@@ -68,16 +68,24 @@ def test_accepted_payload_integrity_rejects_post_validation_replacement() -> Non
 ])
 def test_direct_recovery_replaces_payload_and_proofs_together(acceptance_name):
     """Exercise the actual nested promotion expression without constructing a DOS project."""
-    tree = ast.parse(inspect.getsource(cli_core._run_direct_addr_cli_8616))
+    tree = ast.parse(inspect.getsource(cli_core._DirectAddrCliRun8616))
+
+    def _payload_base_name(value: ast.expr) -> str | None:
+        if isinstance(value, ast.Name):
+            return value.id
+        if isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name) and value.value.id == "self":
+            return value.attr
+        return None
+
     promotions = [
         node for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "replace"
         and any(
             keyword.arg == "payload" and (
                 (isinstance(keyword.value, ast.Attribute)
-                and isinstance(keyword.value.value, ast.Name) and keyword.value.value.id == acceptance_name)
-                or (acceptance_name == "helper_acceptance" and isinstance(keyword.value, ast.Name)
-                and keyword.value.id == "helper_payload")
+                and _payload_base_name(keyword.value.value) == acceptance_name)
+                or (acceptance_name == "helper_acceptance"
+                and _payload_base_name(keyword.value) == "helper_payload")
             )
             for keyword in node.keywords
         )
@@ -90,8 +98,21 @@ def test_direct_recovery_replaces_payload_and_proofs_together(acceptance_name):
         validated_payload_hash=accepted.validated_payload_hash,
         gcc_checked_payload_hash=accepted.gcc_checked_payload_hash,
     )
+    state = SimpleNamespace(
+        direct_result=previous,
+        evidence_snapshot=accepted.tail_validation,
+        robust_result=previous,
+        retry_result=previous,
+        robust_snapshot=accepted.tail_validation,
+        func=previous.function,
+        cfg=None,
+        helper_status="ok",
+        helper_payload=accepted.payload,
+        helper_tail_validation_snapshot=accepted.tail_validation,
+    )
+    setattr(state, acceptance_name, acceptance)
     result = eval(compile(ast.Expression(promotions[0]), "<direct-promotion>", "eval"), {
-        "replace": replace, "direct_result": previous,
+        "replace": replace, "self": state, "direct_result": previous,
         acceptance_name: acceptance, "evidence_snapshot": accepted.tail_validation,
         "robust_result": previous, "retry_result": previous,
         "robust_snapshot": accepted.tail_validation, "func": previous.function, "cfg": None,

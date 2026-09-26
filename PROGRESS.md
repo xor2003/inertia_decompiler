@@ -812,3 +812,28 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verification: ruff 0, mypy 0 (HEAD had 1 — improved), arch-check 0 violations
   in file. Owning suites 87 + 409 passed; 1 failure pre-existing on bare HEAD
   (test_tail_validation_compare_classifies_switch_decision_tree_without_helper_delta).
+
+## cli_core.py — lint debt cleared (was 37 promoted findings)
+
+- The two monster functions were converted to state dataclasses with phase
+  methods: `_DirectAddrCliRun8616` (205-complexity `_run_direct_addr_cli_8616`)
+  and `_MainCliRun8616` (136-complexity `_run_main_cli_8616`); thin wrappers
+  preserve the original function signatures and entry points.
+- Nested closures hoisted to methods; `self.`-field rewrites were
+  position-targeted (AST columns) to protect kwargs, f-strings, handler names
+  (`except ... as ex`), `nonlocal`, and loop variables.
+- Phase methods return `int | None` exit codes propagated by the dispatcher;
+  `break`/`continue` were kept inside their owning loops via sub-phase splits.
+- Regressions found and fixed after extraction: inverted retry gate
+  (`status == "ok"` must be rejected), main seed/rank dispatch reading
+  pre-setup state (made lazy via dispatch phases), `.self.` injected mid
+  attribute chain, duplicated expired-futures sweep block.
+- Source-inspection tests updated to the class layout
+  (`_DirectAddrCliRun8616`); serial-worker completion ordering invariant
+  verified via dynamic call-chain discovery (b1 calls completion phase before
+  the phase leading to robust retry).
+- Verification: ruff 0, mypy 0, arch-check 0 violations in file, all HEAD
+  top-level defs preserved. Delta test set vs HEAD baseline: all remaining
+  failures (drawradaralt branch logic, 3 msc6 runtime-gate tests) reproduce
+  identically on bare HEAD — environmental/pre-existing, including the
+  kvikdos UTF-8 decode issue.

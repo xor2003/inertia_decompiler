@@ -20,7 +20,7 @@ import tempfile
 import threading
 import time
 import typing
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
 from concurrent.futures import FIRST_COMPLETED, wait
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, replace
@@ -158,8 +158,12 @@ from inertia_decompiler.project_loading import (
     _describe_exception,
 )
 from inertia_decompiler.recompile_check import RecompileCheckResult, check_c_recompiles_8616
-from inertia_decompiler.rizin_discovery import RizinDiscoveryStatus, discover_rizin_function_entries
-from inertia_decompiler.rizin_evidence import RizinEvidenceStatus, collect_rizin_evidence
+from inertia_decompiler.rizin_discovery import (
+    RizinDiscoveryResult,
+    RizinDiscoveryStatus,
+    discover_rizin_function_entries,
+)
+from inertia_decompiler.rizin_evidence import RizinEvidence, RizinEvidenceStatus, collect_rizin_evidence
 from inertia_decompiler.runtime_support import (
     FORCE_SERIAL_FUNCTION_DECOMP_ENV as _FORCE_SERIAL_FUNCTION_DECOMP_ENV,
 )
@@ -215,6 +219,7 @@ from inertia_decompiler.serial_clean_worker_evidence import (
     _write_serial_clean_worker_evidence_8616,
 )
 from inertia_decompiler.serial_worker_cache import (
+    SerialWorkerCacheLookup8616,
     SerialWorkerCacheVerdict8616,
     load_serial_worker_cache_8616,
     serial_worker_cache_inputs_8616,
@@ -576,132 +581,129 @@ def _parse_int(value: str) -> int:
     return int(value, 0)
 
 
-def _discover_ranked_binary_offsets(
-    project: angr.Project,
-    *,
-    args: CliArguments,
-) -> list[int]:
-    binary_path = args.binary
-    include_library_functions = args.include_library_functions
-    typing.cast(typing.Any, project)._inertia_include_library_functions = include_library_functions
+def _collect_rizin_library_offsets_8616(evidence: object | None) -> set[int]:
+    """Collect library-like entry addresses reported by rizin evidence."""
+    if evidence is None:
+        return set()
+    out: set[int] = set()
+    functions = getattr(evidence, "functions", ())
+    symbols = getattr(evidence, "symbols", ())
+    for function_fact in functions if isinstance(functions, Sequence) else ():
+        if is_library_like_function_name(function_fact.name):
+            out.add(function_fact.addr)
+    for symbol_fact in symbols if isinstance(symbols, Sequence) else ():
+        if is_library_like_function_name(symbol_fact.name):
+            out.add(symbol_fact.vaddr)
+    return out
 
-    def _collect_rizin_library_offsets_8616(evidence: object | None) -> set[int]:
-        if evidence is None:
-            return set()
-        out: set[int] = set()
-        functions = getattr(evidence, "functions", ())
-        symbols = getattr(evidence, "symbols", ())
-        for function_fact in functions if isinstance(functions, Sequence) else ():
-            if is_library_like_function_name(function_fact.name):
-                out.add(function_fact.addr)
-        for symbol_fact in symbols if isinstance(symbols, Sequence) else ():
-            if is_library_like_function_name(symbol_fact.name):
-                out.add(symbol_fact.vaddr)
-        return out
 
-    def _has_local_sidecar_evidence(binary_path: Path) -> bool:
-        if os.environ.get("INERTIA_IGNORE_LOCAL_SIDECAR_HINTS_8616", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }:
-            return False
-        stem = binary_path.stem
-        parent = binary_path.parent
-        if not parent.exists():
-            return False
-        sidecar_exts = {
-            ".cod",
-            ".lst",
-            ".map",
-            ".idc",
-            ".inc",
-            ".sym",
-            ".dbg",
-            ".tds",
-            ".pdb",
-        }
-        for candidate in parent.glob(f"{stem}.*"):
-            if candidate.resolve() == binary_path.resolve():
-                continue
-            if candidate.suffix.lower() in sidecar_exts:
-                return True
+def _has_local_sidecar_evidence_8616(binary_path: Path) -> bool:
+    """Check whether local sidecar hint files exist next to the binary."""
+    if os.environ.get("INERTIA_IGNORE_LOCAL_SIDECAR_HINTS_8616", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return False
-
-    def _auto_rizin_enabled_for_current_binary() -> bool:
-        # For non-86_16 keep auto as hybrid-friendly behavior.
-        if str(getattr(project.arch, "name", "") or "") != "86_16":
+    stem = binary_path.stem
+    parent = binary_path.parent
+    if not parent.exists():
+        return False
+    sidecar_exts = {
+        ".cod",
+        ".lst",
+        ".map",
+        ".idc",
+        ".inc",
+        ".sym",
+        ".dbg",
+        ".tds",
+        ".pdb",
+    }
+    for candidate in parent.glob(f"{stem}.*"):
+        if candidate.resolve() == binary_path.resolve():
+            continue
+        if candidate.suffix.lower() in sidecar_exts:
             return True
-        env = os.environ.get("INERTIA_AUTO_RIZIN_8616", "").strip().lower()
-        if env in {"1", "true", "yes", "on"}:
-            return True
-        if env in {"0", "false", "no", "off"}:
-            return False
-        # Default: rizin-first when local sidecar hints are not available.
-        return not _has_local_sidecar_evidence(binary_path)
+    return False
 
-    backend = args.function_discovery_backend.strip().lower()
-    if backend == "auto":
-        legacy_seed_engine = args.seed_engine.strip().lower()
-        if legacy_seed_engine in {"angr", "rizin"}:
-            backend = legacy_seed_engine
-    rizin_timeout = max(1, args.rizin_timeout)
-    angr_offsets: list[int] | None = None
-    wants_rizin = False
-    if args.binary.suffix.lower() == ".exe":
-        if backend in {"rizin", "hybrid"}:
-            wants_rizin = True
-        elif backend == "auto":
-            wants_rizin = _auto_rizin_enabled_for_current_binary()
-    rz_evidence = collect_rizin_evidence(binary_path, timeout_sec=rizin_timeout) if wants_rizin else None
-    if rz_evidence is not None:
-        typing.cast(typing.Any, project)._inertia_rizin_evidence = rz_evidence
-        typing.cast(typing.Any, project)._inertia_rizin_function_names = rz_evidence.function_name_by_addr
-    rz = discover_rizin_function_entries(args.binary, timeout_sec=rizin_timeout) if wants_rizin else None
-    rizin_library_offsets = _collect_rizin_library_offsets_8616(rz_evidence)
+
+def _auto_rizin_enabled_for_binary_8616(project: angr.Project, binary_path: Path) -> bool:
+    """Resolve the auto-backend rizin preference for the current binary."""
+    # For non-86_16 keep auto as hybrid-friendly behavior.
+    if str(getattr(project.arch, "name", "") or "") != "86_16":
+        return True
+    env = os.environ.get("INERTIA_AUTO_RIZIN_8616", "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    if env in {"0", "false", "no", "off"}:
+        return False
+    # Default: rizin-first when local sidecar hints are not available.
+    return not _has_local_sidecar_evidence_8616(binary_path)
+
+
+def _wants_rizin_8616(project: angr.Project, args: CliArguments, binary_path: Path, backend: str) -> bool:
+    """Check whether rizin discovery should run for this backend/binary pair."""
+    if args.binary.suffix.lower() != ".exe":
+        return False
+    if backend in {"rizin", "hybrid"}:
+        return True
+    return backend == "auto" and _auto_rizin_enabled_for_binary_8616(project, binary_path)
+
+
+def _rizin_offsets_status_8616(rz_evidence: RizinEvidence | None, rz: RizinDiscoveryResult | None) -> tuple[list[int], float, str]:
+    """Resolve ranked rizin offsets, elapsed time, and status from evidence lanes."""
     if rz_evidence is not None and rz_evidence.status is RizinEvidenceStatus.OK and rz_evidence.functions:
-        rizin_offsets = list(rz_evidence.function_offsets)
-        elapsed_ms = rz_evidence.elapsed_ms
-        status_value = rz_evidence.status.value
-    elif rz is not None and rz.status is RizinDiscoveryStatus.OK:
-        rizin_offsets = list(rz.offsets)
-        elapsed_ms = rz.elapsed_ms
-        status_value = rz.status.value
-    else:
-        rizin_offsets = []
-        elapsed_ms = 0.0
-        status_value = "error"
-    if rizin_offsets:
-        if not include_library_functions and rizin_library_offsets:
-            original_count = len(rizin_offsets)
-            rizin_offsets = [offset for offset in rizin_offsets if offset not in rizin_library_offsets]
-            if len(rizin_offsets) != original_count:
-                print(
-                    f"/* rizin discovery: dropped {original_count - len(rizin_offsets)} library-like entries by default */"
-                )
-        print(
-            f"/* rizin discovery: status={status_value} entries={len(rizin_offsets)} elapsed={elapsed_ms:.1f}ms "
-            f"backend={backend} */"
-        )
-        if backend == "rizin":
-            return rizin_offsets
-        angr_offsets = _rank_exe_function_seeds(
-            project,
-            include_library_functions=include_library_functions,
-        )
-        merged: list[int] = []
-        seen: set[int] = set()
-        for addr in angr_offsets:
-            if addr not in seen:
-                merged.append(addr)
-                seen.add(addr)
-        for addr in rizin_offsets:
-            if addr not in seen:
-                merged.append(addr)
-                seen.add(addr)
-        print(f"/* hybrid discovery: angr={len(angr_offsets)} rizin={len(rizin_offsets)} merged={len(merged)} */")
-        return merged
+        return list(rz_evidence.function_offsets), rz_evidence.elapsed_ms, rz_evidence.status.value
+    if rz is not None and rz.status is RizinDiscoveryStatus.OK:
+        return list(rz.offsets), rz.elapsed_ms, rz.status.value
+    return [], 0.0, "error"
+
+
+def _merged_or_rizin_offsets_8616(
+    project: angr.Project,
+    rizin_offsets: list[int],
+    rizin_library_offsets: set[int],
+    include_library_functions: bool,
+    status_value: str,
+    elapsed_ms: float,
+    backend: str,
+) -> list[int]:
+    """Return rizin offsets directly or merged with angr-ranked seeds."""
+    if not include_library_functions and rizin_library_offsets:
+        original_count = len(rizin_offsets)
+        rizin_offsets = [offset for offset in rizin_offsets if offset not in rizin_library_offsets]
+        if len(rizin_offsets) != original_count:
+            print(
+                f"/* rizin discovery: dropped {original_count - len(rizin_offsets)} library-like entries by default */"
+            )
+    print(
+        f"/* rizin discovery: status={status_value} entries={len(rizin_offsets)} elapsed={elapsed_ms:.1f}ms "
+        f"backend={backend} */"
+    )
+    if backend == "rizin":
+        return rizin_offsets
+    angr_offsets = _rank_exe_function_seeds(
+        project,
+        include_library_functions=include_library_functions,
+    )
+    merged: list[int] = []
+    seen: set[int] = set()
+    for addr in angr_offsets:
+        if addr not in seen:
+            merged.append(addr)
+            seen.add(addr)
+    for addr in rizin_offsets:
+        if addr not in seen:
+            merged.append(addr)
+            seen.add(addr)
+    print(f"/* hybrid discovery: angr={len(angr_offsets)} rizin={len(rizin_offsets)} merged={len(merged)} */")
+    return merged
+
+
+def _print_rizin_fallback_diagnostics_8616(rz_evidence: RizinEvidence | None, rz: RizinDiscoveryResult | None) -> None:
+    """Print rizin lane diagnostics before the angr-ranked fallback."""
     if rz_evidence is not None:
         detail = rz_evidence.detail or rz_evidence.status.value
         print(
@@ -713,12 +715,49 @@ def _discover_ranked_binary_offsets(
             f"/* rizin discovery: status={rz.status.value} elapsed={rz.elapsed_ms:.1f}ms detail={detail}; "
             "falling back to angr-ranked discovery. */"
         )
-    if angr_offsets is None:
-        angr_offsets = _rank_exe_function_seeds(
+
+
+def _discover_ranked_binary_offsets(
+    project: angr.Project,
+    *,
+    args: CliArguments,
+) -> list[int]:
+    binary_path = args.binary
+    include_library_functions = args.include_library_functions
+    typing.cast(typing.Any, project)._inertia_include_library_functions = include_library_functions
+
+    backend = args.function_discovery_backend.strip().lower()
+    if backend == "auto":
+        legacy_seed_engine = args.seed_engine.strip().lower()
+        if legacy_seed_engine in {"angr", "rizin"}:
+            backend = legacy_seed_engine
+    rizin_timeout = max(1, args.rizin_timeout)
+    wants_rizin = _wants_rizin_8616(project, args, binary_path, backend)
+    rz_evidence = collect_rizin_evidence(binary_path, timeout_sec=rizin_timeout) if wants_rizin else None
+    if rz_evidence is not None:
+        typing.cast(typing.Any, project)._inertia_rizin_evidence = rz_evidence
+        typing.cast(typing.Any, project)._inertia_rizin_function_names = rz_evidence.function_name_by_addr
+    rz = discover_rizin_function_entries(args.binary, timeout_sec=rizin_timeout) if wants_rizin else None
+    rizin_library_offsets = _collect_rizin_library_offsets_8616(rz_evidence)
+    rizin_offsets, elapsed_ms, status_value = _rizin_offsets_status_8616(rz_evidence, rz)
+    if rizin_offsets:
+        return _merged_or_rizin_offsets_8616(
+            project,
+            rizin_offsets,
+            rizin_library_offsets,
+            include_library_functions,
+            status_value,
+            elapsed_ms,
+            backend,
+        )
+    _print_rizin_fallback_diagnostics_8616(rz_evidence, rz)
+    return cast(
+        list[int],
+        _rank_exe_function_seeds(
             project,
             include_library_functions=include_library_functions,
-        )
-    return angr_offsets
+        ),
+    )
 
 
 def _function_recovery_detail(stage: str | None) -> str | None:
@@ -1207,163 +1246,193 @@ def _function_work_cache_lookup(
             enable_postprocess=enable_postprocess,
         )
         cached_result = _load_cache_json("function_decompile", cache_key) if cache_key is not None else None
-        if cached_result is not None:
-            cached_status = str(cached_result.get("status", "error"))
-            cached_tail_validation = cached_result.get("tail_validation")
-            if cached_status != "ok":
-                return (
-                    None,
-                    (
-                        f"[dbg] ignoring cached failed function result for {function_addr:#x} "
-                        f"{function_name} status={cached_status}; "
-                        "only successful decompilation results are cached\n"
-                    ),
-                    cache_key,
-                    tail_validation_enabled,
-                    expected_validation_stages,
-                )
-            typed_switch_artifacts = os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
-            cached_diagnostic_output = cached_result.get("diagnostic_output")
-            if typed_switch_artifacts and (
-                not isinstance(cached_diagnostic_output, str) or not cached_diagnostic_output.strip()
-            ):
-                return (
-                    None,
-                    f"[dbg] cache bypass for {function_addr:#x} {function_name} missing_diagnostic_provenance\n",
-                    cache_key,
-                    tail_validation_enabled,
-                    expected_validation_stages,
-                )
-            diagnostic_output = cached_diagnostic_output if isinstance(cached_diagnostic_output, str) else ""
-            if (not tail_validation_enabled) or x86_16_tail_validation_snapshot_passed(
-                cached_tail_validation if isinstance(cached_tail_validation, dict) else None,
-                expected_stages=expected_validation_stages,
-            ):
-                cached_payload = str(cached_result.get("payload", ""))
-                cached_validated_hash = cached_result.get("validated_c_hash")
-                cached_gcc_hash = cached_result.get("gcc_checked_c_hash")
-                if not isinstance(cached_validated_hash, str) or not isinstance(cached_gcc_hash, str):
-                    return (
-                        None,
-                        (
-                            f"[dbg] cache bypass for {function_addr:#x} "
-                            f"{function_name} missing_acceptance_provenance\n"
-                        ),
-                        cache_key,
-                        tail_validation_enabled,
-                        expected_validation_stages,
-                    )
-                if (
-                    cached_validated_hash != cached_gcc_hash
-                    or cached_validated_hash != _sha256_text_8616(cached_payload)
-                ):
-                    return (
-                        None,
-                        (
-                            f"[dbg] cache bypass for {function_addr:#x} "
-                            f"{function_name} stale_output_mismatch\n"
-                        ),
-                        cache_key,
-                        tail_validation_enabled,
-                        expected_validation_stages,
-                    )
-                normalized_cached_payload = _normalize_accepted_payload_8616(cached_payload)
-                if normalized_cached_payload.rstrip() != cached_payload.rstrip():
-                    return (
-                        None,
-                        (
-                            f"[dbg] cache bypass for {function_addr:#x} "
-                            f"{function_name} stale_normalization\n"
-                        ),
-                        cache_key,
-                        tail_validation_enabled,
-                        expected_validation_stages,
-                    )
-                cached_quality = assess_final_generated_c_text(cached_payload)
-                if cached_quality.reject_as_decompiled:
-                    marker_summary = ", ".join(cached_quality.markers[:3]) if cached_quality.markers else "unresolved"
-                    if len(cached_quality.markers) > 3:
-                        marker_summary += ", ..."
-                    return (
-                        None,
-                        (
-                            f"[dbg] cache bypass for {function_addr:#x} "
-                            f"{function_name} quality={marker_summary}\n"
-                        ),
-                        cache_key,
-                        tail_validation_enabled,
-                        expected_validation_stages,
-                    )
-                cache_validation_status = (
-                    "uncollected"
-                    if not tail_validation_enabled
-                    else _tail_validation_display_status(
-                        cached_tail_validation if isinstance(cached_tail_validation, dict) else None
-                    )
-                )
-                cached_tail_snapshot: dict[str, object] | None = None
-                if isinstance(cached_tail_validation, dict):
-                    cached_stage_names = [
-                        stage for stage in expected_validation_stages if stage in cached_tail_validation
-                    ]
-                    cached_stage_names.extend(
-                        stage for stage in cached_tail_validation if stage not in expected_validation_stages
-                    )
-                    cached_tail_snapshot = {
-                        stage: copy.deepcopy(cached_tail_validation[stage]) for stage in cached_stage_names
-                    }
-                cached_elapsed = cached_result.get("elapsed")
-                cached_block_count = cached_result.get("block_count")
-                cached_byte_count = cached_result.get("byte_count")
-                cached_failure_family = FailureFamilySnapshot.from_record(
-                    cached_result.get("failure_family_snapshot")
-                )
-                return (
-                    FunctionWorkResult(
-                        index=item.index,
-                        status=cached_status,
-                        payload=cached_payload,
-                        partial_payload=None,
-                        debug_output=(
-                            f"[dbg] cache hit for {function_addr:#x} "
-                            f"{function_name} "
-                            f"validation={cache_validation_status}\n"
-                            + (diagnostic_output if typed_switch_artifacts else "")
-                        ),
-                        function=item.function,
-                        function_cfg=item.function_cfg,
-                        tail_validation=cached_tail_snapshot,
-                        elapsed=float(cached_elapsed) if isinstance(cached_elapsed, (int, float)) else None,
-                        from_cache=True,
-                        block_count=cached_block_count if isinstance(cached_block_count, int) else None,
-                        byte_count=cached_byte_count if isinstance(cached_byte_count, int) else None,
-                        validated_payload_hash=(
-                            cached_validated_hash if isinstance(cached_validated_hash, str) else None
-                        ),
-                        gcc_checked_payload_hash=(cached_gcc_hash if isinstance(cached_gcc_hash, str) else None),
-                        failure_family_snapshot=cached_failure_family,
-                    ),
-                    "",
-                    cache_key,
-                    tail_validation_enabled,
-                    expected_validation_stages,
-                )
-            cache_bypass_reason = _tail_validation_display_status(
-                cached_tail_validation if isinstance(cached_tail_validation, dict) else None
-            )
-            return (
-                None,
+        if cached_result is None:
+            return None, "", cache_key, tail_validation_enabled, expected_validation_stages
+        cached_status = str(cached_result.get("status", "error"))
+        if cached_status != "ok":
+            return _cache_bypass_8616(
                 (
-                    f"[dbg] cache bypass for {function_addr:#x} "
-                    f"{function_name} validation={cache_bypass_reason}\n"
+                    f"[dbg] ignoring cached failed function result for {function_addr:#x} "
+                    f"{function_name} status={cached_status}; "
+                    "only successful decompilation results are cached\n"
                 ),
                 cache_key,
                 tail_validation_enabled,
                 expected_validation_stages,
             )
-        return None, "", cache_key, tail_validation_enabled, expected_validation_stages
+        return _ok_cached_function_result_tuple_8616(
+            item,
+            cached_result,
+            function_addr,
+            function_name,
+            cache_key,
+            tail_validation_enabled,
+            expected_validation_stages,
+        )
 
     return _impl()
+
+
+def _cache_bypass_8616(
+    reason: str,
+    cache_key: dict[str, object] | None,
+    tail_validation_enabled: bool,
+    expected_validation_stages: list[str],
+) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, bool, list[str]]:
+    """Build a cache-bypass result tuple carrying the bypass diagnostic."""
+    return None, reason, cache_key, tail_validation_enabled, expected_validation_stages
+
+
+def _ok_cached_function_result_tuple_8616(
+    item: FunctionWorkItem,
+    cached_result: dict[str, object],
+    function_addr: int,
+    function_name: str,
+    cache_key: dict[str, object] | None,
+    tail_validation_enabled: bool,
+    expected_validation_stages: list[str],
+) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, bool, list[str]]:
+    """Accept or bypass one cached successful function result."""
+    typed_switch_artifacts = os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
+    cached_diagnostic_output = cached_result.get("diagnostic_output")
+    if typed_switch_artifacts and (
+        not isinstance(cached_diagnostic_output, str) or not cached_diagnostic_output.strip()
+    ):
+        return _cache_bypass_8616(
+            f"[dbg] cache bypass for {function_addr:#x} {function_name} missing_diagnostic_provenance\n",
+            cache_key,
+            tail_validation_enabled,
+            expected_validation_stages,
+        )
+    diagnostic_output = cached_diagnostic_output if isinstance(cached_diagnostic_output, str) else ""
+    cached_tail_validation = cached_result.get("tail_validation")
+    if (not tail_validation_enabled) or x86_16_tail_validation_snapshot_passed(
+        cached_tail_validation if isinstance(cached_tail_validation, dict) else None,
+        expected_stages=expected_validation_stages,
+    ):
+        bypass_reason = _cached_payload_acceptance_bypass_reason_8616(cached_result)
+        if bypass_reason is not None:
+            return _cache_bypass_8616(
+                f"[dbg] cache bypass for {function_addr:#x} {function_name} {bypass_reason}\n",
+                cache_key,
+                tail_validation_enabled,
+                expected_validation_stages,
+            )
+        result = _cached_function_work_result_8616(
+            item,
+            cached_result,
+            function_addr,
+            function_name,
+            tail_validation_enabled,
+            expected_validation_stages,
+            typed_switch_artifacts,
+            diagnostic_output,
+        )
+        return result, "", cache_key, tail_validation_enabled, expected_validation_stages
+    cache_bypass_reason = _tail_validation_display_status(
+        cached_tail_validation if isinstance(cached_tail_validation, dict) else None
+    )
+    return _cache_bypass_8616(
+        f"[dbg] cache bypass for {function_addr:#x} {function_name} validation={cache_bypass_reason}\n",
+        cache_key,
+        tail_validation_enabled,
+        expected_validation_stages,
+    )
+
+
+def _cached_payload_acceptance_bypass_reason_8616(cached_result: dict[str, object]) -> str | None:
+    """Return the acceptance-provenance bypass reason, or None when the payload is reusable."""
+    cached_payload = str(cached_result.get("payload", ""))
+    cached_validated_hash = cached_result.get("validated_c_hash")
+    cached_gcc_hash = cached_result.get("gcc_checked_c_hash")
+    if not isinstance(cached_validated_hash, str) or not isinstance(cached_gcc_hash, str):
+        return "missing_acceptance_provenance"
+    if (
+        cached_validated_hash != cached_gcc_hash
+        or cached_validated_hash != _sha256_text_8616(cached_payload)
+    ):
+        return "stale_output_mismatch"
+    normalized_cached_payload = _normalize_accepted_payload_8616(cached_payload)
+    if normalized_cached_payload.rstrip() != cached_payload.rstrip():
+        return "stale_normalization"
+    cached_quality = assess_final_generated_c_text(cached_payload)
+    if cached_quality.reject_as_decompiled:
+        marker_summary = ", ".join(cached_quality.markers[:3]) if cached_quality.markers else "unresolved"
+        if len(cached_quality.markers) > 3:
+            marker_summary += ", ..."
+        return f"quality={marker_summary}"
+    return None
+
+
+def _cached_tail_snapshot_8616(
+    cached_tail_validation: object,
+    expected_validation_stages: list[str],
+) -> dict[str, object] | None:
+    """Build the cached tail-validation snapshot preserving stage ordering."""
+    if not isinstance(cached_tail_validation, dict):
+        return None
+    cached_stage_names = [
+        stage for stage in expected_validation_stages if stage in cached_tail_validation
+    ]
+    cached_stage_names.extend(
+        stage for stage in cached_tail_validation if stage not in expected_validation_stages
+    )
+    return {stage: copy.deepcopy(cached_tail_validation[stage]) for stage in cached_stage_names}
+
+
+def _cached_function_work_result_8616(
+    item: FunctionWorkItem,
+    cached_result: dict[str, object],
+    function_addr: int,
+    function_name: str,
+    tail_validation_enabled: bool,
+    expected_validation_stages: list[str],
+    typed_switch_artifacts: bool,
+    diagnostic_output: str,
+) -> FunctionWorkResult:
+    """Rebuild a FunctionWorkResult from accepted cached provenance."""
+    cached_payload = str(cached_result.get("payload", ""))
+    cached_validated_hash = cached_result.get("validated_c_hash")
+    cached_gcc_hash = cached_result.get("gcc_checked_c_hash")
+    cached_tail_validation = cached_result.get("tail_validation")
+    cache_validation_status = (
+        "uncollected"
+        if not tail_validation_enabled
+        else _tail_validation_display_status(
+            cached_tail_validation if isinstance(cached_tail_validation, dict) else None
+        )
+    )
+    cached_tail_snapshot = _cached_tail_snapshot_8616(cached_tail_validation, expected_validation_stages)
+    cached_elapsed = cached_result.get("elapsed")
+    cached_block_count = cached_result.get("block_count")
+    cached_byte_count = cached_result.get("byte_count")
+    cached_failure_family = FailureFamilySnapshot.from_record(
+        cached_result.get("failure_family_snapshot")
+    )
+    return FunctionWorkResult(
+        index=item.index,
+        status=str(cached_result.get("status", "error")),
+        payload=cached_payload,
+        partial_payload=None,
+        debug_output=(
+            f"[dbg] cache hit for {function_addr:#x} "
+            f"{function_name} "
+            f"validation={cache_validation_status}\n"
+            + (diagnostic_output if typed_switch_artifacts else "")
+        ),
+        function=item.function,
+        function_cfg=item.function_cfg,
+        tail_validation=cached_tail_snapshot,
+        elapsed=float(cached_elapsed) if isinstance(cached_elapsed, (int, float)) else None,
+        from_cache=True,
+        block_count=cached_block_count if isinstance(cached_block_count, int) else None,
+        byte_count=cached_byte_count if isinstance(cached_byte_count, int) else None,
+        validated_payload_hash=(
+            cached_validated_hash if isinstance(cached_validated_hash, str) else None
+        ),
+        gcc_checked_payload_hash=(cached_gcc_hash if isinstance(cached_gcc_hash, str) else None),
+        failure_family_snapshot=cached_failure_family,
+    )
 
 
 def _isolated_project_recovery_target_8616(
@@ -1407,175 +1476,6 @@ def _run_function_work_item_uncached(
     """Decompile one function under the requested analysis-isolation policy."""
 
     def _impl() -> FunctionWorkResult:
-        def _maybe_return_known_helper_result(
-            decompile_project: angr.Project,
-            decompile_cfg: object,
-            decompile_function: object,
-            effective_timeout: int,
-            failure_family_state: FailureFamilyState,
-        ) -> FunctionWorkResult | None:
-            helper_name = getattr(decompile_function, "name", None)
-            known_helper_preview = (
-                _try_emit_known_runtime_helper_c(name=helper_name) if isinstance(helper_name, str) else None
-            )
-            if not isinstance(helper_name, str) or known_helper_preview is None:
-                return None
-            helper_outcome = _try_decompile_non_optimized_known_function(
-                decompile_project,
-                decompile_cfg,
-                decompile_function,
-                timeout=max(1, min(effective_timeout, 2)),
-                api_style=api_style,
-                binary_path=binary_path,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-                synthetic_globals=synthetic_globals,
-                failure_family_state=failure_family_state,
-            )
-            helper_c = _non_optimized_slice_rendered(helper_outcome)
-            if helper_c is None:
-                return None
-            helper_snapshot = _tail_validation_snapshot_for_fallback(
-                decompile_project,
-                decompile_function,
-                allow_project_fallback=False,
-            )
-            return FunctionWorkResult(
-                index=item.index,
-                status="ok",
-                payload=helper_c,
-                partial_payload=None,
-                debug_output="",
-                function=item.function,
-                function_cfg=item.function_cfg,
-                tail_validation=helper_snapshot,
-                elapsed=0.0,
-                block_count=None,
-                byte_count=None,
-            )
-
-        def _finalize_work_result(
-            *,
-            status: str,
-            payload: str,
-            partial_payload: str | None,
-            debug_output: str,
-            tail_validation_snapshot: dict[str, object] | None,
-            elapsed: float,
-            block_count: int | None,
-            byte_count: int | None,
-            decompile_project: angr.Project,
-            failure_family_state: FailureFamilyState,
-            cache_key: dict[str, object] | None,
-            tail_validation_enabled: bool,
-            expected_validation_stages: tuple[str, ...],
-        ) -> FunctionWorkResult:
-            acceptance = _validated_generated_c_acceptance_8616(
-                status=status,
-                payload=payload,
-                tail_validation_snapshot=tail_validation_snapshot,
-                tail_validation_enabled=tail_validation_enabled,
-                expected_validation_stages=expected_validation_stages,
-                c_target=getattr(decompile_project, "_inertia_c_target", "portable-flat"),
-            )
-            status = acceptance.status
-            acceptance_blocker = acceptance.blocker
-            acceptance_payload = acceptance.validated_payload
-            acceptance_validated_hash = acceptance.validated_payload_hash
-            acceptance_gcc_hash = acceptance.gcc_checked_payload_hash
-            payload = acceptance.gcc_checked_payload
-            if acceptance_blocker is not None:
-                if status == WorkItemStatus.VALIDATION_FAILED.value:
-                    preserved_candidate = None
-                else:
-                    preserved_candidate = (
-                        partial_payload
-                        if isinstance(partial_payload, str) and partial_payload.strip()
-                        else (
-                            acceptance_payload
-                            if isinstance(acceptance_payload, str) and acceptance_payload.strip()
-                            else None
-                        )
-                    )
-                payload = acceptance_blocker
-                partial_payload = preserved_candidate
-            if status in {"empty", "validation_failed"}:
-                recovered_payload, recovered_snapshot = _recover_binary_evidence_c_8616(
-                    decompile_project, decompile_function
-                )
-                if (
-                    isinstance(recovered_payload, str)
-                    and recovered_payload.strip()
-                    and isinstance(recovered_snapshot, dict)
-                ):
-                    recovered_acceptance = _validated_generated_c_acceptance_8616(
-                        status="ok",
-                        payload=recovered_payload,
-                        tail_validation_snapshot=recovered_snapshot,
-                        tail_validation_enabled=tail_validation_enabled,
-                        expected_validation_stages=expected_validation_stages,
-                        c_target=getattr(decompile_project, "_inertia_c_target", "portable-flat"),
-                    )
-                    if recovered_acceptance.status == "ok" and recovered_acceptance.blocker is None:
-                        status = recovered_acceptance.status
-                        payload = recovered_acceptance.gcc_checked_payload
-                        partial_payload = None
-                        tail_validation_snapshot = recovered_snapshot
-                        acceptance_validated_hash = recovered_acceptance.validated_payload_hash
-                        acceptance_gcc_hash = recovered_acceptance.gcc_checked_payload_hash
-            if status == "empty" and isinstance(partial_payload, str) and partial_payload.strip():
-                partial_acceptance = _validated_generated_c_acceptance_8616(
-                    status="ok",
-                    payload=partial_payload,
-                    tail_validation_snapshot=tail_validation_snapshot,
-                    tail_validation_enabled=tail_validation_enabled,
-                    expected_validation_stages=tuple(expected_validation_stages),
-                    c_target=getattr(decompile_project, "_inertia_c_target", "portable-flat"),
-                )
-                if partial_acceptance.status == "ok" and partial_acceptance.blocker is None:
-                    status = partial_acceptance.status
-                    payload = partial_acceptance.gcc_checked_payload
-                    partial_payload = None
-            tail_validation_passed = status == "ok"
-            if cache_key is not None and tail_validation_passed:
-                _store_cache_json(
-                    "function_decompile",
-                    cache_key,
-                    {
-                        "status": status,
-                        "payload": payload,
-                        "tail_validation": tail_validation_snapshot,
-                        "tail_validation_passed": tail_validation_passed,
-                        "elapsed": elapsed,
-                        "block_count": block_count,
-                        "byte_count": byte_count,
-                        "validated_c_hash": acceptance_validated_hash,
-                        "gcc_checked_c_hash": acceptance_gcc_hash,
-                        "diagnostic_output": (
-                            debug_output
-                            if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
-                            else None
-                        ),
-                    },
-                )
-            return FunctionWorkResult(
-                index=item.index,
-                status=status,
-                payload=payload,
-                partial_payload=partial_payload,
-                debug_output=debug_output,
-                function=decompile_function,
-                function_cfg=decompile_cfg,
-                tail_validation=tail_validation_snapshot,
-                elapsed=elapsed,
-                block_count=block_count,
-                byte_count=byte_count,
-                same_family_retry_stops=failure_family_state.same_family_retry_stops,
-                fallback_family_labels=failure_family_state.fallback_family_labels,
-                validated_payload_hash=acceptance_validated_hash,
-                gcc_checked_payload_hash=acceptance_gcc_hash,
-            )
-
         block_estimate, _byte_estimate = _function_complexity(item.function)
         annotate_current_span(
             blocks=block_estimate,
@@ -1614,263 +1514,60 @@ def _run_function_work_item_uncached(
             enable_postprocess=enable_postprocess,
         )
 
-        item_function: _AngrFunction = item.function
-        decompile_project = item_function.project
+        ctx = _WorkRunCtx8616(
+            item=item,
+            api_style=api_style,
+            binary_path=binary_path,
+            lst_metadata=lst_metadata,
+            cod_metadata=cod_metadata,
+            synthetic_globals=synthetic_globals,
+            effective_timeout=effective_timeout,
+            enable_structured_simplify=enable_structured_simplify,
+            enable_postprocess=enable_postprocess,
+            allow_isolated_retry=allow_isolated_retry,
+            force_isolated_project=force_isolated_project,
+            process_isolated_worker=process_isolated_worker,
+            failure_family_state=FailureFamilyState(),
+        )
+        decompile_project = item.function.project
         decompile_cfg = item.function_cfg
-        decompile_function: _AngrFunction = item_function
+        decompile_function: _AngrFunction = item.function
         attach_lst_metadata_to_project(decompile_project, lst_metadata)
-        failure_family_state = FailureFamilyState()
-        helper_result = _maybe_return_known_helper_result(
+        helper_result = _maybe_return_known_helper_result_8616(
+            ctx,
             decompile_project,
             decompile_cfg,
             decompile_function,
-            effective_timeout,
-            failure_family_state,
         )
         if helper_result is not None:
             return helper_result
 
-        def _run_local(
-            project_obj: angr.Project, cfg_obj: object, function_obj: _AngrFunction
-        ) -> tuple[str, str, str | None, str, dict[str, object] | None, float, int, int]:
-            with _capture_thread_output() as (stdout_buf, stderr_buf):
-                _apply_function_annotations_for_active_and_original_8616(
-                    project_obj,
-                    binary_path,
-                    lst_metadata,
-                    function_obj,
-                    cod_metadata=cod_metadata,
-                    synthetic_globals=synthetic_globals,
-                )
-                local_block_count, local_byte_count = _function_complexity(function_obj)
-                local_arch_name = getattr(getattr(project_obj, "arch", None), "name", "")
-                local_clinic_policy = DirectClinicPolicy8616.STANDARD
-                if local_arch_name == "86_16":
-                    local_callsite_count = (
-                        _safe_function_callsite_count_8616(function_obj)
-                        if _clinic_policy_needs_callsite_count_8616(
-                            arch_name=local_arch_name,
-                            direct_addr_mode=True,
-                            block_count=local_block_count,
-                            byte_count=local_byte_count,
-                        )
-                        else 0
-                    )
-                    local_clinic_policy = _direct_clinic_policy_8616(
-                        arch_name=local_arch_name,
-                        direct_addr_mode=True,
-                        block_count=local_block_count,
-                        byte_count=local_byte_count,
-                        call_site_count=local_callsite_count,
-                    )
-                with _temporary_clinic_policy_8616(project_obj, local_clinic_policy):
-                    status, payload, partial_payload, block_count, byte_count, elapsed = _decompile_function_with_stats(
-                        project_obj,
-                        cfg_obj,
-                        function_obj,
-                        effective_timeout,
-                        api_style,
-                        binary_path,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        lst_metadata=lst_metadata,
-                        enable_structured_simplify=enable_structured_simplify,
-                        enable_postprocess=enable_postprocess,
-                        allow_isolated_retry=allow_isolated_retry,
-                        failure_family_state=failure_family_state,
-                    )
-                    annotate_current_span(clinic_policy=local_clinic_policy.value)
-            debug_output_local = stdout_buf.getvalue()
-            err_output = stderr_buf.getvalue()
-            if err_output:
-                debug_output_local += err_output
-            raw_tail_snapshot = _tail_validation_snapshot_for_function_run(project_obj, function_obj)
-            tail_snapshot_local: dict[str, object] | None = raw_tail_snapshot if isinstance(raw_tail_snapshot, dict) else None
-            if (
-                status == "ok"
-                and isinstance(payload, str)
-                and isinstance(getattr(function_obj, "name", None), str)
-                and (
-                    not isinstance(tail_snapshot_local, dict)
-                    or "structuring" not in tail_snapshot_local
-                    or "postprocess" not in tail_snapshot_local
-                )
-            ):
-                helper_model = _try_emit_known_runtime_helper_c(name=function_obj.name)
-                if isinstance(helper_model, str):
-                    norm_payload = re.sub(r"\s+", "", payload)
-                    norm_helper = re.sub(r"\s+", "", helper_model)
-                    if norm_payload == norm_helper:
-                        tail_snapshot_local = {
-                            "structuring": {
-                                "status": "stable",
-                                "mode": "helper_model",
-                                "changed": False,
-                                "detail": f"known compiler/runtime helper model: {function_obj.name}",
-                            },
-                            "postprocess": {
-                                "status": "stable",
-                                "mode": "helper_model",
-                                "changed": False,
-                                "detail": f"known compiler/runtime helper model: {function_obj.name}",
-                            },
-                        }
-            if os.environ.get("INERTIA_DEBUG_TAIL_SNAPSHOT"):
-                logging.getLogger(__name__).warning(
-                    "tail snapshot function=%#x name=%s snapshot=%r",
-                    getattr(function_obj, "addr", -1) or -1,
-                    getattr(function_obj, "name", "sub"),
-                    tail_snapshot_local,
-                )
-            return (
-                status,
-                payload,
-                partial_payload,
-                debug_output_local,
-                tail_snapshot_local,
-                elapsed,
-                block_count,
-                byte_count,
-            )
-
-        fork_isolated_eligible = (
-            force_isolated_project
-            and not process_isolated_worker
-            and _analysis_timeout_use_fork_8616()
-            and decompile_cfg is not None
+        lane = _decompile_for_work_item_8616(
+            ctx,
+            decompile_project,
+            decompile_cfg,
+            decompile_function,
+            block_estimate,
+            _byte_estimate,
+            tail_validation_enabled,
+            expected_validation_stages,
         )
-        if fork_isolated_eligible:
-            try:
-                with span(
-                    "direct.decompile_job",
-                    addr=hex(getattr(decompile_function, "addr", 0)),
-                    name=getattr(decompile_function, "name", None),
-                    timeout=_enforce_function_timeout_cap(
-                        max(1, effective_timeout) + 1,
-                        context="forked local decompile",
-                    ),
-                    isolated="fork",
-                ):
-                    (
-                        status,
-                        payload,
-                        partial_payload,
-                        debug_output,
-                        tail_validation_snapshot,
-                        elapsed,
-                        block_count,
-                        byte_count,
-                    ) = _run_with_timeout_in_fork(
-                            lambda: _run_local(decompile_project, decompile_cfg, decompile_function),
-                            timeout=_enforce_function_timeout_cap(
-                                max(1, effective_timeout) + 1,
-                                context="forked local decompile",
-                            ),
-                        )
-                    annotate_current_span(status=status, blocks=block_count, bytes=byte_count)
-            except TimeoutError as ex:
-                logging.getLogger(__name__).warning("fork-isolated decompilation timed out: %s", ex)
-                return _finalize_work_result(
-                    status="timeout",
-                    payload=f"Timed out after {effective_timeout}s during fork-isolated decompilation.",
-                    partial_payload=None,
-                    debug_output="",
-                    tail_validation_snapshot=None,
-                    elapsed=float(effective_timeout),
-                    block_count=block_estimate,
-                    byte_count=_byte_estimate,
-                    decompile_project=decompile_project,
-                    failure_family_state=failure_family_state,
-                    cache_key=None,
-                    tail_validation_enabled=tail_validation_enabled,
-                    expected_validation_stages=tuple(expected_validation_stages),
-                )
-            except Exception as ex:
-                logging.getLogger(__name__).warning("fork-isolated decompilation failed: %s", ex)
-                fork_isolated_eligible = False
-
-        if (
-            force_isolated_project
-            and not fork_isolated_eligible
-            and binary_path is not None
-            and isinstance(getattr(item.function, "addr", None), int)
-        ):
-            main_object = getattr(getattr(item.function, "project", None), "loader", None)
-            main_object = getattr(main_object, "main_object", None)
-            linked_base = getattr(main_object, "linked_base", None)
-            max_addr = getattr(main_object, "max_addr", None)
-            if isinstance(linked_base, int) and isinstance(max_addr, int):
-                try:
-                    isolated_project = _build_project_cached(
-                        str(binary_path),
-                        force_blob=False,
-                        base_addr=linked_base,
-                        entry_point=getattr(item_function.project, "entry", linked_base),
-                    )
-                    _transfer_caller_return_use_evidence_8616(decompile_project, isolated_project)
-                    attach_lst_metadata_to_project(isolated_project, lst_metadata)
-                    _inherit_tail_validation_runtime_policy(isolated_project, item_function.project)
-                    candidate_addr, isolated_image_end = _isolated_project_recovery_target_8616(
-                        item.function,
-                        isolated_project,
-                        linked_base,
-                        max_addr,
-                    )
-                    isolated_cfg, isolated_function = _recover_candidate_function_pair(
-                        isolated_project,
-                        candidate_addr=candidate_addr,
-                        image_end=isolated_image_end,
-                        metadata=lst_metadata,
-                        project_entry=isolated_project.entry,
-                        region_span=max(0x180, _function_complexity(item.function)[1] + 0x80),
-                    )
-                    _preserve_source_label_for_recovered_function_8616(item.function, isolated_function)
-                    mark_function_original_addr(isolated_function, candidate_addr)
-                    decompile_project = isolated_project
-                    decompile_cfg = isolated_cfg
-                    decompile_function = isolated_function
-                except Exception as ex:
-                    logging.getLogger(__name__).warning("isolated project/function set up failed: %s", ex)
-                    return FunctionWorkResult(
-                        index=item.index,
-                        status=WorkItemStatus.ERROR.value,
-                        payload=f"Fresh isolated project/function setup failed: {_describe_exception(ex)}",
-                        partial_payload=None,
-                        debug_output="",
-                        function=item.function,
-                        function_cfg=item.function_cfg,
-                        elapsed=0.0,
-                        block_count=block_estimate,
-                        byte_count=_byte_estimate,
-                        failure_stage="fresh_project_recovery",
-                    )
-
-        if not fork_isolated_eligible:
-            with span(
-                "direct.decompile_job",
-                addr=hex(getattr(decompile_function, "addr", 0)),
-                name=getattr(decompile_function, "name", None),
-                timeout=effective_timeout,
-                isolated="local",
-            ):
-                (
-                    status,
-                    payload,
-                    partial_payload,
-                    debug_output,
-                    tail_validation_snapshot,
-                    elapsed,
-                    block_count,
-                    byte_count,
-                ) = _run_local(
-                    decompile_project,
-                    decompile_cfg,
-                    decompile_function,
-                )
-                annotate_current_span(status=status, blocks=block_count, bytes=byte_count)
+        if isinstance(lane, FunctionWorkResult):
+            return lane
+        (
+            status,
+            payload,
+            partial_payload,
+            debug_output,
+            tail_validation_snapshot,
+            elapsed,
+            block_count,
+            byte_count,
+        ), decompile_project, decompile_cfg, decompile_function = lane
         if cache_bypass_debug:
             debug_output = f"{cache_bypass_debug}{debug_output}"
-        return _finalize_work_result(
+        return _finalize_work_result_8616(
+            ctx,
             status=status,
             payload=payload,
             partial_payload=partial_payload,
@@ -1880,7 +1577,8 @@ def _run_function_work_item_uncached(
             block_count=block_count,
             byte_count=byte_count,
             decompile_project=decompile_project,
-            failure_family_state=failure_family_state,
+            decompile_function=decompile_function,
+            decompile_cfg=decompile_cfg,
             cache_key=cache_key,
             tail_validation_enabled=tail_validation_enabled,
             expected_validation_stages=tuple(expected_validation_stages),
@@ -1894,6 +1592,517 @@ def _run_function_work_item_uncached(
         timeout=timeout,
     ):
         return _impl()
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkRunCtx8616:
+    """Shared context for one uncached work-item decompile run."""
+
+    item: FunctionWorkItem
+    api_style: str
+    binary_path: Path | None
+    lst_metadata: LSTMetadata | None
+    cod_metadata: CODProcMetadata | None
+    synthetic_globals: dict[int, tuple[str, int]] | None
+    effective_timeout: int
+    enable_structured_simplify: bool
+    enable_postprocess: bool
+    allow_isolated_retry: bool
+    force_isolated_project: bool
+    process_isolated_worker: bool
+    failure_family_state: FailureFamilyState
+
+
+_DecompileRunTuple8616 = tuple[str, str, str | None, str, dict[str, object] | None, float, int, int]
+
+
+def _maybe_return_known_helper_result_8616(
+    ctx: _WorkRunCtx8616,
+    decompile_project: angr.Project,
+    decompile_cfg: object,
+    decompile_function: _AngrFunction,
+) -> FunctionWorkResult | None:
+    """Return a known-runtime-helper result when the helper lane renders C."""
+    helper_name = getattr(decompile_function, "name", None)
+    known_helper_preview = (
+        _try_emit_known_runtime_helper_c(name=helper_name) if isinstance(helper_name, str) else None
+    )
+    if not isinstance(helper_name, str) or known_helper_preview is None:
+        return None
+    helper_outcome = _try_decompile_non_optimized_known_function(
+        decompile_project,
+        decompile_cfg,
+        decompile_function,
+        timeout=max(1, min(ctx.effective_timeout, 2)),
+        api_style=ctx.api_style,
+        binary_path=ctx.binary_path,
+        lst_metadata=ctx.lst_metadata,
+        cod_metadata=ctx.cod_metadata,
+        synthetic_globals=ctx.synthetic_globals,
+        failure_family_state=ctx.failure_family_state,
+    )
+    helper_c = _non_optimized_slice_rendered(helper_outcome)
+    if helper_c is None:
+        return None
+    helper_snapshot = _tail_validation_snapshot_for_fallback(
+        decompile_project,
+        decompile_function,
+        allow_project_fallback=False,
+    )
+    return FunctionWorkResult(
+        index=ctx.item.index,
+        status="ok",
+        payload=helper_c,
+        partial_payload=None,
+        debug_output="",
+        function=ctx.item.function,
+        function_cfg=ctx.item.function_cfg,
+        tail_validation=helper_snapshot,
+        elapsed=0.0,
+        block_count=None,
+        byte_count=None,
+    )
+
+
+def _recovered_evidence_acceptance_8616(
+    decompile_project: angr.Project,
+    decompile_function: _AngrFunction,
+    tail_validation_enabled: bool,
+    expected_validation_stages: Sequence[str],
+) -> tuple[str, str, None, dict[str, object], str | None, str | None] | None:
+    """Re-accept a recovered binary-evidence candidate through the canonical gate."""
+    recovered_payload, recovered_snapshot = _recover_binary_evidence_c_8616(
+        decompile_project, decompile_function
+    )
+    if not (
+        isinstance(recovered_payload, str)
+        and recovered_payload.strip()
+        and isinstance(recovered_snapshot, dict)
+    ):
+        return None
+    recovered_acceptance = _validated_generated_c_acceptance_8616(
+        status="ok",
+        payload=recovered_payload,
+        tail_validation_snapshot=recovered_snapshot,
+        tail_validation_enabled=tail_validation_enabled,
+        expected_validation_stages=expected_validation_stages,
+        c_target=getattr(decompile_project, "_inertia_c_target", "portable-flat"),
+    )
+    if recovered_acceptance.status == "ok" and recovered_acceptance.blocker is None:
+        return (
+            recovered_acceptance.status,
+            recovered_acceptance.gcc_checked_payload,
+            None,
+            recovered_snapshot,
+            recovered_acceptance.validated_payload_hash,
+            recovered_acceptance.gcc_checked_payload_hash,
+        )
+    return None
+
+
+def _finalize_acceptance_lanes_8616(
+    *,
+    status: str,
+    partial_payload: str | None,
+    tail_validation_snapshot: dict[str, object] | None,
+    acceptance: CAcceptanceResult8616,
+    decompile_project: angr.Project,
+    decompile_function: _AngrFunction,
+    tail_validation_enabled: bool,
+    expected_validation_stages: Sequence[str],
+) -> tuple[str, str, str | None, dict[str, object] | None, str | None, str | None]:
+    """Apply blocker, recovered-evidence, and partial acceptance lanes."""
+    acceptance_payload = acceptance.validated_payload
+    acceptance_validated_hash: str | None = acceptance.validated_payload_hash
+    acceptance_gcc_hash: str | None = acceptance.gcc_checked_payload_hash
+    payload = acceptance.gcc_checked_payload
+    if acceptance.blocker is not None:
+        if status == WorkItemStatus.VALIDATION_FAILED.value:
+            preserved_candidate = None
+        else:
+            preserved_candidate = (
+                partial_payload
+                if isinstance(partial_payload, str) and partial_payload.strip()
+                else (
+                    acceptance_payload
+                    if isinstance(acceptance_payload, str) and acceptance_payload.strip()
+                    else None
+                )
+            )
+        payload = acceptance.blocker
+        partial_payload = preserved_candidate
+    if status in {"empty", "validation_failed"}:
+        recovered = _recovered_evidence_acceptance_8616(
+            decompile_project,
+            decompile_function,
+            tail_validation_enabled,
+            expected_validation_stages,
+        )
+        if recovered is not None:
+            (
+                status,
+                payload,
+                partial_payload,
+                tail_validation_snapshot,
+                acceptance_validated_hash,
+                acceptance_gcc_hash,
+            ) = recovered
+    if status == "empty" and isinstance(partial_payload, str) and partial_payload.strip():
+        partial_acceptance = _validated_generated_c_acceptance_8616(
+            status="ok",
+            payload=partial_payload,
+            tail_validation_snapshot=tail_validation_snapshot,
+            tail_validation_enabled=tail_validation_enabled,
+            expected_validation_stages=tuple(expected_validation_stages),
+            c_target=getattr(decompile_project, "_inertia_c_target", "portable-flat"),
+        )
+        if partial_acceptance.status == "ok" and partial_acceptance.blocker is None:
+            status = partial_acceptance.status
+            payload = partial_acceptance.gcc_checked_payload
+            partial_payload = None
+    return status, payload, partial_payload, tail_validation_snapshot, acceptance_validated_hash, acceptance_gcc_hash
+
+
+def _finalize_work_result_8616(
+    ctx: _WorkRunCtx8616,
+    *,
+    status: str,
+    payload: str,
+    partial_payload: str | None,
+    debug_output: str,
+    tail_validation_snapshot: dict[str, object] | None,
+    elapsed: float,
+    block_count: int | None,
+    byte_count: int | None,
+    decompile_project: angr.Project,
+    decompile_function: _AngrFunction,
+    decompile_cfg: object,
+    cache_key: dict[str, object] | None,
+    tail_validation_enabled: bool,
+    expected_validation_stages: Sequence[str],
+) -> FunctionWorkResult:
+    """Apply acceptance, recovery, and cache policy, then build the result."""
+    acceptance = _validated_generated_c_acceptance_8616(
+        status=status,
+        payload=payload,
+        tail_validation_snapshot=tail_validation_snapshot,
+        tail_validation_enabled=tail_validation_enabled,
+        expected_validation_stages=expected_validation_stages,
+        c_target=getattr(decompile_project, "_inertia_c_target", "portable-flat"),
+    )
+    (
+        status,
+        payload,
+        partial_payload,
+        tail_validation_snapshot,
+        acceptance_validated_hash,
+        acceptance_gcc_hash,
+    ) = _finalize_acceptance_lanes_8616(
+        status=acceptance.status,
+        partial_payload=partial_payload,
+        tail_validation_snapshot=tail_validation_snapshot,
+        acceptance=acceptance,
+        decompile_project=decompile_project,
+        decompile_function=decompile_function,
+        tail_validation_enabled=tail_validation_enabled,
+        expected_validation_stages=expected_validation_stages,
+    )
+    tail_validation_passed = status == "ok"
+    if cache_key is not None and tail_validation_passed:
+        _store_cache_json(
+            "function_decompile",
+            cache_key,
+            {
+                "status": status,
+                "payload": payload,
+                "tail_validation": tail_validation_snapshot,
+                "tail_validation_passed": tail_validation_passed,
+                "elapsed": elapsed,
+                "block_count": block_count,
+                "byte_count": byte_count,
+                "validated_c_hash": acceptance_validated_hash,
+                "gcc_checked_c_hash": acceptance_gcc_hash,
+                "diagnostic_output": (
+                    debug_output
+                    if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
+                    else None
+                ),
+            },
+        )
+    return FunctionWorkResult(
+        index=ctx.item.index,
+        status=status,
+        payload=payload,
+        partial_payload=partial_payload,
+        debug_output=debug_output,
+        function=decompile_function,
+        function_cfg=decompile_cfg,
+        tail_validation=tail_validation_snapshot,
+        elapsed=elapsed,
+        block_count=block_count,
+        byte_count=byte_count,
+        same_family_retry_stops=ctx.failure_family_state.same_family_retry_stops,
+        fallback_family_labels=ctx.failure_family_state.fallback_family_labels,
+        validated_payload_hash=acceptance_validated_hash,
+        gcc_checked_payload_hash=acceptance_gcc_hash,
+    )
+
+
+def _helper_model_tail_snapshot_8616(
+    status: str,
+    payload: str,
+    function_obj: _AngrFunction,
+    tail_snapshot_local: dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Substitute the helper-model snapshot when payload matches the model."""
+    if not _payload_needs_helper_retry_8616(status, payload, function_obj, tail_snapshot_local):
+        return tail_snapshot_local
+    helper_model = _try_emit_known_runtime_helper_c(name=function_obj.name)
+    if not isinstance(helper_model, str):
+        return tail_snapshot_local
+    norm_payload = re.sub(r"\s+", "", payload)
+    norm_helper = re.sub(r"\s+", "", helper_model)
+    if norm_payload != norm_helper:
+        return tail_snapshot_local
+    return {
+        "structuring": {
+            "status": "stable",
+            "mode": "helper_model",
+            "changed": False,
+            "detail": f"known compiler/runtime helper model: {function_obj.name}",
+        },
+        "postprocess": {
+            "status": "stable",
+            "mode": "helper_model",
+            "changed": False,
+            "detail": f"known compiler/runtime helper model: {function_obj.name}",
+        },
+    }
+
+
+def _run_local_work_8616(
+    ctx: _WorkRunCtx8616,
+    project_obj: angr.Project,
+    cfg_obj: object,
+    function_obj: _AngrFunction,
+) -> _DecompileRunTuple8616:
+    """Run one decompile attempt with captured output and tail snapshot."""
+    with _capture_thread_output() as (stdout_buf, stderr_buf):
+        _apply_function_annotations_for_active_and_original_8616(
+            project_obj,
+            ctx.binary_path,
+            ctx.lst_metadata,
+            function_obj,
+            cod_metadata=ctx.cod_metadata,
+            synthetic_globals=ctx.synthetic_globals,
+        )
+        local_block_count, local_byte_count = _function_complexity(function_obj)
+        local_arch_name = getattr(getattr(project_obj, "arch", None), "name", "")
+        local_clinic_policy = DirectClinicPolicy8616.STANDARD
+        if local_arch_name == "86_16":
+            local_callsite_count = (
+                _safe_function_callsite_count_8616(function_obj)
+                if _clinic_policy_needs_callsite_count_8616(
+                    arch_name=local_arch_name,
+                    direct_addr_mode=True,
+                    block_count=local_block_count,
+                    byte_count=local_byte_count,
+                )
+                else 0
+            )
+            local_clinic_policy = _direct_clinic_policy_8616(
+                arch_name=local_arch_name,
+                direct_addr_mode=True,
+                block_count=local_block_count,
+                byte_count=local_byte_count,
+                call_site_count=local_callsite_count,
+            )
+        with _temporary_clinic_policy_8616(project_obj, local_clinic_policy):
+            status, payload, partial_payload, block_count, byte_count, elapsed = _decompile_function_with_stats(
+                project_obj,
+                cfg_obj,
+                function_obj,
+                ctx.effective_timeout,
+                ctx.api_style,
+                ctx.binary_path,
+                cod_metadata=ctx.cod_metadata,
+                synthetic_globals=ctx.synthetic_globals,
+                lst_metadata=ctx.lst_metadata,
+                enable_structured_simplify=ctx.enable_structured_simplify,
+                enable_postprocess=ctx.enable_postprocess,
+                allow_isolated_retry=ctx.allow_isolated_retry,
+                failure_family_state=ctx.failure_family_state,
+            )
+            annotate_current_span(clinic_policy=local_clinic_policy.value)
+    debug_output_local = stdout_buf.getvalue()
+    err_output = stderr_buf.getvalue()
+    if err_output:
+        debug_output_local += err_output
+    raw_tail_snapshot = _tail_validation_snapshot_for_function_run(project_obj, function_obj)
+    tail_snapshot_local: dict[str, object] | None = raw_tail_snapshot if isinstance(raw_tail_snapshot, dict) else None
+    tail_snapshot_local = _helper_model_tail_snapshot_8616(status, payload, function_obj, tail_snapshot_local)
+    if os.environ.get("INERTIA_DEBUG_TAIL_SNAPSHOT"):
+        logging.getLogger(__name__).warning(
+            "tail snapshot function=%#x name=%s snapshot=%r",
+            getattr(function_obj, "addr", -1) or -1,
+            getattr(function_obj, "name", "sub"),
+            tail_snapshot_local,
+        )
+    return (
+        status,
+        payload,
+        partial_payload,
+        debug_output_local,
+        tail_snapshot_local,
+        elapsed,
+        block_count,
+        byte_count,
+    )
+
+
+def _isolated_project_lane_8616(
+    ctx: _WorkRunCtx8616,
+    item_function: _AngrFunction,
+    decompile_project: angr.Project,
+    block_estimate: int,
+    byte_estimate: int,
+) -> tuple[angr.Project, object, _AngrFunction] | FunctionWorkResult | None:
+    """Rebuild the decompile triple on a fresh isolated project when possible."""
+    main_object = getattr(getattr(item_function, "project", None), "loader", None)
+    main_object = getattr(main_object, "main_object", None)
+    linked_base = getattr(main_object, "linked_base", None)
+    max_addr = getattr(main_object, "max_addr", None)
+    if not (isinstance(linked_base, int) and isinstance(max_addr, int)):
+        return None
+    try:
+        isolated_project = _build_project_cached(
+            str(ctx.binary_path),
+            force_blob=False,
+            base_addr=linked_base,
+            entry_point=getattr(item_function.project, "entry", linked_base),
+        )
+        _transfer_caller_return_use_evidence_8616(decompile_project, isolated_project)
+        attach_lst_metadata_to_project(isolated_project, ctx.lst_metadata)
+        _inherit_tail_validation_runtime_policy(isolated_project, item_function.project)
+        candidate_addr, isolated_image_end = _isolated_project_recovery_target_8616(
+            item_function,
+            isolated_project,
+            linked_base,
+            max_addr,
+        )
+        isolated_cfg, isolated_function = _recover_candidate_function_pair(
+            isolated_project,
+            candidate_addr=candidate_addr,
+            image_end=isolated_image_end,
+            metadata=ctx.lst_metadata,
+            project_entry=isolated_project.entry,
+            region_span=max(0x180, _function_complexity(item_function)[1] + 0x80),
+        )
+        _preserve_source_label_for_recovered_function_8616(item_function, isolated_function)
+        mark_function_original_addr(isolated_function, candidate_addr)
+        return isolated_project, isolated_cfg, isolated_function
+    except Exception as ex:
+        logging.getLogger(__name__).warning("isolated project/function set up failed: %s", ex)
+        return FunctionWorkResult(
+            index=ctx.item.index,
+            status=WorkItemStatus.ERROR.value,
+            payload=f"Fresh isolated project/function setup failed: {_describe_exception(ex)}",
+            partial_payload=None,
+            debug_output="",
+            function=ctx.item.function,
+            function_cfg=ctx.item.function_cfg,
+            elapsed=0.0,
+            block_count=block_estimate,
+            byte_count=byte_estimate,
+            failure_stage="fresh_project_recovery",
+        )
+
+
+def _decompile_for_work_item_8616(
+    ctx: _WorkRunCtx8616,
+    decompile_project: angr.Project,
+    decompile_cfg: object,
+    decompile_function: _AngrFunction,
+    block_estimate: int,
+    byte_estimate: int,
+    tail_validation_enabled: bool,
+    expected_validation_stages: Sequence[str],
+) -> FunctionWorkResult | tuple[_DecompileRunTuple8616, angr.Project, object, _AngrFunction]:
+    """Run the fork or local decompile lane for one work item."""
+    fork_isolated_eligible = (
+        ctx.force_isolated_project
+        and not ctx.process_isolated_worker
+        and _analysis_timeout_use_fork_8616()
+        and decompile_cfg is not None
+    )
+    if fork_isolated_eligible:
+        try:
+            with span(
+                "direct.decompile_job",
+                addr=hex(getattr(decompile_function, "addr", 0)),
+                name=getattr(decompile_function, "name", None),
+                timeout=_enforce_function_timeout_cap(
+                    max(1, ctx.effective_timeout) + 1,
+                    context="forked local decompile",
+                ),
+                isolated="fork",
+            ):
+                run_tuple = _run_with_timeout_in_fork(
+                    lambda: _run_local_work_8616(ctx, decompile_project, decompile_cfg, decompile_function),
+                    timeout=_enforce_function_timeout_cap(
+                        max(1, ctx.effective_timeout) + 1,
+                        context="forked local decompile",
+                    ),
+                )
+                annotate_current_span(status=run_tuple[0], blocks=run_tuple[6], bytes=run_tuple[7])
+                return run_tuple, decompile_project, decompile_cfg, decompile_function
+        except TimeoutError as ex:
+            logging.getLogger(__name__).warning("fork-isolated decompilation timed out: %s", ex)
+            return _finalize_work_result_8616(
+                ctx,
+                status="timeout",
+                payload=f"Timed out after {ctx.effective_timeout}s during fork-isolated decompilation.",
+                partial_payload=None,
+                debug_output="",
+                tail_validation_snapshot=None,
+                elapsed=float(ctx.effective_timeout),
+                block_count=block_estimate,
+                byte_count=byte_estimate,
+                decompile_project=decompile_project,
+                decompile_function=decompile_function,
+                decompile_cfg=decompile_cfg,
+                cache_key=None,
+                tail_validation_enabled=tail_validation_enabled,
+                expected_validation_stages=expected_validation_stages,
+            )
+        except Exception as ex:
+            logging.getLogger(__name__).warning("fork-isolated decompilation failed: %s", ex)
+            fork_isolated_eligible = False
+
+    if (
+        ctx.force_isolated_project
+        and not fork_isolated_eligible
+        and ctx.binary_path is not None
+        and isinstance(getattr(ctx.item.function, "addr", None), int)
+    ):
+        isolated_lane = _isolated_project_lane_8616(
+            ctx, ctx.item.function, decompile_project, block_estimate, byte_estimate
+        )
+        if isinstance(isolated_lane, FunctionWorkResult):
+            return isolated_lane
+        if isolated_lane is not None:
+            decompile_project, decompile_cfg, decompile_function = isolated_lane
+
+    with span(
+        "direct.decompile_job",
+        addr=hex(getattr(decompile_function, "addr", 0)),
+        name=getattr(decompile_function, "name", None),
+        timeout=ctx.effective_timeout,
+        isolated="local",
+    ):
+        run_tuple = _run_local_work_8616(ctx, decompile_project, decompile_cfg, decompile_function)
+        annotate_current_span(status=run_tuple[0], blocks=run_tuple[6], bytes=run_tuple[7])
+    return run_tuple, decompile_project, decompile_cfg, decompile_function
 
 
 def _function_work_result_for_fork_ipc(result: FunctionWorkResult) -> FunctionWorkResult:
@@ -2152,16 +2361,7 @@ def _run_serial_clean_process_work_item_8616(
     )
     if canonical is not None:
         recovery_addr = canonical.canonical_addr
-    worker_window = context.args.window
-    exact_region_end = None
-    if context.lst_metadata is not None:
-        try:
-            exact_region = _lst_code_region(context.lst_metadata, recovery_addr)
-        except (AttributeError, KeyError, TypeError, ValueError):
-            exact_region = None
-        if exact_region is not None and exact_region[0] <= recovery_addr < exact_region[1]:
-            exact_region_end = exact_region[1]
-            worker_window = max(1, exact_region[1] - recovery_addr)
+    worker_window, exact_region_end = _serial_clean_worker_window_8616(context, recovery_addr)
     command = _serial_clean_worker_command_8616(
         context.args,
         recovery_addr=recovery_addr,
@@ -2193,17 +2393,7 @@ def _run_serial_clean_process_work_item_8616(
             enabled=not context.args.trace_c_stages and not context.args.dump_layers,
         )
         if cache_lookup.verdict is SerialWorkerCacheVerdict8616.HIT and cache_lookup.record is not None:
-            result_path.write_text(json.dumps(cache_lookup.record, sort_keys=True), encoding="utf-8")
-            cached_result = _read_serial_clean_worker_result_8616(
-                result_path,
-                item=replace(item, recovery_addr=recovery_addr),
-                debug_output=f"[dbg] clean serial function cache hit: {recovery_addr:#x}\n",
-            )
-            return replace(
-                cached_result,
-                from_cache=True,
-                execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
-            )
+            return _serial_clean_cache_hit_result_8616(cache_lookup, result_path, item, recovery_addr)
         if cache_only:
             return None
         environment = os.environ.copy()
@@ -2278,6 +2468,63 @@ def _run_serial_clean_process_work_item_8616(
                 failure_stage="clean_process_protocol",
                 execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
             )
+
+
+def _serial_clean_worker_window_8616(
+    context: _BatchCliContext8616, recovery_addr: int
+) -> tuple[int, int | None]:
+    """Resolve the clean-worker window from an exact LST region when present."""
+    worker_window = context.args.window
+    exact_region_end = None
+    if context.lst_metadata is not None:
+        try:
+            exact_region = _lst_code_region(context.lst_metadata, recovery_addr)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            exact_region = None
+        if exact_region is not None and exact_region[0] <= recovery_addr < exact_region[1]:
+            exact_region_end = exact_region[1]
+            worker_window = max(1, exact_region[1] - recovery_addr)
+    return worker_window, exact_region_end
+
+
+def _serial_clean_cache_hit_result_8616(
+    cache_lookup: SerialWorkerCacheLookup8616,
+    result_path: Path,
+    item: FunctionWorkItem,
+    recovery_addr: int,
+) -> FunctionWorkResult:
+    """Materialize a clean-worker cache hit into a FunctionWorkResult."""
+    result_path.write_text(json.dumps(cache_lookup.record, sort_keys=True), encoding="utf-8")
+    cached_result = _read_serial_clean_worker_result_8616(
+        result_path,
+        item=replace(item, recovery_addr=recovery_addr),
+        debug_output=f"[dbg] clean serial function cache hit: {recovery_addr:#x}\n",
+    )
+    return replace(
+        cached_result,
+        from_cache=True,
+        execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
+    )
+
+
+def _payload_needs_helper_retry_8616(
+    status: str, payload: object, function_obj: object, tail_snapshot: object
+) -> bool:
+    """Check whether a successful payload lacks required validation stages."""
+    if status != "ok" or not isinstance(payload, str):
+        return False
+    if not isinstance(getattr(function_obj, "name", None), str):
+        return False
+    return _tail_snapshot_missing_stages_8616(tail_snapshot)
+
+
+def _tail_snapshot_missing_stages_8616(tail_snapshot: object) -> bool:
+    """Check whether a tail snapshot misses the structuring or postprocess stage."""
+    return (
+        not isinstance(tail_snapshot, dict)
+        or "structuring" not in tail_snapshot
+        or "postprocess" not in tail_snapshot
+    )
 
 
 @typing.overload
@@ -2647,104 +2894,251 @@ def _validated_generated_c_acceptance_8616(
     if isinstance(tail_validation_snapshot, dict):
         tail_validation_snapshot = copy.deepcopy(tail_validation_snapshot)
 
-    def _impl() -> CAcceptanceResult8616:
-        """Run final validation, quality, and recompilation checks."""
-        baseline_payload = payload if isinstance(payload, str) else ""
-        if status != WorkItemStatus.OK.value:
-            return _acceptance_result_8616(status, None, baseline_payload)
-        if not baseline_payload.strip():
-            return _acceptance_result_8616(
-                WorkItemStatus.VALIDATION_FAILED,
-                "No emitted C body.",
-                baseline_payload,
-            )
+    return _acceptance_run_8616(
+        status,
+        payload,
+        tail_validation_snapshot,
+        tail_validation_enabled,
+        expected_validation_stages,
+        emit_failure_diagnostics,
+    )
 
-        accepted_payload = baseline_payload
 
-        def _dump_validation_failed_payload(detail: str) -> None:
-            dump_payload = accepted_payload if accepted_payload.strip() else baseline_payload
-            if not dump_payload.strip():
-                return
-            try:
-                import time
-                from pathlib import Path
-
-                root = Path("angr_platforms/.cache/validation_failed_payloads")
-                root.mkdir(parents=True, exist_ok=True)
-                digest = hashlib.sha1(dump_payload.encode("utf-8", errors="ignore")).hexdigest()[:12]
-                stamp = int(time.time())
-                out = root / f"payload_{stamp}_{digest}.c"
-                out.write_text(dump_payload, encoding="utf-8")
-                print(f"[tail-validation] failed payload artifact: {out}", file=sys.stderr)
-            except Exception:
-                return
-
-        def _validation_fail(detail: str) -> CAcceptanceResult8616:
-            _mark_tail_validation_failed_with_blocker_8616(
-                tail_validation_snapshot,
-                detail,
-                stage="postprocess",
-            )
-            if emit_failure_diagnostics:
-                print("[tail-validation] whole-tail validation failed across 1 functions", file=sys.stderr)
-                print(f"[tail-validation] acceptance-gate detail: {detail}", file=sys.stderr)
-                _dump_validation_failed_payload(detail)
-                sys.stderr.flush()
-            return _acceptance_result_8616(WorkItemStatus.VALIDATION_FAILED, detail, accepted_payload)
-
-        accepted_payload = _normalize_accepted_payload_8616(accepted_payload)
-        accepted_payload = _prune_invalid_simple_function_prototypes_text(accepted_payload)
-
-        quality = assess_final_generated_c_text(accepted_payload)
-        if quality.reject_as_decompiled:
-            marker_summary = ", ".join(quality.markers[:3]) if quality.markers else "unresolved"
-            if len(quality.markers) > 3:
-                marker_summary += ", ..."
-            return _validation_fail(f"Final quality guard rejected emitted C ({marker_summary}).")
-        if tail_validation_enabled and not _tail_validation_passes_lenient(
-            tail_validation_snapshot, expected_stages=list(expected_validation_stages)
-        ):
-            display_status = _tail_validation_display_status(tail_validation_snapshot)
-            detail = _tail_validation_stage_detail_8616(tail_validation_snapshot, expected_validation_stages)
-            return _validation_fail(f"Tail validation {display_status} ({detail}).")
-
-        checked_payloads, recomp_failure = _collect_recompilation_payloads_8616(accepted_payload)
-        if recomp_failure is not None:
-            return _validation_fail(recomp_failure)
-
-        if not checked_payloads:
-            return _validation_fail("No compiler succeeded; cannot establish recompilation identity.")
-
-        reference_target, reference_checked_payload = checked_payloads[0]
-        reference_hash = _sha256_text_8616(reference_checked_payload)
-        for target_name, target_checked_payload in checked_payloads[1:]:
-            target_hash = _sha256_text_8616(target_checked_payload)
-            if target_hash != reference_hash:
-                return _validation_fail(
-                    f"recompile identity mismatch across toolchains: {reference_target} and {target_name}"
-                )
-
-        validation_hash = _sha256_text_8616(accepted_payload)
-        gcc_hash = reference_hash
-        if gcc_hash != validation_hash:
-            return _validation_fail("stale output mismatch: validated emitted C differs from gcc-checked C.")
-        if _unreachable_calls_after_return_violation_8616(accepted_payload):
-            return _validation_fail("Unreachable call statements present after return in emitted C.")
-        ds_linear_macro_hits = _count_unresolved_ds_linear_macro_hits_8616(accepted_payload)
-        if ds_linear_macro_hits >= 6:
-            return _validation_fail(
-                f"Excess unresolved DS-linear macro accesses in emitted C (count={ds_linear_macro_hits})."
-            )
-        return CAcceptanceResult8616(
-            status=WorkItemStatus.OK,
-            blocker=None,
-            validated_payload=accepted_payload,
-            validated_payload_hash=validation_hash,
-            gcc_checked_payload=reference_checked_payload,
-            gcc_checked_payload_hash=gcc_hash,
+def _acceptance_run_8616(
+    status: str,
+    payload: str,
+    tail_validation_snapshot: dict[str, object] | None,
+    tail_validation_enabled: bool,
+    expected_validation_stages: list[str] | tuple[str, ...],
+    emit_failure_diagnostics: bool,
+) -> CAcceptanceResult8616:
+    """Run final validation, quality, and recompilation checks."""
+    baseline_payload = payload if isinstance(payload, str) else ""
+    if status != WorkItemStatus.OK.value:
+        return _acceptance_result_8616(status, None, baseline_payload)
+    if not baseline_payload.strip():
+        return _acceptance_result_8616(
+            WorkItemStatus.VALIDATION_FAILED,
+            "No emitted C body.",
+            baseline_payload,
         )
 
-    return _impl()
+    accepted_payload = _normalize_accepted_payload_8616(baseline_payload)
+    accepted_payload = _prune_invalid_simple_function_prototypes_text(accepted_payload)
+
+    quality = assess_final_generated_c_text(accepted_payload)
+    if quality.reject_as_decompiled:
+        marker_summary = ", ".join(quality.markers[:3]) if quality.markers else "unresolved"
+        if len(quality.markers) > 3:
+            marker_summary += ", ..."
+        return _validation_fail_8616(
+            f"Final quality guard rejected emitted C ({marker_summary}).",
+            tail_validation_snapshot,
+            emit_failure_diagnostics,
+            accepted_payload,
+            baseline_payload,
+        )
+    if tail_validation_enabled and not _tail_validation_passes_lenient(
+        tail_validation_snapshot, expected_stages=list(expected_validation_stages)
+    ):
+        display_status = _tail_validation_display_status(tail_validation_snapshot)
+        detail = _tail_validation_stage_detail_8616(tail_validation_snapshot, expected_validation_stages)
+        return _validation_fail_8616(
+            f"Tail validation {display_status} ({detail}).",
+            tail_validation_snapshot,
+            emit_failure_diagnostics,
+            accepted_payload,
+            baseline_payload,
+        )
+
+    checked_payloads, recomp_failure = _collect_recompilation_payloads_8616(accepted_payload)
+    recompile_fail_detail = _recompile_gate_fail_detail_8616(checked_payloads, recomp_failure)
+    if recompile_fail_detail is not None:
+        return _validation_fail_8616(
+            recompile_fail_detail,
+            tail_validation_snapshot,
+            emit_failure_diagnostics,
+            accepted_payload,
+            baseline_payload,
+        )
+
+    reference_checked_payload = checked_payloads[0][1]
+    validation_hash = _sha256_text_8616(accepted_payload)
+    gcc_hash = _sha256_text_8616(reference_checked_payload)
+    if gcc_hash != validation_hash:
+        return _validation_fail_8616(
+            "stale output mismatch: validated emitted C differs from gcc-checked C.",
+            tail_validation_snapshot,
+            emit_failure_diagnostics,
+            accepted_payload,
+            baseline_payload,
+        )
+    if _unreachable_calls_after_return_violation_8616(accepted_payload):
+        return _validation_fail_8616(
+            "Unreachable call statements present after return in emitted C.",
+            tail_validation_snapshot,
+            emit_failure_diagnostics,
+            accepted_payload,
+            baseline_payload,
+        )
+    ds_linear_macro_hits = _count_unresolved_ds_linear_macro_hits_8616(accepted_payload)
+    if ds_linear_macro_hits >= 6:
+        return _validation_fail_8616(
+            f"Excess unresolved DS-linear macro accesses in emitted C (count={ds_linear_macro_hits}).",
+            tail_validation_snapshot,
+            emit_failure_diagnostics,
+            accepted_payload,
+            baseline_payload,
+        )
+    return CAcceptanceResult8616(
+        status=WorkItemStatus.OK,
+        blocker=None,
+        validated_payload=accepted_payload,
+        validated_payload_hash=validation_hash,
+        gcc_checked_payload=reference_checked_payload,
+        gcc_checked_payload_hash=gcc_hash,
+    )
+
+
+def _recompile_gate_fail_detail_8616(
+    checked_payloads: list[tuple[str, str]] | tuple[tuple[str, str], ...],
+    recomp_failure: str | None,
+) -> str | None:
+    """Return the first recompilation-gate fail detail, or None when accepted."""
+    if recomp_failure is not None:
+        return recomp_failure
+    if not checked_payloads:
+        return "No compiler succeeded; cannot establish recompilation identity."
+    return _toolchain_identity_fail_detail_8616(checked_payloads, checked_payloads[0][0])
+
+
+def _exe_addr_none_batch_gate_8616(args: CliArguments) -> bool:
+    """Check the shared EXE batch-mode address gate."""
+    return args.addr is None and args.binary.suffix.lower() == ".exe"
+
+
+def _exe_unlabeled_batch_gate_8616(
+    args: CliArguments, lst_metadata: object, visible_code_labels: object
+) -> bool:
+    """Check the batch-mode gate requiring EXE input, LST, and no visible labels."""
+    return (
+        _exe_addr_none_batch_gate_8616(args)
+        and lst_metadata is not None
+        and not visible_code_labels
+    )
+
+
+def _seeded_supplement_needed_8616(
+    args: CliArguments,
+    function_cfg_pairs: Sized | None,
+    ranked_binary_offsets: Sized | None,
+) -> bool:
+    """Check whether seeded/ranked supplements are needed to reach the cap."""
+    if args.max_functions <= 0 or not ranked_binary_offsets or not function_cfg_pairs:
+        return False
+    return cast(bool, len(function_cfg_pairs) < args.max_functions)
+
+
+def _catalog_address_cache_storable_8616(project: angr.Project) -> bool:
+    """Check whether catalog address evidence is absent or provably complete."""
+    source_region_evidence = _source_region_catalog_evidence_8616(project)
+    return source_region_evidence is None or source_region_evidence.complete
+
+
+def _library_ranked_task_gate_8616(
+    args: CliArguments,
+    lst_metadata: object,
+    visible_code_labels: object,
+    include_library_functions: object,
+    ranked_binary_offsets: object,
+) -> bool:
+    """Check the ranked-library task replacement gate for batch EXE mode."""
+    if not _exe_unlabeled_batch_gate_8616(args, lst_metadata, visible_code_labels):
+        return False
+    return bool(include_library_functions and ranked_binary_offsets)
+
+
+def _retry_gate_allows_candidate_8616(
+    result: FunctionWorkResult,
+    args: CliArguments,
+    project: angr.Project,
+    lst_metadata: object,
+    cod_metadata: object,
+) -> bool:
+    """Check whether a failed result may retry with new sidecar evidence."""
+    if result.status == "ok" or args.addr is not None:
+        return False
+    if getattr(project.arch, "name", "") != "86_16" or result.failure_stage == "sweep_budget":
+        return False
+    return cast(
+        bool,
+        result.retry_may_change_evidence(
+            sidecar_available=lst_metadata is not None or cod_metadata is not None
+        ),
+    )
+
+
+def _cacheable_direct_result_8616(result: FunctionWorkResult, integrity: AcceptedPayloadIntegrityVerdict8616) -> bool:
+    """Check whether a direct result carries complete cacheable provenance."""
+    if result.status != WorkItemStatus.OK.value or not isinstance(result.tail_validation, dict):
+        return False
+    if not isinstance(result.validated_payload_hash, str) or not isinstance(result.gcc_checked_payload_hash, str):
+        return False
+    return result.failure_family_snapshot is not None and integrity.passed
+
+
+def _toolchain_identity_fail_detail_8616(
+    checked_payloads: list[tuple[str, str]] | tuple[tuple[str, str], ...],
+    reference_target: str,
+) -> str | None:
+    """Return a fail detail when toolchains disagree on the checked C identity."""
+    reference_hash = _sha256_text_8616(checked_payloads[0][1])
+    for target_name, target_checked_payload in checked_payloads[1:]:
+        target_hash = _sha256_text_8616(target_checked_payload)
+        if target_hash != reference_hash:
+            return f"recompile identity mismatch across toolchains: {reference_target} and {target_name}"
+    return None
+
+
+def _dump_validation_failed_payload_8616(accepted_payload: str, baseline_payload: str) -> None:
+    """Persist a validation-failed payload artifact for debugging."""
+    dump_payload = accepted_payload if accepted_payload.strip() else baseline_payload
+    if not dump_payload.strip():
+        return
+    try:
+        import time
+        from pathlib import Path
+
+        root = Path("angr_platforms/.cache/validation_failed_payloads")
+        root.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha1(dump_payload.encode("utf-8", errors="ignore")).hexdigest()[:12]
+        stamp = int(time.time())
+        out = root / f"payload_{stamp}_{digest}.c"
+        out.write_text(dump_payload, encoding="utf-8")
+        print(f"[tail-validation] failed payload artifact: {out}", file=sys.stderr)
+    except Exception:
+        return
+
+
+def _validation_fail_8616(
+    detail: str,
+    tail_validation_snapshot: dict[str, object] | None,
+    emit_failure_diagnostics: bool,
+    accepted_payload: str,
+    baseline_payload: str,
+) -> CAcceptanceResult8616:
+    """Record a validation failure and emit its diagnostics when enabled."""
+    _mark_tail_validation_failed_with_blocker_8616(
+        tail_validation_snapshot,
+        detail,
+        stage="postprocess",
+    )
+    if emit_failure_diagnostics:
+        print("[tail-validation] whole-tail validation failed across 1 functions", file=sys.stderr)
+        print(f"[tail-validation] acceptance-gate detail: {detail}", file=sys.stderr)
+        _dump_validation_failed_payload_8616(accepted_payload, baseline_payload)
+        sys.stderr.flush()
+    return _acceptance_result_8616(WorkItemStatus.VALIDATION_FAILED, detail, accepted_payload)
 
 
 def _accept_generated_c_for_emission_8616(
@@ -2992,57 +3386,63 @@ def _ordered_call_names_from_text_8616(text: str) -> list[str]:
         return []
     text = _strip_comment_blocks_8616(text)
     keywords = {"if", "for", "while", "switch", "return", "sizeof"}
-
-    def skip_string(index: int, quote: str) -> int:
-        index += 1
-        while index < len(text):
-            if text[index] == "\\":
-                index += 2
-                continue
-            if text[index] == quote:
-                return index + 1
-            index += 1
-        return index
-
-    def skip_ws(index: int) -> int:
-        while index < len(text) and text[index].isspace():
-            index += 1
-        return index
-
-    def parse_until(index: int, stop_char: str | None = None) -> tuple[list[str], int]:
-        """Collect call-like names until a matching delimiter is reached."""
-        names: list[str] = []
-        while index < len(text):
-            ch = text[index]
-            if stop_char is not None and ch == stop_char:
-                return names, index + 1
-            if ch in {'"', "'"}:
-                index = skip_string(index, ch)
-                continue
-            if ch == "(":
-                nested, index = parse_until(index + 1, ")")
-                names.extend(nested)
-                continue
-            if ch == "_" or ch.isalpha():
-                start = index
-                index += 1
-                while index < len(text) and (text[index] == "_" or text[index].isalnum()):
-                    index += 1
-                raw_name = text[start:index]
-                paren = skip_ws(index)
-                if paren < len(text) and text[paren] == "(":
-                    nested, index = parse_until(paren + 1, ")")
-                    names.extend(nested)
-                    name = raw_name.lstrip("_")
-                    if name and name not in keywords:
-                        names.append(name)
-                    continue
-                continue
-            index += 1
-        return names, index
-
-    names, _end = parse_until(0)
+    names, _end = _call_text_parse_until_8616(text, keywords, 0)
     return names
+
+
+def _call_text_skip_string_8616(text: str, index: int, quote: str) -> int:
+    """Advance past a quoted string literal in C text."""
+    index += 1
+    while index < len(text):
+        if text[index] == "\\":
+            index += 2
+            continue
+        if text[index] == quote:
+            return index + 1
+        index += 1
+    return index
+
+
+def _call_text_skip_ws_8616(text: str, index: int) -> int:
+    """Advance past whitespace in C text."""
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def _call_text_parse_until_8616(
+    text: str, keywords: set[str], index: int, stop_char: str | None = None
+) -> tuple[list[str], int]:
+    """Collect call-like names until a matching delimiter is reached."""
+    names: list[str] = []
+    while index < len(text):
+        ch = text[index]
+        if stop_char is not None and ch == stop_char:
+            return names, index + 1
+        if ch in {'"', "'"}:
+            index = _call_text_skip_string_8616(text, index, ch)
+            continue
+        if ch == "(":
+            nested, index = _call_text_parse_until_8616(text, keywords, index + 1, ")")
+            names.extend(nested)
+            continue
+        if ch == "_" or ch.isalpha():
+            start = index
+            index += 1
+            while index < len(text) and (text[index] == "_" or text[index].isalnum()):
+                index += 1
+            raw_name = text[start:index]
+            paren = _call_text_skip_ws_8616(text, index)
+            if paren < len(text) and text[paren] == "(":
+                nested, index = _call_text_parse_until_8616(text, keywords, paren + 1, ")")
+                names.extend(nested)
+                name = raw_name.lstrip("_")
+                if name and name not in keywords:
+                    names.append(name)
+                continue
+            continue
+        index += 1
+    return names, index
 
 
 def _extract_emitted_function_name_8616(emitted_c: str) -> str | None:
@@ -3059,36 +3459,33 @@ def _extract_emitted_function_name_8616(emitted_c: str) -> str | None:
 
 
 def _unreachable_calls_after_return_violation_8616(emitted_c: str) -> bool:
-    def _impl() -> bool:
-        body = _extract_function_body_text_8616(_strip_comment_blocks_8616(emitted_c))
-        if not isinstance(body, str) or not body.strip():
-            return False
-        depth = 0
-        saw_top_level_return = False
-        token_re = re.compile(r"\breturn\s*;|([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-        for line in body.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith(("//", "/*", "*")):
-                depth += line.count("{") - line.count("}")
-                if depth < 0:
-                    depth = 0
-                continue
-            if depth == 0 and re.search(r"\breturn\s*;", line):
-                saw_top_level_return = True
-            elif depth == 0 and saw_top_level_return:
-                for match in token_re.finditer(line):
-                    name = match.group(1)
-                    if name is None:
-                        continue
-                    if name in {"if", "for", "while", "switch", "return", "sizeof"}:
-                        continue
-                    return True
-            depth += line.count("{") - line.count("}")
-            if depth < 0:
-                depth = 0
+    body = _extract_function_body_text_8616(_strip_comment_blocks_8616(emitted_c))
+    if not isinstance(body, str) or not body.strip():
         return False
+    depth = 0
+    saw_top_level_return = False
+    token_re = re.compile(r"\breturn\s*;|([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*")):
+            depth = max(0, depth + line.count("{") - line.count("}"))
+            continue
+        if depth == 0 and re.search(r"\breturn\s*;", line):
+            saw_top_level_return = True
+        elif depth == 0 and saw_top_level_return and _line_has_call_token_8616(token_re, line):
+            return True
+        depth = max(0, depth + line.count("{") - line.count("}"))
+    return False
 
-    return _impl()
+
+def _line_has_call_token_8616(token_re: re.Pattern[str], line: str) -> bool:
+    """Check whether a line contains a non-keyword call token."""
+    for match in token_re.finditer(line):
+        name = match.group(1)
+        if name is None or name in {"if", "for", "while", "switch", "return", "sizeof"}:
+            continue
+        return True
+    return False
 
 
 def _print_stop_on_first_failure_8616(function: object, result: FunctionWorkResult) -> None:
@@ -3149,33 +3546,40 @@ def _helper_name(project: angr.Project, addr: int) -> str | None:
 
 
 def _iter_c_nodes(node: _StructuredCNode8616) -> Iterator[_StructuredCNode8616]:
-    def _impl() -> Iterator[_StructuredCNode8616]:
-        yield node
-        if isinstance(node, structured_c.CStatements):
-            for stmt in node.statements:
-                yield from _iter_c_nodes(stmt)
-            return
-        for attr in ("lhs", "rhs", "expr", "condition", "true_node", "false_node", "stmt", "callee_target"):
-            if hasattr(node, attr):
-                try:
-                    value = getattr(node, attr)
-                except Exception:
-                    continue
-                if value is not None and type(value).__module__.startswith(
-                    "angr.analyses.decompiler.structured_codegen"
-                ):
-                    yield from _iter_c_nodes(value)
-        if hasattr(node, "args"):
-            try:
-                args = node.args
-            except Exception:
-                args = None
-            if args:
-                for arg in args:
-                    if type(arg).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                        yield from _iter_c_nodes(arg)
+    yield node
+    if isinstance(node, structured_c.CStatements):
+        for stmt in node.statements:
+            yield from _iter_c_nodes(stmt)
+        return
+    yield from _iter_c_child_nodes_8616(node)
 
-    return _impl()
+
+def _iter_c_child_nodes_8616(node: _StructuredCNode8616) -> Iterator[_StructuredCNode8616]:
+    """Walk the generic structured-codegen child slots of one C node."""
+    for attr in ("lhs", "rhs", "expr", "condition", "true_node", "false_node", "stmt", "callee_target"):
+        if hasattr(node, attr):
+            try:
+                value = getattr(node, attr)
+            except Exception:
+                continue
+            if _is_structured_codegen_node_8616(value):
+                yield from _iter_c_nodes(value)
+    if hasattr(node, "args"):
+        try:
+            args = node.args
+        except Exception:
+            args = None
+        if args:
+            for arg in args:
+                if _is_structured_codegen_node_8616(arg):
+                    yield from _iter_c_nodes(arg)
+
+
+def _is_structured_codegen_node_8616(value: object) -> bool:
+    """Check whether a child value lives in the structured-codegen module."""
+    return value is not None and type(value).__module__.startswith(
+        "angr.analyses.decompiler.structured_codegen"
+    )
 
 
 def _fork_unavailable_reason() -> str:
@@ -3383,6 +3787,222 @@ def _retry_timeout_for_failed_result_8616(
     )
 
 
+@dataclass(slots=True)
+class _TimeoutDelayPrinter8616:
+    """One-shot timeout delay line printer bound to a work result."""
+
+    result: FunctionWorkResult
+    printed: bool = False
+
+    def __call__(self) -> None:
+        """Print the timeout delay line once for timeout results."""
+        if self.printed or self.result.status != "timeout":
+            return
+        elapsed = self.result.elapsed
+        if isinstance(elapsed, (int, float)) and elapsed >= 0:
+            print(f"/* timeout delay: {float(elapsed):.2f}s */")
+            self.printed = True
+
+
+@dataclass(frozen=True, slots=True)
+class _OkEmitOutcome8616:
+    """Outcome of the ok-status emission lane."""
+
+    early_counters: tuple[int, int] | None
+    result: FunctionWorkResult
+    attempt_status_printed: bool
+    emitted_problem: bool
+
+
+def _retry_work_item_8616(item: FunctionWorkItem, result: FunctionWorkResult) -> FunctionWorkItem:
+    """Prefer the result's recovered function/CFG for retry lanes when present."""
+    if result.function is not None and result.function_cfg is not None:
+        return FunctionWorkItem(
+            index=item.index,
+            function_cfg=result.function_cfg,
+            function=result.function,
+            recovery_addr=item.recovery_addr,
+        )
+    return item
+
+
+def _emit_retry_gate_candidate_8616(
+    result: FunctionWorkResult,
+    args: CliArguments,
+    project: angr.Project,
+    lst_metadata: LSTMetadata | None,
+    cod_metadata: CODProcMetadata | None,
+    retry_item: FunctionWorkItem,
+    function: _AngrFunction,
+    synthetic_globals: _SyntheticGlobals8616,
+    timeout_was_explicit: bool,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    result_state_by_index: dict[int, FunctionWorkResult] | None,
+) -> bool:
+    """Run the pre-emission retry lane when its gate allows a candidate."""
+    if not _retry_gate_allows_candidate_8616(result, args, project, lst_metadata, cod_metadata):
+        return False
+    return _try_emit_retry_recovered_candidate_8616(
+        item=retry_item,
+        function=function,
+        project=project,
+        args=args,
+        lst_metadata=lst_metadata,
+        cod_metadata=cod_metadata,
+        synthetic_globals=synthetic_globals,
+        retry_timeout=_retry_timeout_for_failed_result_8616(
+            result,
+            args,
+            timeout_was_explicit=timeout_was_explicit,
+        ),
+        fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+        result_state_by_index=result_state_by_index,
+    )
+
+
+def _validation_failed_retry_gate_8616(
+    args: CliArguments,
+    project: angr.Project,
+    result: FunctionWorkResult,
+    lst_metadata: LSTMetadata | None,
+    cod_metadata: CODProcMetadata | None,
+) -> bool:
+    """Allow a post-validation retry only for evidence-mutating sweep lanes."""
+    return (
+        args.addr is None
+        and getattr(project.arch, "name", "") == "86_16"
+        and result.failure_stage != "sweep_budget"
+        and result.retry_may_change_evidence(
+            sidecar_available=lst_metadata is not None or cod_metadata is not None
+        )
+    )
+
+
+def _emit_ok_result_8616(
+    *,
+    result: FunctionWorkResult,
+    function: _AngrFunction,
+    retry_item: FunctionWorkItem,
+    args: CliArguments,
+    project: angr.Project,
+    lst_metadata: LSTMetadata | None,
+    cod_metadata: CODProcMetadata | None,
+    synthetic_globals: _SyntheticGlobals8616,
+    result_tail_validation: dict[str, object],
+    timeout_was_explicit: bool,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    result_state_by_index: dict[int, FunctionWorkResult] | None,
+) -> _OkEmitOutcome8616:
+    """Emit an ok-status result or route its failed validation to retry."""
+    payload_text = result.payload if isinstance(result.payload, str) else ""
+    normalized_payload_text = _normalize_accepted_payload_8616(payload_text)
+    if normalized_payload_text != payload_text:
+        result = replace(result, payload=normalized_payload_text)
+    if not _tail_validation_runtime_enabled(project) or x86_16_tail_validation_snapshot_passed(
+        result_tail_validation
+    ):
+        _print_function_attempt_status(
+            function,
+            attempt="decompiled",
+            validation_snapshot=result_tail_validation,
+        )
+        if args.output_c_dir is not None:
+            write_generated_function_c(
+                args.output_c_dir,
+                address=function_original_addr(function),
+                name=function.name,
+                payload=result.payload,
+            )
+        if args.addr is not None:
+            _emit_optional_source_sidecar_c_block(
+                args.binary,
+                function.name,
+                result.payload,
+                alternate_source_c=bool(args.alternate_source_c),
+                c_header="/* -- c -- */",
+            )
+        return _OkEmitOutcome8616(
+            early_counters=(1, 0),
+            result=result,
+            attempt_status_printed=False,
+            emitted_problem=False,
+        )
+    validation_status = _tail_validation_display_status(result_tail_validation)
+    print("/* problem: validation=failed */")
+    for _diag_line in _format_tail_validation_diagnostic(
+        result_tail_validation,
+        function_addr=function.addr,
+        function_name=function.name,
+        block_count=result.block_count,
+        byte_count=result.byte_count,
+        exit_kind=result.status,
+        exit_detail=f"tail-validation status={validation_status}",
+    ):
+        print(_diag_line)
+    _print_function_attempt_status(
+        function,
+        attempt="decompiled",
+        validation_snapshot=result_tail_validation,
+    )
+    print("/* decompiled output failed tail-validation; trying fallback lanes */")
+    if _validation_failed_retry_gate_8616(
+        args, project, result, lst_metadata, cod_metadata
+    ) and _try_emit_retry_recovered_candidate_8616(
+        item=retry_item,
+        function=function,
+        project=project,
+        args=args,
+        lst_metadata=lst_metadata,
+        cod_metadata=cod_metadata,
+        synthetic_globals=synthetic_globals,
+        retry_timeout=_retry_timeout_for_failed_result_8616(
+            result,
+            args,
+            timeout_was_explicit=timeout_was_explicit,
+        ),
+        fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+        result_state_by_index=result_state_by_index,
+    ):
+        return _OkEmitOutcome8616(
+            early_counters=(1, 0),
+            result=result,
+            attempt_status_printed=True,
+            emitted_problem=True,
+        )
+    return _OkEmitOutcome8616(
+        early_counters=None,
+        result=result,
+        attempt_status_printed=True,
+        emitted_problem=True,
+    )
+
+
+def _emit_partial_payload_block_8616(
+    result: FunctionWorkResult,
+    function: _AngrFunction,
+    args: CliArguments,
+    emit_timeout_delay_line: Callable[[], None],
+) -> None:
+    """Emit the partial-payload lane for a failed result."""
+    partial_report = _partial_result_report_8616(result.status)
+    _print_function_attempt_status(
+        function,
+        attempt=_function_attempt_display_status(result),
+        validation_snapshot=result.tail_validation,
+    )
+    print(f"/* problem: {result.status} */")
+    _print_diagnostic_text(result.payload)
+    if partial_report.show_timeout_delay:
+        emit_timeout_delay_line()
+    _emit_optional_source_sidecar_c_block(
+        args.binary,
+        function.name,
+        result.partial_payload,
+        alternate_source_c=bool(args.alternate_source_c),
+        c_header=partial_report.sweep_c_header,
+    )
+
+
 def _emit_function_result(
     item: FunctionWorkItem,
     result: FunctionWorkResult,
@@ -3409,16 +4029,7 @@ def _emit_function_result(
         decompiled_local = 0
         failed_local = 0
         attempt_status_printed = False
-        timeout_delay_printed = False
-
-        def _emit_timeout_delay_line() -> None:
-            nonlocal timeout_delay_printed
-            if timeout_delay_printed or result.status != "timeout":
-                return
-            elapsed = result.elapsed
-            if isinstance(elapsed, (int, float)) and elapsed >= 0:
-                print(f"/* timeout delay: {float(elapsed):.2f}s */")
-                timeout_delay_printed = True
+        _emit_timeout_delay_line = _TimeoutDelayPrinter8616(result)
 
         if result.debug_output:
             print(result.debug_output, end="" if result.debug_output.endswith("\n") else "\n", file=sys.stderr)
@@ -3437,144 +4048,49 @@ def _emit_function_result(
             artifact_path=f"{function.addr:#x}:{function.name}",
         )
         print(f"/* failure family: {failure_family_snapshot.label()} */")
-        retry_item = item
-        if result.function is not None and result.function_cfg is not None:
-            retry_item = FunctionWorkItem(
-                index=item.index,
-                function_cfg=result.function_cfg,
-                function=result.function,
-                recovery_addr=item.recovery_addr,
-            )
-        if (
-            result.status != "ok"
-            and args.addr is None
-            and getattr(project.arch, "name", "") == "86_16"
-            and result.failure_stage != "sweep_budget"
-            and result.retry_may_change_evidence(
-                sidecar_available=lst_metadata is not None or cod_metadata is not None
-            )
-            and _try_emit_retry_recovered_candidate_8616(
-                item=retry_item,
-                function=function,
-                project=project,
-                args=args,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-                synthetic_globals=synthetic_globals,
-                retry_timeout=_retry_timeout_for_failed_result_8616(
-                    result,
-                    args,
-                    timeout_was_explicit=timeout_was_explicit,
-                ),
-                fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                result_state_by_index=result_state_by_index,
-            )
+        retry_item = _retry_work_item_8616(item, result)
+        if _emit_retry_gate_candidate_8616(
+            result,
+            args,
+            project,
+            lst_metadata,
+            cod_metadata,
+            retry_item,
+            function,
+            synthetic_globals,
+            timeout_was_explicit,
+            fallback_tail_validation_by_index,
+            result_state_by_index,
         ):
-            decompiled_local += 1
-            return decompiled_local, failed_local
+            return 1, 0
         if args.show_asm:
             print("/* -- asm -- */")
             print(_format_first_block_asm(project, function.addr))
         emitted_problem = False
         if result.status == "ok":
-            payload_text = result.payload if isinstance(result.payload, str) else ""
-            normalized_payload_text = _normalize_accepted_payload_8616(payload_text)
-            if normalized_payload_text != payload_text:
-                result = replace(result, payload=normalized_payload_text)
-                payload_text = normalized_payload_text
-            if result.status == "ok" and (
-                not _tail_validation_runtime_enabled(project)
-                or x86_16_tail_validation_snapshot_passed(result_tail_validation)
-            ):
-                decompiled_local += 1
-                _print_function_attempt_status(
-                    function,
-                    attempt="decompiled",
-                    validation_snapshot=result_tail_validation,
-                )
-                if args.output_c_dir is not None:
-                    write_generated_function_c(
-                        args.output_c_dir,
-                        address=function_original_addr(function),
-                        name=function.name,
-                        payload=result.payload,
-                    )
-                if args.addr is not None:
-                    _emit_optional_source_sidecar_c_block(
-                        args.binary,
-                        function.name,
-                        result.payload,
-                        alternate_source_c=bool(args.alternate_source_c),
-                        c_header="/* -- c -- */",
-                    )
-                return decompiled_local, failed_local
-            if result.status == "ok":
-                validation_status = _tail_validation_display_status(result_tail_validation)
-                print("/* problem: validation=failed */")
-                for _diag_line in _format_tail_validation_diagnostic(
-                    result_tail_validation,
-                    function_addr=function.addr,
-                    function_name=function.name,
-                    block_count=result.block_count,
-                    byte_count=result.byte_count,
-                    exit_kind=result.status,
-                    exit_detail=f"tail-validation status={validation_status}",
-                ):
-                    print(_diag_line)
-                _print_function_attempt_status(
-                    function,
-                    attempt="decompiled",
-                    validation_snapshot=result_tail_validation,
-                )
-                print("/* decompiled output failed tail-validation; trying fallback lanes */")
-                attempt_status_printed = True
-                emitted_problem = True
-                if (
-                    args.addr is None
-                    and getattr(project.arch, "name", "") == "86_16"
-                    and result.failure_stage != "sweep_budget"
-                    and result.retry_may_change_evidence(
-                        sidecar_available=lst_metadata is not None or cod_metadata is not None
-                    )
-                    and _try_emit_retry_recovered_candidate_8616(
-                        item=retry_item,
-                        function=function,
-                        project=project,
-                        args=args,
-                        lst_metadata=lst_metadata,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        retry_timeout=_retry_timeout_for_failed_result_8616(
-                            result,
-                            args,
-                            timeout_was_explicit=timeout_was_explicit,
-                        ),
-                        fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                        result_state_by_index=result_state_by_index,
-                    )
-                ):
-                    decompiled_local += 1
-                    return decompiled_local, failed_local
+            ok_outcome = _emit_ok_result_8616(
+                result=result,
+                function=function,
+                retry_item=retry_item,
+                args=args,
+                project=project,
+                lst_metadata=lst_metadata,
+                cod_metadata=cod_metadata,
+                synthetic_globals=synthetic_globals,
+                result_tail_validation=result_tail_validation,
+                timeout_was_explicit=timeout_was_explicit,
+                fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+                result_state_by_index=result_state_by_index,
+            )
+            if ok_outcome.early_counters is not None:
+                return ok_outcome.early_counters
+            result = ok_outcome.result
+            attempt_status_printed = ok_outcome.attempt_status_printed
+            emitted_problem = ok_outcome.emitted_problem
 
         if result.partial_payload:
-            partial_report = _partial_result_report_8616(result.status)
-            _print_function_attempt_status(
-                function,
-                attempt=_function_attempt_display_status(result),
-                validation_snapshot=result.tail_validation,
-            )
+            _emit_partial_payload_block_8616(result, function, args, _emit_timeout_delay_line)
             attempt_status_printed = True
-            print(f"/* problem: {result.status} */")
-            _print_diagnostic_text(result.payload)
-            if partial_report.show_timeout_delay:
-                _emit_timeout_delay_line()
-            _emit_optional_source_sidecar_c_block(
-                args.binary,
-                function.name,
-                result.partial_payload,
-                alternate_source_c=bool(args.alternate_source_c),
-                c_header=partial_report.sweep_c_header,
-            )
             emitted_problem = True
 
         return _emit_function_result_fallback_lanes_8616(
@@ -3657,61 +4173,19 @@ def _try_emit_retry_recovered_candidate_8616(
                     thread_name_prefix="retry-recovered-candidate",
                 )
         retry_result = _accept_function_work_result_for_emission_8616(retry_result, project=project)
-        retry_tv = _tail_validation_snapshot_from_result_8616(retry_result.tail_validation)
-        retry_has_payload = isinstance(retry_result.payload, str) and bool(retry_result.payload.strip())
-        if (
-            (retry_result.status != "ok" or not x86_16_tail_validation_snapshot_passed(retry_tv))
-            and project.arch.name == "86_16"
-        ):
-            clean_item = FunctionWorkItem(
-                index=item.index,
-                function_cfg=item.function_cfg,
-                function=function,
-                recovery_addr=function_original_addr(function),
-            )
-            clean_context = cast(
-                "_BatchCliContext8616",
-                SimpleNamespace(args=args, project=project, lst_metadata=lst_metadata),
-            )
-            retry_result = _run_serial_clean_process_work_item_8616(
-                clean_context,
-                clean_item,
-                timeout=retry_timeout,
-                caller_return_evidence_by_addr=caller_return_use_evidence_by_addr_8616(project),
-            )
-            retry_result = _accept_function_work_result_for_emission_8616(retry_result, project=project)
-            retry_tv = _tail_validation_snapshot_from_result_8616(retry_result.tail_validation)
-            retry_has_payload = isinstance(retry_result.payload, str) and bool(retry_result.payload.strip())
+        retry_result, retry_tv, retry_has_payload = _retry_clean_process_fallback_8616(
+            retry_result, item, function, project, args, lst_metadata, retry_timeout
+        )
         if retry_result.status != "ok" or not x86_16_tail_validation_snapshot_passed(retry_tv) or not retry_has_payload:
             return False
-        retry_payload = retry_result.payload
-        if fallback_tail_validation_by_index is not None:
-            fallback_tail_validation_by_index[item.index] = dict(retry_tv)
-        if result_state_by_index is not None:
-            result_state_by_index[item.index] = replace(
-                retry_result,
-                payload=retry_payload,
-                tail_validation=dict(retry_tv),
-            )
-        print("/* retry lane: recovered validation-passed candidate */")
-        _print_function_attempt_status(
+        _record_retry_success_8616(
+            retry_result,
+            retry_tv,
+            item,
             function,
-            attempt="decompiled",
-            validation_snapshot=retry_tv,
-        )
-        if args.output_c_dir is not None:
-            write_generated_function_c(
-                args.output_c_dir,
-                address=function_original_addr(function),
-                name=function.name,
-                payload=retry_payload,
-            )
-        _emit_optional_source_sidecar_c_block(
-            args.binary,
-            function.name,
-            retry_payload,
-            alternate_source_c=bool(args.alternate_source_c),
-            c_header="/* -- c -- */",
+            args,
+            fallback_tail_validation_by_index,
+            result_state_by_index,
         )
         return True
     except (FuturesTimeoutError, TimeoutError):
@@ -3723,6 +4197,85 @@ def _try_emit_retry_recovered_candidate_8616(
             file=sys.stderr,
         )
         return False
+
+
+def _retry_clean_process_fallback_8616(
+    retry_result: FunctionWorkResult,
+    item: FunctionWorkItem,
+    function: _AngrFunction,
+    project: angr.Project,
+    args: CliArguments,
+    lst_metadata: LSTMetadata | None,
+    retry_timeout: int,
+) -> tuple[FunctionWorkResult, dict[str, object], bool]:
+    """Re-run a rejected retry through the clean-process worker lane."""
+    retry_tv = _tail_validation_snapshot_from_result_8616(retry_result.tail_validation)
+    retry_has_payload = isinstance(retry_result.payload, str) and bool(retry_result.payload.strip())
+    if (
+        (retry_result.status != "ok" or not x86_16_tail_validation_snapshot_passed(retry_tv))
+        and project.arch.name == "86_16"
+    ):
+        clean_item = FunctionWorkItem(
+            index=item.index,
+            function_cfg=item.function_cfg,
+            function=function,
+            recovery_addr=function_original_addr(function),
+        )
+        clean_context = cast(
+            "_BatchCliContext8616",
+            SimpleNamespace(args=args, project=project, lst_metadata=lst_metadata),
+        )
+        retry_result = _run_serial_clean_process_work_item_8616(
+            clean_context,
+            clean_item,
+            timeout=retry_timeout,
+            caller_return_evidence_by_addr=caller_return_use_evidence_by_addr_8616(project),
+        )
+        retry_result = _accept_function_work_result_for_emission_8616(retry_result, project=project)
+        retry_tv = _tail_validation_snapshot_from_result_8616(retry_result.tail_validation)
+        retry_has_payload = isinstance(retry_result.payload, str) and bool(retry_result.payload.strip())
+    return retry_result, retry_tv, retry_has_payload
+
+
+def _record_retry_success_8616(
+    retry_result: FunctionWorkResult,
+    retry_tv: dict[str, object],
+    item: FunctionWorkItem,
+    function: _AngrFunction,
+    args: CliArguments,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]] | None,
+    result_state_by_index: dict[int, FunctionWorkResult] | None,
+) -> None:
+    """Record and emit one validated retry-recovered candidate."""
+    retry_payload = retry_result.payload
+    if fallback_tail_validation_by_index is not None:
+        fallback_tail_validation_by_index[item.index] = dict(retry_tv)
+    if result_state_by_index is not None:
+        result_state_by_index[item.index] = replace(
+            retry_result,
+            payload=retry_payload,
+            tail_validation=dict(retry_tv),
+        )
+    print("/* retry lane: recovered validation-passed candidate */")
+    _print_function_attempt_status(
+        function,
+        attempt="decompiled",
+        validation_snapshot=retry_tv,
+    )
+    if args.output_c_dir is not None:
+        write_generated_function_c(
+            args.output_c_dir,
+            address=function_original_addr(function),
+            name=function.name,
+            payload=retry_payload,
+        )
+    _emit_optional_source_sidecar_c_block(
+        args.binary,
+        function.name,
+        retry_payload,
+        alternate_source_c=bool(args.alternate_source_c),
+        c_header="/* -- c -- */",
+    )
 
 
 def _emit_function_result_fallback_lanes_8616(
@@ -3748,122 +4301,42 @@ def _emit_function_result_fallback_lanes_8616(
         nonlocal decompiled_local, failed_local, attempt_status_printed, emitted_problem
         function: _AngrFunction = item.function
         skip_heavy_fallbacks_for_result = result.skip_heavy_fallbacks
-        slice_result: SliceRecoveryAttemptOutcome | None = None
-        if allow_heavy_fallbacks and precise_sidecar_regions and not skip_heavy_fallbacks_for_result:
-            slice_result = _try_decompile_sidecar_slice(
-                project,
-                lst_metadata,
-                function.addr,
-                function.name,
-                timeout=args.timeout,
-                api_style=args.api_style,
-                binary_path=args.binary,
-            )
-        if slice_result is not None and slice_result.status == "ok":
-            fallback_snapshot = _remember_fallback_tail_validation(
-                project,
-                fallback_tail_validation_by_index,
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
-            )
-            fallback_acceptance = _accept_generated_c_for_emission_8616(
-                payload=slice_result.payload,
-                tail_validation_snapshot=fallback_snapshot,
-                project=project,
-            )
-            if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
-                decompiled_local += 1
-                _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    function.name,
-                    fallback_acceptance.gcc_checked_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="/* -- c (sidecar slice fallback) -- */",
-                )
-                return decompiled_local, failed_local
-            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-            print("/* problem: validation=failed */")
-            for _diag_line in _format_tail_validation_diagnostic(
-                fallback_snapshot,
-                function_addr=function.addr,
-                function_name=function.name,
-                block_count=result.block_count,
-                byte_count=result.byte_count,
-                exit_kind="fallback",
-                exit_detail=fallback_acceptance.blocker or "sidecar slice fallback not semantically stable",
-            ):
-                print(_diag_line)
-
-        nonopt_result: NonOptimizedSliceOutcome | str | None = None
-        known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
+        slice_result, slice_counters = _sidecar_slice_fallback_8616(
+            item=item,
+            result=result,
+            function=function,
+            project=project,
+            args=args,
+            lst_metadata=lst_metadata,
+            precise_sidecar_regions=precise_sidecar_regions,
+            allow_heavy_fallbacks=allow_heavy_fallbacks,
+            skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
+            fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+            decompiled_local=decompiled_local,
+            failed_local=failed_local,
+        )
+        if slice_counters is not None:
+            return slice_counters
         function_project = getattr(function, "project", project)
         using_rebased_function_slice = function_project is not project
         function_lst_metadata = None if using_rebased_function_slice else lst_metadata
-        if result.partial_payload is None:
-            known_nonopt_result = _try_decompile_non_optimized_known_function(
-                function_project,
-                item.function_cfg,
-                function,
-                timeout=_bounded_non_optimized_timeout(args.timeout),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=function_lst_metadata,
-                cod_metadata=cod_metadata,
-            )
-            if function_project is not project:
-                for attr_name in (
-                    "_inertia_partial_tail_validation_snapshot",
-                    "_inertia_last_tail_validation_snapshot",
-                ):
-                    attr_value = getattr(function_project, attr_name, None)
-                    if isinstance(attr_value, dict):
-                        setattr(project, attr_name, dict(attr_value))
-        known_nonopt_c = _non_optimized_slice_rendered(known_nonopt_result)
-        if known_nonopt_c is not None:
-            fallback_snapshot = _remember_fallback_tail_validation(
-                project,
-                fallback_tail_validation_by_index,
-                item,
-                function=function,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-            )
-            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-            fallback_acceptance = _accept_generated_c_for_emission_8616(
-                payload=known_nonopt_c,
-                tail_validation_snapshot=fallback_snapshot,
-                project=project,
-            )
-            if fallback_acceptance.status is not WorkItemStatus.OK or fallback_acceptance.blocker is not None:
-                print("/* problem: validation=failed */")
-                for _diag_line in _format_tail_validation_diagnostic(
-                    fallback_snapshot,
-                    function_addr=function.addr,
-                    function_name=function.name,
-                    block_count=result.block_count,
-                    byte_count=result.byte_count,
-                    exit_kind="fallback",
-                    exit_detail=(
-                        fallback_acceptance.blocker
-                        or "non-optimized known-function fallback not semantically stable"
-                    ),
-                ):
-                    print(_diag_line)
-                known_nonopt_c = None
-            else:
-                decompiled_local += 1
-                if not emitted_problem:
-                    print(f"/* problem: {result.status} */")
-                    _print_diagnostic_text(result.payload)
-                    emit_timeout_delay_line()
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    function.name,
-                    fallback_acceptance.gcc_checked_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="/* -- c (non-optimized fallback) -- */",
-                )
-                return decompiled_local, failed_local
+        known_nonopt_c, known_counters = _known_nonopt_fallback_8616(
+            item=item,
+            result=result,
+            function=function,
+            function_project=function_project,
+            function_lst_metadata=function_lst_metadata,
+            args=args,
+            project=project,
+            cod_metadata=cod_metadata,
+            fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+            emitted_problem=emitted_problem,
+            emit_timeout_delay_line=emit_timeout_delay_line,
+            decompiled_local=decompiled_local,
+            failed_local=failed_local,
+        )
+        if known_counters is not None:
+            return known_counters
 
         if not allow_heavy_fallbacks or skip_heavy_fallbacks_for_result:
             return _emit_function_result_light_fallback_8616(
@@ -3884,107 +4357,53 @@ def _emit_function_result_fallback_lanes_8616(
                 emit_timeout_delay_line=emit_timeout_delay_line,
             )
 
-        trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
-        if trivial_c is not None:
-            fallback_snapshot = _remember_fallback_tail_validation(
-                project,
-                fallback_tail_validation_by_index,
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
-            )
-            fallback_acceptance = _accept_generated_c_for_emission_8616(
-                payload=trivial_c,
-                tail_validation_snapshot=fallback_snapshot,
-                project=project,
-            )
-            if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
-                decompiled_local += 1
-                _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    function.name,
-                    fallback_acceptance.gcc_checked_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="/* -- c (trivial sidecar fallback) -- */",
-                )
-                return decompiled_local, failed_local
-            print("/* problem: validation=failed */")
-            _print_diagnostic_text(
-                fallback_acceptance.blocker or "Trivial sidecar fallback failed final acceptance."
-            )
+        trivial_counters = _trivial_sidecar_fallback_8616(
+            item=item,
+            result=result,
+            function=function,
+            project=project,
+            args=args,
+            lst_metadata=lst_metadata,
+            fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+            decompiled_local=decompiled_local,
+            failed_local=failed_local,
+        )
+        if trivial_counters is not None:
+            return trivial_counters
 
-        if (
-            result.partial_payload is None
-            and (precise_sidecar_regions or args.addr is not None)
-            and known_nonopt_c is None
-            and not sidecar_verdict_closes_non_optimized_lane(
-                slice_result.verdict if slice_result is not None else None
-            )
-        ):
-            nonopt_result = _try_decompile_non_optimized_slice(
-                function_project if using_rebased_function_slice else project,
-                function.addr,
-                function.name,
-                timeout=_bounded_non_optimized_timeout(args.timeout),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=function_lst_metadata,
+        nonopt_result: NonOptimizedSliceOutcome | str | None = None
+        if _nonopt_slice_gate_8616(result, precise_sidecar_regions, args, known_nonopt_c, slice_result):
+            nonopt_result = _run_nonopt_slice_lane_8616(
+                function_project=function_project,
+                using_rebased_function_slice=using_rebased_function_slice,
+                project=project,
+                function=function,
+                args=args,
+                function_lst_metadata=function_lst_metadata,
                 cod_metadata=cod_metadata,
-                allow_fresh_project_retry=not use_serial_fork_per_function,
+                use_serial_fork_per_function=use_serial_fork_per_function,
             )
-            if function_project is not project:
-                for attr_name in (
-                    "_inertia_partial_tail_validation_snapshot",
-                    "_inertia_last_tail_validation_snapshot",
-                ):
-                    attr_value = getattr(function_project, attr_name, None)
-                    if isinstance(attr_value, dict):
-                        setattr(project, attr_name, dict(attr_value))
         closed_sidecar_verdict = slice_result.verdict if slice_result is not None else None
         if closed_sidecar_verdict is not None and sidecar_verdict_closes_non_optimized_lane(closed_sidecar_verdict):
             print(
                 "/* non-optimized fallback unavailable: "
                 f"sidecar slice already closed the lane ({closed_sidecar_verdict.stage}:{closed_sidecar_verdict.stop_family}) */"
             )
-        nonopt_c = _non_optimized_slice_rendered(nonopt_result)
-        if nonopt_c is not None:
-            fallback_snapshot = _remember_fallback_tail_validation(
-                project,
-                fallback_tail_validation_by_index,
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-            )
-            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-            fallback_acceptance = _accept_generated_c_for_emission_8616(
-                payload=nonopt_c,
-                tail_validation_snapshot=fallback_snapshot,
-                project=project,
-            )
-            if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
-                decompiled_local += 1
-                if not emitted_problem:
-                    print(f"/* problem: {result.status} */")
-                    _print_diagnostic_text(result.payload)
-                    emit_timeout_delay_line()
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    function.name,
-                    fallback_acceptance.gcc_checked_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="/* -- c (non-optimized fallback) -- */",
-                )
-                return decompiled_local, failed_local
-            print("/* problem: validation=failed */")
-            for _diag_line in _format_tail_validation_diagnostic(
-                fallback_snapshot,
-                function_addr=function.addr,
-                function_name=function.name,
-                block_count=result.block_count,
-                byte_count=result.byte_count,
-                exit_kind="fallback",
-                exit_detail=fallback_acceptance.blocker or "non-optimized fallback not semantically stable",
-            ):
-                print(_diag_line)
+        nonopt_counters = _emit_nonopt_acceptance_8616(
+            nonopt_result=nonopt_result,
+            item=item,
+            result=result,
+            function=function,
+            project=project,
+            args=args,
+            fallback_tail_validation_by_index=fallback_tail_validation_by_index,
+            emitted_problem=emitted_problem,
+            emit_timeout_delay_line=emit_timeout_delay_line,
+            decompiled_local=decompiled_local,
+            failed_local=failed_local,
+        )
+        if nonopt_counters is not None:
+            return nonopt_counters
 
         return _emit_string_or_asm_fallback_8616(
             item=item,
@@ -4005,6 +4424,306 @@ def _emit_function_result_fallback_lanes_8616(
         )
 
     return _impl()
+
+
+def _copy_function_project_tv_attrs_8616(function_project: object, project: angr.Project) -> None:
+    """Copy tail-validation snapshots from a rebased function project."""
+    if function_project is project:
+        return
+    for attr_name in (
+        "_inertia_partial_tail_validation_snapshot",
+        "_inertia_last_tail_validation_snapshot",
+    ):
+        attr_value = getattr(function_project, attr_name, None)
+        if isinstance(attr_value, dict):
+            setattr(project, attr_name, dict(attr_value))
+
+
+def _sidecar_slice_fallback_8616(
+    *,
+    item: FunctionWorkItem,
+    result: FunctionWorkResult,
+    function: _AngrFunction,
+    project: angr.Project,
+    args: CliArguments,
+    lst_metadata: LSTMetadata | None,
+    precise_sidecar_regions: bool,
+    allow_heavy_fallbacks: bool,
+    skip_heavy_fallbacks_for_result: bool,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    decompiled_local: int,
+    failed_local: int,
+) -> tuple[SliceRecoveryAttemptOutcome | None, tuple[int, int] | None]:
+    """Try the sidecar-slice fallback lane and its acceptance gate."""
+    slice_result: SliceRecoveryAttemptOutcome | None = None
+    if allow_heavy_fallbacks and precise_sidecar_regions and not skip_heavy_fallbacks_for_result:
+        slice_result = _try_decompile_sidecar_slice(
+            project,
+            lst_metadata,
+            function.addr,
+            function.name,
+            timeout=args.timeout,
+            api_style=args.api_style,
+            binary_path=args.binary,
+        )
+    if slice_result is None or slice_result.status != "ok":
+        return slice_result, None
+    fallback_snapshot = _remember_fallback_tail_validation(
+        project,
+        fallback_tail_validation_by_index,
+        item,
+        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
+    )
+    fallback_acceptance = _accept_generated_c_for_emission_8616(
+        payload=slice_result.payload,
+        tail_validation_snapshot=fallback_snapshot,
+        project=project,
+    )
+    if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
+        _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+        _emit_optional_source_sidecar_c_block(
+            args.binary,
+            function.name,
+            fallback_acceptance.gcc_checked_payload,
+            alternate_source_c=bool(args.alternate_source_c),
+            c_header="/* -- c (sidecar slice fallback) -- */",
+        )
+        return slice_result, (decompiled_local + 1, failed_local)
+    _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+    print("/* problem: validation=failed */")
+    for _diag_line in _format_tail_validation_diagnostic(
+        fallback_snapshot,
+        function_addr=function.addr,
+        function_name=function.name,
+        block_count=result.block_count,
+        byte_count=result.byte_count,
+        exit_kind="fallback",
+        exit_detail=fallback_acceptance.blocker or "sidecar slice fallback not semantically stable",
+    ):
+        print(_diag_line)
+    return slice_result, None
+
+
+def _known_nonopt_fallback_8616(
+    *,
+    item: FunctionWorkItem,
+    result: FunctionWorkResult,
+    function: _AngrFunction,
+    function_project: object,
+    function_lst_metadata: LSTMetadata | None,
+    args: CliArguments,
+    project: angr.Project,
+    cod_metadata: CODProcMetadata | None,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    emitted_problem: bool,
+    emit_timeout_delay_line: Callable[[], None],
+    decompiled_local: int,
+    failed_local: int,
+) -> tuple[str | None, tuple[int, int] | None]:
+    """Try the non-optimized known-function fallback lane."""
+    if result.partial_payload is not None:
+        return None, None
+    known_nonopt_result = _try_decompile_non_optimized_known_function(
+        function_project,
+        item.function_cfg,
+        function,
+        timeout=_bounded_non_optimized_timeout(args.timeout),
+        api_style=args.api_style,
+        binary_path=args.binary,
+        lst_metadata=function_lst_metadata,
+        cod_metadata=cod_metadata,
+    )
+    _copy_function_project_tv_attrs_8616(function_project, project)
+    known_nonopt_c = _non_optimized_slice_rendered(known_nonopt_result)
+    if known_nonopt_c is None:
+        return None, None
+    fallback_snapshot = _remember_fallback_tail_validation(
+        project,
+        fallback_tail_validation_by_index,
+        item,
+        function=function,
+        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+    )
+    _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+    fallback_acceptance = _accept_generated_c_for_emission_8616(
+        payload=known_nonopt_c,
+        tail_validation_snapshot=fallback_snapshot,
+        project=project,
+    )
+    if fallback_acceptance.status is not WorkItemStatus.OK or fallback_acceptance.blocker is not None:
+        print("/* problem: validation=failed */")
+        for _diag_line in _format_tail_validation_diagnostic(
+            fallback_snapshot,
+            function_addr=function.addr,
+            function_name=function.name,
+            block_count=result.block_count,
+            byte_count=result.byte_count,
+            exit_kind="fallback",
+            exit_detail=(
+                fallback_acceptance.blocker
+                or "non-optimized known-function fallback not semantically stable"
+            ),
+        ):
+            print(_diag_line)
+        return None, None
+    if not emitted_problem:
+        print(f"/* problem: {result.status} */")
+        _print_diagnostic_text(result.payload)
+        emit_timeout_delay_line()
+    _emit_optional_source_sidecar_c_block(
+        args.binary,
+        function.name,
+        fallback_acceptance.gcc_checked_payload,
+        alternate_source_c=bool(args.alternate_source_c),
+        c_header="/* -- c (non-optimized fallback) -- */",
+    )
+    return None, (decompiled_local + 1, failed_local)
+
+
+def _trivial_sidecar_fallback_8616(
+    *,
+    item: FunctionWorkItem,
+    result: FunctionWorkResult,
+    function: _AngrFunction,
+    project: angr.Project,
+    args: CliArguments,
+    lst_metadata: LSTMetadata | None,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    decompiled_local: int,
+    failed_local: int,
+) -> tuple[int, int] | None:
+    """Try the trivial sidecar fallback lane and its acceptance gate."""
+    trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
+    if trivial_c is None:
+        return None
+    fallback_snapshot = _remember_fallback_tail_validation(
+        project,
+        fallback_tail_validation_by_index,
+        item,
+        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
+    )
+    fallback_acceptance = _accept_generated_c_for_emission_8616(
+        payload=trivial_c,
+        tail_validation_snapshot=fallback_snapshot,
+        project=project,
+    )
+    if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
+        _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+        _emit_optional_source_sidecar_c_block(
+            args.binary,
+            function.name,
+            fallback_acceptance.gcc_checked_payload,
+            alternate_source_c=bool(args.alternate_source_c),
+            c_header="/* -- c (trivial sidecar fallback) -- */",
+        )
+        return decompiled_local + 1, failed_local
+    print("/* problem: validation=failed */")
+    _print_diagnostic_text(
+        fallback_acceptance.blocker or "Trivial sidecar fallback failed final acceptance."
+    )
+    return None
+
+
+def _nonopt_slice_gate_8616(
+    result: FunctionWorkResult,
+    precise_sidecar_regions: bool,
+    args: CliArguments,
+    known_nonopt_c: str | None,
+    slice_result: SliceRecoveryAttemptOutcome | None,
+) -> bool:
+    """Gate the non-optimized slice lane on remaining fallback eligibility."""
+    return (
+        result.partial_payload is None
+        and (precise_sidecar_regions or args.addr is not None)
+        and known_nonopt_c is None
+        and not sidecar_verdict_closes_non_optimized_lane(
+            slice_result.verdict if slice_result is not None else None
+        )
+    )
+
+
+def _run_nonopt_slice_lane_8616(
+    *,
+    function_project: object,
+    using_rebased_function_slice: bool,
+    project: angr.Project,
+    function: _AngrFunction,
+    args: CliArguments,
+    function_lst_metadata: LSTMetadata | None,
+    cod_metadata: CODProcMetadata | None,
+    use_serial_fork_per_function: bool,
+) -> NonOptimizedSliceOutcome | str | None:
+    """Run the non-optimized slice fallback attempt."""
+    nonopt_result = _try_decompile_non_optimized_slice(
+        function_project if using_rebased_function_slice else project,
+        function.addr,
+        function.name,
+        timeout=_bounded_non_optimized_timeout(args.timeout),
+        api_style=args.api_style,
+        binary_path=args.binary,
+        lst_metadata=function_lst_metadata,
+        cod_metadata=cod_metadata,
+        allow_fresh_project_retry=not use_serial_fork_per_function,
+    )
+    _copy_function_project_tv_attrs_8616(function_project, project)
+    return nonopt_result
+
+
+def _emit_nonopt_acceptance_8616(
+    *,
+    nonopt_result: NonOptimizedSliceOutcome | str | None,
+    item: FunctionWorkItem,
+    result: FunctionWorkResult,
+    function: _AngrFunction,
+    project: angr.Project,
+    args: CliArguments,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    emitted_problem: bool,
+    emit_timeout_delay_line: Callable[[], None],
+    decompiled_local: int,
+    failed_local: int,
+) -> tuple[int, int] | None:
+    """Accept and emit a rendered non-optimized slice candidate."""
+    nonopt_c = _non_optimized_slice_rendered(nonopt_result)
+    if nonopt_c is None:
+        return None
+    fallback_snapshot = _remember_fallback_tail_validation(
+        project,
+        fallback_tail_validation_by_index,
+        item,
+        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+    )
+    _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+    fallback_acceptance = _accept_generated_c_for_emission_8616(
+        payload=nonopt_c,
+        tail_validation_snapshot=fallback_snapshot,
+        project=project,
+    )
+    if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
+        if not emitted_problem:
+            print(f"/* problem: {result.status} */")
+            _print_diagnostic_text(result.payload)
+            emit_timeout_delay_line()
+        _emit_optional_source_sidecar_c_block(
+            args.binary,
+            function.name,
+            fallback_acceptance.gcc_checked_payload,
+            alternate_source_c=bool(args.alternate_source_c),
+            c_header="/* -- c (non-optimized fallback) -- */",
+        )
+        return decompiled_local + 1, failed_local
+    print("/* problem: validation=failed */")
+    for _diag_line in _format_tail_validation_diagnostic(
+        fallback_snapshot,
+        function_addr=function.addr,
+        function_name=function.name,
+        block_count=result.block_count,
+        byte_count=result.byte_count,
+        exit_kind="fallback",
+        exit_detail=fallback_acceptance.blocker or "non-optimized fallback not semantically stable",
+    ):
+        print(_diag_line)
+    return None
 
 
 def _emit_function_result_light_fallback_8616(
@@ -4031,58 +4750,28 @@ def _emit_function_result_light_fallback_8616(
         nonlocal decompiled_local, failed_local, attempt_status_printed, emitted_problem
         function: _AngrFunction = item.function
         sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
-        string_c = None
-        nonopt_failure_detail = None
-        if (not allow_heavy_fallbacks) and (not skip_heavy_fallbacks_for_result):
-            try:
-                nonopt_probe_result = _try_decompile_non_optimized_slice(
-                    project,
-                    function.addr,
-                    function.name,
-                    timeout=_bounded_non_optimized_timeout(args.timeout),
-                    api_style=args.api_style,
-                    binary_path=args.binary,
-                    lst_metadata=lst_metadata,
-                    cod_metadata=cod_metadata,
-                    allow_fresh_project_retry=False,
-                    original_addr=function.addr,
-                )
-                nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_probe_result)
-            except Exception:
-                nonopt_failure_detail = None
-        nonopt_skip_reason = describe_non_optimized_unavailable(
-            allow_heavy_fallbacks=allow_heavy_fallbacks,
-            skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
-            interactive_stdout=interactive_stdout,
-            max_functions=args.max_functions,
-            addr_requested=args.addr is not None,
-            result_status=result.status,
-            failure_stage=result.failure_stage,
-            nonopt_failure_detail=nonopt_failure_detail,
+        _emit_light_nonopt_unavailable_8616(
+            project,
+            function,
+            result,
+            args,
+            lst_metadata,
+            cod_metadata,
+            allow_heavy_fallbacks,
+            skip_heavy_fallbacks_for_result,
+            interactive_stdout,
         )
-        if nonopt_skip_reason is not None:
-            print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-        if result.partial_payload is None:
-            if sidecar_region is not None:
-                string_c = _try_emit_string_intrinsic_c(
-                    project, start=sidecar_region[0], end=sidecar_region[1], name=function.name
-                )
-            else:
-                start, end = _infer_linear_disassembly_window(project, function.addr)
-                string_c = _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name)
+        string_c = (
+            _string_intrinsic_candidate_8616(project, function, sidecar_region)
+            if result.partial_payload is None
+            else None
+        )
         if string_c is not None:
-            fallback_snapshot = _remember_fallback_tail_validation(
-                project,
-                fallback_tail_validation_by_index,
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+            accepted_string = _accept_string_fallback_8616(
+                project, item, string_c, fallback_tail_validation_by_index
             )
-            fallback_acceptance = _accept_generated_c_for_emission_8616(
-                payload=string_c,
-                tail_validation_snapshot=fallback_snapshot,
-                project=project,
-            )
-            if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
+            if accepted_string is not None:
+                fallback_acceptance, fallback_snapshot = accepted_string
                 failed_local += 1
                 _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
                 if not emitted_problem:
@@ -4107,41 +4796,99 @@ def _emit_function_result_light_fallback_8616(
             _print_function_attempt_status(
                 function, attempt=_function_attempt_display_status(result), validation_snapshot=result.tail_validation
             )
-        if result.partial_payload is not None:
-            if emitted_problem:
-                print("/* -- asm fallback -- */")
-                _print_asm_fallback_text(asm_fallback)
-            return decompiled_local, failed_local
-        if result.status == "empty":
-            if asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>":
-                print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")
-            else:
-                if emitted_problem:
-                    print("/* -- asm fallback -- */")
-                    _print_asm_fallback_text(asm_fallback)
-                    return decompiled_local, failed_local
-                print(f"/* -- {result.status} -- */")
-                _print_diagnostic_text(result.payload)
-                emit_timeout_delay_line()
-                print("/* -- asm fallback -- */")
-                _print_asm_fallback_text(asm_fallback)
-            return decompiled_local, failed_local
+        _emit_light_asm_fallback_tail_8616(
+            function, result, project, asm_fallback, emitted_problem, emit_timeout_delay_line
+        )
+        return decompiled_local, failed_local
+
+    return _impl()
+
+
+def _emit_light_nonopt_unavailable_8616(
+    project: angr.Project,
+    function: _AngrFunction,
+    result: FunctionWorkResult,
+    args: CliArguments,
+    lst_metadata: LSTMetadata | None,
+    cod_metadata: CODProcMetadata | None,
+    allow_heavy_fallbacks: bool,
+    skip_heavy_fallbacks_for_result: bool,
+    interactive_stdout: bool,
+) -> None:
+    """Probe the light non-optimized lane and print why it is unavailable."""
+    nonopt_failure_detail = None
+    if (not allow_heavy_fallbacks) and (not skip_heavy_fallbacks_for_result):
+        try:
+            nonopt_probe_result = _try_decompile_non_optimized_slice(
+                project,
+                function.addr,
+                function.name,
+                timeout=_bounded_non_optimized_timeout(args.timeout),
+                api_style=args.api_style,
+                binary_path=args.binary,
+                lst_metadata=lst_metadata,
+                cod_metadata=cod_metadata,
+                allow_fresh_project_retry=False,
+                original_addr=function.addr,
+            )
+            nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_probe_result)
+        except Exception:
+            nonopt_failure_detail = None
+    nonopt_skip_reason = describe_non_optimized_unavailable(
+        allow_heavy_fallbacks=allow_heavy_fallbacks,
+        skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
+        interactive_stdout=interactive_stdout,
+        max_functions=args.max_functions,
+        addr_requested=args.addr is not None,
+        result_status=result.status,
+        failure_stage=result.failure_stage,
+        nonopt_failure_detail=nonopt_failure_detail,
+    )
+    if nonopt_skip_reason is not None:
+        print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
+
+
+def _emit_light_asm_fallback_tail_8616(
+    function: _AngrFunction,
+    result: FunctionWorkResult,
+    project: angr.Project,
+    asm_fallback: str,
+    emitted_problem: bool,
+    emit_timeout_delay_line: Callable[[], None],
+) -> None:
+    """Emit the light-lane asm fallback tail."""
+    if result.partial_payload is not None:
         if emitted_problem:
-            print("/* -- lift break probe -- */")
-            _print_diagnostic_text(_probe_lift_break(project, function.addr))
             print("/* -- asm fallback -- */")
             _print_asm_fallback_text(asm_fallback)
-            return decompiled_local, failed_local
+        return
+    if result.status == "empty":
+        if asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>":
+            print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")
+            return
+        if emitted_problem:
+            print("/* -- asm fallback -- */")
+            _print_asm_fallback_text(asm_fallback)
+            return
         print(f"/* -- {result.status} -- */")
         _print_diagnostic_text(result.payload)
         emit_timeout_delay_line()
+        print("/* -- asm fallback -- */")
+        _print_asm_fallback_text(asm_fallback)
+        return
+    if emitted_problem:
         print("/* -- lift break probe -- */")
         _print_diagnostic_text(_probe_lift_break(project, function.addr))
         print("/* -- asm fallback -- */")
         _print_asm_fallback_text(asm_fallback)
-        return decompiled_local, failed_local
-
-    return _impl()
+        return
+    print(f"/* -- {result.status} -- */")
+    _print_diagnostic_text(result.payload)
+    emit_timeout_delay_line()
+    print("/* -- lift break probe -- */")
+    _print_diagnostic_text(_probe_lift_break(project, function.addr))
+    print("/* -- asm fallback -- */")
+    _print_asm_fallback_text(asm_fallback)
 
 
 def _emit_string_or_asm_fallback_8616(
@@ -4162,107 +4909,164 @@ def _emit_string_or_asm_fallback_8616(
     nonopt_result: NonOptimizedSliceOutcome | str | None,
     emit_timeout_delay_line: Callable[[], None],
 ) -> tuple[int, int]:
-    def _impl() -> tuple[int, int]:
-        nonlocal decompiled_local, failed_local, attempt_status_printed, emitted_problem
-        function: _AngrFunction = item.function
-        sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
-        string_c = None
-        if sidecar_region is not None:
-            string_c = _try_emit_string_intrinsic_c(
-                project, start=sidecar_region[0], end=sidecar_region[1], name=function.name
-            )
-        else:
-            start, end = _infer_linear_disassembly_window(project, function.addr)
-            string_c = _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name)
-        if string_c is not None:
-            fallback_snapshot = _remember_fallback_tail_validation(
-                project,
-                fallback_tail_validation_by_index,
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
-            )
-            fallback_acceptance = _accept_generated_c_for_emission_8616(
-                payload=string_c,
-                tail_validation_snapshot=fallback_snapshot,
-                project=project,
-            )
-            if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
-                decompiled_local += 1
-                _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-                if not emitted_problem:
-                    print(f"/* problem: {result.status} */")
-                    _print_diagnostic_text(result.payload)
-                    emit_timeout_delay_line()
-                nonopt_skip_reason = describe_non_optimized_unavailable(
-                    allow_heavy_fallbacks=allow_heavy_fallbacks,
-                    skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
-                    interactive_stdout=interactive_stdout,
-                    max_functions=args.max_functions,
-                    addr_requested=args.addr is not None,
-                    result_status=result.status,
-                    failure_stage=result.failure_stage,
-                    nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
-                )
-                if nonopt_skip_reason is not None:
-                    print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    function.name,
-                    fallback_acceptance.gcc_checked_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="/* -- c (string intrinsic fallback) -- */",
-                )
-                return decompiled_local, failed_local
-        asm_fallback = (
-            _format_asm_range(project, sidecar_region[0], sidecar_region[1])
-            if sidecar_region is not None
-            else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
+    function: _AngrFunction = item.function
+    sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
+    string_c = _string_intrinsic_candidate_8616(project, function, sidecar_region)
+    if string_c is not None:
+        accepted_string = _accept_string_fallback_8616(
+            project, item, string_c, fallback_tail_validation_by_index
         )
-        failed_local += 1
-        for _diag_line in _format_tail_validation_diagnostic(
-            result.tail_validation,
-            function_addr=function.addr,
-            function_name=function.name,
-            block_count=result.block_count,
-            byte_count=result.byte_count,
-            exit_kind=result.status,
-            exit_detail=result.payload,
-        ):
-            print(_diag_line)
-        if not attempt_status_printed:
-            _print_function_attempt_status(
-                function, attempt=_function_attempt_display_status(result), validation_snapshot=result.tail_validation
+        if accepted_string is not None:
+            fallback_acceptance, fallback_snapshot = accepted_string
+            decompiled_local += 1
+            _emit_string_fallback_block_8616(
+                function,
+                result,
+                args,
+                fallback_acceptance,
+                fallback_snapshot,
+                allow_heavy_fallbacks,
+                skip_heavy_fallbacks_for_result,
+                interactive_stdout,
+                nonopt_result,
+                emitted_problem,
+                emit_timeout_delay_line,
             )
-        if result.status == "empty":
-            if asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>":
-                print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")
-            else:
-                if emitted_problem:
-                    print("/* -- asm fallback -- */")
-                    _print_asm_fallback_text(asm_fallback)
-                    return decompiled_local, failed_local
-                print(f"/* -- {result.status} -- */")
-                _print_diagnostic_text(result.payload)
-                emit_timeout_delay_line()
-                print("/* -- asm fallback -- */")
-                _print_asm_fallback_text(asm_fallback)
-        else:
-            if emitted_problem:
-                print("/* -- lift break probe -- */")
-                _print_diagnostic_text(_probe_lift_break(project, function.addr))
-                print("/* -- asm fallback -- */")
-                _print_asm_fallback_text(asm_fallback)
-                return decompiled_local, failed_local
-            print(f"/* -- {result.status} -- */")
-            _print_diagnostic_text(result.payload)
-            emit_timeout_delay_line()
+            return decompiled_local, failed_local
+    asm_fallback = (
+        _format_asm_range(project, sidecar_region[0], sidecar_region[1])
+        if sidecar_region is not None
+        else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
+    )
+    failed_local += 1
+    _emit_asm_fallback_block_8616(
+        function, result, project, asm_fallback, attempt_status_printed, emitted_problem, emit_timeout_delay_line
+    )
+    return decompiled_local, failed_local
+
+
+def _string_intrinsic_candidate_8616(
+    project: angr.Project, function: _AngrFunction, sidecar_region: tuple[int, int] | None
+) -> str | None:
+    """Emit a string-intrinsic C candidate for a function's code window."""
+    if sidecar_region is not None:
+        return cast(
+            str | None,
+            _try_emit_string_intrinsic_c(
+                project, start=sidecar_region[0], end=sidecar_region[1], name=function.name
+            ),
+        )
+    start, end = _infer_linear_disassembly_window(project, function.addr)
+    return cast(str | None, _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name))
+
+
+def _accept_string_fallback_8616(
+    project: angr.Project,
+    item: FunctionWorkItem,
+    string_c: str,
+    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+) -> tuple[CAcceptanceResult8616, dict[str, object]] | None:
+    """Accept a string-intrinsic fallback only through the canonical gate."""
+    fallback_snapshot = _remember_fallback_tail_validation(
+        project,
+        fallback_tail_validation_by_index,
+        item,
+        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+    )
+    fallback_acceptance = _accept_generated_c_for_emission_8616(
+        payload=string_c,
+        tail_validation_snapshot=fallback_snapshot,
+        project=project,
+    )
+    if fallback_acceptance.status is WorkItemStatus.OK and fallback_acceptance.blocker is None:
+        return fallback_acceptance, fallback_snapshot
+    return None
+
+
+def _emit_string_fallback_block_8616(
+    function: _AngrFunction,
+    result: FunctionWorkResult,
+    args: CliArguments,
+    fallback_acceptance: CAcceptanceResult8616,
+    fallback_snapshot: dict[str, object],
+    allow_heavy_fallbacks: bool,
+    skip_heavy_fallbacks_for_result: bool,
+    interactive_stdout: bool,
+    nonopt_result: NonOptimizedSliceOutcome | str | None,
+    emitted_problem: bool,
+    emit_timeout_delay_line: Callable[[], None],
+) -> None:
+    """Print the accepted string-intrinsic fallback output block."""
+    _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+    if not emitted_problem:
+        print(f"/* problem: {result.status} */")
+        _print_diagnostic_text(result.payload)
+        emit_timeout_delay_line()
+    nonopt_skip_reason = describe_non_optimized_unavailable(
+        allow_heavy_fallbacks=allow_heavy_fallbacks,
+        skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
+        interactive_stdout=interactive_stdout,
+        max_functions=args.max_functions,
+        addr_requested=args.addr is not None,
+        result_status=result.status,
+        failure_stage=result.failure_stage,
+        nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
+    )
+    if nonopt_skip_reason is not None:
+        print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
+    _emit_optional_source_sidecar_c_block(
+        args.binary,
+        function.name,
+        fallback_acceptance.gcc_checked_payload,
+        alternate_source_c=bool(args.alternate_source_c),
+        c_header="/* -- c (string intrinsic fallback) -- */",
+    )
+
+
+def _emit_asm_fallback_block_8616(
+    function: _AngrFunction,
+    result: FunctionWorkResult,
+    project: angr.Project,
+    asm_fallback: str,
+    attempt_status_printed: bool,
+    emitted_problem: bool,
+    emit_timeout_delay_line: Callable[[], None],
+) -> None:
+    """Print diagnostics and the asm fallback block for a failed function."""
+    for _diag_line in _format_tail_validation_diagnostic(
+        result.tail_validation,
+        function_addr=function.addr,
+        function_name=function.name,
+        block_count=result.block_count,
+        byte_count=result.byte_count,
+        exit_kind=result.status,
+        exit_detail=result.payload,
+    ):
+        print(_diag_line)
+    if not attempt_status_printed:
+        _print_function_attempt_status(
+            function, attempt=_function_attempt_display_status(result), validation_snapshot=result.tail_validation
+        )
+    if emitted_problem:
+        if result.status != "empty":
             print("/* -- lift break probe -- */")
             _print_diagnostic_text(_probe_lift_break(project, function.addr))
-            print("/* -- asm fallback -- */")
-            _print_asm_fallback_text(asm_fallback)
-        return decompiled_local, failed_local
-
-    return _impl()
+        print("/* -- asm fallback -- */")
+        _print_asm_fallback_text(asm_fallback)
+        return
+    if result.status == "empty" and (
+        asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>"
+    ):
+        print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")
+        return
+    print(f"/* -- {result.status} -- */")
+    _print_diagnostic_text(result.payload)
+    emit_timeout_delay_line()
+    if result.status != "empty":
+        print("/* -- lift break probe -- */")
+        _print_diagnostic_text(_probe_lift_break(project, function.addr))
+    print("/* -- asm fallback -- */")
+    _print_asm_fallback_text(asm_fallback)
 
 
 def _prepare_main_cli_args_8616(argv: list[str] | None) -> tuple[CliArguments, bool, Path | None]:
@@ -4373,116 +5177,24 @@ def _prepare_main_project_8616(
         linked_proc_addr: int | None = None
         sidecar_only_input = binary_path.suffix.lower() in {".cod", ".lst", ".map", ".dbg", ".pdb"}
         if not sidecar_only_input:
-            project = _build_project(
-                args.binary,
-                force_blob=args.blob,
-                base_addr=args.base_addr,
-                entry_point=args.entry_point,
-            )
-            typing.cast(typing.Any, project)._inertia_c_target = args.c_target
-            typing.cast(typing.Any, project)._inertia_trace_c_stages = bool(args.trace_c_stages)
-            typing.cast(typing.Any, project)._inertia_dump_layers = bool(args.dump_layers)
-            typing.cast(typing.Any, project)._inertia_dump_layer_root = args.dump_layer_dir
-            typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
-            _set_tail_validation_runtime_enabled(project, _tail_validation_enabled_for_run(args.binary, proc=args.proc))
-            if bool(args.ignore_local_sidecar_hints):
-                lst_metadata = load_binary_signature_metadata(
-                    args.binary, project, pat_backend=args.pat_backend,
-                    signature_catalog=effective_signature_catalog,
-                )
-                print(
-                    "/* ignoring local sidecar metadata for function discovery and recovery due --ignore-local-sidecar-hints */"
-                )
-            else:
-                lst_metadata = _load_lst_metadata(
-                    args.binary,
-                    project,
-                    pat_backend=args.pat_backend,
-                    signature_catalog=effective_signature_catalog,
-                )
-            linked_proc_addr = _linked_proc_addr_from_metadata_8616(lst_metadata, args.proc, args.proc_kind)
-            if linked_proc_addr is not None:
-                if cod_path is not None:
-                    try:
-                        cod_metadata = extract_cod_proc_metadata(cod_path, args.proc, args.proc_kind)
-                    except Exception as exc:
-                        print(f"[dbg] failed to parse COD metadata for {args.proc}: {exc}", file=sys.stderr)
-                _apply_binary_specific_annotations(
-                    project,
-                    args.binary,
-                    lst_metadata,
-                    cod_metadata=cod_metadata,
-                    synthetic_globals=synthetic_globals,
-                )
-                if lst_metadata is None or has_only_binary_signatures(lst_metadata):
-                    print(
-                        "/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */"
-                    )
-                print(_recovery_evidence_line(args.binary, lst_metadata))
-                function_label = args.proc
-                if args.addr is not None:
-                    print(f"[dbg] proc mode ignoring caller-provided --addr {args.addr:#x}")
-                args.addr = linked_proc_addr
-                linked_region = _lst_code_region(lst_metadata, linked_proc_addr) if lst_metadata is not None else None
-                if linked_region is not None:
-                    args.window = max(args.window, linked_region[1] - linked_region[0])
-                proc_resolved_to_linked_binary = True
-                print(
-                    f"[dbg] proc mode resolved {args.proc} to linked binary address {linked_proc_addr:#x}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        if linked_proc_addr is None:
-            if cod_path is None:
-                raise ValueError(f"--proc mode requires sibling COD listing: not found for {binary_path}")
-            entries = extract_cod_function_entries(cod_path, args.proc, args.proc_kind)
-            cod_metadata = extract_cod_proc_metadata(cod_path, args.proc, args.proc_kind)
-            prefer_fast_recovery = True
-            selected_entries = extract_small_two_arg_cod_logic_entries(entries)
-            if selected_entries is None:
-                selected_entries = extract_simple_cod_logic_entries(entries)
-            if selected_entries is None:
-                logic_start = infer_cod_logic_start(entries)
-                cod_image = build_cod_analysis_image_8616(
-                    entries,
-                    start_offset=logic_start,
-                    image_base=args.base_addr,
-                )
-            else:
-                cod_image = build_cod_analysis_image_8616(selected_entries, image_base=args.base_addr)
-            proc_code = cod_image.code
-            # The fixture body ends before synthetic callees, not at a guessed fast window.
-            args.exact_region_end = args.base_addr + min(cod_image.call_target_offsets, default=len(proc_code))
-            synthetic_globals = cod_image.synthetic_globals
-            project = _build_project_from_bytes(
-                proc_code,
-                base_addr=args.base_addr,
-                entry_point=args.entry_point,
-            )
-            record_synthetic_call_stubs_8616(
+            (
                 project,
-                frozenset(args.base_addr + offset for offset in cod_image.call_target_offsets),
-            )
-            record_cod_module_caller_return_use_evidence_8616(cod_metadata, args.entry_point, project)
-            for target_offset, target_name in cod_image.call_target_offsets.items():
-                annotate_function(project, args.base_addr + target_offset, name=target_name)
-            typing.cast(typing.Any, project)._inertia_c_target = args.c_target
-            typing.cast(typing.Any, project)._inertia_dump_layers = bool(args.dump_layers)
-            typing.cast(typing.Any, project)._inertia_dump_layer_root = args.dump_layer_dir
-            typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
-            _set_tail_validation_runtime_enabled(project, _tail_validation_enabled_for_run(args.binary, proc=args.proc))
-            _apply_binary_specific_annotations(
-                project,
-                args.binary,
                 lst_metadata,
-                cod_metadata=cod_metadata,
-                synthetic_globals=synthetic_globals,
+                cod_metadata,
+                function_label,
+                linked_proc_addr,
+                proc_resolved_to_linked_binary,
+            ) = _proc_linked_binary_lane_8616(
+                args, binary_path, cod_path, effective_signature_catalog
             )
-            function_label = args.proc
-            if args.addr is not None:
-                print(f"[dbg] proc mode ignoring caller-provided --addr {args.addr:#x}")
-            args.addr = args.entry_point
-            args.window = max(len(proc_code), 1)
+        if linked_proc_addr is None:
+            (
+                project,
+                cod_metadata,
+                synthetic_globals,
+                function_label,
+            ) = _proc_cod_image_lane_8616(args, binary_path, cod_path, lst_metadata)
+            prefer_fast_recovery = True
     else:
         project = _build_project(
             args.binary,
@@ -4538,6 +5250,144 @@ def _prepare_main_project_8616(
     )
 
 
+def _proc_linked_binary_lane_8616(
+    args: CliArguments,
+    binary_path: Path,
+    cod_path: Path | None,
+    effective_signature_catalog: Path | None,
+) -> tuple[
+    angr.Project,
+    LSTMetadata | None,
+    CODProcMetadata | None,
+    str | None,
+    int | None,
+    bool,
+]:
+    """Build the binary-backed project lane for ``--proc`` mode."""
+    cod_metadata = None
+    function_label = None
+    proc_resolved_to_linked_binary = False
+    project = _build_project(
+        args.binary,
+        force_blob=args.blob,
+        base_addr=args.base_addr,
+        entry_point=args.entry_point,
+    )
+    typing.cast(typing.Any, project)._inertia_c_target = args.c_target
+    typing.cast(typing.Any, project)._inertia_trace_c_stages = bool(args.trace_c_stages)
+    typing.cast(typing.Any, project)._inertia_dump_layers = bool(args.dump_layers)
+    typing.cast(typing.Any, project)._inertia_dump_layer_root = args.dump_layer_dir
+    typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
+    _set_tail_validation_runtime_enabled(project, _tail_validation_enabled_for_run(args.binary, proc=args.proc))
+    if bool(args.ignore_local_sidecar_hints):
+        lst_metadata = load_binary_signature_metadata(
+            args.binary, project, pat_backend=args.pat_backend,
+            signature_catalog=effective_signature_catalog,
+        )
+        print(
+            "/* ignoring local sidecar metadata for function discovery and recovery due --ignore-local-sidecar-hints */"
+        )
+    else:
+        lst_metadata = _load_lst_metadata(
+            args.binary,
+            project,
+            pat_backend=args.pat_backend,
+            signature_catalog=effective_signature_catalog,
+        )
+    linked_proc_addr = _linked_proc_addr_from_metadata_8616(lst_metadata, args.proc, args.proc_kind)
+    if linked_proc_addr is not None:
+        if cod_path is not None:
+            try:
+                cod_metadata = extract_cod_proc_metadata(cod_path, args.proc, args.proc_kind)
+            except Exception as exc:
+                print(f"[dbg] failed to parse COD metadata for {args.proc}: {exc}", file=sys.stderr)
+        _apply_binary_specific_annotations(
+            project,
+            args.binary,
+            lst_metadata,
+            cod_metadata=cod_metadata,
+            synthetic_globals=None,
+        )
+        if lst_metadata is None or has_only_binary_signatures(lst_metadata):
+            print(
+                "/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */"
+            )
+        print(_recovery_evidence_line(args.binary, lst_metadata))
+        function_label = args.proc
+        if args.addr is not None:
+            print(f"[dbg] proc mode ignoring caller-provided --addr {args.addr:#x}")
+        args.addr = linked_proc_addr
+        linked_region = _lst_code_region(lst_metadata, linked_proc_addr) if lst_metadata is not None else None
+        if linked_region is not None:
+            args.window = max(args.window, linked_region[1] - linked_region[0])
+        proc_resolved_to_linked_binary = True
+        print(
+            f"[dbg] proc mode resolved {args.proc} to linked binary address {linked_proc_addr:#x}",
+            file=sys.stderr,
+            flush=True,
+        )
+    return project, lst_metadata, cod_metadata, function_label, linked_proc_addr, proc_resolved_to_linked_binary
+
+
+def _proc_cod_image_lane_8616(
+    args: CliArguments,
+    binary_path: Path,
+    cod_path: Path | None,
+    lst_metadata: LSTMetadata | None,
+) -> tuple[angr.Project, CODProcMetadata | None, _SyntheticGlobals8616, str | None]:
+    """Build the COD-image project lane when the linked binary lookup failed."""
+    if cod_path is None:
+        raise ValueError(f"--proc mode requires sibling COD listing: not found for {binary_path}")
+    entries = extract_cod_function_entries(cod_path, args.proc, args.proc_kind)
+    cod_metadata = extract_cod_proc_metadata(cod_path, args.proc, args.proc_kind)
+    selected_entries = extract_small_two_arg_cod_logic_entries(entries)
+    if selected_entries is None:
+        selected_entries = extract_simple_cod_logic_entries(entries)
+    if selected_entries is None:
+        logic_start = infer_cod_logic_start(entries)
+        cod_image = build_cod_analysis_image_8616(
+            entries,
+            start_offset=logic_start,
+            image_base=args.base_addr,
+        )
+    else:
+        cod_image = build_cod_analysis_image_8616(selected_entries, image_base=args.base_addr)
+    proc_code = cod_image.code
+    # The fixture body ends before synthetic callees, not at a guessed fast window.
+    args.exact_region_end = args.base_addr + min(cod_image.call_target_offsets, default=len(proc_code))
+    synthetic_globals = cod_image.synthetic_globals
+    project = _build_project_from_bytes(
+        proc_code,
+        base_addr=args.base_addr,
+        entry_point=args.entry_point,
+    )
+    record_synthetic_call_stubs_8616(
+        project,
+        frozenset(args.base_addr + offset for offset in cod_image.call_target_offsets),
+    )
+    record_cod_module_caller_return_use_evidence_8616(cod_metadata, args.entry_point, project)
+    for target_offset, target_name in cod_image.call_target_offsets.items():
+        annotate_function(project, args.base_addr + target_offset, name=target_name)
+    typing.cast(typing.Any, project)._inertia_c_target = args.c_target
+    typing.cast(typing.Any, project)._inertia_dump_layers = bool(args.dump_layers)
+    typing.cast(typing.Any, project)._inertia_dump_layer_root = args.dump_layer_dir
+    typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
+    _set_tail_validation_runtime_enabled(project, _tail_validation_enabled_for_run(args.binary, proc=args.proc))
+    _apply_binary_specific_annotations(
+        project,
+        args.binary,
+        lst_metadata,
+        cod_metadata=cod_metadata,
+        synthetic_globals=synthetic_globals,
+    )
+    function_label = args.proc
+    if args.addr is not None:
+        print(f"[dbg] proc mode ignoring caller-provided --addr {args.addr:#x}")
+    args.addr = args.entry_point
+    args.window = max(len(proc_code), 1)
+    return project, cod_metadata, synthetic_globals, function_label
+
+
 @dataclass(frozen=True, slots=True)
 class _DirectAddrCliContext8616:
     """Inputs for the direct-address CLI decompilation branch."""
@@ -4566,14 +5416,7 @@ def _direct_request_cache_artifact_for_result_8616(
 ) -> DirectRequestCacheArtifact8616 | None:
     """Project an accepted direct result into the persistent cache contract."""
     integrity = verify_function_work_result_payload_integrity_8616(result)
-    if (
-        result.status != WorkItemStatus.OK.value
-        or not isinstance(result.tail_validation, dict)
-        or not isinstance(result.validated_payload_hash, str)
-        or not isinstance(result.gcc_checked_payload_hash, str)
-        or result.failure_family_snapshot is None
-        or not integrity.passed
-    ):
+    if not _cacheable_direct_result_8616(result, integrity):
         return None
     startup_diagnostic_lines: list[str] = []
     if context.args.ignore_local_sidecar_hints:
@@ -4686,2196 +5529,2891 @@ def _emit_direct_cache_hit_8616(
     return 0
 
 
-def _run_direct_addr_cli_8616(context: _DirectAddrCliContext8616) -> int:
-    """Run the direct-address CLI branch after project and sidecar setup."""
-    args = context.args
-    direct_addr = args.addr
-    if direct_addr is None:
-        raise ValueError("direct-address CLI branch requires args.addr")
-    project = context.project
-    direct_request_cache_lookup = load_direct_request_cache_8616(
-        context.request_cache_inputs,
-        enabled=direct_request_cache_enabled_8616(args),
-    )
-    if (
-        direct_request_cache_lookup.verdict is DirectRequestCacheVerdict8616.HIT
-        and direct_request_cache_lookup.artifact is not None
-    ):
-        artifact = direct_request_cache_lookup.artifact
-        try:
-            cached_segment_evidence = (
-                None
-                if artifact.segment_program_function_evidence_record is None
-                else segment_program_function_evidence_from_record_8616(
-                    artifact.segment_program_function_evidence_record
-                )
-            )
-        except (PipelineHardError, ValueError):
-            cached_segment_evidence = None
-            print("[dbg] direct request cache refused: segment_evidence", file=sys.stderr, flush=True)
-        else:
-            expected_runtime_header = render_c_runtime_header_8616(args.c_target)
-            if (
-                artifact.arch_name == project.arch.name
-                and artifact.entry_point == project.entry
-                and artifact.runtime_header == expected_runtime_header
-            ):
-                cached_function = SimpleNamespace(
-                    addr=artifact.function_addr,
-                    name=artifact.function_name,
-                    project=project,
-                )
-                cached_result = FunctionWorkResult(
-                    index=1,
-                    status=WorkItemStatus.OK.value,
-                    payload=artifact.payload,
-                    debug_output=(
-                        f"[dbg] direct request cache hit: {artifact.function_addr:#x} "
-                        f"{artifact.function_name} validation=passed\n"
-                        f"{artifact.diagnostic_output}"
-                    ),
-                    function=cached_function,
-                    function_cfg=None,
-                    tail_validation=copy.deepcopy(artifact.tail_validation),
-                    elapsed=artifact.elapsed,
-                    from_cache=True,
-                    block_count=artifact.block_count,
-                    byte_count=artifact.byte_count,
-                    validated_payload_hash=artifact.validated_payload_hash,
-                    gcc_checked_payload_hash=artifact.gcc_checked_payload_hash,
-                    failure_family_snapshot=artifact.failure_family_snapshot,
-                    segment_program_function_evidence=cached_segment_evidence,
-                )
-                return _emit_direct_cache_hit_8616(
-                    context,
-                    cached_result,
-                    function=cached_function,
-                    function_cfg=None,
-                    emit_function_header=True,
-                    project_for_worker_result=None,
-                )
-            print("[dbg] direct request cache refused: runtime_identity", file=sys.stderr, flush=True)
-    if direct_request_cache_lookup.verdict is DirectRequestCacheVerdict8616.REFUSED:
-        print(
-            "[dbg] direct request cache refused: acceptance_proof",
-            file=sys.stderr,
-            flush=True,
-        )
-    _hydrate_serial_clean_worker_evidence_8616(project)
-    clean_worker_caller_return_evidence_by_addr = dict(caller_return_use_evidence_by_addr_8616(project))
-    function_label = context.function_label
-    cod_metadata = context.cod_metadata
-    synthetic_globals = context.synthetic_globals
-    lst_metadata = context.lst_metadata
-    prefer_fast_recovery = context.prefer_fast_recovery
-    proc_resolved_to_linked_binary = context.proc_resolved_to_linked_binary
-    low_memory_path = context.low_memory_path
-    interactive_stdout = context.interactive_stdout
-    precise_sidecar_regions = context.precise_sidecar_regions
-    timeout_was_explicit = context.timeout_was_explicit
-    print("/* recovering function... */", flush=True)
-    fast_direct_probe_requested = os.environ.get("INERTIA_FAST_DIRECT_PROBE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    fast_direct_probe = bool(
-        fast_direct_probe_requested and timeout_was_explicit and isinstance(args.timeout, int) and args.timeout <= 6
-    )
-    direct_budget_timeout = args.timeout
-    if project.arch.name == "86_16" and not fast_direct_probe:
-        # Keep direct-address recovery deterministic under explicit user
-        # timeout; avoid inflating into outer subprocess timeouts.
-        if timeout_was_explicit and isinstance(args.timeout, int):
-            direct_budget_timeout = max(args.timeout, 1)
-        else:
-            direct_budget_timeout = max(direct_budget_timeout, 24)
-    direct_addr_started_at = time.monotonic()
-    direct_addr_deadline = direct_addr_started_at + _direct_addr_wall_clock_budget(
-        args.timeout,
-        effective_timeout=direct_budget_timeout,
-        explicit_timeout=bool(timeout_was_explicit),
-    )
-    budget_fallback_addr: int | None = None
-    budget_fallback_name: str | None = None
+@dataclass(slots=True)
+class _DirectAddrCliRun8616:
+    """Mutable run state for direct-address CLI orchestration."""
 
-    def _emit_budget_exhausted_sidecar_asm_fallback_or_timeout(detail: str) -> None:
-        if precise_sidecar_regions and budget_fallback_addr is not None and lst_metadata is not None:
-            sidecar_region = _lst_code_region(lst_metadata, budget_fallback_addr)
-            if sidecar_region is not None:
-                code_name = (
-                    _lst_code_label(lst_metadata, sidecar_region[0], project.entry)
-                    or budget_fallback_name
-                    or f"sub_{budget_fallback_addr:x}"
+    context: _DirectAddrCliContext8616
+    _: Any = None
+    _bbytes: Any = None
+    _bcount: Any = None
+    _block_count: Any = None
+    _byte_count: Any = None
+    _dbg_region: Any = None
+    _diag_line: Any = None
+    _direct_blocks: Any = None
+    _direct_blocks_for_timeout_guard: Any = None
+    _direct_bytes: Any = None
+    _direct_bytes_for_timeout_guard: Any = None
+    _direct_effective_timeout: Any = None
+    _early_slice: Any = None
+    _elapsed: Any = None
+    _stored_snapshot: Any = None
+    accepted_payload: Any = None
+    accepted_side_payload: Any = None
+    allow_known_nonopt: Any = None
+    args: Any = None
+    artifact: Any = None
+    asm_fallback: Any = None
+    attr_name: Any = None
+    attr_value: Any = None
+    best_direct_candidate: Any = None
+    best_direct_rank: Any = None
+    block_count: Any = None
+    boosted: Any = None
+    budget_fallback_addr: Any = None
+    budget_fallback_name: Any = None
+    budgeted_direct_decompile_timeout: Any = None
+    byte_count: Any = None
+    cached_clean_status: Any = None
+    cached_direct_result: Any = None
+    cached_function: Any = None
+    cached_result: Any = None
+    cached_segment_evidence: Any = None
+    call_target: Any = None
+    candidate: Any = None
+    candidates: Any = None
+    canonical_direct_addr: Any = None
+    cfg: Any = None
+    cfg2: Any = None
+    checked_acceptance: Any = None
+    checked_blocker: Any = None
+    checked_payload: Any = None
+    checked_status: Any = None
+    clean_worker_caller_return_evidence_by_addr: Any = None
+    clinic_core_timeout: Any = None
+    cod_metadata: Any = None
+    code_name: Any = None
+    current_partial_payload: Any = None
+    current_rank: Any = None
+    debug_output: Any = None
+    detail: Any = None
+    direct_acceptance: Any = None
+    direct_addr: Any = None
+    direct_addr_deadline: Any = None
+    direct_addr_started_at: Any = None
+    direct_analysis_timeout: Any = None
+    direct_arch_name: Any = None
+    direct_blocker: Any = None
+    direct_budget_timeout: Any = None
+    direct_cache_debug: Any = None
+    direct_cache_item: Any = None
+    direct_cache_key: Any = None
+    direct_cache_result: Any = None
+    direct_callsite_count: Any = None
+    direct_clinic_policy: Any = None
+    direct_debug_output: Any = None
+    direct_decompile_timeout: Any = None
+    direct_display_addr: Any = None
+    direct_elapsed: Any = None
+    direct_extra: Any = None
+    direct_failure_family_snapshot: Any = None
+    direct_failure_family_state: Any = None
+    direct_item: Any = None
+    direct_job_result: Any = None
+    direct_nonoptimized_verdict: Any = None
+    direct_payload: Any = None
+    direct_project: Any = None
+    direct_project_fallback_addr: Any = None
+    direct_recovery_timeout: Any = None
+    direct_request_cache_lookup: Any = None
+    direct_result: Any = None
+    direct_segment_program_evidence: Any = None
+    direct_sidecar_verdict: Any = None
+    direct_status: Any = None
+    direct_tail_validation_snapshot: Any = None
+    direct_timeout_payload: Any = None
+    direct_timeout_stage: Any = None
+    end: Any = None
+    evidence_acceptance: Any = None
+    evidence_payload: Any = None
+    evidence_snapshot: Any = None
+    exact_region: Any = None
+    exact_region_end: Any = None
+    exact_retry_blocked: Any = None
+    expected_runtime_header: Any = None
+    extra: Any = None
+    fallback_function: Any = None
+    fallback_snapshot: Any = None
+    fast_direct_probe: Any = None
+    fast_direct_probe_requested: Any = None
+    func: Any = None
+    func2: Any = None
+    func_info: Any = None
+    func_info_tv: Any = None
+    function_label: Any = None
+    function_tail_candidate: Any = None
+    generic_nonopt_c: Any = None
+    generic_nonopt_result: Any = None
+    heavy_fallback_budget: Any = None
+    helper_acceptance: Any = None
+    helper_blocker: Any = None
+    helper_model: Any = None
+    helper_payload: Any = None
+    helper_result: Any = None
+    helper_snapshot: Any = None
+    helper_status: Any = None
+    helper_tail_validation_snapshot: Any = None
+    integrity: Any = None
+    interactive_stdout: Any = None
+    k: Any = None
+    known_helper_model: Any = None
+    known_nonopt_c: Any = None
+    known_nonopt_result: Any = None
+    linear_window: Any = None
+    low_memory_path: Any = None
+    lst_metadata: Any = None
+    m: Any = None
+    merged_statuses: Any = None
+    nonopt_c: Any = None
+    nonopt_failure_detail: Any = None
+    nonopt_result: Any = None
+    nonopt_skip_reason: Any = None
+    partial_acceptance: Any = None
+    partial_payload: Any = None
+    partial_payload_text: Any = None
+    partial_report: Any = None
+    partial_text: Any = None
+    payload: Any = None
+    payload_detail: Any = None
+    payload_for_acceptance: Any = None
+    payload_text: Any = None
+    precise_sidecar_regions: Any = None
+    prefer_fast_recovery: Any = None
+    present_calls: Any = None
+    preserved_candidate: Any = None
+    proc_resolved_to_linked_binary: Any = None
+    project: Any = None
+    project_fb: Any = None
+    quality: Any = None
+    quality_violations: Any = None
+    ranked_cfg: Any = None
+    ranked_func: Any = None
+    recovered_blocks: Any = None
+    recovered_bytes: Any = None
+    recovery_detail: Any = None
+    region: Any = None
+    region_span: Any = None
+    remaining_direct_budget: Any = None
+    reserve_budget_for_rebased_sidecar: Any = None
+    result: Any = None
+    retry_acceptance: Any = None
+    retry_blocker: Any = None
+    retry_checked_status: Any = None
+    retry_count: Any = None
+    retry_extra: Any = None
+    retry_idx: Any = None
+    retry_partial: Any = None
+    retry_payload: Any = None
+    retry_preserved_candidate: Any = None
+    retry_rank: Any = None
+    retry_result: Any = None
+    retry_status: Any = None
+    retry_tail_validation: Any = None
+    robust_acceptance: Any = None
+    robust_blocks: Any = None
+    robust_bytes: Any = None
+    robust_item: Any = None
+    robust_result: Any = None
+    robust_snapshot: Any = None
+    robust_tail_validation_snapshot: Any = None
+    robust_timeout: Any = None
+    side_acceptance: Any = None
+    side_cfg: Any = None
+    side_func: Any = None
+    side_payload: Any = None
+    side_payload_checked: Any = None
+    side_project: Any = None
+    side_status: Any = None
+    side_status_checked: Any = None
+    side_tail: Any = None
+    side_tail_candidate: Any = None
+    side_tail_from_decompile: Any = None
+    sidecar_addr: Any = None
+    sidecar_attempted: Any = None
+    sidecar_closed_nonopt: Any = None
+    sidecar_region: Any = None
+    skip_heavy_validation_fallbacks: Any = None
+    slice_result: Any = None
+    snapshot: Any = None
+    start: Any = None
+    status: Any = None
+    stderr_buf: Any = None
+    stdout_buf: Any = None
+    string_c: Any = None
+    string_end: Any = None
+    string_start: Any = None
+    synthetic_globals: Any = None
+    text: Any = None
+    timeout_text: Any = None
+    timeout_was_explicit: Any = None
+    trivial_c: Any = None
+    use_fork_for_direct: Any = None
+    using_rebased_direct_slice: Any = None
+    v: Any = None
+
+    def run_8616(self) -> int:
+        """Run the direct-address CLI phases and return the process exit code."""
+        _rc = self.run_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part1_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part2_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part3_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part4_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part5_8616()
+        if _rc is not None:
+            return _rc
+        return 0
+
+    def _emit_budget_exhausted_sidecar_asm_fallback_or_timeout(self, detail: str) -> None:
+        """Hoisted nested function (callable via `self`)."""
+        if self.precise_sidecar_regions and self.budget_fallback_addr is not None and self.lst_metadata is not None:
+            self.sidecar_region = _lst_code_region(self.lst_metadata, self.budget_fallback_addr)
+            if self.sidecar_region is not None:
+                self.code_name = (
+                    _lst_code_label(self.lst_metadata, self.sidecar_region[0], self.project.entry)
+                    or self.budget_fallback_name
+                    or f"sub_{self.budget_fallback_addr:x}"
                 )
-                print(f"/* Decompilation timeout: Timed out after {args.timeout}s. */")
+                print(f"/* Decompilation timeout: Timed out after {self.args.timeout}s. */")
                 print("/* direct validation=failed */")
                 _emit_failed_timeout_acceptance_hints_8616()
                 print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
                 print("/* non-optimized fallback failed: unavailable after recovery-timeout budget exhaustion */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
                 _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
+                    self.project,
                     None,
-                    SimpleNamespace(addr=sidecar_region[0], name=code_name),
+                    SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name),
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
-                    binary_path=args.binary,
+                    binary_path=self.args.binary,
                 )
                 print("\n/* == asm fallback == */")
-                print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
+                print(_format_asm_range(self.project, self.sidecar_region[0], self.sidecar_region[1]))
                 sys.stdout.flush()
                 emit_compact_summary()
                 sys.stderr.flush()
                 os._exit(4)
-        _emit_timeout_and_exit(args.timeout, detail)
-
-    def _remaining_direct_addr_budget() -> int:
-        return max(0, int(direct_addr_deadline - time.monotonic()))
-
-    def _enforce_direct_addr_budget_timeout(*, recovery_detail: str | None = None) -> None:
-        if _remaining_direct_addr_budget() > 0:
+        _emit_timeout_and_exit(self.args.timeout, detail)
+    def _remaining_direct_addr_budget(self) -> int:
+        """Hoisted nested function (callable via `self`)."""
+        return max(0, int(self.direct_addr_deadline - time.monotonic()))
+    def _enforce_direct_addr_budget_timeout(self, *, recovery_detail: str | None=None) -> None:
+        """Hoisted nested function (callable via `self`)."""
+        if self._remaining_direct_addr_budget() > 0:
             return
-        detail = recovery_detail
-        if detail is None:
-            detail = "after exhausting direct-address recovery budget"
-        _emit_budget_exhausted_sidecar_asm_fallback_or_timeout(detail)
-
-    canonical_direct_addr = _canonicalize_direct_addr_from_sidecar_padding_8616(
-        project,
-        lst_metadata,
-        direct_addr,
-        function_label=function_label,
-    )
-    if canonical_direct_addr is not None:
-        print(
-            "/* direct address canonicalized from "
-            f"{canonical_direct_addr.requested_addr:#x} to {canonical_direct_addr.canonical_addr:#x} "
-            "using sidecar padding/prologue evidence */",
-            file=sys.stderr,
-            flush=True,
-        )
-        direct_addr = canonical_direct_addr.canonical_addr
-        args.addr = direct_addr
-        if function_label is None and canonical_direct_addr.name:
-            function_label = canonical_direct_addr.name
-
-    try:
-
-        def _recover_target_function() -> _FunctionCfgPair8616:
-            exact_region_end = getattr(args, "exact_region_end", None)
-            exact_region = (
-                (direct_addr, exact_region_end)
-                if isinstance(exact_region_end, int) and exact_region_end > direct_addr
-                else None
-            )
-            return cast(
-                _FunctionCfgPair8616,
-                _recover_direct_addr_function(
-                    project,
-                    direct_addr,
-                    timeout=args.timeout,
-                    window=args.window,
-                    function_label=function_label,
-                    lst_metadata=lst_metadata,
-                    low_memory_path=low_memory_path,
-                    prefer_fast_recovery=prefer_fast_recovery,
-                    exact_region=exact_region,
-                ),
-            )
-
-        direct_recovery_timeout = (
-            max(1, min(args.timeout, 6))
-            if args.proc is not None and not proc_resolved_to_linked_binary
-            else _default_recovery_timeout(args.timeout, explicit_timeout=timeout_was_explicit)
-        )
-        direct_recovery_timeout = max(1, min(direct_recovery_timeout, _remaining_direct_addr_budget() or 1))
-        cfg, func = _run_with_timeout_in_daemon_thread(
-            _recover_target_function,
-            timeout=direct_recovery_timeout,
-            thread_name_prefix="recovery",
-            prefer_process_alarm=True,
-        )
-    except _AnalysisTimeout:
-        _enforce_direct_addr_budget_timeout()
-        sidecar_region = _lst_code_region(lst_metadata, direct_addr) if lst_metadata is not None else None
-        if precise_sidecar_regions and sidecar_region is not None:
-            code_name = _lst_code_label(lst_metadata, sidecar_region[0], project.entry) or f"sub_{direct_addr:x}"
-            slice_result = _try_decompile_sidecar_slice(
-                project,
-                lst_metadata,
-                sidecar_region[0],
-                code_name,
-                timeout=max(1, min(args.timeout, _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-            )
-            if slice_result is not None and slice_result.status == "ok":
-                fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
-                print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    fallback_function,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
-                    binary_path=args.binary,
-                )
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    code_name,
-                    slice_result.payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="\n/* == c == */",
-                )
-                return 0
-            _enforce_direct_addr_budget_timeout()
-            nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
-                project,
-                sidecar_region[0],
-                code_name,
-                timeout=max(1, min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-            )
-            nonopt_c = _non_optimized_slice_rendered(nonopt_result)
-            if nonopt_c is not None:
-                fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
-                print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    fallback_function,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-                    binary_path=args.binary,
-                )
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    code_name,
-                    nonopt_c,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="\n/* == c (non-optimized fallback) == */",
-                )
-                return 0
-            string_c = _try_emit_string_intrinsic_c(
-                project,
-                start=sidecar_region[0],
-                end=sidecar_region[1],
-                name=code_name,
-            )
-            if string_c is not None:
-                print(
-                    "/* Function recovery timed out; emitted generic string-intrinsic fallback from sidecar bounds. */"
-                )
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    SimpleNamespace(addr=sidecar_region[0], name=code_name),
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
-                    binary_path=args.binary,
-                )
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    code_name,
-                    string_c,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="\n/* == c (string intrinsic fallback) == */",
-                )
-                return 0
-            print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
-            print("/* direct validation=failed */")
-            _emit_failed_timeout_acceptance_hints_8616()
-            print(f"/* binary: {args.binary} */")
-            print(f"/* arch: {project.arch.name} */")
-            print(f"/* entry: {project.entry:#x} */")
-            print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-            _emit_tail_validation_for_function_run_or_uncollected(
-                project,
-                None,
-                SimpleNamespace(addr=sidecar_region[0], name=code_name),
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
-                binary_path=args.binary,
-            )
-            print("\n/* == asm fallback == */")
-            print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
-            return 4
-        nonopt_result = None
-        _enforce_direct_addr_budget_timeout()
-        nonopt_result = _try_decompile_non_optimized_slice(
-            project,
-            direct_addr,
-            function_label or f"sub_{direct_addr:x}",
-            timeout=max(1, min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1)),
-            api_style=args.api_style,
-            binary_path=args.binary,
-            lst_metadata=lst_metadata,
-            cod_metadata=cod_metadata,
-        )
-        nonopt_c = _non_optimized_slice_rendered(nonopt_result)
-        if nonopt_c is not None:
-            fallback_function = SimpleNamespace(addr=direct_addr, name=function_label or f"sub_{direct_addr:x}")
-            print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
-            print(f"/* binary: {args.binary} */")
-            print(f"/* arch: {project.arch.name} */")
-            print(f"/* entry: {project.entry:#x} */")
-            print(f"/* function: {direct_addr:#x} {function_label or f'sub_{direct_addr:x}'} */")
-            _emit_tail_validation_for_function_run_or_uncollected(
-                project,
-                None,
-                fallback_function,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-                binary_path=args.binary,
-            )
-            _emit_optional_source_sidecar_c_block(
-                args.binary,
-                fallback_function.name,
-                nonopt_c,
-                alternate_source_c=bool(args.alternate_source_c),
-                c_header="\n/* == c (non-optimized fallback) == */",
-            )
-            return 0
-        fallback_function = SimpleNamespace(addr=direct_addr, name=function_label or f"sub_{direct_addr:x}")
-        start, end = _infer_linear_disassembly_window(project, direct_addr)
-        string_c = _try_emit_string_intrinsic_c(
-            project,
-            start=start,
-            end=end,
-            name=fallback_function.name,
-        )
-        if string_c is not None:
-            print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
-            print(f"/* binary: {args.binary} */")
-            print(f"/* arch: {project.arch.name} */")
-            print(f"/* entry: {project.entry:#x} */")
-            print(f"/* function: {direct_addr:#x} {fallback_function.name} */")
-            _emit_tail_validation_for_function_run_or_uncollected(
-                project,
-                None,
-                fallback_function,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
-                binary_path=args.binary,
-            )
-            nonopt_skip_reason = describe_non_optimized_unavailable(
-                allow_heavy_fallbacks=True,
-                skip_heavy_fallbacks_for_result=False,
-                interactive_stdout=interactive_stdout,
-                max_functions=args.max_functions,
-                addr_requested=direct_addr is not None,
-                result_status="timeout",
-                failure_stage=None,
-                nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
-            )
-            if nonopt_skip_reason is not None:
-                print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-            _emit_optional_source_sidecar_c_block(
-                args.binary,
-                fallback_function.name,
-                string_c,
-                alternate_source_c=bool(args.alternate_source_c),
-                c_header="\n/* == c (string intrinsic fallback) == */",
-            )
-            return 0
-        asm_fallback = _format_asm_range(project, start, end)
-        recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
-        if recovery_detail is None:
-            recovery_detail = "during x86-16 function recovery (direct-address path)"
-        print(f"/* timeout: function {direct_addr:#x} {function_label or f'sub_{direct_addr:x}'} */")
-        _stored_snapshot = getattr(project, "_inertia_last_tail_validation_snapshot", None)
-        if isinstance(_stored_snapshot, dict) and _stored_snapshot:
-            for _diag_line in _format_tail_validation_diagnostic(
-                _stored_snapshot,
-                function_addr=direct_addr,
-                function_name=function_label or f"sub_{direct_addr:x}",
-                exit_kind="timeout",
-                exit_detail=recovery_detail,
-            ):
-                print(_diag_line)
-        _emit_timeout_and_exit(args.timeout, recovery_detail)
-    except FuturesTimeoutError:
-        _enforce_direct_addr_budget_timeout()
-        sidecar_region = _lst_code_region(lst_metadata, direct_addr) if lst_metadata is not None else None
-        if precise_sidecar_regions and sidecar_region is not None:
-            code_name = _lst_code_label(lst_metadata, sidecar_region[0], project.entry) or f"sub_{direct_addr:x}"
-            slice_result = _try_decompile_sidecar_slice(
-                project,
-                lst_metadata,
-                sidecar_region[0],
-                code_name,
-                timeout=max(1, min(args.timeout, _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-            )
-            if slice_result is not None and slice_result.status == "ok":
-                fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
-                print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    fallback_function,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
-                    binary_path=args.binary,
-                )
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    code_name,
-                    slice_result.payload,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="\n/* == c == */",
-                )
-                return 0
-            _enforce_direct_addr_budget_timeout()
-            nonopt_result = _try_decompile_non_optimized_slice(
-                project,
-                sidecar_region[0],
-                code_name,
-                timeout=max(1, min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-            )
-            nonopt_c = _non_optimized_slice_rendered(nonopt_result)
-            if nonopt_c is not None:
-                fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
-                print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    fallback_function,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-                    binary_path=args.binary,
-                )
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    code_name,
-                    nonopt_c,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="\n/* == c (non-optimized fallback) == */",
-                )
-                return 0
-            string_c = _try_emit_string_intrinsic_c(
-                project,
-                start=sidecar_region[0],
-                end=sidecar_region[1],
-                name=code_name,
-            )
-            if string_c is not None:
-                print(
-                    "/* Function recovery timed out; emitted generic string-intrinsic fallback from sidecar bounds. */"
-                )
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    SimpleNamespace(addr=sidecar_region[0], name=code_name),
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
-                    binary_path=args.binary,
-                )
-                _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    code_name,
-                    string_c,
-                    alternate_source_c=bool(args.alternate_source_c),
-                    c_header="\n/* == c (string intrinsic fallback) == */",
-                )
-                return 0
-            print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
-            print("/* direct validation=failed */")
-            _emit_failed_timeout_acceptance_hints_8616()
-            print(f"/* binary: {args.binary} */")
-            print(f"/* arch: {project.arch.name} */")
-            print(f"/* entry: {project.entry:#x} */")
-            print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-            _emit_tail_validation_for_function_run_or_uncollected(
-                project,
-                None,
-                SimpleNamespace(addr=sidecar_region[0], name=code_name),
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
-                binary_path=args.binary,
-            )
-            print("\n/* == asm fallback == */")
-            print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
-            return 4
-        nonopt_result = None
-        if precise_sidecar_regions:
-            _enforce_direct_addr_budget_timeout()
-            nonopt_result = _try_decompile_non_optimized_slice(
-                project,
-                direct_addr,
-                function_label or f"sub_{direct_addr:x}",
-                timeout=max(1, min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-            )
-        nonopt_c = _non_optimized_slice_rendered(nonopt_result)
-        if nonopt_c is not None:
-            fallback_function = SimpleNamespace(addr=direct_addr, name=function_label or f"sub_{direct_addr:x}")
-            print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
-            print(f"/* binary: {args.binary} */")
-            print(f"/* arch: {project.arch.name} */")
-            print(f"/* entry: {project.entry:#x} */")
-            print(f"/* function: {direct_addr:#x} {function_label or f'sub_{direct_addr:x}'} */")
-            _emit_tail_validation_for_function_run_or_uncollected(
-                project,
-                None,
-                fallback_function,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-                binary_path=args.binary,
-            )
-            _emit_optional_source_sidecar_c_block(
-                args.binary,
-                fallback_function.name,
-                nonopt_c,
-                alternate_source_c=bool(args.alternate_source_c),
-                c_header="\n/* == c (non-optimized fallback) == */",
-            )
-            return 0
-        fallback_function = SimpleNamespace(addr=direct_addr, name=function_label or f"sub_{direct_addr:x}")
-        start, end = _infer_linear_disassembly_window(project, direct_addr)
-        string_c = _try_emit_string_intrinsic_c(
-            project,
-            start=start,
-            end=end,
-            name=fallback_function.name,
-        )
-        if string_c is not None:
-            print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
-            print(f"/* binary: {args.binary} */")
-            print(f"/* arch: {project.arch.name} */")
-            print(f"/* entry: {project.entry:#x} */")
-            print(f"/* function: {direct_addr:#x} {fallback_function.name} */")
-            _emit_tail_validation_for_function_run_or_uncollected(
-                project,
-                None,
-                fallback_function,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
-                binary_path=args.binary,
-            )
-            nonopt_skip_reason = describe_non_optimized_unavailable(
-                allow_heavy_fallbacks=True,
-                skip_heavy_fallbacks_for_result=False,
-                interactive_stdout=interactive_stdout,
-                max_functions=args.max_functions,
-                addr_requested=direct_addr is not None,
-                result_status="timeout",
-                failure_stage=None,
-                nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
-            )
-            if nonopt_skip_reason is not None:
-                print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-            _emit_optional_source_sidecar_c_block(
-                args.binary,
-                fallback_function.name,
-                string_c,
-                alternate_source_c=bool(args.alternate_source_c),
-                c_header="\n/* == c (string intrinsic fallback) == */",
-            )
-            return 0
-        asm_fallback = _format_asm_range(project, start, end)
-        recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
-        if recovery_detail is None:
-            recovery_detail = "during x86-16 function recovery (direct-address path)"
-        print(f"/* timeout: function {direct_addr:#x} {function_label or f'sub_{direct_addr:x}'} */")
-        _stored_snapshot = getattr(project, "_inertia_last_tail_validation_snapshot", None)
-        if isinstance(_stored_snapshot, dict) and _stored_snapshot:
-            for _diag_line in _format_tail_validation_diagnostic(
-                _stored_snapshot,
-                function_addr=direct_addr,
-                function_name=function_label or f"sub_{direct_addr:x}",
-                exit_kind="timeout",
-                exit_detail=recovery_detail,
-            ):
-                print(_diag_line)
-        _emit_timeout_and_exit(args.timeout, recovery_detail)
-    except Exception as ex:
-        recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
-        if recovery_detail is None:
-            print(f"/* Function recovery failed: {ex} */")
-        else:
-            print(f"/* Function recovery failed {recovery_detail}: {ex} */")
-        if os.environ.get("INERTIA_DEBUG_RECOVERY_TRACEBACK"):
-            import traceback
-
-            traceback.print_exc()
-        print("\n/* == lift break probe == */")
-        print(_probe_lift_break(project, direct_addr))
-        print("\n/* == first block asm == */")
-        print(_format_first_block_asm(project, direct_addr))
-        print("\n/* == non-optimized disassembly == */")
-        start, end = _infer_linear_disassembly_window(project, direct_addr)
-        print(_format_asm_range(project, start, end))
-        return 5
-
-    if project.arch.name == "86_16":
-        record_direct_target_caller_return_use_evidence_8616(
-            project,
-            direct_addr,
-            binary_path=args.binary,
-        )
-
-    if (
-        precise_sidecar_regions
-        and lst_metadata is not None
-        and project.arch.name == "86_16"
-        and direct_addr is not None
-    ):
-        try:
-            sidecar_region = _lst_code_region(lst_metadata, direct_addr)
-            block_count, byte_count = _function_complexity(func)
-            if (
-                sidecar_region is not None
-                and isinstance(sidecar_region[0], int)
-                and int(sidecar_region[0]) == int(direct_addr)
-                and (block_count <= 3 or byte_count <= 24)
-            ):
-                sidecar_addr = sidecar_region[0]
-                code_name = _lst_code_label(lst_metadata, sidecar_addr, project.entry) or f"sub_{sidecar_addr:x}"
-                cfg2, func2 = _recover_lst_function(
-                    project,
-                    lst_metadata,
-                    sidecar_addr if lst_metadata.absolute_addrs else sidecar_addr - project.entry,
-                    code_name,
-                    timeout=max(1, min(args.timeout, 6)),
-                    window=args.window,
-                    low_memory=low_memory_path,
-                )
-                if func2 is not None:
-                    cfg, func = cfg2, func2
-                    mark_function_original_addr(func, direct_addr)
-        except Exception:
-            pass
-
-    if direct_addr is not None and project.arch.name == "86_16":
-        try:
-            recovered_blocks, recovered_bytes = _function_complexity(func)
-        except Exception:
-            recovered_blocks, recovered_bytes = (0, 0)
-        region = _lst_code_region(lst_metadata, direct_addr) if lst_metadata is not None else None
-        region_span = max(0, int(region[1]) - int(region[0])) if isinstance(region, tuple) and len(region) == 2 else 0
-        if recovered_blocks <= 1 and recovered_bytes <= 16 and region_span >= 64:
-            try:
-                ranked_cfg, ranked_func = _recover_ranked_binary_function(
-                    project,
-                    direct_addr,
-                    function_label or func.name,
-                    timeout=max(12, min(args.timeout, 24)),
-                    window=args.window,
-                    low_memory=low_memory_path,
-                )
-            except Exception:
-                pass
-            else:
-                cfg, func = ranked_cfg, ranked_func
-
-    if function_label is not None:
-        func.name = function_label
-    elif lst_metadata is not None:
-        code_name = lst_metadata.code_labels.get(function_original_addr(func))
-        if code_name is not None:
-            func.name = code_name
-    direct_project = getattr(func, "project", project)
-    if project.arch.name == "86_16":
-        attach_direct_target_argument_evidence_context_8616(
-            project,
-            direct_project,
-            function_original_addr(func),
-        )
-        prepare_direct_indexed_alias_program_context_8616(
-            project,
-            direct_project,
-            func,
-            timeout=args.timeout,
-            window=args.window,
-            binary_path=args.binary,
-        )
-        for call_target in collect_neighbor_call_targets(func):
-            if call_target.return_addr is not None:
-                record_direct_target_caller_return_use_evidence_8616(
-                    project,
-                    call_target.target_addr,
-                    binary_path=args.binary,
-                )
-    _transfer_caller_return_use_evidence_8616(project, direct_project)
-    typing.cast(typing.Any, direct_project)._inertia_trace_c_stages = bool(args.trace_c_stages)
-    typing.cast(typing.Any, direct_project)._inertia_dump_layers = bool(args.dump_layers)
-    typing.cast(typing.Any, direct_project)._inertia_dump_layer_root = args.dump_layer_dir
-    typing.cast(typing.Any, direct_project)._inertia_dump_layer_filter = args.dump_layer_filter
-    if bool(args.alternate_source_c) and getattr(project.arch, "name", "") == "86_16":
-        typing.cast(typing.Any, direct_project)._inertia_enable_typed_switch_seqnode_replacement_8616 = True
-    _apply_binary_specific_annotations(
-        direct_project,
-        args.binary,
-        lst_metadata,
-        func_addr=function_original_addr(func),
-        cod_metadata=cod_metadata,
-        synthetic_globals=synthetic_globals,
-    )
-
-    print(f"/* binary: {args.binary} */")
-    print(f"/* arch: {project.arch.name} */")
-    print(f"/* entry: {project.entry:#x} */")
-    print(f"/* function: {function_original_addr(func):#x} {func.name} */")
-
-    if args.show_asm:
-        print("\n/* == asm == */")
-        print(_format_first_block_asm(direct_project, func.addr))
-
-    known_helper_model = _try_emit_known_runtime_helper_c(name=getattr(func, "name", ""))
-    if isinstance(known_helper_model, str):
-        helper_snapshot: dict[str, object] = {
-            "structuring": {
-                "status": "stable",
-                "mode": "helper_model",
-                "changed": False,
-                "detail": f"known compiler/runtime helper model: {func.name}",
-            },
-            "postprocess": {
-                "status": "stable",
-                "mode": "helper_model",
-                "changed": False,
-                "detail": f"known compiler/runtime helper model: {func.name}",
-            },
-        }
-        helper_result = FunctionWorkResult(
-            index=1,
-            status=WorkItemStatus.OK.value,
-            payload=known_helper_model,
-            debug_output="",
-            function=func,
-            function_cfg=cfg,
-            tail_validation=helper_snapshot,
-        )
-        if _complete_serial_clean_worker_result_8616(helper_result, project=direct_project):
-            return 0
-        print(
-            "[dbg] direct failure family: status=ok stage=helper_model sidecar=not_applicable "
-            "nonopt=not_needed fallback=direct_addr validation=passed",
-            file=sys.stderr,
-        )
-        _emit_tail_validation_snapshot_or_uncollected(
-            cfg,
-            func,
-            helper_snapshot,
-            binary_path=args.binary,
-        )
-        _emit_optional_source_sidecar_c_block(
-            args.binary,
-            func.name,
-            known_helper_model,
-            alternate_source_c=bool(args.alternate_source_c),
-            c_header="\n/* == c == */",
-        )
-        return 0
-
-    direct_cache_item = FunctionWorkItem(index=1, function_cfg=cfg, function=func)
-    direct_cache_result, direct_cache_debug, direct_cache_key, _, _ = _function_work_cache_lookup(
-        direct_cache_item,
-        binary_path=args.binary,
-        timeout=max(1, int(args.timeout)),
-        api_style=args.api_style,
-        enable_structured_simplify=True,
-        enable_postprocess=True,
-        cod_metadata=cod_metadata,
-        synthetic_globals=synthetic_globals,
-        lst_metadata=lst_metadata,
-    )
-    if direct_cache_result is not None and direct_cache_result.failure_family_snapshot is not None:
-        if direct_cache_debug:
-            print(direct_cache_debug, file=sys.stderr, end="")
-        cached_direct_result = replace(
-            direct_cache_result,
-            function=func,
-            function_cfg=cfg,
-        )
-        _store_direct_request_result_8616(
-            context,
-            direct_request_cache_lookup,
-            cached_direct_result,
-            function_addr=function_original_addr(func),
-            function_name=func.name,
-        )
-        return _emit_direct_cache_hit_8616(
-            context,
-            cached_direct_result,
-            function=func,
-            function_cfg=cfg,
-            emit_function_header=False,
-            project_for_worker_result=direct_project,
-        )
-
-    if (
-        canonical_direct_addr is not None
-        and canonical_direct_addr.requested_addr != canonical_direct_addr.canonical_addr
-        and not args.ignore_local_sidecar_hints
-    ):
-        assert lst_metadata is not None
-        cached_clean_status = _run_canonicalized_direct_clean_worker_8616(
-            project,
-            args,
-            lst_metadata,
-            canonical_direct_addr,
-            function_label=function_label,
-            caller_return_evidence_by_addr=clean_worker_caller_return_evidence_by_addr,
-            cache_only=True,
-        )
-        if cached_clean_status is not None:
-            return cached_clean_status
-
-    print("/* decompiling... */", flush=True)
-    direct_tail_validation_snapshot: dict[str, object] | None = None
-    direct_segment_program_evidence: SegmentProgramFunctionEvidence8616 | None = None
-    direct_failure_family_state = FailureFamilyState()
-    direct_sidecar_verdict = "not_attempted"
-    direct_nonoptimized_verdict = "not_attempted"
-    direct_timeout_stage: str | None = None
-    direct_debug_output = ""
-    _block_count, _byte_count = _function_complexity(func)
-    _elapsed = 0.0
-
-    def _direct_failure_snapshot(result: FunctionWorkResult) -> FailureFamilySnapshot:
+        self.detail = recovery_detail
+        if self.detail is None:
+            self.detail = "after exhausting direct-address recovery budget"
+        self._emit_budget_exhausted_sidecar_asm_fallback_or_timeout(self.detail)
+    def _direct_failure_snapshot(self, result: FunctionWorkResult) -> FailureFamilySnapshot:
+        """Hoisted nested function (callable via `self`)."""
         """Build the complete direct-address diagnostic snapshot for one result."""
         return build_failure_family_snapshot(
             status=result.status,
             failure_stage=result.failure_stage,
-            sidecar_verdict=direct_sidecar_verdict,
-            non_optimized_verdict=direct_nonoptimized_verdict,
+            sidecar_verdict=self.direct_sidecar_verdict,
+            non_optimized_verdict=self.direct_nonoptimized_verdict,
             fallback_kind="direct_addr",
             tail_validation_verdict=_tail_validation_display_status(
                 result.tail_validation,
                 fallback_kind="direct_addr" if result.status != "ok" else None,
             ),
-            artifact_path=f"{func.addr:#x}:{func.name}",
+            artifact_path=f"{self.func.addr:#x}:{self.func.name}",
         )
-
-    def _direct_analysis_timeout_for_shape(base_timeout: int, block_count: int, byte_count: int) -> int:
-        boosted = _effective_decompile_timeout_8616(
-            direct_project,
+    def _direct_analysis_timeout_for_shape(self, base_timeout: int, block_count: int, byte_count: int) -> int:
+        """Hoisted nested function (callable via `self`)."""
+        self.boosted = _effective_decompile_timeout_8616(
+            self.direct_project,
             base_timeout,
             block_count=block_count,
             byte_count=byte_count,
         )
-        if getattr(project.arch, "name", "") == "86_16":
+        if getattr(self.project.arch, "name", "") == "86_16":
             # Large menu/controller functions are clinic-heavy and can
             # legitimately exceed the default 120s lane timeout.
             if block_count >= 72 or byte_count >= 520:
-                boosted = max(boosted, base_timeout + 180)
+                self.boosted = max(self.boosted, base_timeout + 180)
             elif block_count >= 56 or byte_count >= 420:
-                boosted = max(boosted, base_timeout + 120)
+                self.boosted = max(self.boosted, base_timeout + 120)
             elif block_count >= 40 or byte_count >= 300:
-                boosted = max(boosted, base_timeout + 80)
+                self.boosted = max(self.boosted, base_timeout + 80)
         return _enforce_function_timeout_cap(
-            max(1, boosted),
+            max(1, self.boosted),
             context="direct shape timeout",
-            explicit_timeout_floor=args.timeout if timeout_was_explicit else None,
+            explicit_timeout_floor=self.args.timeout if self.timeout_was_explicit else None,
         )
+    def _preserve_best_failure_candidate(self, result: FunctionWorkResult) -> str | None:
+        """Hoisted nested function (callable via `self`)."""
+        self.candidates = [
+            text for text in (result.payload, result.partial_payload) if isinstance(text, str) and text.strip()
+        ]
+        if not self.candidates:
+            return None
 
-    try:
+        def _rank(text: str) -> tuple[int, int]:
+            self.quality = assess_decompiled_c_text(text)
+            self.quality_violations = len(self.quality.markers) if self.quality.reject_as_decompiled else 0
+            return (
+                -self.quality_violations,
+                len(text),
+            )
 
-        def direct_decompile_job() -> _DirectDecompileJobResult8616:
-            """Run one direct function through the selected bounded Clinic policy."""
-            _bcount, _bbytes = _function_complexity(func)
-            direct_analysis_timeout = _direct_analysis_timeout_for_shape(args.timeout, _bcount, _bbytes)
-            direct_arch_name = getattr(getattr(direct_project, "arch", None), "name", "")
-            direct_callsite_count = (
-                _safe_function_callsite_count_8616(func)
-                if _clinic_policy_needs_callsite_count_8616(
-                    arch_name=direct_arch_name,
-                    direct_addr_mode=direct_addr is not None,
-                    block_count=_bcount,
-                    byte_count=_bbytes,
-                )
-                else 0
+        return cast(str | None, max(self.candidates, key=_rank))
+    def _preserve_acceptance_candidate_or_best_failure(self, acceptance: CAcceptanceResult8616, result: FunctionWorkResult) -> str | None:
+        """Hoisted nested function (callable via `self`)."""
+        if acceptance.status == "ok" and acceptance.blocker is None:
+            self.checked_payload = acceptance.gcc_checked_payload
+            if self.checked_payload.strip():
+                return cast(str, self.checked_payload)
+            if acceptance.validated_payload.strip():
+                return cast(str | None, acceptance.validated_payload)
+        return self._preserve_best_failure_candidate(result)
+    def _recover_target_function(self) -> _FunctionCfgPair8616:
+        """Hoisted nested function (callable via `self`)."""
+        self.exact_region_end = getattr(self.args, "exact_region_end", None)
+        self.exact_region = (
+            (self.direct_addr, self.exact_region_end)
+            if isinstance(self.exact_region_end, int) and self.exact_region_end > self.direct_addr
+            else None
+        )
+        return cast(
+            _FunctionCfgPair8616,
+            _recover_direct_addr_function(
+                self.project,
+                self.direct_addr,
+                timeout=self.args.timeout,
+                window=self.args.window,
+                function_label=self.function_label,
+                lst_metadata=self.lst_metadata,
+                low_memory_path=self.low_memory_path,
+                prefer_fast_recovery=self.prefer_fast_recovery,
+                exact_region=self.exact_region,
+            ),
+        )
+    def direct_decompile_job(self) -> _DirectDecompileJobResult8616:
+        """Hoisted nested function (callable via `self`)."""
+        """Run one direct function through the selected bounded Clinic policy."""
+        self._bcount, self._bbytes = _function_complexity(self.func)
+        self.direct_analysis_timeout = self._direct_analysis_timeout_for_shape(self.args.timeout, self._bcount, self._bbytes)
+        self.direct_arch_name = getattr(getattr(self.direct_project, "arch", None), "name", "")
+        self.direct_callsite_count = (
+            _safe_function_callsite_count_8616(self.func)
+            if _clinic_policy_needs_callsite_count_8616(
+                arch_name=self.direct_arch_name,
+                direct_addr_mode=self.direct_addr is not None,
+                block_count=self._bcount,
+                byte_count=self._bbytes,
             )
-            direct_clinic_policy = _direct_clinic_policy_8616(
-                arch_name=direct_arch_name,
-                direct_addr_mode=direct_addr is not None,
-                block_count=_bcount,
-                byte_count=_bbytes,
-                call_site_count=direct_callsite_count,
-            )
-            if os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
-                print(
-                    "[dbg] direct clinic policy "
-                    f"policy={direct_clinic_policy.value} arch={direct_arch_name!r} "
-                    f"blocks={_bcount} bytes={_bbytes} calls={direct_callsite_count}"
-                )
-            with _temporary_clinic_policy_8616(direct_project, direct_clinic_policy):
-                with _capture_thread_output() as (stdout_buf, stderr_buf):
-                    result = _decompile_function_with_stats(
-                        direct_project,
-                        cfg,
-                        func,
-                        direct_analysis_timeout,
-                        args.api_style,
-                        args.binary,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        lst_metadata=lst_metadata,
-                        # Direct-address mode must prefer deterministic single-lane
-                        # recovery. Isolated retries can re-run the full pipeline
-                        # multiple times and overwrite a valid candidate with a
-                        # later timeout lane.
-                        allow_isolated_retry=False,
-                        failure_family_state=direct_failure_family_state,
-                    )
-                debug_output = stdout_buf.getvalue() + stderr_buf.getvalue()
-            snapshot = _tail_validation_snapshot_for_function_run(direct_project, func)
-            project_fb = getattr(direct_project, "_inertia_last_tail_validation_snapshot", None)
-            if (
-                isinstance(project_fb, dict)
-                and x86_16_tail_validation_snapshot_passed(project_fb)
-                and not x86_16_tail_validation_snapshot_passed(snapshot)
-            ):
-                # A nested analysis can capture a pre-refresh snapshot before
-                # the requested function publishes its final project snapshot.
-                # The complete passing project snapshot is the authoritative
-                # result at this worker boundary.
-                snapshot = dict(project_fb)
-            func_info_tv = None
-            func_info = getattr(func, "info", None)
-            if isinstance(func_info, dict):
-                func_info_tv = func_info.get("x86_16_tail_validation")
-            merged_statuses = (
-                {k: v.get("status") if isinstance(v, dict) else type(v).__name__ for k, v in snapshot.items()}
-                if isinstance(snapshot, dict)
-                else "N/A"
-            )
+            else 0
+        )
+        self.direct_clinic_policy = _direct_clinic_policy_8616(
+            arch_name=self.direct_arch_name,
+            direct_addr_mode=self.direct_addr is not None,
+            block_count=self._bcount,
+            byte_count=self._bbytes,
+            call_site_count=self.direct_callsite_count,
+        )
+        if os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
             print(
-                f"[dbg] direct_decompile_job snapshot: project_fb_stages={list(project_fb.keys()) if isinstance(project_fb, dict) else 'NOT_DICT'} func_info_tv_stages={list(func_info_tv.keys()) if isinstance(func_info_tv, dict) else type(func_info_tv).__name__ if func_info_tv is not None else 'None'} merged_stages={list(snapshot.keys()) if isinstance(snapshot, dict) else 'NOT_DICT'} merged_statuses={merged_statuses}",
+                "[dbg] direct clinic policy "
+                f"policy={self.direct_clinic_policy.value} arch={self.direct_arch_name!r} "
+                f"blocks={self._bcount} bytes={self._bbytes} calls={self.direct_callsite_count}"
+            )
+        with _temporary_clinic_policy_8616(self.direct_project, self.direct_clinic_policy):
+            with _capture_thread_output() as (self.stdout_buf, self.stderr_buf):
+                self.result = _decompile_function_with_stats(
+                    self.direct_project,
+                    self.cfg,
+                    self.func,
+                    self.direct_analysis_timeout,
+                    self.args.api_style,
+                    self.args.binary,
+                    cod_metadata=self.cod_metadata,
+                    synthetic_globals=self.synthetic_globals,
+                    lst_metadata=self.lst_metadata,
+                    # Direct-address mode must prefer deterministic single-lane
+                    # recovery. Isolated retries can re-run the full pipeline
+                    # multiple times and overwrite a valid candidate with a
+                    # later timeout lane.
+                    allow_isolated_retry=False,
+                    failure_family_state=self.direct_failure_family_state,
+                )
+            self.debug_output = self.stdout_buf.getvalue() + self.stderr_buf.getvalue()
+        self.snapshot = _tail_validation_snapshot_for_function_run(self.direct_project, self.func)
+        self.project_fb = getattr(self.direct_project, "_inertia_last_tail_validation_snapshot", None)
+        if (
+            isinstance(self.project_fb, dict)
+            and x86_16_tail_validation_snapshot_passed(self.project_fb)
+            and not x86_16_tail_validation_snapshot_passed(self.snapshot)
+        ):
+            # A nested analysis can capture a pre-refresh snapshot before
+            # the requested function publishes its final project snapshot.
+            # The complete passing project snapshot is the authoritative
+            # result at this worker boundary.
+            self.snapshot = dict(self.project_fb)
+        self.func_info_tv = None
+        self.func_info = getattr(self.func, "info", None)
+        if isinstance(self.func_info, dict):
+            self.func_info_tv = self.func_info.get("x86_16_tail_validation")
+        self.merged_statuses = (
+            {k: v.get("status") if isinstance(v, dict) else type(v).__name__ for k, v in self.snapshot.items()}
+            if isinstance(self.snapshot, dict)
+            else "N/A"
+        )
+        print(
+            f"[dbg] direct_decompile_job snapshot: project_fb_stages={list(self.project_fb.keys()) if isinstance(self.project_fb, dict) else 'NOT_DICT'} func_info_tv_stages={list(self.func_info_tv.keys()) if isinstance(self.func_info_tv, dict) else type(self.func_info_tv).__name__ if self.func_info_tv is not None else 'None'} merged_stages={list(self.snapshot.keys()) if isinstance(self.snapshot, dict) else 'NOT_DICT'} merged_statuses={self.merged_statuses}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return (
+            *self.result,
+            self.snapshot,
+            segment_program_function_evidence_for_function_8616(self.direct_project, self.func),
+            FailureFamilyState(
+                previous_snapshot=self.direct_failure_family_state.previous_snapshot,
+                candidate_snapshot=self.direct_failure_family_state.candidate_snapshot,
+                new_proof_seen=self.direct_failure_family_state.new_proof_seen,
+                repeat_detected=self.direct_failure_family_state.repeat_detected,
+            ),
+            self.debug_output,
+        )
+    def _candidate_text_for_rank(self, result: FunctionWorkResult) -> str:
+        """Hoisted nested function (callable via `self`)."""
+        self.payload_text = result.payload if isinstance(result.payload, str) and result.payload.strip() else ""
+        self.partial_text = (
+            result.partial_payload
+            if isinstance(result.partial_payload, str) and result.partial_payload.strip()
+            else ""
+        )
+        if self.payload_text and not self.partial_text:
+            return cast(str, self.payload_text)
+        if self.partial_text and not self.payload_text:
+            return cast(str, self.partial_text)
+        if not self.payload_text and not self.partial_text:
+            return ""
+
+        def _text_rank(text: str) -> tuple[int, int, int]:
+            self.quality = assess_decompiled_c_text(text)
+            self.quality_violations = len(self.quality.markers) if self.quality.reject_as_decompiled else 0
+            self.present_calls = _non_probe_call_count_for_fallback_rank_8616(text)
+            return (
+                -self.quality_violations,
+                self.present_calls,
+                len(text),
+            )
+
+        return cast(str, self.payload_text if _text_rank(self.payload_text) >= _text_rank(self.partial_text) else self.partial_text)
+    def _candidate_rank(self, result: FunctionWorkResult) -> tuple[int, int, int]:
+        """Hoisted nested function (callable via `self`)."""
+        self.text = self._candidate_text_for_rank(result)
+        self.quality = assess_decompiled_c_text(self.text)
+        self.quality_violations = len(self.quality.markers) if self.quality.reject_as_decompiled else 0
+        self.present_calls = _non_probe_call_count_for_fallback_rank_8616(self.text)
+        return (
+            -self.quality_violations,
+            self.present_calls,
+            len(self.text),
+        )
+    def _consume_heavy_fallback_budget(self) -> bool:
+        """Hoisted nested function (callable via `self`)."""
+        if self.heavy_fallback_budget <= 0:
+            return False
+        self.heavy_fallback_budget -= 1
+        return True
+    def _current_direct_partial_payload(self) -> str | None:
+        """Hoisted nested function (callable via `self`)."""
+        self.candidate = self.direct_result.partial_payload
+        return self.candidate if isinstance(self.candidate, str) and self.candidate.strip() else None
+    def _accept_direct_fallback_payload(self, payload_text: str, *, tail_validation_snapshot: dict[str, object] | None=None) -> str | None:
+        """Hoisted nested function (callable via `self`)."""
+        self.payload_for_acceptance = payload_text
+        self.snapshot = dict(tail_validation_snapshot) if isinstance(tail_validation_snapshot, dict) else None
+        for _attr_name_lp8616 in (
+            "_inertia_partial_tail_validation_snapshot",
+            "_inertia_last_tail_validation_snapshot",
+        ):
+            self.attr_name = _attr_name_lp8616
+            if self.snapshot is not None:
+                break
+            self.attr_value = getattr(self.direct_project, _attr_name_lp8616, None)
+            if isinstance(self.attr_value, dict):
+                self.snapshot = dict(self.attr_value)
+                break
+        if self.snapshot is None:
+            self.snapshot = _tail_validation_snapshot_for_function_run(self.direct_project, self.func)
+        self.checked_acceptance = _validated_generated_c_acceptance_8616(
+            status="ok",
+            payload=self.payload_for_acceptance,
+            tail_validation_snapshot=self.snapshot,
+            tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+            expected_validation_stages=["structuring", "postprocess"],
+            c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+            emit_failure_diagnostics=False,
+        )
+        self.checked_status = self.checked_acceptance.status
+        self.checked_blocker = self.checked_acceptance.blocker
+        if self.checked_status == "ok":
+            print("[dbg] direct fallback validation=passed", file=sys.stderr)
+            return cast(str, self.checked_acceptance.gcc_checked_payload or self.payload_for_acceptance)
+        _dump_validation_failed_payload_if_requested_8616(
+            self.payload_for_acceptance,
+            prefix=f"fallback_{self.func.addr:x}_{self.func.name}",
+        )
+        print(
+            f"[dbg] rejected direct fallback payload: {self.checked_status} detail={self.checked_blocker or 'n/a'}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    def _phase_direct_header_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if (
+            self.direct_request_cache_lookup.verdict is DirectRequestCacheVerdict8616.HIT
+            and self.direct_request_cache_lookup.artifact is not None
+        ):
+            self.artifact = self.direct_request_cache_lookup.artifact
+            try:
+                self.cached_segment_evidence = (
+                    None
+                    if self.artifact.segment_program_function_evidence_record is None
+                    else segment_program_function_evidence_from_record_8616(
+                        self.artifact.segment_program_function_evidence_record
+                    )
+                )
+            except (PipelineHardError, ValueError):
+                self.cached_segment_evidence = None
+                print("[dbg] direct request cache refused: segment_evidence", file=sys.stderr, flush=True)
+            else:
+                self.expected_runtime_header = render_c_runtime_header_8616(self.args.c_target)
+                if (
+                    self.artifact.arch_name == self.project.arch.name
+                    and self.artifact.entry_point == self.project.entry
+                    and self.artifact.runtime_header == self.expected_runtime_header
+                ):
+                    self.cached_function = SimpleNamespace(
+                        addr=self.artifact.function_addr,
+                        name=self.artifact.function_name,
+                        project=self.project,
+                    )
+                    self.cached_result = FunctionWorkResult(
+                        index=1,
+                        status=WorkItemStatus.OK.value,
+                        payload=self.artifact.payload,
+                        debug_output=(
+                            f"[dbg] direct request cache hit: {self.artifact.function_addr:#x} "
+                            f"{self.artifact.function_name} validation=passed\n"
+                            f"{self.artifact.diagnostic_output}"
+                        ),
+                        function=self.cached_function,
+                        function_cfg=None,
+                        tail_validation=copy.deepcopy(self.artifact.tail_validation),
+                        elapsed=self.artifact.elapsed,
+                        from_cache=True,
+                        block_count=self.artifact.block_count,
+                        byte_count=self.artifact.byte_count,
+                        validated_payload_hash=self.artifact.validated_payload_hash,
+                        gcc_checked_payload_hash=self.artifact.gcc_checked_payload_hash,
+                        failure_family_snapshot=self.artifact.failure_family_snapshot,
+                        segment_program_function_evidence=self.cached_segment_evidence,
+                    )
+                    return _emit_direct_cache_hit_8616(
+                        self.context,
+                        self.cached_result,
+                        function=self.cached_function,
+                        function_cfg=None,
+                        emit_function_header=True,
+                        project_for_worker_result=None,
+                    )
+                print("[dbg] direct request cache refused: runtime_identity", file=sys.stderr, flush=True)
+        return None
+
+    def _phase_direct_cfg_recovery_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _phase_direct_probe_setup_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if (
+            self.precise_sidecar_regions
+            and self.lst_metadata is not None
+            and self.project.arch.name == "86_16"
+            and self.direct_addr is not None
+        ):
+            try:
+                self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_addr)
+                self.block_count, self.byte_count = _function_complexity(self.func)
+                if (
+                    self.sidecar_region is not None
+                    and isinstance(self.sidecar_region[0], int)
+                    and int(self.sidecar_region[0]) == int(self.direct_addr)
+                    and (self.block_count <= 3 or self.byte_count <= 24)
+                ):
+                    self.sidecar_addr = self.sidecar_region[0]
+                    self.code_name = _lst_code_label(self.lst_metadata, self.sidecar_addr, self.project.entry) or f"sub_{self.sidecar_addr:x}"
+                    self.cfg2, self.func2 = _recover_lst_function(
+                        self.project,
+                        self.lst_metadata,
+                        self.sidecar_addr if self.lst_metadata.absolute_addrs else self.sidecar_addr - self.project.entry,
+                        self.code_name,
+                        timeout=max(1, min(self.args.timeout, 6)),
+                        window=self.args.window,
+                        low_memory=self.low_memory_path,
+                    )
+                    if self.func2 is not None:
+                        self.cfg, self.func = self.cfg2, self.func2
+                        mark_function_original_addr(self.func, self.direct_addr)
+            except Exception:
+                pass
+        return None
+
+    def _phase_direct_catalog_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.direct_addr is not None and self.project.arch.name == "86_16":
+            try:
+                self.recovered_blocks, self.recovered_bytes = _function_complexity(self.func)
+            except Exception:
+                self.recovered_blocks, self.recovered_bytes = (0, 0)
+            self.region = _lst_code_region(self.lst_metadata, self.direct_addr) if self.lst_metadata is not None else None
+            self.region_span = max(0, int(self.region[1]) - int(self.region[0])) if isinstance(self.region, tuple) and len(self.region) == 2 else 0
+            if self.recovered_blocks <= 1 and self.recovered_bytes <= 16 and self.region_span >= 64:
+                try:
+                    self.ranked_cfg, self.ranked_func = _recover_ranked_binary_function(
+                        self.project,
+                        self.direct_addr,
+                        self.function_label or self.func.name,
+                        timeout=max(12, min(self.args.timeout, 24)),
+                        window=self.args.window,
+                        low_memory=self.low_memory_path,
+                    )
+                except Exception:
+                    pass
+                else:
+                    self.cfg, self.func = self.ranked_cfg, self.ranked_func
+        return None
+
+    def _phase_direct_fast_probe_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.project.arch.name == "86_16":
+            attach_direct_target_argument_evidence_context_8616(
+                self.project,
+                self.direct_project,
+                function_original_addr(self.func),
+            )
+            prepare_direct_indexed_alias_program_context_8616(
+                self.project,
+                self.direct_project,
+                self.func,
+                timeout=self.args.timeout,
+                window=self.args.window,
+                binary_path=self.args.binary,
+            )
+            for _call_target_lp8616 in collect_neighbor_call_targets(self.func):
+                self.call_target = _call_target_lp8616
+                if _call_target_lp8616.return_addr is not None:
+                    record_direct_target_caller_return_use_evidence_8616(
+                        self.project,
+                        _call_target_lp8616.target_addr,
+                        binary_path=self.args.binary,
+                    )
+        return None
+    def _phase_direct_helper_model_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if isinstance(self.known_helper_model, str):
+            self.helper_snapshot: dict[str, object] = {
+                "structuring": {
+                    "status": "stable",
+                    "mode": "helper_model",
+                    "changed": False,
+                    "detail": f"known compiler/runtime helper model: {self.func.name}",
+                },
+                "postprocess": {
+                    "status": "stable",
+                    "mode": "helper_model",
+                    "changed": False,
+                    "detail": f"known compiler/runtime helper model: {self.func.name}",
+                },
+            }
+            self.helper_result = FunctionWorkResult(
+                index=1,
+                status=WorkItemStatus.OK.value,
+                payload=self.known_helper_model,
+                debug_output="",
+                function=self.func,
+                function_cfg=self.cfg,
+                tail_validation=self.helper_snapshot,
+            )
+            if _complete_serial_clean_worker_result_8616(self.helper_result, project=self.direct_project):
+                return 0
+            print(
+                "[dbg] direct failure family: status=ok stage=helper_model sidecar=not_applicable "
+                "nonopt=not_needed fallback=direct_addr validation=passed",
+                file=sys.stderr,
+            )
+            _emit_tail_validation_snapshot_or_uncollected(
+                self.cfg,
+                self.func,
+                self.helper_snapshot,
+                binary_path=self.args.binary,
+            )
+            _emit_optional_source_sidecar_c_block(
+                self.args.binary,
+                self.func.name,
+                self.known_helper_model,
+                alternate_source_c=bool(self.args.alternate_source_c),
+                c_header="\n/* == c == */",
+            )
+            return 0
+        return None
+
+    def _phase_direct_cache_failure_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.direct_cache_result is not None and self.direct_cache_result.failure_family_snapshot is not None:
+            if self.direct_cache_debug:
+                print(self.direct_cache_debug, file=sys.stderr, end="")
+            self.cached_direct_result = replace(
+                self.direct_cache_result,
+                function=self.func,
+                function_cfg=self.cfg,
+            )
+            _store_direct_request_result_8616(
+                self.context,
+                self.direct_request_cache_lookup,
+                self.cached_direct_result,
+                function_addr=function_original_addr(self.func),
+                function_name=self.func.name,
+            )
+            return _emit_direct_cache_hit_8616(
+                self.context,
+                self.cached_direct_result,
+                function=self.func,
+                function_cfg=self.cfg,
+                emit_function_header=False,
+                project_for_worker_result=self.direct_project,
+            )
+        return None
+
+    def _phase_direct_known_cache_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if (
+            self.canonical_direct_addr is not None
+            and self.canonical_direct_addr.requested_addr != self.canonical_direct_addr.canonical_addr
+            and not self.args.ignore_local_sidecar_hints
+        ):
+            assert self.lst_metadata is not None
+            self.cached_clean_status = _run_canonicalized_direct_clean_worker_8616(
+                self.project,
+                self.args,
+                self.lst_metadata,
+                self.canonical_direct_addr,
+                function_label=self.function_label,
+                caller_return_evidence_by_addr=self.clean_worker_caller_return_evidence_by_addr,
+                cache_only=True,
+            )
+            if self.cached_clean_status is not None:
+                return cast(int | None, self.cached_clean_status)
+        return None
+
+    def _phase_direct_probe_recovery_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _rc = self._phase_direct_probe_recovery_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _phase_direct_status_sync_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.direct_status != self.direct_result.status or self.direct_blocker is not None:
+            self.preserved_candidate = self._preserve_acceptance_candidate_or_best_failure(self.direct_acceptance, self.direct_result)
+            self.direct_payload = self.direct_acceptance.gcc_checked_payload
+        else:
+            self.direct_payload = (
+                self.direct_acceptance.gcc_checked_payload
+                if self.direct_status is WorkItemStatus.OK
+                else self.direct_result.payload
+            )
+            self.preserved_candidate = self.direct_result.partial_payload
+        return None
+
+    def _phase_direct_empty_lanes_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if (
+            self.direct_result.status == "empty"
+            and isinstance(self.direct_result.partial_payload, str)
+            and self.direct_result.partial_payload.strip()
+        ):
+            self.partial_acceptance = _validated_generated_c_acceptance_8616(
+                status="ok",
+                payload=self.direct_result.partial_payload,
+                tail_validation_snapshot=self.direct_result.tail_validation,
+                tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+                expected_validation_stages=["structuring", "postprocess"],
+                c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+                emit_failure_diagnostics=False,
+            )
+            if self.partial_acceptance.status == "ok" and self.partial_acceptance.blocker is None:
+                self.direct_result = replace(
+                    self.direct_result,
+                    status="ok",
+                    payload=self.partial_acceptance.gcc_checked_payload,
+                    partial_payload=None,
+                    validated_payload_hash=self.partial_acceptance.validated_payload_hash,
+                    gcc_checked_payload_hash=self.partial_acceptance.gcc_checked_payload_hash,
+                )
+        return None
+
+    def _phase_direct_light_lanes_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if (
+            self.canonical_direct_addr is not None
+            and self.canonical_direct_addr.requested_addr != self.canonical_direct_addr.canonical_addr
+            and not self.args.ignore_local_sidecar_hints
+            and _work_item_status_8616(self.direct_result.status) is WorkItemStatus.VALIDATION_FAILED
+        ):
+            assert self.lst_metadata is not None
+            return _run_canonicalized_direct_clean_worker_8616(
+                self.project,
+                self.args,
+                self.lst_metadata,
+                self.canonical_direct_addr,
+                function_label=self.function_label,
+                caller_return_evidence_by_addr=self.clean_worker_caller_return_evidence_by_addr,
+            )
+        return None
+
+    def _phase_direct_heavy_lanes_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.direct_result.status != "ok":
+            self.helper_model = (
+                _try_emit_known_runtime_helper_c(name=getattr(self.func, "name", ""))
+                if isinstance(getattr(self.func, "name", None), str)
+                else None
+            )
+            if isinstance(self.helper_model, str):
+                self.helper_snapshot = {
+                    "structuring": {
+                        "status": "stable",
+                        "mode": "helper_model",
+                        "changed": False,
+                        "detail": f"known compiler/runtime helper model: {getattr(self.func, 'name', 'sub')}",
+                    },
+                    "postprocess": {
+                        "status": "stable",
+                        "mode": "helper_model",
+                        "changed": False,
+                        "detail": f"known compiler/runtime helper model: {getattr(self.func, 'name', 'sub')}",
+                    },
+                }
+                self.helper_tail_validation_snapshot: dict[str, object] = dict(self.helper_snapshot)
+                self.helper_acceptance = _validated_generated_c_acceptance_8616(
+                    status="ok",
+                    payload=self.helper_model,
+                    tail_validation_snapshot=self.helper_tail_validation_snapshot,
+                    tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+                    expected_validation_stages=["structuring", "postprocess"],
+                    c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+                    emit_failure_diagnostics=False,
+                )
+                self.helper_status = self.helper_acceptance.status
+                self.helper_blocker = self.helper_acceptance.blocker
+                self.helper_payload = self.helper_acceptance.gcc_checked_payload
+                if self.helper_status == "ok" and self.helper_blocker is None:
+                    self.direct_result = replace(
+                        self.direct_result,
+                        status=self.helper_status,
+                        payload=self.helper_payload,
+                        partial_payload=None,
+                        tail_validation=self.helper_tail_validation_snapshot,
+                        validated_payload_hash=self.helper_acceptance.validated_payload_hash,
+                        gcc_checked_payload_hash=self.helper_acceptance.gcc_checked_payload_hash,
+                    )
+        return None
+
+    def _phase_direct_failure_emit_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if (
+            self.direct_result.status != "ok"
+            and not self.clinic_core_timeout
+            and _direct_addr_robust_retry_enabled_8616(timeout_was_explicit=self.timeout_was_explicit)
+        ):
+            # Robust direct-address retry lane: reuse the same function-work
+            # decompile path as whole-file sweeps. This avoids direct-only
+            # recovery/decompile divergence for functions that are stable in
+            # the sweep lane but brittle in the thin direct lane.
+            try:
+                self.robust_blocks, self.robust_bytes = _function_complexity(self.func)
+                self.robust_timeout = _effective_decompile_timeout_8616(
+                    self.direct_project,
+                    self.args.timeout,
+                    block_count=self.robust_blocks,
+                    byte_count=self.robust_bytes,
+                )
+                self.robust_item = FunctionWorkItem(index=1, function_cfg=self.cfg, function=self.func)
+                self.robust_result = _run_function_work_item(
+                    self.robust_item,
+                    timeout=max(1, int(self.robust_timeout)),
+                    api_style=self.args.api_style,
+                    binary_path=self.args.binary,
+                    lst_metadata=self.lst_metadata,
+                    cod_metadata=self.cod_metadata,
+                    synthetic_globals=self.synthetic_globals,
+                    enable_structured_simplify=True,
+                    enable_postprocess=True,
+                    allow_isolated_retry=True,
+                )
+            except Exception:
+                self.robust_result = None
+            if self.robust_result is not None and self.robust_result.status == "ok":
+                self.robust_snapshot = _tail_validation_snapshot_for_function_run(self.direct_project, self.func)
+                if not self.robust_snapshot and isinstance(self.robust_result.tail_validation, dict):
+                    self.robust_snapshot = self.robust_result.tail_validation
+                self.robust_tail_validation_snapshot = self.robust_snapshot if self.robust_snapshot else None
+                self.robust_acceptance = _validated_generated_c_acceptance_8616(
+                    status="ok",
+                    payload=self.robust_result.payload,
+                    tail_validation_snapshot=self.robust_tail_validation_snapshot,
+                    tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+                    expected_validation_stages=["structuring", "postprocess"],
+                    c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+                    emit_failure_diagnostics=False,
+                )
+                if self.robust_acceptance.status == "ok" and self.robust_acceptance.blocker is None:
+                    self.direct_result = replace(
+                        self.robust_result,
+                        index=1,
+                        function=self.func,
+                        function_cfg=self.cfg,
+                        payload=self.robust_acceptance.gcc_checked_payload,
+                        tail_validation=self.robust_snapshot,
+                        validated_payload_hash=self.robust_acceptance.validated_payload_hash,
+                        gcc_checked_payload_hash=self.robust_acceptance.gcc_checked_payload_hash,
+                    )
+        return None
+
+    def _phase_direct_serial_gate_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.direct_result.status == "timeout":
+            _emit_tail_validation_snapshot_or_uncollected(
+                self.cfg,
+                self.func,
+                self.direct_result.tail_validation,
+                binary_path=self.args.binary,
+            )
+            print(f"[dbg] direct decompilation timeout detail: {self.direct_result.payload}", file=sys.stderr)
+            print(f"\n/* Decompilation timeout: Timed out while recovering a function after {self.args.timeout}s during x86-16 function recovery. */")
+            print("/* Direct decompilation timeout is terminal for this function; skipping fallback lanes. */\n/* Tip: try a larger --timeout for larger binaries. */")
+            return 3
+        return None
+
+    def _phase_direct_emit_batch_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _rc = self._phase_direct_emit_batch_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _phase_direct_integrity_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.integrity.verdict in {
+            AcceptedPayloadIntegrityVerdict8616.MISSING_VALIDATED_HASH,
+            AcceptedPayloadIntegrityVerdict8616.MISSING_COMPILER_HASH,
+        }:
+            self.direct_result = _accept_function_work_result_for_emission_8616(
+                self.direct_result,
+                project=self.direct_project,
+            )
+            self.integrity = verify_function_work_result_payload_integrity_8616(self.direct_result)
+        return None
+
+    def _phase_direct_cache_store_8616(self) -> int | None:
+        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        if self.direct_cache_key is not None and self.direct_result.status == "ok":
+            _store_cache_json(
+                "function_decompile",
+                self.direct_cache_key,
+                {
+                    "status": self.direct_result.status,
+                    "payload": self.direct_result.payload,
+                    "tail_validation": self.direct_result.tail_validation,
+                    "tail_validation_passed": True,
+                    "elapsed": self.direct_result.elapsed,
+                    "block_count": self.direct_result.block_count,
+                    "byte_count": self.direct_result.byte_count,
+                    "validated_c_hash": self.direct_result.validated_payload_hash,
+                    "gcc_checked_c_hash": self.direct_result.gcc_checked_payload_hash,
+                    "diagnostic_output": (
+                        self.direct_result.debug_output
+                        if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
+                        else None
+                    ),
+                    "failure_family_snapshot": self.direct_failure_family_snapshot.to_record(),
+                },
+            )
+        return None
+
+
+    def run_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        """Run the direct-address CLI branch after project and sidecar setup."""
+        self.args = self.context.args
+        self.direct_addr = self.args.addr
+        if self.direct_addr is None:
+            raise ValueError("direct-address CLI branch requires args.addr")
+        self.project = self.context.project
+        self.direct_request_cache_lookup = load_direct_request_cache_8616(
+            self.context.request_cache_inputs,
+            enabled=direct_request_cache_enabled_8616(self.args),
+        )
+        _rc = self._phase_direct_header_8616()
+        if _rc is not None:
+            return _rc
+        if self.direct_request_cache_lookup.verdict is DirectRequestCacheVerdict8616.REFUSED:
+            print(
+                "[dbg] direct request cache refused: acceptance_proof",
                 file=sys.stderr,
                 flush=True,
             )
-            return (
-                *result,
-                snapshot,
-                segment_program_function_evidence_for_function_8616(direct_project, func),
-                FailureFamilyState(
-                    previous_snapshot=direct_failure_family_state.previous_snapshot,
-                    candidate_snapshot=direct_failure_family_state.candidate_snapshot,
-                    new_proof_seen=direct_failure_family_state.new_proof_seen,
-                    repeat_detected=direct_failure_family_state.repeat_detected,
-                ),
-                debug_output,
+        _hydrate_serial_clean_worker_evidence_8616(self.project)
+        self.clean_worker_caller_return_evidence_by_addr = dict(caller_return_use_evidence_by_addr_8616(self.project))
+        self.function_label = self.context.function_label
+        self.cod_metadata = self.context.cod_metadata
+        self.synthetic_globals = self.context.synthetic_globals
+        self.lst_metadata = self.context.lst_metadata
+        self.prefer_fast_recovery = self.context.prefer_fast_recovery
+        self.proc_resolved_to_linked_binary = self.context.proc_resolved_to_linked_binary
+        self.low_memory_path = self.context.low_memory_path
+        self.interactive_stdout = self.context.interactive_stdout
+        self.precise_sidecar_regions = self.context.precise_sidecar_regions
+        return None
+    def run_8616_part1_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        self.timeout_was_explicit = self.context.timeout_was_explicit
+        print("/* recovering function... */", flush=True)
+        self.fast_direct_probe_requested = os.environ.get("INERTIA_FAST_DIRECT_PROBE", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.fast_direct_probe = bool(
+            self.fast_direct_probe_requested and self.timeout_was_explicit and isinstance(self.args.timeout, int) and self.args.timeout <= 6
+        )
+        self.direct_budget_timeout = self.args.timeout
+        if self.project.arch.name == "86_16" and not self.fast_direct_probe:
+            # Keep direct-address recovery deterministic under explicit user
+            # timeout; avoid inflating into outer subprocess timeouts.
+            if self.timeout_was_explicit and isinstance(self.args.timeout, int):
+                self.direct_budget_timeout = max(self.args.timeout, 1)
+            else:
+                self.direct_budget_timeout = max(self.direct_budget_timeout, 24)
+        self.direct_addr_started_at = time.monotonic()
+        self.direct_addr_deadline = self.direct_addr_started_at + _direct_addr_wall_clock_budget(
+            self.args.timeout,
+            effective_timeout=self.direct_budget_timeout,
+            explicit_timeout=bool(self.timeout_was_explicit),
+        )
+        self.budget_fallback_addr: int | None = None
+        self.budget_fallback_name: str | None = None
+        self.canonical_direct_addr = _canonicalize_direct_addr_from_sidecar_padding_8616(
+            self.project,
+            self.lst_metadata,
+            self.direct_addr,
+            function_label=self.function_label,
+        )
+        return None
+    def run_8616_part2_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if self.canonical_direct_addr is not None:
+            print(
+                "/* direct address canonicalized from "
+                f"{self.canonical_direct_addr.requested_addr:#x} to {self.canonical_direct_addr.canonical_addr:#x} "
+                "using sidecar padding/prologue evidence */",
+                file=sys.stderr,
+                flush=True,
             )
+            self.direct_addr = self.canonical_direct_addr.canonical_addr
+            self.args.addr = self.direct_addr
+            if self.function_label is None and self.canonical_direct_addr.name:
+                self.function_label = self.canonical_direct_addr.name
+        _rc = self._phase_direct_cfg_recovery_8616()
+        if _rc is not None:
+            return _rc
+        if self.project.arch.name == "86_16":
+            record_direct_target_caller_return_use_evidence_8616(
+                self.project,
+                self.direct_addr,
+                binary_path=self.args.binary,
+            )
+        _rc = self._phase_direct_probe_setup_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_catalog_8616()
+        if _rc is not None:
+            return _rc
+        if self.function_label is not None:
+            self.func.name = self.function_label
+        elif self.lst_metadata is not None:
+            self.code_name = self.lst_metadata.code_labels.get(function_original_addr(self.func))
+            if self.code_name is not None:
+                self.func.name = self.code_name
+        return None
+    def run_8616_part3_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        self.direct_project = getattr(self.func, "project", self.project)
+        _rc = self._phase_direct_fast_probe_8616()
+        if _rc is not None:
+            return _rc
+        _transfer_caller_return_use_evidence_8616(self.project, self.direct_project)
+        typing.cast(typing.Any, self.direct_project)._inertia_trace_c_stages = bool(self.args.trace_c_stages)
+        typing.cast(typing.Any, self.direct_project)._inertia_dump_layers = bool(self.args.dump_layers)
+        typing.cast(typing.Any, self.direct_project)._inertia_dump_layer_root = self.args.dump_layer_dir
+        typing.cast(typing.Any, self.direct_project)._inertia_dump_layer_filter = self.args.dump_layer_filter
+        if bool(self.args.alternate_source_c) and getattr(self.project.arch, "name", "") == "86_16":
+            typing.cast(typing.Any, self.direct_project)._inertia_enable_typed_switch_seqnode_replacement_8616 = True
+        _apply_binary_specific_annotations(
+            self.direct_project,
+            self.args.binary,
+            self.lst_metadata,
+            func_addr=function_original_addr(self.func),
+            cod_metadata=self.cod_metadata,
+            synthetic_globals=self.synthetic_globals,
+        )
+        print(f"/* binary: {self.args.binary} */")
+        print(f"/* arch: {self.project.arch.name} */")
+        print(f"/* entry: {self.project.entry:#x} */")
+        print(f"/* function: {function_original_addr(self.func):#x} {self.func.name} */")
+        if self.args.show_asm:
+            print("\n/* == asm == */")
+            print(_format_first_block_asm(self.direct_project, self.func.addr))
+        self.known_helper_model = _try_emit_known_runtime_helper_c(name=getattr(self.func, "name", ""))
+        _rc = self._phase_direct_helper_model_8616()
+        if _rc is not None:
+            return _rc
+        return None
+    def run_8616_part4_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        self.direct_cache_item = FunctionWorkItem(index=1, function_cfg=self.cfg, function=self.func)
+        self.direct_cache_result, self.direct_cache_debug, self.direct_cache_key, self._, self._ = _function_work_cache_lookup(
+            self.direct_cache_item,
+            binary_path=self.args.binary,
+            timeout=max(1, int(self.args.timeout)),
+            api_style=self.args.api_style,
+            enable_structured_simplify=True,
+            enable_postprocess=True,
+            cod_metadata=self.cod_metadata,
+            synthetic_globals=self.synthetic_globals,
+            lst_metadata=self.lst_metadata,
+        )
+        _rc = self._phase_direct_cache_failure_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_known_cache_8616()
+        if _rc is not None:
+            return _rc
+        print("/* decompiling... */", flush=True)
+        self.direct_tail_validation_snapshot: dict[str, object] | None = None
+        self.direct_segment_program_evidence: SegmentProgramFunctionEvidence8616 | None = None
+        self.direct_failure_family_state = FailureFamilyState()
+        self.direct_sidecar_verdict = "not_attempted"
+        self.direct_nonoptimized_verdict = "not_attempted"
+        self.direct_timeout_stage: str | None = None
+        self.direct_debug_output = ""
+        self._block_count, self._byte_count = _function_complexity(self.func)
+        self._elapsed = 0.0
+        _rc = self._phase_direct_probe_recovery_8616()
+        if _rc is not None:
+            return _rc
+        return None
+    def run_8616_part5_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        _rc = self.run_8616_part5_8616_b0()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part5_8616_b1()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part5_8616_b2()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        try:
 
-        # The inner decompilation path already enforces the analysis deadline.
-        # Give the forked direct-address wrapper a few extra seconds to merge
-        # tail-validation snapshots and serialize the result back to the parent.
-        _direct_blocks, _direct_bytes = _function_complexity(func)
-        _direct_effective_timeout = _effective_decompile_timeout_8616(
-            direct_project,
-            args.timeout,
-            block_count=_direct_blocks,
-            byte_count=_direct_bytes,
+
+            _rc = self._phase_direct_cfg_recovery_8616_part0_8616_zb0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_direct_cfg_recovery_8616_part0_8616_zb1()
+            if _rc is not None:
+                return _rc
+        except _AnalysisTimeout:
+            _rc = self._phase_direct_cfg_recovery_8616_part0_8616_zh0()
+            if _rc is not None:
+                return _rc
+        except FuturesTimeoutError:
+            _rc = self._phase_direct_cfg_recovery_8616_part0_8616_zh1()
+            if _rc is not None:
+                return _rc
+        except Exception as ex:
+            _rc = self._phase_direct_cfg_recovery_8616_part0_8616_zh2(ex)
+            if _rc is not None:
+                return _rc
+        return None
+    def _phase_direct_probe_recovery_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        try:
+
+
+            # The inner decompilation path already enforces the analysis deadline.
+            # Give the forked direct-address wrapper a few extra seconds to merge
+            # tail-validation snapshots and serialize the result back to the parent.
+            _rc = self._phase_direct_probe_recovery_8616_part0_8616_b0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_direct_probe_recovery_8616_part0_8616_b1()
+            if _rc is not None:
+                return _rc
+        except FuturesTimeoutError:
+            self.status = "timeout"
+            self.payload = f"Timed out after {self.direct_decompile_timeout}s."
+            self.partial_payload = None
+            self._elapsed = max(0.0, time.monotonic() - self.direct_addr_started_at)
+            self.direct_timeout_stage = _direct_timeout_failure_stage_from_payload(self.payload, default="decompilation")
+        else:
+            self.direct_timeout_stage = (
+                _direct_timeout_failure_stage_from_payload(
+                    self.payload,
+                    default="decompilation",
+                )
+                if self.status == "timeout"
+                else None
+            )
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if self.direct_result.status != "ok":
+
+
+
+            # Repeated direct runs can land on different internal lanes. Keep
+            # the least raw/unresolved candidate before heavy fallback fan-out.
+            _rc = self._phase_direct_emit_batch_8616_part0_8616_zb0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_direct_emit_batch_8616_part0_8616_zb1()
+            if _rc is not None:
+                return _rc
+        return None
+
+
+    def run_8616_part5_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.direct_item = FunctionWorkItem(index=1, function_cfg=self.cfg, function=self.func)
+        self.direct_result = FunctionWorkResult(
+            index=1,
+            status=self.status,
+            payload=self.payload,
+            debug_output=self.direct_debug_output,
+            function=self.func,
+            function_cfg=self.cfg,
+            partial_payload=self.partial_payload,
+            failure_stage=self.direct_timeout_stage,
+            tail_validation=self.direct_tail_validation_snapshot
+            or _tail_validation_snapshot_for_function_run(self.direct_project, self.func),
+            elapsed=self._elapsed,
+            block_count=self._block_count,
+            byte_count=self._byte_count,
+            segment_program_function_evidence=self.direct_segment_program_evidence,
         )
-        _direct_effective_timeout = _direct_analysis_timeout_for_shape(
-            _direct_effective_timeout,
-            _direct_blocks,
-            _direct_bytes,
+        self.direct_acceptance = _validated_generated_c_acceptance_8616(
+            status=self.direct_result.status,
+            payload=self.direct_result.payload,
+            tail_validation_snapshot=self.direct_result.tail_validation,
+            tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+            expected_validation_stages=["structuring", "postprocess"],
+            c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+            emit_failure_diagnostics=_env_truthy_8616("INERTIA_DUMP_VALIDATION_FAILED_PAYLOAD"),
         )
-        direct_addr_deadline = max(
-            direct_addr_deadline,
-            direct_addr_started_at
+        self.direct_status = self.direct_acceptance.status
+        self.direct_blocker = self.direct_acceptance.blocker
+        _rc = self._phase_direct_status_sync_8616()
+        if _rc is not None:
+            return _rc
+        self.direct_result = replace(
+            self.direct_result,
+            status=self.direct_status,
+            payload=self.direct_blocker if self.direct_blocker is not None else self.direct_payload,
+            partial_payload=self.preserved_candidate if self.direct_blocker is not None else self.direct_result.partial_payload,
+            validated_payload_hash=(self.direct_acceptance.validated_payload_hash if self.direct_blocker is None else None),
+            gcc_checked_payload_hash=(self.direct_acceptance.gcc_checked_payload_hash if self.direct_blocker is None else None),
+        )
+        if self.direct_status == "validation_failed" and isinstance(self.direct_result.tail_validation, dict):
+            typing.cast(typing.Any, self.direct_project)._inertia_forced_tail_validation_snapshot = dict(self.direct_result.tail_validation)
+        return None
+    def run_8616_part5_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self.run_8616_part5_8616_b1_s0()
+        if _rc is not None:
+            return _rc
+        _rc = self.run_8616_part5_8616_b1_s1()
+        if _rc is not None:
+            return _rc
+        return None
+    def run_8616_part5_8616_b2(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_serial_gate_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616()
+        if _rc is not None:
+            return _rc
+        self.integrity = verify_function_work_result_payload_integrity_8616(self.direct_result)
+        _rc = self._phase_direct_integrity_8616()
+        if _rc is not None:
+            return _rc
+        if not self.integrity.passed:
+            print(f"[tail-validation] {self.integrity.diagnostic()}", file=sys.stderr, flush=True)
+            return 4
+        _emit_tail_validation_console_summary([self.direct_item], {1: self.direct_result}, binary_path=self.args.binary)
+        _store_direct_request_result_8616(
+            self.context,
+            self.direct_request_cache_lookup,
+            self.direct_result,
+            function_addr=function_original_addr(self.func),
+            function_name=self.func.name,
+        )
+        if self.args.output_c_dir is not None:
+            write_generated_function_c(
+                self.args.output_c_dir,
+                address=function_original_addr(self.func),
+                name=self.func.name,
+                payload=self.direct_result.payload,
+            )
+        _emit_optional_source_sidecar_c_block(
+            self.args.binary,
+            self.func.name,
+            self.direct_result.payload,
+            alternate_source_c=bool(self.args.alternate_source_c),
+            c_header="\n/* == c == */",
+        )
+        _rc = self._phase_direct_cache_store_8616()
+        if _rc is not None:
+            return _rc
+        _write_serial_clean_worker_result_8616(self.direct_result, project=self.direct_project)
+        return 0
+    def _phase_direct_cfg_recovery_8616_part0_8616_e00(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self._enforce_direct_addr_budget_timeout()
+        self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_addr) if self.lst_metadata is not None else None
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e01(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.precise_sidecar_regions and self.sidecar_region is not None:
+            self.code_name = _lst_code_label(self.lst_metadata, self.sidecar_region[0], self.project.entry) or f"sub_{self.direct_addr:x}"
+            self.slice_result = _try_decompile_sidecar_slice(
+                self.project,
+                self.lst_metadata,
+                self.sidecar_region[0],
+                self.code_name,
+                timeout=max(1, min(self.args.timeout, self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+            )
+            if self.slice_result is not None and self.slice_result.status == "ok":
+                self.fallback_function = SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name)
+                print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    self.project,
+                    None,
+                    self.fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
+                    binary_path=self.args.binary,
+                )
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.code_name,
+                    self.slice_result.payload,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c == */",
+                )
+                return 0
+            self._enforce_direct_addr_budget_timeout()
+            self.nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
+                self.project,
+                self.sidecar_region[0],
+                self.code_name,
+                timeout=max(1, min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+                lst_metadata=self.lst_metadata,
+                cod_metadata=self.cod_metadata,
+            )
+            self.nonopt_c = _non_optimized_slice_rendered(self.nonopt_result)
+            if self.nonopt_c is not None:
+                self.fallback_function = SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name)
+                print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    self.project,
+                    None,
+                    self.fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                    binary_path=self.args.binary,
+                )
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.code_name,
+                    self.nonopt_c,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c (non-optimized fallback) == */",
+                )
+                return 0
+            self.string_c = _try_emit_string_intrinsic_c(
+                self.project,
+                start=self.sidecar_region[0],
+                end=self.sidecar_region[1],
+                name=self.code_name,
+            )
+            if self.string_c is not None:
+                print(
+                    "/* Function recovery timed out; emitted generic string-intrinsic fallback from sidecar bounds. */"
+                )
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    self.project,
+                    None,
+                    SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name),
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                    binary_path=self.args.binary,
+                )
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.code_name,
+                    self.string_c,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c (string intrinsic fallback) == */",
+                )
+                return 0
+            print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
+            print("/* direct validation=failed */")
+            _emit_failed_timeout_acceptance_hints_8616()
+            print(f"/* binary: {self.args.binary} */")
+            print(f"/* arch: {self.project.arch.name} */")
+            print(f"/* entry: {self.project.entry:#x} */")
+            print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+            _emit_tail_validation_for_function_run_or_uncollected(
+                self.project,
+                None,
+                SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name),
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
+                binary_path=self.args.binary,
+            )
+            print("\n/* == asm fallback == */")
+            print(_format_asm_range(self.project, self.sidecar_region[0], self.sidecar_region[1]))
+            return 4
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e02(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.nonopt_result = None
+        self._enforce_direct_addr_budget_timeout()
+        self.nonopt_result = _try_decompile_non_optimized_slice(
+            self.project,
+            self.direct_addr,
+            self.function_label or f"sub_{self.direct_addr:x}",
+            timeout=max(1, min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1)),
+            api_style=self.args.api_style,
+            binary_path=self.args.binary,
+            lst_metadata=self.lst_metadata,
+            cod_metadata=self.cod_metadata,
+        )
+        self.nonopt_c = _non_optimized_slice_rendered(self.nonopt_result)
+        if self.nonopt_c is not None:
+            self.fallback_function = SimpleNamespace(addr=self.direct_addr, name=self.function_label or f"sub_{self.direct_addr:x}")
+            print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+            print(f"/* binary: {self.args.binary} */")
+            print(f"/* arch: {self.project.arch.name} */")
+            print(f"/* entry: {self.project.entry:#x} */")
+            print(f"/* function: {self.direct_addr:#x} {self.function_label or f'sub_{self.direct_addr:x}'} */")
+            _emit_tail_validation_for_function_run_or_uncollected(
+                self.project,
+                None,
+                self.fallback_function,
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                binary_path=self.args.binary,
+            )
+            _emit_optional_source_sidecar_c_block(
+                self.args.binary,
+                self.fallback_function.name,
+                self.nonopt_c,
+                alternate_source_c=bool(self.args.alternate_source_c),
+                c_header="\n/* == c (non-optimized fallback) == */",
+            )
+            return 0
+        self.fallback_function = SimpleNamespace(addr=self.direct_addr, name=self.function_label or f"sub_{self.direct_addr:x}")
+        self.start, self.end = _infer_linear_disassembly_window(self.project, self.direct_addr)
+        self.string_c = _try_emit_string_intrinsic_c(
+            self.project,
+            start=self.start,
+            end=self.end,
+            name=self.fallback_function.name,
+        )
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e03(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.string_c is not None:
+            print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
+            print(f"/* binary: {self.args.binary} */")
+            print(f"/* arch: {self.project.arch.name} */")
+            print(f"/* entry: {self.project.entry:#x} */")
+            print(f"/* function: {self.direct_addr:#x} {self.fallback_function.name} */")
+            _emit_tail_validation_for_function_run_or_uncollected(
+                self.project,
+                None,
+                self.fallback_function,
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                binary_path=self.args.binary,
+            )
+            self.nonopt_skip_reason = describe_non_optimized_unavailable(
+                allow_heavy_fallbacks=True,
+                skip_heavy_fallbacks_for_result=False,
+                interactive_stdout=self.interactive_stdout,
+                max_functions=self.args.max_functions,
+                addr_requested=self.direct_addr is not None,
+                result_status="timeout",
+                failure_stage=None,
+                nonopt_failure_detail=_non_optimized_slice_failure_detail(self.nonopt_result),
+            )
+            if self.nonopt_skip_reason is not None:
+                print(f"/* non-optimized fallback unavailable: {self.nonopt_skip_reason} */")
+            _emit_optional_source_sidecar_c_block(
+                self.args.binary,
+                self.fallback_function.name,
+                self.string_c,
+                alternate_source_c=bool(self.args.alternate_source_c),
+                c_header="\n/* == c (string intrinsic fallback) == */",
+            )
+            return 0
+        self.asm_fallback = _format_asm_range(self.project, self.start, self.end)
+        self.recovery_detail = _function_recovery_detail(getattr(self.project, "_inertia_decompiler_stage", None))
+        if self.recovery_detail is None:
+            self.recovery_detail = "during x86-16 function recovery (direct-address path)"
+        print(f"/* timeout: function {self.direct_addr:#x} {self.function_label or f'sub_{self.direct_addr:x}'} */")
+        self._stored_snapshot = getattr(self.project, "_inertia_last_tail_validation_snapshot", None)
+        if isinstance(self._stored_snapshot, dict) and self._stored_snapshot:
+            for __diag_line_lp8616 in _format_tail_validation_diagnostic(
+                self.direct_result.tail_validation,
+                function_addr=self.func.addr,
+                function_name=self.func.name,
+                block_count=self.direct_result.block_count,
+                byte_count=self.direct_result.byte_count,
+                exit_kind=self.direct_result.status,
+                exit_detail=self.direct_result.payload,
+            ):
+                self._diag_line = __diag_line_lp8616
+                print(__diag_line_lp8616)
+        _emit_timeout_and_exit(self.args.timeout, self.recovery_detail)
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e10(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self._enforce_direct_addr_budget_timeout()
+        self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_addr) if self.lst_metadata is not None else None
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e11(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.precise_sidecar_regions and self.sidecar_region is not None:
+            self.code_name = _lst_code_label(self.lst_metadata, self.sidecar_region[0], self.project.entry) or f"sub_{self.direct_addr:x}"
+            self.slice_result = _try_decompile_sidecar_slice(
+                self.project,
+                self.lst_metadata,
+                self.sidecar_region[0],
+                self.code_name,
+                timeout=max(1, min(self.args.timeout, self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+            )
+            if self.slice_result is not None and self.slice_result.status == "ok":
+                self.fallback_function = SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name)
+                print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    self.project,
+                    None,
+                    self.fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
+                    binary_path=self.args.binary,
+                )
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.code_name,
+                    self.slice_result.payload,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c == */",
+                )
+                return 0
+            self._enforce_direct_addr_budget_timeout()
+            self.nonopt_result = _try_decompile_non_optimized_slice(
+                self.project,
+                self.sidecar_region[0],
+                self.code_name,
+                timeout=max(1, min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+                lst_metadata=self.lst_metadata,
+                cod_metadata=self.cod_metadata,
+            )
+            self.nonopt_c = _non_optimized_slice_rendered(self.nonopt_result)
+            if self.nonopt_c is not None:
+                self.fallback_function = SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name)
+                print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    self.project,
+                    None,
+                    self.fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                    binary_path=self.args.binary,
+                )
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.code_name,
+                    self.nonopt_c,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c (non-optimized fallback) == */",
+                )
+                return 0
+            self.string_c = _try_emit_string_intrinsic_c(
+                self.project,
+                start=self.sidecar_region[0],
+                end=self.sidecar_region[1],
+                name=self.code_name,
+            )
+            if self.string_c is not None:
+                print(
+                    "/* Function recovery timed out; emitted generic string-intrinsic fallback from sidecar bounds. */"
+                )
+                print(f"/* binary: {self.args.binary} */")
+                print(f"/* arch: {self.project.arch.name} */")
+                print(f"/* entry: {self.project.entry:#x} */")
+                print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    self.project,
+                    None,
+                    SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name),
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                    binary_path=self.args.binary,
+                )
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.code_name,
+                    self.string_c,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c (string intrinsic fallback) == */",
+                )
+                return 0
+            print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
+            print("/* direct validation=failed */")
+            _emit_failed_timeout_acceptance_hints_8616()
+            print(f"/* binary: {self.args.binary} */")
+            print(f"/* arch: {self.project.arch.name} */")
+            print(f"/* entry: {self.project.entry:#x} */")
+            print(f"/* function: {self.sidecar_region[0]:#x} {self.code_name} */")
+            _emit_tail_validation_for_function_run_or_uncollected(
+                self.project,
+                None,
+                SimpleNamespace(addr=self.sidecar_region[0], name=self.code_name),
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
+                binary_path=self.args.binary,
+            )
+            print("\n/* == asm fallback == */")
+            print(_format_asm_range(self.project, self.sidecar_region[0], self.sidecar_region[1]))
+            return 4
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e12(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.nonopt_result = None
+        if self.precise_sidecar_regions:
+            self._enforce_direct_addr_budget_timeout()
+            self.nonopt_result = _try_decompile_non_optimized_slice(
+                self.project,
+                self.direct_addr,
+                self.function_label or f"sub_{self.direct_addr:x}",
+                timeout=max(1, min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+                lst_metadata=self.lst_metadata,
+                cod_metadata=self.cod_metadata,
+            )
+        self.nonopt_c = _non_optimized_slice_rendered(self.nonopt_result)
+        if self.nonopt_c is not None:
+            self.fallback_function = SimpleNamespace(addr=self.direct_addr, name=self.function_label or f"sub_{self.direct_addr:x}")
+            print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+            print(f"/* binary: {self.args.binary} */")
+            print(f"/* arch: {self.project.arch.name} */")
+            print(f"/* entry: {self.project.entry:#x} */")
+            print(f"/* function: {self.direct_addr:#x} {self.function_label or f'sub_{self.direct_addr:x}'} */")
+            _emit_tail_validation_for_function_run_or_uncollected(
+                self.project,
+                None,
+                self.fallback_function,
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                binary_path=self.args.binary,
+            )
+            _emit_optional_source_sidecar_c_block(
+                self.args.binary,
+                self.fallback_function.name,
+                self.nonopt_c,
+                alternate_source_c=bool(self.args.alternate_source_c),
+                c_header="\n/* == c (non-optimized fallback) == */",
+            )
+            return 0
+        self.fallback_function = SimpleNamespace(addr=self.direct_addr, name=self.function_label or f"sub_{self.direct_addr:x}")
+        self.start, self.end = _infer_linear_disassembly_window(self.project, self.direct_addr)
+        self.string_c = _try_emit_string_intrinsic_c(
+            self.project,
+            start=self.start,
+            end=self.end,
+            name=self.fallback_function.name,
+        )
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_e13(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.string_c is not None:
+            print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
+            print(f"/* binary: {self.args.binary} */")
+            print(f"/* arch: {self.project.arch.name} */")
+            print(f"/* entry: {self.project.entry:#x} */")
+            print(f"/* function: {self.direct_addr:#x} {self.fallback_function.name} */")
+            _emit_tail_validation_for_function_run_or_uncollected(
+                self.project,
+                None,
+                self.fallback_function,
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                binary_path=self.args.binary,
+            )
+            self.nonopt_skip_reason = describe_non_optimized_unavailable(
+                allow_heavy_fallbacks=True,
+                skip_heavy_fallbacks_for_result=False,
+                interactive_stdout=self.interactive_stdout,
+                max_functions=self.args.max_functions,
+                addr_requested=self.direct_addr is not None,
+                result_status="timeout",
+                failure_stage=None,
+                nonopt_failure_detail=_non_optimized_slice_failure_detail(self.nonopt_result),
+            )
+            if self.nonopt_skip_reason is not None:
+                print(f"/* non-optimized fallback unavailable: {self.nonopt_skip_reason} */")
+            _emit_optional_source_sidecar_c_block(
+                self.args.binary,
+                self.fallback_function.name,
+                self.string_c,
+                alternate_source_c=bool(self.args.alternate_source_c),
+                c_header="\n/* == c (string intrinsic fallback) == */",
+            )
+            return 0
+        self.asm_fallback = _format_asm_range(self.project, self.start, self.end)
+        self.recovery_detail = _function_recovery_detail(getattr(self.project, "_inertia_decompiler_stage", None))
+        if self.recovery_detail is None:
+            self.recovery_detail = "during x86-16 function recovery (direct-address path)"
+        print(f"/* timeout: function {self.direct_addr:#x} {self.function_label or f'sub_{self.direct_addr:x}'} */")
+        self._stored_snapshot = getattr(self.project, "_inertia_last_tail_validation_snapshot", None)
+        if isinstance(self._stored_snapshot, dict) and self._stored_snapshot:
+            for __diag_line_lp8616 in _format_tail_validation_diagnostic(
+                self.direct_result.tail_validation,
+                function_addr=self.func.addr,
+                function_name=self.func.name,
+                block_count=self.direct_result.block_count,
+                byte_count=self.direct_result.byte_count,
+                exit_kind=self.direct_result.status,
+                exit_detail=self.direct_result.payload,
+            ):
+                self._diag_line = __diag_line_lp8616
+                print(__diag_line_lp8616)
+        _emit_timeout_and_exit(self.args.timeout, self.recovery_detail)
+        return None
+    def _phase_direct_probe_recovery_8616_part0_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self._direct_blocks, self._direct_bytes = _function_complexity(self.func)
+        self._direct_effective_timeout = _effective_decompile_timeout_8616(
+            self.direct_project,
+            self.args.timeout,
+            block_count=self._direct_blocks,
+            byte_count=self._direct_bytes,
+        )
+        self._direct_effective_timeout = self._direct_analysis_timeout_for_shape(
+            self._direct_effective_timeout,
+            self._direct_blocks,
+            self._direct_bytes,
+        )
+        self.direct_addr_deadline = max(
+            self.direct_addr_deadline,
+            self.direct_addr_started_at
             + _direct_addr_wall_clock_budget(
-                args.timeout,
-                effective_timeout=_direct_effective_timeout,
-                explicit_timeout=bool(timeout_was_explicit),
+                self.args.timeout,
+                effective_timeout=self._direct_effective_timeout,
+                explicit_timeout=bool(self.timeout_was_explicit),
             ),
         )
-        direct_decompile_timeout = _enforce_function_timeout_cap(
-            max(1, _direct_effective_timeout) + 28,
+        self.direct_decompile_timeout = _enforce_function_timeout_cap(
+            max(1, self._direct_effective_timeout) + 28,
             context="direct analysis wrapper timeout",
-            explicit_timeout_floor=(max(1, _direct_effective_timeout) + 28 if timeout_was_explicit else None),
+            explicit_timeout_floor=(max(1, self._direct_effective_timeout) + 28 if self.timeout_was_explicit else None),
         )
-        if timeout_was_explicit and isinstance(args.timeout, int) and args.timeout <= 6:
-            if _direct_blocks >= 4 or _direct_bytes >= 0x50:
-                direct_decompile_timeout = min(direct_decompile_timeout, args.timeout + 20)
+        if self.timeout_was_explicit and isinstance(self.args.timeout, int) and self.args.timeout <= 6:
+            if self._direct_blocks >= 4 or self._direct_bytes >= 0x50:
+                self.direct_decompile_timeout = min(self.direct_decompile_timeout, self.args.timeout + 20)
             else:
-                direct_decompile_timeout = min(direct_decompile_timeout, args.timeout + 8)
+                self.direct_decompile_timeout = min(self.direct_decompile_timeout, self.args.timeout + 8)
             # For larger explicit x86-16 functions, retain the shape-aware
             # budget calculated above. Capping it to ``args.timeout + 32``
             # defeats the large-function allowance and turns normal xdist
             # contention into a false direct-decompilation timeout. The small
             # timeout lane remains deliberately bounded because it is used by
             # fast discovery probes rather than full function recovery.
-        remaining_direct_budget = _remaining_direct_addr_budget() or 1
-        budgeted_direct_decompile_timeout = max(1, min(direct_decompile_timeout, remaining_direct_budget))
-        direct_decompile_timeout = _enforce_function_timeout_cap(
-            budgeted_direct_decompile_timeout,
+        self.remaining_direct_budget = self._remaining_direct_addr_budget() or 1
+        self.budgeted_direct_decompile_timeout = max(1, min(self.direct_decompile_timeout, self.remaining_direct_budget))
+        self.direct_decompile_timeout = _enforce_function_timeout_cap(
+            self.budgeted_direct_decompile_timeout,
             context="direct direct-address budget timeout",
-            explicit_timeout_floor=(budgeted_direct_decompile_timeout if timeout_was_explicit else None),
+            explicit_timeout_floor=(self.budgeted_direct_decompile_timeout if self.timeout_was_explicit else None),
         )
-        use_fork_for_direct = _direct_addr_use_fork_lane_8616(
-            tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
+        self.use_fork_for_direct = _direct_addr_use_fork_lane_8616(
+            tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
         )
+        return None
+    def _phase_direct_probe_recovery_8616_part0_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
         with span(
             "direct.decompile_job",
-            addr=hex(getattr(func, "addr", 0)),
-            name=getattr(func, "name", None),
-            timeout=direct_decompile_timeout,
-            isolated="fork" if use_fork_for_direct else "thread",
-            blocks=_direct_blocks,
-            bytes=_direct_bytes,
+            addr=hex(getattr(self.func, "addr", 0)),
+            name=getattr(self.func, "name", None),
+            timeout=self.direct_decompile_timeout,
+            isolated="fork" if self.use_fork_for_direct else "thread",
+            blocks=self._direct_blocks,
+            bytes=self._direct_bytes,
         ):
-            if use_fork_for_direct:
-                direct_job_result = _run_with_timeout_in_fork(
-                        direct_decompile_job,
-                        timeout=direct_decompile_timeout,
+            if self.use_fork_for_direct:
+                self.direct_job_result = _run_with_timeout_in_fork(
+                        self.direct_decompile_job,
+                        timeout=self.direct_decompile_timeout,
                     )
             else:
-                direct_job_result = _run_with_timeout_in_daemon_thread(
-                        direct_decompile_job,
-                        timeout=direct_decompile_timeout,
+                self.direct_job_result = _run_with_timeout_in_daemon_thread(
+                        self.direct_decompile_job,
+                        timeout=self.direct_decompile_timeout,
                         thread_name_prefix="direct-decomp",
                     )
-            status, payload, partial_payload, _block_count, _byte_count, _elapsed, *direct_extra = direct_job_result
-            annotate_current_span(status=status)
-            for extra in direct_extra:
-                if isinstance(extra, dict):
-                    direct_tail_validation_snapshot = dict(extra)
-                elif isinstance(extra, SegmentProgramFunctionEvidence8616):
-                    direct_segment_program_evidence = extra
-                elif isinstance(extra, FailureFamilyState):
-                    direct_failure_family_state.previous_snapshot = extra.previous_snapshot
-                    direct_failure_family_state.candidate_snapshot = extra.candidate_snapshot
-                    direct_failure_family_state.new_proof_seen = extra.new_proof_seen
-                    direct_failure_family_state.repeat_detected = extra.repeat_detected
-                elif isinstance(extra, str):
-                    direct_debug_output = extra
-    except FuturesTimeoutError:
-        status = "timeout"
-        payload = f"Timed out after {direct_decompile_timeout}s."
-        partial_payload = None
-        _elapsed = max(0.0, time.monotonic() - direct_addr_started_at)
-        direct_timeout_stage = _direct_timeout_failure_stage_from_payload(payload, default="decompilation")
-    else:
-        direct_timeout_stage = (
-            _direct_timeout_failure_stage_from_payload(
-                payload,
-                default="decompilation",
-            )
-            if status == "timeout"
-            else None
+            self.status, self.payload, self.partial_payload, self._block_count, self._byte_count, self._elapsed, *self.direct_extra = self.direct_job_result
+            annotate_current_span(status=self.status)
+            for _extra_lp8616 in self.direct_extra:
+                self.extra = _extra_lp8616
+                if isinstance(_extra_lp8616, dict):
+                    self.direct_tail_validation_snapshot = dict(_extra_lp8616)
+                elif isinstance(_extra_lp8616, SegmentProgramFunctionEvidence8616):
+                    self.direct_segment_program_evidence = _extra_lp8616
+                elif isinstance(_extra_lp8616, FailureFamilyState):
+                    self.direct_failure_family_state.previous_snapshot = _extra_lp8616.previous_snapshot
+                    self.direct_failure_family_state.candidate_snapshot = _extra_lp8616.candidate_snapshot
+                    self.direct_failure_family_state.new_proof_seen = _extra_lp8616.new_proof_seen
+                    self.direct_failure_family_state.repeat_detected = _extra_lp8616.repeat_detected
+                elif isinstance(_extra_lp8616, str):
+                    self.direct_debug_output = _extra_lp8616
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.direct_result.status == "validation_failed":
+            _rc = self._phase_direct_emit_batch_8616_part0_8616_b0_zb0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_direct_emit_batch_8616_part0_8616_b0_zb1()
+            if _rc is not None:
+                return _rc
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self._enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address decompilation budget")
+        self.direct_display_addr = function_original_addr(self.func)
+        self.using_rebased_direct_slice = self.direct_project is not self.project
+        self.direct_project_fallback_addr = _direct_addr_project_local_fallback_addr_8616(
+            function=self.func,
+            direct_display_addr=self.direct_display_addr,
+            using_rebased_direct_slice=self.using_rebased_direct_slice,
         )
-    direct_item = FunctionWorkItem(index=1, function_cfg=cfg, function=func)
-    direct_result = FunctionWorkResult(
-        index=1,
-        status=status,
-        payload=payload,
-        debug_output=direct_debug_output,
-        function=func,
-        function_cfg=cfg,
-        partial_payload=partial_payload,
-        failure_stage=direct_timeout_stage,
-        tail_validation=direct_tail_validation_snapshot
-        or _tail_validation_snapshot_for_function_run(direct_project, func),
-        elapsed=_elapsed,
-        block_count=_block_count,
-        byte_count=_byte_count,
-        segment_program_function_evidence=direct_segment_program_evidence,
-    )
-    direct_acceptance = _validated_generated_c_acceptance_8616(
-        status=direct_result.status,
-        payload=direct_result.payload,
-        tail_validation_snapshot=direct_result.tail_validation,
-        tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-        expected_validation_stages=["structuring", "postprocess"],
-        c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-        emit_failure_diagnostics=_env_truthy_8616("INERTIA_DUMP_VALIDATION_FAILED_PAYLOAD"),
-    )
-    direct_status = direct_acceptance.status
-    direct_blocker = direct_acceptance.blocker
-
-    def _preserve_best_failure_candidate(result: FunctionWorkResult) -> str | None:
-        candidates = [
-            text for text in (result.payload, result.partial_payload) if isinstance(text, str) and text.strip()
-        ]
-        if not candidates:
-            return None
-
-        def _rank(text: str) -> tuple[int, int]:
-            quality = assess_decompiled_c_text(text)
-            quality_violations = len(quality.markers) if quality.reject_as_decompiled else 0
-            return (
-                -quality_violations,
-                len(text),
-            )
-
-        return max(candidates, key=_rank)
-
-    def _preserve_acceptance_candidate_or_best_failure(
-        acceptance: CAcceptanceResult8616,
-        result: FunctionWorkResult,
-    ) -> str | None:
-        if acceptance.status == "ok" and acceptance.blocker is None:
-            checked_payload = acceptance.gcc_checked_payload
-            if checked_payload.strip():
-                return checked_payload
-            if acceptance.validated_payload.strip():
-                return acceptance.validated_payload
-        return _preserve_best_failure_candidate(result)
-
-    if direct_status != direct_result.status or direct_blocker is not None:
-        preserved_candidate = _preserve_acceptance_candidate_or_best_failure(direct_acceptance, direct_result)
-        direct_payload = direct_acceptance.gcc_checked_payload
-    else:
-        direct_payload = (
-            direct_acceptance.gcc_checked_payload
-            if direct_status is WorkItemStatus.OK
-            else direct_result.payload
+        self.slice_result = None
+        self.sidecar_closed_nonopt = False
+        self.known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
+        self.reserve_budget_for_rebased_sidecar = (
+            self.using_rebased_direct_slice and self.precise_sidecar_regions and self.direct_result.status == "validation_failed"
         )
-        preserved_candidate = direct_result.partial_payload
-    direct_result = replace(
-        direct_result,
-        status=direct_status,
-        payload=direct_blocker if direct_blocker is not None else direct_payload,
-        partial_payload=preserved_candidate if direct_blocker is not None else direct_result.partial_payload,
-        validated_payload_hash=(direct_acceptance.validated_payload_hash if direct_blocker is None else None),
-        gcc_checked_payload_hash=(direct_acceptance.gcc_checked_payload_hash if direct_blocker is None else None),
-    )
-    if direct_status == "validation_failed" and isinstance(direct_result.tail_validation, dict):
-        typing.cast(typing.Any, direct_project)._inertia_forced_tail_validation_snapshot = dict(direct_result.tail_validation)
-    if direct_result.status in {"empty", "validation_failed"}:
-        evidence_payload, evidence_snapshot = _recover_binary_evidence_c_8616(direct_project, func)
-        if isinstance(evidence_payload, str) and evidence_payload.strip() and isinstance(evidence_snapshot, dict):
-            evidence_acceptance = _validated_generated_c_acceptance_8616(
-                status="ok",
-                payload=evidence_payload,
-                tail_validation_snapshot=evidence_snapshot,
-                tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-                expected_validation_stages=["structuring", "postprocess"],
-                c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-                emit_failure_diagnostics=False,
-            )
-            if evidence_acceptance.status == "ok" and evidence_acceptance.blocker is None:
-                direct_result = replace(
-                    direct_result,
-                    status="ok",
-                    payload=evidence_acceptance.gcc_checked_payload,
-                    partial_payload=None,
-                    tail_validation=evidence_snapshot,
-                    validated_payload_hash=evidence_acceptance.validated_payload_hash,
-                    gcc_checked_payload_hash=evidence_acceptance.gcc_checked_payload_hash,
-                )
-    if (
-        direct_result.status == "empty"
-        and isinstance(direct_result.partial_payload, str)
-        and direct_result.partial_payload.strip()
-    ):
-        partial_acceptance = _validated_generated_c_acceptance_8616(
-            status="ok",
-            payload=direct_result.partial_payload,
-            tail_validation_snapshot=direct_result.tail_validation,
-            tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-            expected_validation_stages=["structuring", "postprocess"],
-            c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-            emit_failure_diagnostics=False,
-        )
-        if partial_acceptance.status == "ok" and partial_acceptance.blocker is None:
-            direct_result = replace(
-                direct_result,
-                status="ok",
-                payload=partial_acceptance.gcc_checked_payload,
-                partial_payload=None,
-                validated_payload_hash=partial_acceptance.validated_payload_hash,
-                gcc_checked_payload_hash=partial_acceptance.gcc_checked_payload_hash,
-            )
-    if (
-        canonical_direct_addr is not None
-        and canonical_direct_addr.requested_addr != canonical_direct_addr.canonical_addr
-        and not args.ignore_local_sidecar_hints
-        and _work_item_status_8616(direct_result.status) is WorkItemStatus.VALIDATION_FAILED
-    ):
-        assert lst_metadata is not None
-        return _run_canonicalized_direct_clean_worker_8616(
-            project,
-            args,
-            lst_metadata,
-            canonical_direct_addr,
-            function_label=function_label,
-            caller_return_evidence_by_addr=clean_worker_caller_return_evidence_by_addr,
-        )
-    if direct_result.status != "ok":
-        helper_model = (
-            _try_emit_known_runtime_helper_c(name=getattr(func, "name", ""))
-            if isinstance(getattr(func, "name", None), str)
-            else None
-        )
-        if isinstance(helper_model, str):
-            helper_snapshot = {
-                "structuring": {
-                    "status": "stable",
-                    "mode": "helper_model",
-                    "changed": False,
-                    "detail": f"known compiler/runtime helper model: {getattr(func, 'name', 'sub')}",
-                },
-                "postprocess": {
-                    "status": "stable",
-                    "mode": "helper_model",
-                    "changed": False,
-                    "detail": f"known compiler/runtime helper model: {getattr(func, 'name', 'sub')}",
-                },
-            }
-            helper_tail_validation_snapshot: dict[str, object] = dict(helper_snapshot)
-            helper_acceptance = _validated_generated_c_acceptance_8616(
-                status="ok",
-                payload=helper_model,
-                tail_validation_snapshot=helper_tail_validation_snapshot,
-                tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-                expected_validation_stages=["structuring", "postprocess"],
-                c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-                emit_failure_diagnostics=False,
-            )
-            helper_status = helper_acceptance.status
-            helper_blocker = helper_acceptance.blocker
-            helper_payload = helper_acceptance.gcc_checked_payload
-            if helper_status == "ok" and helper_blocker is None:
-                direct_result = replace(
-                    direct_result,
-                    status=helper_status,
-                    payload=helper_payload,
-                    partial_payload=None,
-                    tail_validation=helper_tail_validation_snapshot,
-                    validated_payload_hash=helper_acceptance.validated_payload_hash,
-                    gcc_checked_payload_hash=helper_acceptance.gcc_checked_payload_hash,
-                )
-    if os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616):
-        direct_result = replace(direct_result, failure_family_snapshot=_direct_failure_snapshot(direct_result))
-        if _complete_serial_clean_worker_result_8616(direct_result, project=direct_project):
-            return 0
-    direct_timeout_payload = direct_result.payload
-    _direct_blocks_for_timeout_guard, _direct_bytes_for_timeout_guard = _function_complexity(func)
-    clinic_core_timeout = isinstance(direct_timeout_payload, str) and (
-        "core:clinic:" in direct_timeout_payload
-        or "timed out after" in direct_timeout_payload.lower()
-        or (
-            direct_result.status == "empty"
-            and getattr(project.arch, "name", "") == "86_16"
-            and (_direct_blocks_for_timeout_guard >= 32 or _direct_bytes_for_timeout_guard >= 280)
-            and "decompiler did not produce code" in direct_timeout_payload.lower()
-        )
-    )
-    if (
-        direct_result.status != "ok"
-        and not clinic_core_timeout
-        and _direct_addr_robust_retry_enabled_8616(timeout_was_explicit=timeout_was_explicit)
-    ):
-        # Robust direct-address retry lane: reuse the same function-work
-        # decompile path as whole-file sweeps. This avoids direct-only
-        # recovery/decompile divergence for functions that are stable in
-        # the sweep lane but brittle in the thin direct lane.
-        try:
-            robust_blocks, robust_bytes = _function_complexity(func)
-            robust_timeout = _effective_decompile_timeout_8616(
-                direct_project,
-                args.timeout,
-                block_count=robust_blocks,
-                byte_count=robust_bytes,
-            )
-            robust_item = FunctionWorkItem(index=1, function_cfg=cfg, function=func)
-            robust_result = _run_function_work_item(
-                robust_item,
-                timeout=max(1, int(robust_timeout)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-                synthetic_globals=synthetic_globals,
-                enable_structured_simplify=True,
-                enable_postprocess=True,
-                allow_isolated_retry=True,
-            )
-        except Exception:
-            robust_result = None
-        if robust_result is not None and robust_result.status == "ok":
-            robust_snapshot = _tail_validation_snapshot_for_function_run(direct_project, func)
-            if not robust_snapshot and isinstance(robust_result.tail_validation, dict):
-                robust_snapshot = robust_result.tail_validation
-            robust_tail_validation_snapshot = robust_snapshot if robust_snapshot else None
-            robust_acceptance = _validated_generated_c_acceptance_8616(
-                status="ok",
-                payload=robust_result.payload,
-                tail_validation_snapshot=robust_tail_validation_snapshot,
-                tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-                expected_validation_stages=["structuring", "postprocess"],
-                c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-                emit_failure_diagnostics=False,
-            )
-            if robust_acceptance.status == "ok" and robust_acceptance.blocker is None:
-                direct_result = replace(
-                    robust_result,
-                    index=1,
-                    function=func,
-                    function_cfg=cfg,
-                    payload=robust_acceptance.gcc_checked_payload,
-                    tail_validation=robust_snapshot,
-                    validated_payload_hash=robust_acceptance.validated_payload_hash,
-                    gcc_checked_payload_hash=robust_acceptance.gcc_checked_payload_hash,
-                )
-    direct_failure_family_snapshot = _direct_failure_snapshot(direct_result)
-    budget_fallback_addr = function_original_addr(func)
-    budget_fallback_name = func.name
-    direct_result = replace(direct_result, failure_family_snapshot=direct_failure_family_snapshot)
-    if direct_result.debug_output:
-        print(direct_result.debug_output, file=sys.stderr, end="")
-    print(f"[dbg] direct failure family: {direct_failure_family_snapshot.label()}", file=sys.stderr)
-    if direct_result.status == "error":
-        _print_stop_on_first_failure_8616(func, direct_result)
-        return 6
-    if direct_result.status == "timeout":
-        _emit_tail_validation_snapshot_or_uncollected(
-            cfg,
-            func,
-            direct_result.tail_validation,
-            binary_path=args.binary,
-        )
-        print(f"[dbg] direct decompilation timeout detail: {direct_result.payload}", file=sys.stderr)
-        print(f"\n/* Decompilation timeout: Timed out while recovering a function after {args.timeout}s during x86-16 function recovery. */")
-        print("/* Direct decompilation timeout is terminal for this function; skipping fallback lanes. */\n/* Tip: try a larger --timeout for larger binaries. */")
-        return 3
-    if direct_result.status != "ok":
-
-        def _candidate_text_for_rank(result: FunctionWorkResult) -> str:
-            payload_text = result.payload if isinstance(result.payload, str) and result.payload.strip() else ""
-            partial_text = (
-                result.partial_payload
-                if isinstance(result.partial_payload, str) and result.partial_payload.strip()
-                else ""
-            )
-            if payload_text and not partial_text:
-                return payload_text
-            if partial_text and not payload_text:
-                return partial_text
-            if not payload_text and not partial_text:
-                return ""
-
-            def _text_rank(text: str) -> tuple[int, int, int]:
-                quality = assess_decompiled_c_text(text)
-                quality_violations = len(quality.markers) if quality.reject_as_decompiled else 0
-                present_calls = _non_probe_call_count_for_fallback_rank_8616(text)
-                return (
-                    -quality_violations,
-                    present_calls,
-                    len(text),
-                )
-
-            return payload_text if _text_rank(payload_text) >= _text_rank(partial_text) else partial_text
-
-        def _candidate_rank(result: FunctionWorkResult) -> tuple[int, int, int]:
-            text = _candidate_text_for_rank(result)
-            quality = assess_decompiled_c_text(text)
-            quality_violations = len(quality.markers) if quality.reject_as_decompiled else 0
-            present_calls = _non_probe_call_count_for_fallback_rank_8616(text)
-            return (
-                -quality_violations,
-                present_calls,
-                len(text),
-            )
-
-        # Repeated direct runs can land on different internal lanes. Keep
-        # the least raw/unresolved candidate before heavy fallback fan-out.
-        if direct_result.status == "validation_failed":
-            best_direct_candidate = direct_result
-            best_direct_rank = _candidate_rank(direct_result)
-            retry_count = _direct_addr_validation_retry_count_8616(
-                timeout_was_explicit=timeout_was_explicit,
-                args_timeout=args.timeout,
-            )
-            for retry_idx in range(retry_count):
-                try:
-                    retry_status, retry_payload, retry_partial, *retry_extra = _run_with_timeout_in_daemon_thread(
-                        direct_decompile_job,
-                        timeout=max(1, min(args.timeout, 8)),
-                        thread_name_prefix=f"direct-decomp-retry-{retry_idx + 1}",
-                    )
-                    retry_tail_validation = None
-                    for extra in retry_extra:
-                        if isinstance(extra, dict):
-                            retry_tail_validation = dict(extra)
-                    retry_result = FunctionWorkResult(
-                        index=1,
-                        status=retry_status,
-                        payload=retry_payload,
-                        debug_output="",
-                        function=func,
-                        function_cfg=cfg,
-                        partial_payload=retry_partial,
-                        tail_validation=retry_tail_validation
-                        or _tail_validation_snapshot_for_function_run(direct_project, func),
-                    )
-                    retry_acceptance = _validated_generated_c_acceptance_8616(
-                        status=retry_result.status,
-                        payload=retry_result.payload,
-                        tail_validation_snapshot=retry_result.tail_validation,
-                        tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-                        expected_validation_stages=["structuring", "postprocess"],
-                        c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-                        emit_failure_diagnostics=False,
-                    )
-                    retry_checked_status = retry_acceptance.status
-                    retry_blocker = retry_acceptance.blocker
-                    if retry_checked_status != retry_result.status or retry_blocker is not None:
-                        retry_preserved_candidate = _preserve_acceptance_candidate_or_best_failure(
-                            retry_acceptance,
-                            retry_result,
-                        )
-                        retry_result = replace(
-                            retry_result,
-                            status=retry_checked_status,
-                            payload=retry_blocker if retry_blocker is not None else retry_result.payload,
-                            partial_payload=retry_preserved_candidate
-                            if retry_blocker is not None
-                            else retry_result.partial_payload,
-                        )
-                    else:
-                        retry_result = replace(
-                            retry_result,
-                            payload=retry_acceptance.gcc_checked_payload,
-                            validated_payload_hash=retry_acceptance.validated_payload_hash,
-                            gcc_checked_payload_hash=retry_acceptance.gcc_checked_payload_hash,
-                        )
-                    retry_rank = _candidate_rank(retry_result)
-                    if retry_result.status == "ok":
-                        direct_result = retry_result
-                        best_direct_candidate = retry_result
-                        best_direct_rank = retry_rank
-                        break
-                    if retry_rank > best_direct_rank:
-                        best_direct_candidate = retry_result
-                        best_direct_rank = retry_rank
-                except Exception:
-                    continue
-            if direct_result.status != "ok":
-                current_rank = _candidate_rank(direct_result)
-                if best_direct_rank > current_rank:
-                    direct_result = best_direct_candidate
-
-        _enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address decompilation budget")
-        direct_display_addr = function_original_addr(func)
-        using_rebased_direct_slice = direct_project is not project
-        direct_project_fallback_addr = _direct_addr_project_local_fallback_addr_8616(
-            function=func,
-            direct_display_addr=direct_display_addr,
-            using_rebased_direct_slice=using_rebased_direct_slice,
-        )
-        slice_result = None
-        sidecar_closed_nonopt = False
-        known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
-        reserve_budget_for_rebased_sidecar = (
-            using_rebased_direct_slice and precise_sidecar_regions and direct_result.status == "validation_failed"
-        )
-        skip_heavy_validation_fallbacks = _direct_addr_should_skip_heavy_validation_fallbacks_8616(
-            timeout_was_explicit=timeout_was_explicit,
-            args_timeout=args.timeout,
-            direct_status=direct_result.status,
-            partial_payload=direct_result.partial_payload,
+        self.skip_heavy_validation_fallbacks = _direct_addr_should_skip_heavy_validation_fallbacks_8616(
+            timeout_was_explicit=self.timeout_was_explicit,
+            args_timeout=self.args.timeout,
+            direct_status=self.direct_result.status,
+            partial_payload=self.direct_result.partial_payload,
         )
         # Cap heavy fallback fan-out per function to keep direct-addr mode
         # deterministic and prevent minute-long retry storms.
-        if fast_direct_probe or skip_heavy_validation_fallbacks:
-            heavy_fallback_budget = 0
-        elif timeout_was_explicit and isinstance(args.timeout, int):
-            heavy_fallback_budget = 1
+        if self.fast_direct_probe or self.skip_heavy_validation_fallbacks:
+            self.heavy_fallback_budget = 0
+        elif self.timeout_was_explicit and isinstance(self.args.timeout, int):
+            self.heavy_fallback_budget = 1
         else:
-            heavy_fallback_budget = 2 if direct_result.status == "validation_failed" else 4
+            self.heavy_fallback_budget = 2 if self.direct_result.status == "validation_failed" else 4
 
-        def _consume_heavy_fallback_budget() -> bool:
-            nonlocal heavy_fallback_budget
-            if heavy_fallback_budget <= 0:
-                return False
-            heavy_fallback_budget -= 1
-            return True
 
-        def _current_direct_partial_payload() -> str | None:
-            candidate = direct_result.partial_payload
-            return candidate if isinstance(candidate, str) and candidate.strip() else None
 
-        def _accept_direct_fallback_payload(
-            payload_text: str,
-            *,
-            tail_validation_snapshot: dict[str, object] | None = None,
-        ) -> str | None:
-            payload_for_acceptance = payload_text
-            snapshot = dict(tail_validation_snapshot) if isinstance(tail_validation_snapshot, dict) else None
-            for attr_name in (
-                "_inertia_partial_tail_validation_snapshot",
-                "_inertia_last_tail_validation_snapshot",
-            ):
-                if snapshot is not None:
-                    break
-                attr_value = getattr(direct_project, attr_name, None)
-                if isinstance(attr_value, dict):
-                    snapshot = dict(attr_value)
-                    break
-            if snapshot is None:
-                snapshot = _tail_validation_snapshot_for_function_run(direct_project, func)
-            checked_acceptance = _validated_generated_c_acceptance_8616(
-                status="ok",
-                payload=payload_for_acceptance,
-                tail_validation_snapshot=snapshot,
-                tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
-                expected_validation_stages=["structuring", "postprocess"],
-                c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
-                emit_failure_diagnostics=False,
-            )
-            checked_status = checked_acceptance.status
-            checked_blocker = checked_acceptance.blocker
-            if checked_status == "ok":
-                print("[dbg] direct fallback validation=passed", file=sys.stderr)
-                return checked_acceptance.gcc_checked_payload or payload_for_acceptance
-            _dump_validation_failed_payload_if_requested_8616(
-                payload_for_acceptance,
-                prefix=f"fallback_{func.addr:x}_{func.name}",
-            )
-            print(
-                f"[dbg] rejected direct fallback payload: {checked_status} detail={checked_blocker or 'n/a'}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return None
 
-        exact_retry_blocked = (
-            direct_failure_family_state.repeat_detected and not direct_failure_family_state.new_proof_seen
+        self.exact_retry_blocked = (
+            self.direct_failure_family_state.repeat_detected and not self.direct_failure_family_state.new_proof_seen
         )
-        if direct_result.status == "empty":
-            partial_payload_text = (
-                direct_result.partial_payload if isinstance(direct_result.partial_payload, str) else None
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b2(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.direct_result.status == "empty":
+            self.partial_payload_text = (
+                self.direct_result.partial_payload if isinstance(self.direct_result.partial_payload, str) else None
             )
-            if isinstance(partial_payload_text, str) and partial_payload_text.strip():
-                snapshot = direct_result.tail_validation
-                checked_acceptance = _validated_generated_c_acceptance_8616(
+            if isinstance(self.partial_payload_text, str) and self.partial_payload_text.strip():
+                self.snapshot = self.direct_result.tail_validation
+                self.checked_acceptance = _validated_generated_c_acceptance_8616(
                     status="ok",
-                    payload=partial_payload_text,
-                    tail_validation_snapshot=snapshot,
-                    tail_validation_enabled=_tail_validation_runtime_enabled(direct_project),
+                    payload=self.partial_payload_text,
+                    tail_validation_snapshot=self.snapshot,
+                    tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
                     expected_validation_stages=["structuring", "postprocess"],
-                    c_target=getattr(direct_project, "_inertia_c_target", "portable-flat"),
+                    c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
                     emit_failure_diagnostics=False,
                 )
-                checked_status = checked_acceptance.status
-                checked_blocker = checked_acceptance.blocker
-                if checked_status == "ok" and checked_blocker is None:
-                    direct_result = replace(
-                        direct_result,
+                self.checked_status = self.checked_acceptance.status
+                self.checked_blocker = self.checked_acceptance.blocker
+                if self.checked_status == "ok" and self.checked_blocker is None:
+                    self.direct_result = replace(
+                        self.direct_result,
                         status="ok",
-                        payload=checked_acceptance.gcc_checked_payload,
+                        payload=self.checked_acceptance.gcc_checked_payload,
                         partial_payload=None,
-                        validated_payload_hash=checked_acceptance.validated_payload_hash,
-                        gcc_checked_payload_hash=checked_acceptance.gcc_checked_payload_hash,
+                        validated_payload_hash=self.checked_acceptance.validated_payload_hash,
+                        gcc_checked_payload_hash=self.checked_acceptance.gcc_checked_payload_hash,
                     )
                 else:
                     _dump_validation_failed_payload_if_requested_8616(
-                        partial_payload_text,
-                        prefix=f"direct_partial_{func.addr:x}_{func.name}",
+                        self.partial_payload_text,
+                        prefix=f"direct_partial_{self.func.addr:x}_{self.func.name}",
                     )
                     print(
-                        f"[dbg] rejected direct partial payload: {checked_status} detail={checked_blocker or 'n/a'}",
+                        f"[dbg] rejected direct partial payload: {self.checked_status} detail={self.checked_blocker or 'n/a'}",
                         file=sys.stderr,
                         flush=True,
                     )
-                    direct_result = replace(direct_result, partial_payload=None)
+                    self.direct_result = replace(self.direct_result, partial_payload=None)
             # Allow one non-optimized known-function lane even when the
             # optimized lane repeats an "empty" family; this is often a
             # recoverable clinic/core failure class for helper routines.
-            exact_retry_blocked = False
+            self.exact_retry_blocked = False
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b3(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
         if (
-            not fast_direct_probe
-            and direct_result.status != "ok"
-            and precise_sidecar_regions
-            and lst_metadata is not None
+            not self.fast_direct_probe
+            and self.direct_result.status != "ok"
+            and self.precise_sidecar_regions
+            and self.lst_metadata is not None
             and not (
-                timeout_was_explicit
-                and isinstance(args.timeout, int)
-                and args.timeout <= 6
-                and direct_result.status == "timeout"
+                self.timeout_was_explicit
+                and isinstance(self.args.timeout, int)
+                and self.args.timeout <= 6
+                and self.direct_result.status == "timeout"
             )
         ):
-            sidecar_region = _lst_code_region(lst_metadata, direct_display_addr)
-            direct_sidecar_verdict = "attempted"
-            if sidecar_region is not None:
-                try:
-                    sidecar_addr = sidecar_region[0]
-                    code_name = _lst_code_label(lst_metadata, sidecar_addr, project.entry) or func.name
-                    side_cfg, side_func = _recover_lst_function(
-                        project,
-                        lst_metadata,
-                        sidecar_addr if lst_metadata.absolute_addrs else sidecar_addr - project.entry,
-                        code_name,
-                        timeout=max(2, min(args.timeout, 8)),
-                        window=args.window,
-                        low_memory=low_memory_path,
-                        allow_rebased_exact_slice=False,
-                    )
-                    # Dynamic angr boundary: exact recovery may return a function owned by a slice project.
-                    side_project = getattr(side_func, "project", project)
-                    if not isinstance(side_project, angr.Project):
-                        side_project = project
-                    _transfer_caller_return_use_evidence_8616(project, side_project)
-                    with span(
-                        "direct.sidecar_retry",
-                        addr=hex(sidecar_addr),
-                        name=code_name,
-                        timeout=max(2, min(args.timeout, 8)),
-                    ):
-                        side_tail_from_decompile = None
-                        side_status, side_payload, *_ = _decompile_function_with_stats(
-                            side_project,
-                            side_cfg,
-                            side_func,
-                            max(2, min(args.timeout, 8)),
-                            args.api_style,
-                            args.binary,
-                            cod_metadata=cod_metadata,
-                            synthetic_globals=synthetic_globals,
-                            lst_metadata=lst_metadata,
-                            allow_isolated_retry=False,
-                            failure_family_state=direct_failure_family_state,
-                        )
-                        side_tail_candidate = getattr(
-                            side_project,
-                            "_inertia_last_validated_function_payload_snapshot",
-                            None,
-                        )
-                        function_tail_candidate = _retry_function_tail_validation_snapshot_8616(
-                            side_project,
-                            side_func,
-                        )
-                        if function_tail_candidate:
-                            side_tail_candidate = function_tail_candidate
-                        if not isinstance(side_tail_candidate, dict):
-                            side_tail_candidate = getattr(
-                                side_project,
-                                "_inertia_last_tail_validation_snapshot",
-                                None,
-                            )
-                        if isinstance(side_tail_candidate, dict):
-                            side_tail_from_decompile = dict(side_tail_candidate)
-                        annotate_current_span(status=side_status)
-                    direct_sidecar_verdict = side_status
-                    if side_status == "ok":
-                        side_tail = (
-                            side_tail_from_decompile
-                            if isinstance(side_tail_from_decompile, dict)
-                            else _retry_function_tail_validation_snapshot_8616(side_project, side_func)
-                        )
-                        _emit_tail_validation_snapshot_or_uncollected(
-                            side_cfg,
-                            side_func,
-                            side_tail,
-                            binary_path=args.binary,
-                        )
-                        side_acceptance = _validated_generated_c_acceptance_8616(
-                            status=side_status,
-                            payload=side_payload,
-                            tail_validation_snapshot=side_tail,
-                            tail_validation_enabled=_tail_validation_runtime_enabled(side_project),
-                            expected_validation_stages=["structuring", "postprocess"],
-                            c_target=getattr(side_project, "_inertia_c_target", "portable-flat"),
-                        )
-                        side_status_checked = side_acceptance.status
-                        side_payload_checked = side_acceptance.gcc_checked_payload
-                        if side_status_checked != "ok":
-                            side_status = side_status_checked
-                    if side_status == "ok":
-                        accepted_side_payload = (
-                            side_payload_checked if isinstance(side_payload_checked, str) else side_payload
-                        )
-                        print("[dbg] direct sidecar fallback validation=passed", file=sys.stderr)
-                        _emit_optional_source_sidecar_c_block(
-                            args.binary,
-                            side_func.name,
-                            accepted_side_payload,
-                            alternate_source_c=bool(args.alternate_source_c),
-                            c_header="\n/* == c (sidecar slice fallback) == */",
-                        )
-                        return 0
-                except (_AnalysisTimeout, Exception):
-                    direct_sidecar_verdict = "error"
-            _early_slice = _try_decompile_sidecar_slice(
-                project,
-                lst_metadata,
-                direct_display_addr,
-                func.name,
-                timeout=max(2, min(8, args.timeout) if isinstance(args.timeout, int) else 8),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                failure_family_state=direct_failure_family_state,
-            )
-            if _early_slice is not None:
-                direct_sidecar_verdict = _early_slice.status
-            if _early_slice is not None and _early_slice.status == "ok":
-                _emit_sidecar_slice_tail_validation_snapshot_8616(
-                    cfg,
-                    func,
-                    _early_slice.snapshot,
-                    binary_path=args.binary,
-                )
-                accepted_payload = _accept_direct_fallback_payload(
-                    _early_slice.payload,
-                    tail_validation_snapshot=_early_slice.snapshot,
-                )
-                if accepted_payload is not None:
-                    _emit_optional_source_sidecar_c_block(
-                        args.binary,
-                        func.name,
-                        accepted_payload,
-                        alternate_source_c=bool(args.alternate_source_c),
-                        c_header="\n/* == c (sidecar slice fallback) == */",
-                    )
-                    return 0
-        allow_known_nonopt = (not exact_retry_blocked) or (direct_result.status in {"timeout", "validation_failed"})
-        if fast_direct_probe:
-            allow_known_nonopt = False
+            _rc = self._phase_direct_emit_batch_8616_part0_8616_b3_zb0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_direct_emit_batch_8616_part0_8616_b3_zb1()
+            if _rc is not None:
+                return _rc
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b4(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.allow_known_nonopt = (not self.exact_retry_blocked) or (self.direct_result.status in {"timeout", "validation_failed"})
+        if self.fast_direct_probe:
+            self.allow_known_nonopt = False
         if (
-            timeout_was_explicit
-            and isinstance(args.timeout, int)
-            and args.timeout > 6
-            and direct_result.status == "timeout"
+            self.timeout_was_explicit
+            and isinstance(self.args.timeout, int)
+            and self.args.timeout > 6
+            and self.direct_result.status == "timeout"
         ):
-            allow_known_nonopt = False
-        if _current_direct_partial_payload() is None:
-            if allow_known_nonopt and not _consume_heavy_fallback_budget():
-                allow_known_nonopt = False
-            if allow_known_nonopt:
-                _enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
-                known_nonopt_result = _try_decompile_non_optimized_known_function(
-                    direct_project,
-                    cfg,
-                    func,
+            self.allow_known_nonopt = False
+        if self._current_direct_partial_payload() is None:
+            if self.allow_known_nonopt and not self._consume_heavy_fallback_budget():
+                self.allow_known_nonopt = False
+            if self.allow_known_nonopt:
+                self._enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
+                self.known_nonopt_result = _try_decompile_non_optimized_known_function(
+                    self.direct_project,
+                    self.cfg,
+                    self.func,
                     timeout=max(
                         1,
-                        min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1),
+                        min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1),
                     ),
-                    api_style=args.api_style,
-                    binary_path=args.binary,
-                    lst_metadata=None if using_rebased_direct_slice else lst_metadata,
-                    cod_metadata=cod_metadata,
-                    synthetic_globals=synthetic_globals,
-                    failure_family_state=direct_failure_family_state,
+                    api_style=self.args.api_style,
+                    binary_path=self.args.binary,
+                    lst_metadata=None if self.using_rebased_direct_slice else self.lst_metadata,
+                    cod_metadata=self.cod_metadata,
+                    synthetic_globals=self.synthetic_globals,
+                    failure_family_state=self.direct_failure_family_state,
                 )
-                if known_nonopt_result is not None:
-                    direct_nonoptimized_verdict = (
-                        known_nonopt_result.status
-                        if isinstance(known_nonopt_result, NonOptimizedSliceOutcome)
+                if self.known_nonopt_result is not None:
+                    self.direct_nonoptimized_verdict = (
+                        self.known_nonopt_result.status
+                        if isinstance(self.known_nonopt_result, NonOptimizedSliceOutcome)
                         else "ok"
                     )
-        known_nonopt_c = _non_optimized_slice_rendered(known_nonopt_result)
-        if known_nonopt_c is not None:
-            fallback_snapshot = _tail_validation_snapshot_for_fallback(
-                direct_project,
-                func,
+        self.known_nonopt_c = _non_optimized_slice_rendered(self.known_nonopt_result)
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b5(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.known_nonopt_c is not None:
+            self.fallback_snapshot = _tail_validation_snapshot_for_fallback(
+                self.direct_project,
+                self.func,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
             )
             _emit_tail_validation_snapshot_or_uncollected(
-                cfg,
-                func,
-                fallback_snapshot,
-                binary_path=args.binary,
+                self.cfg,
+                self.func,
+                self.fallback_snapshot,
+                binary_path=self.args.binary,
             )
-            accepted_payload = _accept_direct_fallback_payload(
-                known_nonopt_c,
-                tail_validation_snapshot=fallback_snapshot,
+            self.accepted_payload = self._accept_direct_fallback_payload(
+                self.known_nonopt_c,
+                tail_validation_snapshot=self.fallback_snapshot,
             )
-            if accepted_payload is not None:
-                print(f"\n/* Decompilation {direct_result.status}: {direct_result.payload} */")
+            if self.accepted_payload is not None:
+                print(f"\n/* Decompilation {self.direct_result.status}: {self.direct_result.payload} */")
                 print("/* Falling back to known-function non-optimized decompilation. */")
                 _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    func.name,
-                    accepted_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
+                    self.args.binary,
+                    self.func.name,
+                    self.accepted_payload,
+                    alternate_source_c=bool(self.args.alternate_source_c),
                     c_header="\n/* == c (non-optimized fallback) == */",
                 )
                 return 0
-        _enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
-        generic_nonopt_result = None
-        if not reserve_budget_for_rebased_sidecar and _consume_heavy_fallback_budget():
-            generic_nonopt_result = _try_decompile_non_optimized_slice(
-                direct_project,
-                direct_project_fallback_addr,
-                func.name,
-                timeout=max(1, min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=None if using_rebased_direct_slice else lst_metadata,
-                cod_metadata=cod_metadata,
+        self._enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
+        self.generic_nonopt_result = None
+        if not self.reserve_budget_for_rebased_sidecar and self._consume_heavy_fallback_budget():
+            self.generic_nonopt_result = _try_decompile_non_optimized_slice(
+                self.direct_project,
+                self.direct_project_fallback_addr,
+                self.func.name,
+                timeout=max(1, min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+                lst_metadata=None if self.using_rebased_direct_slice else self.lst_metadata,
+                cod_metadata=self.cod_metadata,
                 allow_fresh_project_retry=False,
-                failure_family_state=direct_failure_family_state,
-                original_addr=direct_display_addr,
+                failure_family_state=self.direct_failure_family_state,
+                original_addr=self.direct_display_addr,
             )
-            if generic_nonopt_result is not None:
-                direct_nonoptimized_verdict = (
-                    generic_nonopt_result.status
-                    if isinstance(generic_nonopt_result, NonOptimizedSliceOutcome)
+            if self.generic_nonopt_result is not None:
+                self.direct_nonoptimized_verdict = (
+                    self.generic_nonopt_result.status
+                    if isinstance(self.generic_nonopt_result, NonOptimizedSliceOutcome)
                     else "ok"
                 )
-        generic_nonopt_c = _non_optimized_slice_rendered(generic_nonopt_result)
-        if generic_nonopt_c is not None:
-            fallback_snapshot = _tail_validation_snapshot_for_fallback(
-                direct_project,
-                func,
+        self.generic_nonopt_c = _non_optimized_slice_rendered(self.generic_nonopt_result)
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b6(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.generic_nonopt_c is not None:
+            self.fallback_snapshot = _tail_validation_snapshot_for_fallback(
+                self.direct_project,
+                self.func,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
             )
             _emit_tail_validation_snapshot_or_uncollected(
-                cfg,
-                func,
-                fallback_snapshot,
-                binary_path=args.binary,
+                self.cfg,
+                self.func,
+                self.fallback_snapshot,
+                binary_path=self.args.binary,
             )
-            accepted_payload = _accept_direct_fallback_payload(
-                generic_nonopt_c,
-                tail_validation_snapshot=fallback_snapshot,
+            self.accepted_payload = self._accept_direct_fallback_payload(
+                self.generic_nonopt_c,
+                tail_validation_snapshot=self.fallback_snapshot,
             )
-            if accepted_payload is not None:
-                print(f"\n/* Decompilation {direct_result.status}: {direct_result.payload} */")
+            if self.accepted_payload is not None:
+                print(f"\n/* Decompilation {self.direct_result.status}: {self.direct_result.payload} */")
                 print("/* Falling back to non-optimized slice decompilation. */")
                 _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    func.name,
-                    accepted_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
+                    self.args.binary,
+                    self.func.name,
+                    self.accepted_payload,
+                    alternate_source_c=bool(self.args.alternate_source_c),
                     c_header="\n/* == c (non-optimized fallback) == */",
                 )
                 return 0
-        exact_retry_blocked = (
-            direct_failure_family_state.repeat_detected and not direct_failure_family_state.new_proof_seen
+        self.exact_retry_blocked = (
+            self.direct_failure_family_state.repeat_detected and not self.direct_failure_family_state.new_proof_seen
         )
-        if direct_result.status == "validation_failed":
+        if self.direct_result.status == "validation_failed":
             # Validation-failed direct lane is frequently under-recovered
             # semantics. Allow exact sidecar retry even when the failure
             # family repeats so richer bounded slices can be considered.
-            exact_retry_blocked = False
-        if not fast_direct_probe and precise_sidecar_regions:  # noqa: SIM102
-            if not exact_retry_blocked:
-                _dbg_region = _lst_code_region(lst_metadata, direct_display_addr) if lst_metadata is not None else None
+            self.exact_retry_blocked = False
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b7(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if not self.fast_direct_probe and self.precise_sidecar_regions:  # noqa: SIM102
+            if not self.exact_retry_blocked:
+                self._dbg_region = _lst_code_region(self.lst_metadata, self.direct_display_addr) if self.lst_metadata is not None else None
                 print(
-                    f"[dbg] sidecar slice gate: precise={precise_sidecar_regions} rebased={using_rebased_direct_slice} blocked={exact_retry_blocked} addr={direct_display_addr:#x} region={_dbg_region}",
+                    f"[dbg] sidecar slice gate: precise={self.precise_sidecar_regions} rebased={self.using_rebased_direct_slice} blocked={self.exact_retry_blocked} addr={self.direct_display_addr:#x} region={self._dbg_region}",
                     file=sys.stderr,
                     flush=True,
                 )
-                _enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
-                sidecar_attempted = False
-                if _consume_heavy_fallback_budget():
-                    sidecar_attempted = True
-                    slice_result = _try_decompile_sidecar_slice(
-                        project,
-                        lst_metadata,
-                        direct_display_addr,
-                        func.name,
-                        timeout=max(1, min(args.timeout, _remaining_direct_addr_budget() or 1)),
-                        api_style=args.api_style,
-                        binary_path=args.binary,
-                        failure_family_state=direct_failure_family_state,
+                self._enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
+                self.sidecar_attempted = False
+                if self._consume_heavy_fallback_budget():
+                    self.sidecar_attempted = True
+                    self.slice_result = _try_decompile_sidecar_slice(
+                        self.project,
+                        self.lst_metadata,
+                        self.direct_display_addr,
+                        self.func.name,
+                        timeout=max(1, min(self.args.timeout, self._remaining_direct_addr_budget() or 1)),
+                        api_style=self.args.api_style,
+                        binary_path=self.args.binary,
+                        failure_family_state=self.direct_failure_family_state,
                     )
-                if slice_result is not None:
-                    direct_sidecar_verdict = slice_result.status
-                if sidecar_attempted and slice_result is None:
+                if self.slice_result is not None:
+                    self.direct_sidecar_verdict = self.slice_result.status
+                if self.sidecar_attempted and self.slice_result is None:
                     print("[dbg] sidecar slice attempt returned None", file=sys.stderr, flush=True)
-        if slice_result is not None:
-            if slice_result.status != "ok":
+        if self.slice_result is not None:
+            if self.slice_result.status != "ok":
                 print(
-                    f"[dbg] sidecar slice attempt status={slice_result.status} payload={slice_result.payload}",
+                    f"[dbg] sidecar slice attempt status={self.slice_result.status} payload={self.slice_result.payload}",
                     file=sys.stderr,
                     flush=True,
                 )
-                sidecar_closed_nonopt = sidecar_verdict_closes_non_optimized_lane(slice_result.verdict)
-                slice_result = None
+                self.sidecar_closed_nonopt = sidecar_verdict_closes_non_optimized_lane(self.slice_result.verdict)
+                self.slice_result = None
             else:
                 _emit_sidecar_slice_tail_validation_snapshot_8616(
-                    cfg,
-                    func,
-                    slice_result.snapshot,
-                    binary_path=args.binary,
+                    self.cfg,
+                    self.func,
+                    self.slice_result.snapshot,
+                    binary_path=self.args.binary,
                 )
-                accepted_payload = _accept_direct_fallback_payload(
-                    slice_result.payload,
-                    tail_validation_snapshot=slice_result.snapshot,
+                self.accepted_payload = self._accept_direct_fallback_payload(
+                    self.slice_result.payload,
+                    tail_validation_snapshot=self.slice_result.snapshot,
                 )
-                if accepted_payload is not None:
+                if self.accepted_payload is not None:
                     _emit_optional_source_sidecar_c_block(
-                        args.binary,
-                        func.name,
-                        accepted_payload,
-                        alternate_source_c=bool(args.alternate_source_c),
+                        self.args.binary,
+                        self.func.name,
+                        self.accepted_payload,
+                        alternate_source_c=bool(self.args.alternate_source_c),
                         c_header="\n/* == c (sidecar slice fallback) == */",
                     )
                     return 0
-        trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, direct_display_addr, func.name)
-        if trivial_c is not None:
+        self.trivial_c = _try_emit_trivial_sidecar_c(self.project, self.lst_metadata, self.direct_display_addr, self.func.name)
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b8(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.trivial_c is not None:
             _emit_tail_validation_for_function_run_or_uncollected(
-                direct_project,
-                cfg,
-                func,
+                self.direct_project,
+                self.cfg,
+                self.func,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
-                binary_path=args.binary,
+                binary_path=self.args.binary,
             )
             _emit_optional_source_sidecar_c_block(
-                args.binary,
-                func.name,
-                trivial_c,
-                alternate_source_c=bool(args.alternate_source_c),
+                self.args.binary,
+                self.func.name,
+                self.trivial_c,
+                alternate_source_c=bool(self.args.alternate_source_c),
                 c_header="\n/* == c (trivial sidecar fallback) == */",
             )
             return 0
-        nonopt_result = None
-        if (
-            partial_payload is None
-            and known_nonopt_c is None
-            and (precise_sidecar_regions or using_rebased_direct_slice)
-            and not sidecar_closed_nonopt
-            and not (direct_failure_family_state.repeat_detected and not direct_failure_family_state.new_proof_seen)
-            and _consume_heavy_fallback_budget()
-        ):
-            _enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
-            nonopt_result = _try_decompile_non_optimized_slice(
-                direct_project if using_rebased_direct_slice else project,
-                direct_project_fallback_addr,
-                func.name,
-                timeout=max(1, min(_bounded_non_optimized_timeout(args.timeout), _remaining_direct_addr_budget() or 1)),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=None if using_rebased_direct_slice else lst_metadata,
-                cod_metadata=cod_metadata,
+        self.nonopt_result = None
+        if self._direct_nonopt_probe_eligible_8616() and self._consume_heavy_fallback_budget():
+            self._enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address fallback budget")
+            self.nonopt_result = _try_decompile_non_optimized_slice(
+                self.direct_project if self.using_rebased_direct_slice else self.project,
+                self.direct_project_fallback_addr,
+                self.func.name,
+                timeout=max(1, min(_bounded_non_optimized_timeout(self.args.timeout), self._remaining_direct_addr_budget() or 1)),
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+                lst_metadata=None if self.using_rebased_direct_slice else self.lst_metadata,
+                cod_metadata=self.cod_metadata,
                 allow_fresh_project_retry=False,
-                failure_family_state=direct_failure_family_state,
-                original_addr=direct_display_addr,
+                failure_family_state=self.direct_failure_family_state,
+                original_addr=self.direct_display_addr,
             )
-        nonopt_c = _non_optimized_slice_rendered(nonopt_result)
-        if nonopt_c is not None:
-            fallback_snapshot = _tail_validation_snapshot_for_fallback(
-                direct_project,
-                func,
+        self.nonopt_c = _non_optimized_slice_rendered(self.nonopt_result)
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b9(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.nonopt_c is not None:
+            self.fallback_snapshot = _tail_validation_snapshot_for_fallback(
+                self.direct_project,
+                self.func,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
             )
             _emit_tail_validation_snapshot_or_uncollected(
-                cfg,
-                func,
-                fallback_snapshot,
-                binary_path=args.binary,
+                self.cfg,
+                self.func,
+                self.fallback_snapshot,
+                binary_path=self.args.binary,
             )
-            accepted_payload = _accept_direct_fallback_payload(
-                nonopt_c,
-                tail_validation_snapshot=fallback_snapshot,
+            self.accepted_payload = self._accept_direct_fallback_payload(
+                self.nonopt_c,
+                tail_validation_snapshot=self.fallback_snapshot,
             )
-            if accepted_payload is not None:
-                print(f"\n/* Decompilation {direct_result.status}: {direct_result.payload} */")
+            if self.accepted_payload is not None:
+                print(f"\n/* Decompilation {self.direct_result.status}: {self.direct_result.payload} */")
                 print("/* Falling back to non-optimized slice decompilation. */")
                 _emit_optional_source_sidecar_c_block(
-                    args.binary,
-                    func.name,
-                    accepted_payload,
-                    alternate_source_c=bool(args.alternate_source_c),
+                    self.args.binary,
+                    self.func.name,
+                    self.accepted_payload,
+                    alternate_source_c=bool(self.args.alternate_source_c),
                     c_header="\n/* == c (non-optimized fallback) == */",
                 )
                 return 0
-        current_partial_payload = _current_direct_partial_payload()
-        if current_partial_payload is not None:
-            _emit_tail_validation_snapshot_or_uncollected(
-                cfg,
-                func,
-                direct_result.tail_validation,
-                binary_path=args.binary,
-            )
-            partial_report = _partial_result_report_8616(direct_result.status)
-            payload_detail = direct_result.payload
-            if partial_report.status is WorkItemStatus.TIMEOUT:
-                timeout_text = "timeout"
-                if isinstance(direct_result.payload, str):
-                    m = re.search(r"Timed out after (\d+)s", direct_result.payload)
-                    if m is not None:
-                        timeout_text = f"Timed out after {m.group(1)}s."
-                payload_detail = (
-                    timeout_text if timeout_text != "timeout" else f"Timed out after {args.timeout}s."
-                )
-            print(f"/* {partial_report.heading}: {payload_detail} */")
-            if partial_report.show_timeout_delay:
-                direct_elapsed = direct_result.elapsed
-                if isinstance(direct_elapsed, (int, float)):
-                    print(f"/* timeout delay: {float(direct_elapsed):.2f}s */")
-            if partial_report.status is WorkItemStatus.VALIDATION_FAILED:
-                print("/* direct validation=failed */")
-            _emit_failed_timeout_acceptance_hints_8616()
-            print(f"/* non-optimized fallback failed: {partial_report.fallback_detail} */")
-            if "&sp_0" in current_partial_payload:
-                print("/* Source-evidenced loop call was hoisted outside loop in emitted C. */")
-            _emit_optional_source_sidecar_c_block(
-                args.binary,
-                func.name,
-                current_partial_payload,
-                alternate_source_c=bool(args.alternate_source_c),
-                c_header=partial_report.direct_c_header,
-            )
-            return 6 if direct_result.status == "error" else 4
-        sidecar_region = None
-        if lst_metadata is not None and not using_rebased_direct_slice:
-            sidecar_region = _lst_code_region(lst_metadata, direct_display_addr)
-        linear_window = (
-            None if sidecar_region is not None else _infer_linear_disassembly_window(direct_project, func.addr)
-        )
-        if sidecar_region is None and linear_window is None:
-            linear_window = _infer_linear_disassembly_window(direct_project, func.addr)
-        if sidecar_region is not None:
-            string_start, string_end = sidecar_region
-        else:
-            assert linear_window is not None
-            string_start, string_end = linear_window
-        string_c = _try_emit_string_intrinsic_c(
-            direct_project,
-            start=string_start,
-            end=string_end,
-            name=func.name,
-        )
-        if string_c is not None:
+        self.current_partial_payload = self._current_direct_partial_payload()
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b10(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b10_s0()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b10_s1()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b11(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.string_c is not None:
             _emit_tail_validation_for_function_run_or_uncollected(
-                direct_project,
-                cfg,
-                func,
+                self.direct_project,
+                self.cfg,
+                self.func,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
-                binary_path=args.binary,
+                binary_path=self.args.binary,
             )
-            print(f"\n/* Decompilation {direct_result.status}: {direct_result.payload} */")
+            print(f"\n/* Decompilation {self.direct_result.status}: {self.direct_result.payload} */")
             print("/* Falling back to generic string-intrinsic recovery. */")
-            nonopt_skip_reason = describe_non_optimized_unavailable(
+            self.nonopt_skip_reason = describe_non_optimized_unavailable(
                 allow_heavy_fallbacks=True,
                 skip_heavy_fallbacks_for_result=False,
-                interactive_stdout=interactive_stdout,
-                max_functions=args.max_functions,
-                addr_requested=direct_addr is not None,
-                result_status=direct_result.status,
+                interactive_stdout=self.interactive_stdout,
+                max_functions=self.args.max_functions,
+                addr_requested=self.direct_addr is not None,
+                result_status=self.direct_result.status,
                 failure_stage=None,
-                nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
+                nonopt_failure_detail=_non_optimized_slice_failure_detail(self.nonopt_result),
             )
-            if nonopt_skip_reason is not None:
-                print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
+            if self.nonopt_skip_reason is not None:
+                print(f"/* non-optimized fallback unavailable: {self.nonopt_skip_reason} */")
             _emit_optional_source_sidecar_c_block(
-                args.binary,
-                func.name,
-                string_c,
-                alternate_source_c=bool(args.alternate_source_c),
+                self.args.binary,
+                self.func.name,
+                self.string_c,
+                alternate_source_c=bool(self.args.alternate_source_c),
                 c_header="\n/* == c (string intrinsic fallback) == */",
             )
             return 0
         _emit_tail_validation_for_function_run_or_uncollected(
-            direct_project,
-            cfg,
-            func,
+            self.direct_project,
+            self.cfg,
+            self.func,
             allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
-            binary_path=args.binary,
+            binary_path=self.args.binary,
         )
-        asm_fallback = (
-            _format_asm_range(project, sidecar_region[0], sidecar_region[1])
-            if sidecar_region is not None
-            else _format_asm_range(project, *_infer_linear_disassembly_window(project, func.addr))
+        self.asm_fallback = (
+            _format_asm_range(self.project, self.sidecar_region[0], self.sidecar_region[1])
+            if self.sidecar_region is not None
+            else _format_asm_range(self.project, *_infer_linear_disassembly_window(self.project, self.func.addr))
         )
-        print(f"\n/* Decompilation {direct_result.status}: {direct_result.payload} */")
+        print(f"\n/* Decompilation {self.direct_result.status}: {self.direct_result.payload} */")
         print("/* Falling back to non-optimized disassembly. */")
-        nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_result)
-        if nonopt_failure_detail is not None:
-            print(f"/* non-optimized fallback failed: {nonopt_failure_detail} */")
-        for _diag_line in _format_tail_validation_diagnostic(
-            direct_result.tail_validation,
-            function_addr=func.addr,
-            function_name=func.name,
-            block_count=direct_result.block_count,
-            byte_count=direct_result.byte_count,
-            exit_kind=direct_result.status,
-            exit_detail=direct_result.payload,
+        self.nonopt_failure_detail = _non_optimized_slice_failure_detail(self.nonopt_result)
+        if self.nonopt_failure_detail is not None:
+            print(f"/* non-optimized fallback failed: {self.nonopt_failure_detail} */")
+        for __diag_line_lp8616 in _format_tail_validation_diagnostic(
+            self.direct_result.tail_validation,
+            function_addr=self.func.addr,
+            function_name=self.func.name,
+            block_count=self.direct_result.block_count,
+            byte_count=self.direct_result.byte_count,
+            exit_kind=self.direct_result.status,
+            exit_detail=self.direct_result.payload,
         ):
-            print(_diag_line)
+            self._diag_line = __diag_line_lp8616
+            print(__diag_line_lp8616)
         print("\n/* == lift break probe == */")
-        print(_probe_lift_break(project, func.addr))
+        print(_probe_lift_break(self.project, self.func.addr))
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b12(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
         print("\n/* == asm fallback == */")
-        print(asm_fallback)
-        return 6 if status == "error" else 4
+        print(self.asm_fallback)
+        return 6 if self.status == "error" else 4
 
-    integrity = verify_function_work_result_payload_integrity_8616(direct_result)
-    if integrity.verdict in {
-        AcceptedPayloadIntegrityVerdict8616.MISSING_VALIDATED_HASH,
-        AcceptedPayloadIntegrityVerdict8616.MISSING_COMPILER_HASH,
-    }:
-        direct_result = _accept_function_work_result_for_emission_8616(
-            direct_result,
-            project=direct_project,
+
+    def _phase_direct_cfg_recovery_8616_part0_8616_zb0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.direct_recovery_timeout = (
+            max(1, min(self.args.timeout, 6))
+            if self.args.proc is not None and not self.proc_resolved_to_linked_binary
+            else _default_recovery_timeout(self.args.timeout, explicit_timeout=self.timeout_was_explicit)
         )
-        integrity = verify_function_work_result_payload_integrity_8616(direct_result)
-    if not integrity.passed:
-        print(f"[tail-validation] {integrity.diagnostic()}", file=sys.stderr, flush=True)
-        return 4
-    _emit_tail_validation_console_summary([direct_item], {1: direct_result}, binary_path=args.binary)
-    _store_direct_request_result_8616(
-        context,
-        direct_request_cache_lookup,
-        direct_result,
-        function_addr=function_original_addr(func),
-        function_name=func.name,
-    )
-    if args.output_c_dir is not None:
-        write_generated_function_c(
-            args.output_c_dir,
-            address=function_original_addr(func),
-            name=func.name,
-            payload=direct_result.payload,
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_zb1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.direct_recovery_timeout = max(1, min(self.direct_recovery_timeout, self._remaining_direct_addr_budget() or 1))
+        self.cfg, self.func = _run_with_timeout_in_daemon_thread(
+            self._recover_target_function,
+            timeout=self.direct_recovery_timeout,
+            thread_name_prefix="recovery",
+            prefer_process_alarm=True,
         )
-    _emit_optional_source_sidecar_c_block(
-        args.binary,
-        func.name,
-        direct_result.payload,
-        alternate_source_c=bool(args.alternate_source_c),
-        c_header="\n/* == c == */",
-    )
-    if direct_cache_key is not None and direct_result.status == "ok":
-        _store_cache_json(
-            "function_decompile",
-            direct_cache_key,
-            {
-                "status": direct_result.status,
-                "payload": direct_result.payload,
-                "tail_validation": direct_result.tail_validation,
-                "tail_validation_passed": True,
-                "elapsed": direct_result.elapsed,
-                "block_count": direct_result.block_count,
-                "byte_count": direct_result.byte_count,
-                "validated_c_hash": direct_result.validated_payload_hash,
-                "gcc_checked_c_hash": direct_result.gcc_checked_payload_hash,
-                "diagnostic_output": (
-                    direct_result.debug_output
-                    if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
-                    else None
-                ),
-                "failure_family_snapshot": direct_failure_family_snapshot.to_record(),
-            },
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_ze00(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e00()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e01()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_ze01(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e02()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e03()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_ze10(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e10()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e11()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_ze11(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e12()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e13()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_ze20(self, ex: BaseException) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.recovery_detail = _function_recovery_detail(getattr(self.project, "_inertia_decompiler_stage", None))
+        if self.recovery_detail is None:
+            print(f"/* Function recovery failed: {ex} */")
+        else:
+            print(f"/* Function recovery failed {self.recovery_detail}: {ex} */")
+        if os.environ.get("INERTIA_DEBUG_RECOVERY_TRACEBACK"):
+            import traceback
+
+            traceback.print_exc()
+        print("\n/* == lift break probe == */")
+        print(_probe_lift_break(self.project, self.direct_addr))
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_ze21(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        print("\n/* == first block asm == */")
+        print(_format_first_block_asm(self.project, self.direct_addr))
+        print("\n/* == non-optimized disassembly == */")
+        self.start, self.end = _infer_linear_disassembly_window(self.project, self.direct_addr)
+        print(_format_asm_range(self.project, self.start, self.end))
+        return 5
+    def _phase_direct_emit_batch_8616_part0_8616_zb0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b0()
+        if _rc is not None:
+            return _rc
+
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b1()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b2()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b3()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b4()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b5()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_zb1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b6()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b7()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b8()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b9()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b10()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b11()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_emit_batch_8616_part0_8616_b12()
+        if _rc is not None:
+            return _rc
+        return None
+    def run_8616_part5_8616_b1_s0(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if self.direct_result.status in {"empty", "validation_failed"}:
+            self.evidence_payload, self.evidence_snapshot = _recover_binary_evidence_c_8616(self.direct_project, self.func)
+            if isinstance(self.evidence_payload, str) and self.evidence_payload.strip() and isinstance(self.evidence_snapshot, dict):
+                self.evidence_acceptance = _validated_generated_c_acceptance_8616(
+                    status="ok",
+                    payload=self.evidence_payload,
+                    tail_validation_snapshot=self.evidence_snapshot,
+                    tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+                    expected_validation_stages=["structuring", "postprocess"],
+                    c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+                    emit_failure_diagnostics=False,
+                )
+                if self.evidence_acceptance.status == "ok" and self.evidence_acceptance.blocker is None:
+                    self.direct_result = replace(
+                        self.direct_result,
+                        status="ok",
+                        payload=self.evidence_acceptance.gcc_checked_payload,
+                        partial_payload=None,
+                        tail_validation=self.evidence_snapshot,
+                        validated_payload_hash=self.evidence_acceptance.validated_payload_hash,
+                        gcc_checked_payload_hash=self.evidence_acceptance.gcc_checked_payload_hash,
+                    )
+        _rc = self._phase_direct_empty_lanes_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_light_lanes_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_heavy_lanes_8616()
+        if _rc is not None:
+            return _rc
+        if os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616):
+            self.direct_result = replace(self.direct_result, failure_family_snapshot=self._direct_failure_snapshot(self.direct_result))
+            if _complete_serial_clean_worker_result_8616(self.direct_result, project=self.direct_project):
+                return 0
+        self.direct_timeout_payload = self.direct_result.payload
+        self._direct_blocks_for_timeout_guard, self._direct_bytes_for_timeout_guard = _function_complexity(self.func)
+        return None
+    def run_8616_part5_8616_b1_s1(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        self.clinic_core_timeout = isinstance(self.direct_timeout_payload, str) and (
+            "core:clinic:" in self.direct_timeout_payload
+            or "timed out after" in self.direct_timeout_payload.lower()
+            or (
+                self.direct_result.status == "empty"
+                and getattr(self.project.arch, "name", "") == "86_16"
+                and (self._direct_blocks_for_timeout_guard >= 32 or self._direct_bytes_for_timeout_guard >= 280)
+                and "decompiler did not produce code" in self.direct_timeout_payload.lower()
+            )
         )
-    _write_serial_clean_worker_result_8616(direct_result, project=direct_project)
-    return 0
+        _rc = self._phase_direct_failure_emit_8616()
+        if _rc is not None:
+            return _rc
+        self.direct_failure_family_snapshot = self._direct_failure_snapshot(self.direct_result)
+        self.budget_fallback_addr = function_original_addr(self.func)
+        self.budget_fallback_name = self.func.name
+        self.direct_result = replace(self.direct_result, failure_family_snapshot=self.direct_failure_family_snapshot)
+        if self.direct_result.debug_output:
+            print(self.direct_result.debug_output, file=sys.stderr, end="")
+        print(f"[dbg] direct failure family: {self.direct_failure_family_snapshot.label()}", file=sys.stderr)
+        if self.direct_result.status == "error":
+            _print_stop_on_first_failure_8616(self.func, self.direct_result)
+            return 6
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b0_zb0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.best_direct_candidate = self.direct_result
+        self.best_direct_rank = self._candidate_rank(self.direct_result)
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b0_zb1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.retry_count = _direct_addr_validation_retry_count_8616(
+            timeout_was_explicit=self.timeout_was_explicit,
+            args_timeout=self.args.timeout,
+        )
+        for _retry_idx_lp8616 in range(self.retry_count):
+            self.retry_idx = _retry_idx_lp8616
+            try:
+                self.retry_status, self.retry_payload, self.retry_partial, *self.retry_extra = _run_with_timeout_in_daemon_thread(
+                    self.direct_decompile_job,
+                    timeout=max(1, min(self.args.timeout, 8)),
+                    thread_name_prefix=f"direct-decomp-retry-{_retry_idx_lp8616 + 1}",
+                )
+                self.retry_tail_validation = None
+                for _lv8616 in self.retry_extra:
+                    self.extra = _lv8616
+                    if isinstance(self.extra, dict):
+                        self.retry_tail_validation = dict(self.extra)
+                self.retry_result = FunctionWorkResult(
+                    index=1,
+                    status=self.retry_status,
+                    payload=self.retry_payload,
+                    debug_output="",
+                    function=self.func,
+                    function_cfg=self.cfg,
+                    partial_payload=self.retry_partial,
+                    tail_validation=self.retry_tail_validation
+                    or _tail_validation_snapshot_for_function_run(self.direct_project, self.func),
+                )
+                self.retry_acceptance = _validated_generated_c_acceptance_8616(
+                    status=self.retry_result.status,
+                    payload=self.retry_result.payload,
+                    tail_validation_snapshot=self.retry_result.tail_validation,
+                    tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
+                    expected_validation_stages=["structuring", "postprocess"],
+                    c_target=getattr(self.direct_project, "_inertia_c_target", "portable-flat"),
+                    emit_failure_diagnostics=False,
+                )
+                self.retry_checked_status = self.retry_acceptance.status
+                self.retry_blocker = self.retry_acceptance.blocker
+                if self.retry_checked_status != self.retry_result.status or self.retry_blocker is not None:
+                    self.retry_preserved_candidate = self._preserve_acceptance_candidate_or_best_failure(
+                        self.retry_acceptance,
+                        self.retry_result,
+                    )
+                    self.retry_result = replace(
+                        self.retry_result,
+                        status=self.retry_checked_status,
+                        payload=self.retry_blocker if self.retry_blocker is not None else self.retry_result.payload,
+                        partial_payload=self.retry_preserved_candidate
+                        if self.retry_blocker is not None
+                        else self.retry_result.partial_payload,
+                    )
+                else:
+                    self.retry_result = replace(
+                        self.retry_result,
+                        payload=self.retry_acceptance.gcc_checked_payload,
+                        validated_payload_hash=self.retry_acceptance.validated_payload_hash,
+                        gcc_checked_payload_hash=self.retry_acceptance.gcc_checked_payload_hash,
+                    )
+                self.retry_rank = self._candidate_rank(self.retry_result)
+                if self.retry_result.status == "ok":
+                    self.direct_result = self.retry_result
+                    self.best_direct_candidate = self.retry_result
+                    self.best_direct_rank = self.retry_rank
+                    break
+                if self.retry_rank > self.best_direct_rank:
+                    self.best_direct_candidate = self.retry_result
+                    self.best_direct_rank = self.retry_rank
+            except Exception:
+                continue
+        if self.direct_result.status != "ok":
+            self.current_rank = self._candidate_rank(self.direct_result)
+            if self.best_direct_rank > self.current_rank:
+                self.direct_result = self.best_direct_candidate
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b3_zb0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_display_addr)
+        self.direct_sidecar_verdict = "attempted"
+        if self.sidecar_region is not None:
+            try:
+                self.sidecar_addr = self.sidecar_region[0]
+                self.code_name = _lst_code_label(self.lst_metadata, self.sidecar_addr, self.project.entry) or self.func.name
+                self.side_cfg, self.side_func = _recover_lst_function(
+                    self.project,
+                    self.lst_metadata,
+                    self.sidecar_addr if self.lst_metadata.absolute_addrs else self.sidecar_addr - self.project.entry,
+                    self.code_name,
+                    timeout=max(2, min(self.args.timeout, 8)),
+                    window=self.args.window,
+                    low_memory=self.low_memory_path,
+                    allow_rebased_exact_slice=False,
+                )
+                # Dynamic angr boundary: exact recovery may return a function owned by a slice project.
+                self.side_project = getattr(self.side_func, "project", self.project)
+                if not isinstance(self.side_project, angr.Project):
+                    self.side_project = self.project
+                _transfer_caller_return_use_evidence_8616(self.project, self.side_project)
+                with span(
+                    "direct.sidecar_retry",
+                    addr=hex(self.sidecar_addr),
+                    name=self.code_name,
+                    timeout=max(2, min(self.args.timeout, 8)),
+                ):
+                    self.side_tail_from_decompile = None
+                    self.side_status, self.side_payload, *self._ = _decompile_function_with_stats(
+                        self.side_project,
+                        self.side_cfg,
+                        self.side_func,
+                        max(2, min(self.args.timeout, 8)),
+                        self.args.api_style,
+                        self.args.binary,
+                        cod_metadata=self.cod_metadata,
+                        synthetic_globals=self.synthetic_globals,
+                        lst_metadata=self.lst_metadata,
+                        allow_isolated_retry=False,
+                        failure_family_state=self.direct_failure_family_state,
+                    )
+                    self.side_tail_candidate = getattr(
+                        self.side_project,
+                        "_inertia_last_validated_function_payload_snapshot",
+                        None,
+                    )
+                    self.function_tail_candidate = _retry_function_tail_validation_snapshot_8616(
+                        self.side_project,
+                        self.side_func,
+                    )
+                    if self.function_tail_candidate:
+                        self.side_tail_candidate = self.function_tail_candidate
+                    if not isinstance(self.side_tail_candidate, dict):
+                        self.side_tail_candidate = getattr(
+                            self.side_project,
+                            "_inertia_last_tail_validation_snapshot",
+                            None,
+                        )
+                    if isinstance(self.side_tail_candidate, dict):
+                        self.side_tail_from_decompile = dict(self.side_tail_candidate)
+                    annotate_current_span(status=self.side_status)
+                self.direct_sidecar_verdict = self.side_status
+                if self.side_status == "ok":
+                    self.side_tail = (
+                        self.side_tail_from_decompile
+                        if isinstance(self.side_tail_from_decompile, dict)
+                        else _retry_function_tail_validation_snapshot_8616(self.side_project, self.side_func)
+                    )
+                    _emit_tail_validation_snapshot_or_uncollected(
+                        self.side_cfg,
+                        self.side_func,
+                        self.side_tail,
+                        binary_path=self.args.binary,
+                    )
+                    self.side_acceptance = _validated_generated_c_acceptance_8616(
+                        status=self.side_status,
+                        payload=self.side_payload,
+                        tail_validation_snapshot=self.side_tail,
+                        tail_validation_enabled=_tail_validation_runtime_enabled(self.side_project),
+                        expected_validation_stages=["structuring", "postprocess"],
+                        c_target=getattr(self.side_project, "_inertia_c_target", "portable-flat"),
+                    )
+                    self.side_status_checked = self.side_acceptance.status
+                    self.side_payload_checked = self.side_acceptance.gcc_checked_payload
+                    if self.side_status_checked != "ok":
+                        self.side_status = self.side_status_checked
+                if self.side_status == "ok":
+                    self.accepted_side_payload = (
+                        self.side_payload_checked if isinstance(self.side_payload_checked, str) else self.side_payload
+                    )
+                    print("[dbg] direct sidecar fallback validation=passed", file=sys.stderr)
+                    _emit_optional_source_sidecar_c_block(
+                        self.args.binary,
+                        self.side_func.name,
+                        self.accepted_side_payload,
+                        alternate_source_c=bool(self.args.alternate_source_c),
+                        c_header="\n/* == c (sidecar slice fallback) == */",
+                    )
+                    return 0
+            except (_AnalysisTimeout, Exception):
+                self.direct_sidecar_verdict = "error"
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b3_zb1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self._early_slice = _try_decompile_sidecar_slice(
+            self.project,
+            self.lst_metadata,
+            self.direct_display_addr,
+            self.func.name,
+            timeout=max(2, min(8, self.args.timeout) if isinstance(self.args.timeout, int) else 8),
+            api_style=self.args.api_style,
+            binary_path=self.args.binary,
+            failure_family_state=self.direct_failure_family_state,
+        )
+        if self._early_slice is not None:
+            self.direct_sidecar_verdict = self._early_slice.status
+        if self._early_slice is not None and self._early_slice.status == "ok":
+            _emit_sidecar_slice_tail_validation_snapshot_8616(
+                self.cfg,
+                self.func,
+                self._early_slice.snapshot,
+                binary_path=self.args.binary,
+            )
+            self.accepted_payload = self._accept_direct_fallback_payload(
+                self._early_slice.payload,
+                tail_validation_snapshot=self._early_slice.snapshot,
+            )
+            if self.accepted_payload is not None:
+                _emit_optional_source_sidecar_c_block(
+                    self.args.binary,
+                    self.func.name,
+                    self.accepted_payload,
+                    alternate_source_c=bool(self.args.alternate_source_c),
+                    c_header="\n/* == c (sidecar slice fallback) == */",
+                )
+                return 0
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b10_s0(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if self.current_partial_payload is not None:
+            _emit_tail_validation_snapshot_or_uncollected(
+                self.cfg,
+                self.func,
+                self.direct_result.tail_validation,
+                binary_path=self.args.binary,
+            )
+            self.partial_report = _partial_result_report_8616(self.direct_result.status)
+            self.payload_detail = self.direct_result.payload
+            if self.partial_report.status is WorkItemStatus.TIMEOUT:
+                self.timeout_text = "timeout"
+                if isinstance(self.direct_result.payload, str):
+                    self.m = re.search(r"Timed out after (\d+)s", self.direct_result.payload)
+                    if self.m is not None:
+                        self.timeout_text = f"Timed out after {self.m.group(1)}s."
+                self.payload_detail = (
+                    self.timeout_text if self.timeout_text != "timeout" else f"Timed out after {self.args.timeout}s."
+                )
+            print(f"/* {self.partial_report.heading}: {self.payload_detail} */")
+            if self.partial_report.show_timeout_delay:
+                self.direct_elapsed = self.direct_result.elapsed
+                if isinstance(self.direct_elapsed, (int, float)):
+                    print(f"/* timeout delay: {float(self.direct_elapsed):.2f}s */")
+            if self.partial_report.status is WorkItemStatus.VALIDATION_FAILED:
+                print("/* direct validation=failed */")
+            _emit_failed_timeout_acceptance_hints_8616()
+            print(f"/* non-optimized fallback failed: {self.partial_report.fallback_detail} */")
+            if "&sp_0" in self.current_partial_payload:
+                print("/* Source-evidenced loop call was hoisted outside loop in emitted C. */")
+            _emit_optional_source_sidecar_c_block(
+                self.args.binary,
+                self.func.name,
+                self.current_partial_payload,
+                alternate_source_c=bool(self.args.alternate_source_c),
+                c_header=self.partial_report.direct_c_header,
+            )
+            return 6 if self.direct_result.status == "error" else 4
+        self.sidecar_region = None
+        if self.lst_metadata is not None and not self.using_rebased_direct_slice:
+            self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_display_addr)
+        return None
+    def _phase_direct_emit_batch_8616_part0_8616_b10_s1(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        self.linear_window = (
+            None if self.sidecar_region is not None else _infer_linear_disassembly_window(self.direct_project, self.func.addr)
+        )
+        if self.sidecar_region is None and self.linear_window is None:
+            self.linear_window = _infer_linear_disassembly_window(self.direct_project, self.func.addr)
+        if self.sidecar_region is not None:
+            self.string_start, self.string_end = self.sidecar_region
+        else:
+            assert self.linear_window is not None
+            self.string_start, self.string_end = self.linear_window
+        self.string_c = _try_emit_string_intrinsic_c(
+            self.direct_project,
+            start=self.string_start,
+            end=self.string_end,
+            name=self.func.name,
+        )
+        return None
+
+
+    def _phase_direct_cfg_recovery_8616_part0_8616_zh0(self) -> int | None:
+        """Run an extracted handler sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze00()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze01()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_zh1(self) -> int | None:
+        """Run an extracted handler sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze10()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze11()
+        if _rc is not None:
+            return _rc
+        return None
+    def _phase_direct_cfg_recovery_8616_part0_8616_zh2(self, ex: BaseException) -> int | None:
+        """Run an extracted handler sub-phase; return an exit code to abort."""
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze20(ex)
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze21()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _direct_nonopt_probe_eligible_8616(self) -> bool:
+        """Return whether a non-optimized-slice probe is eligible before consuming fallback budget."""
+        return (
+            self.partial_payload is None
+            and self.known_nonopt_c is None
+            and (self.precise_sidecar_regions or self.using_rebased_direct_slice)
+            and not self.sidecar_closed_nonopt
+            and not (self.direct_failure_family_state.repeat_detected and not self.direct_failure_family_state.new_proof_seen)
+        )
+def _run_direct_addr_cli_8616(context: _DirectAddrCliContext8616) -> int:
+
+
+    """Run the direct-address CLI branch after project and sidecar setup."""
+    return _DirectAddrCliRun8616(context=context).run_8616()
 
 
 @dataclass(frozen=True, slots=True)
@@ -6964,19 +8502,9 @@ def _batch_function_decompile_timeout_8616(
     except AttributeError:
         architecture = ""
     if architecture == "86_16":
-        if block_count >= 72 or byte_count >= 520:
-            decompile_timeout = max(decompile_timeout, args.timeout + 120, 240)
-        elif block_count >= 56 or byte_count >= 420:
-            decompile_timeout = max(decompile_timeout, args.timeout + 90, 240)
-        elif block_count >= 36 or byte_count >= 300:
-            decompile_timeout = max(decompile_timeout, args.timeout + 60)
-        if args.addr is None and not context.timeout_was_explicit and (
-            block_count >= 36 or byte_count >= 300
-        ):
-            decompile_timeout = max(
-                decompile_timeout,
-                PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
-            )
+        decompile_timeout = _x86_16_complexity_timeout_8616(
+            decompile_timeout, args, context.timeout_was_explicit, block_count, byte_count
+        )
     if args.addr is None:
         decompile_timeout = max(decompile_timeout, 16)
     if args.addr is None and context.timeout_was_explicit:
@@ -6990,18 +8518,54 @@ def _batch_function_decompile_timeout_8616(
         explicit_timeout_floor=args.timeout if context.timeout_was_explicit else None,
         default_timeout_cap=PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
     )
-    if (
-        architecture == "86_16"
-        and args.addr is None
-        and not context.timeout_was_explicit
-        and bounded_timeout >= 180
+    return _finalization_timeout_floor_8616(
+        architecture, args, context.timeout_was_explicit, bounded_timeout
+    )
+
+
+def _x86_16_complexity_timeout_8616(
+    decompile_timeout: int,
+    args: CliArguments,
+    timeout_was_explicit: bool,
+    block_count: int,
+    byte_count: int,
+) -> int:
+    """Raise a decompile timeout by measured 16-bit function complexity."""
+    if block_count >= 72 or byte_count >= 520:
+        decompile_timeout = max(decompile_timeout, args.timeout + 120, 240)
+    elif block_count >= 56 or byte_count >= 420:
+        decompile_timeout = max(decompile_timeout, args.timeout + 90, 240)
+    elif block_count >= 36 or byte_count >= 300:
+        decompile_timeout = max(decompile_timeout, args.timeout + 60)
+    if args.addr is None and not timeout_was_explicit and (
+        block_count >= 36 or byte_count >= 300
     ):
-        return _enforce_function_timeout_cap(
-            max(bounded_timeout, 240),
-            context="sweep large-function finalization timeout",
-            default_timeout_cap=PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
+        decompile_timeout = max(
+            decompile_timeout,
+            PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
         )
-    return bounded_timeout
+    return decompile_timeout
+
+
+def _finalization_timeout_floor_8616(
+    architecture: str,
+    args: CliArguments,
+    timeout_was_explicit: bool,
+    bounded_timeout: int,
+) -> int:
+    """Enforce the large-function finalization floor for batch 16-bit sweeps."""
+    if (
+        architecture != "86_16"
+        or args.addr is not None
+        or timeout_was_explicit
+        or bounded_timeout < 180
+    ):
+        return bounded_timeout
+    return _enforce_function_timeout_cap(
+        max(bounded_timeout, 240),
+        context="sweep large-function finalization timeout",
+        default_timeout_cap=PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
+    )
 
 
 def _transfer_caller_return_use_evidence_8616(
@@ -7097,435 +8661,498 @@ def _run_serial_function_8616(
     emitted_indexes: set[int],
 ) -> _SerialFunctionOutcome8616:
     """Recover, decompile, retry, and emit one serial function work item."""
-    args = context.args
-    project = context.project
-    function_tasks = context.function_tasks
-    result_map = context.result_map
-    fallback_tail_validation_by_index = context.fallback_tail_validation_by_index
-    lst_metadata = context.lst_metadata
-    cod_metadata = context.cod_metadata
-    synthetic_globals = context.synthetic_globals
-    visible_code_labels = context.visible_code_labels
-    low_memory_path = context.low_memory_path
-    interactive_stdout = context.interactive_stdout
-    precise_sidecar_regions = context.precise_sidecar_regions
-    timeout_was_explicit = context.timeout_was_explicit
-    use_serial_fork_per_function = context.use_serial_fork_per_function
-    allow_heavy_fallbacks = context.allow_heavy_fallbacks
-    _force_isolated_project_for_work_item = context.force_isolated_project_for
-    _configure_recovered_work_item_project_8616 = context.configure_recovered_project_for
-    _remaining_sweep_budget_sec = context.remaining_sweep_budget_sec
-    decompiled = 0
-    failed = 0
     item_function = cast(_AngrFunction, item.function)
     recovery_addr = _function_work_item_recovery_addr_8616(item)
-    result: FunctionWorkResult | None = result_map.get(item.index)
-    recovery_mode = "existing"
-    decompile_timeout = max(1, args.timeout)
+    result: FunctionWorkResult | None = context.result_map.get(item.index)
     if result is None:
-        active_item = item
-        active_function = item_function
-        if item.function_cfg is None:
-            recovery_mode = "lst" if lst_metadata is not None and visible_code_labels else "ranked"
-            cached_work_result, _cache_bypass_debug, _cache_key, _tail_enabled, _expected_stages = (
-                _function_work_cache_lookup(
-                    item,
-                    binary_path=args.binary,
-                    timeout=args.timeout,
-                    api_style=args.api_style,
-                    enable_structured_simplify=True,
-                    enable_postprocess=True,
-                    cod_metadata=cod_metadata,
-                    synthetic_globals=synthetic_globals,
-                    lst_metadata=lst_metadata,
-                )
+        return _serial_missing_result_lane_8616(
+            context,
+            item,
+            item_function,
+            recovery_addr,
+            recover_timeout=recover_timeout,
+            adaptive_timeout_model=adaptive_timeout_model,
+            allow_isolated_retry_in_function_tasks=allow_isolated_retry_in_function_tasks,
+            emitted_indexes=emitted_indexes,
+        )
+    return _SerialFunctionOutcome8616(decompiled=0, failed=0)
+
+
+def _serial_local_recover_timeout_8616(recover_timeout: int, remaining_sweep_budget: float | None) -> int:
+    """Clamp the recovery timeout to the remaining sweep budget."""
+    if remaining_sweep_budget is not None:
+        return max(1, min(recover_timeout, int(remaining_sweep_budget)))
+    return recover_timeout
+
+
+def _serial_recover_call_8616(
+    recover_call: Callable[[], object],
+    local_recover_timeout: int,
+    thread_name_prefix: str,
+) -> _FunctionCfgPair8616:
+    """Run one recovery call through fork when enabled, else daemon thread."""
+    if _analysis_timeout_use_fork_8616():
+        try:
+            return cast(
+                _FunctionCfgPair8616,
+                _run_with_timeout_in_fork(
+                    cast(Callable[[], Any], recover_call),
+                    timeout=local_recover_timeout + 1,
+                ),
             )
-            if cached_work_result is not None:
-                result = cached_work_result
-            if result is None:
-                cached_recovery_result, recovery_cache_bypass_debug, _recovery_cache_key = (
-                    _lookup_persistent_recovery_timeout(
-                        binary_path=args.binary,
-                        addr=recovery_addr,
-                        mode=recovery_mode,
-                        window=args.window,
-                        low_memory=low_memory_path,
-                        timeout=recover_timeout,
-                    )
-                )
-                if cached_recovery_result is not None:
-                    result = replace(
-                        cached_recovery_result,
-                        index=item.index,
-                        function=item.function,
-                        function_cfg=None,
-                    )
+        except (FuturesTimeoutError, TimeoutError):
+            raise
+        except Exception:
+            return cast(
+                _FunctionCfgPair8616,
+                _run_with_timeout_in_daemon_thread(
+                    cast(Callable[[], Any], recover_call),
+                    timeout=local_recover_timeout + 1,
+                    thread_name_prefix=thread_name_prefix,
+                ),
+            )
+    return cast(
+        _FunctionCfgPair8616,
+        _run_with_timeout_in_daemon_thread(
+            cast(Callable[[], Any], recover_call),
+            timeout=local_recover_timeout + 1,
+            thread_name_prefix=thread_name_prefix,
+        ),
+    )
+
+
+def _serial_stub_rerank_and_item_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    item_function: _AngrFunction,
+    function_cfg: object,
+    function: _AngrFunction | None,
+    recovery_addr: int,
+    recovery_mode: str,
+    recover_timeout: int,
+) -> FunctionWorkItem:
+    """Re-rank lst stub recoveries and rebuild the active work item."""
+    args = context.args
+    project = context.project
+    lst_metadata = context.lst_metadata
+    if recovery_mode == "lst" and function is not None and lst_metadata is not None:
+        try:
+            recovered_blocks, recovered_bytes = _function_complexity(function)
+        except Exception:
+            recovered_blocks, recovered_bytes = (0, 0)
+        region = _lst_code_region(lst_metadata, recovery_addr)
+        region_span = (
+            max(0, int(region[1]) - int(region[0]))
+            if isinstance(region, tuple) and len(region) == 2
+            else 0
+        )
+        # Sidecar regions that span much more than a tiny
+        # one-block body often indicate that entry recovery
+        # latched onto a stub/prefix. Retry ranked recovery
+        # and keep the larger candidate when available.
+        if recovered_blocks <= 1 and recovered_bytes <= 16 and region_span >= 64:
             try:
-                remaining_sweep_budget = _remaining_sweep_budget_sec()
-                if remaining_sweep_budget is not None and remaining_sweep_budget <= 0:
-                    raise TimeoutError("Whole-sweep budget exhausted before recovery.")
-                if result is not None:
-                    pass
-                elif lst_metadata is not None and visible_code_labels:
-                    local_recover_timeout = recover_timeout
-                    if remaining_sweep_budget is not None:
-                        local_recover_timeout = max(1, min(local_recover_timeout, remaining_sweep_budget))
-                    print(
-                        f"[dbg] recovery worker: start {recovery_addr:#x} {item_function.name} "
-                        f"mode=lst recovery_timeout={local_recover_timeout}s"
-                    )
-                    if _analysis_timeout_use_fork_8616():
-                        try:
-                            function_cfg, function = cast(
-                                _FunctionCfgPair8616,
-                                _run_with_timeout_in_fork(
-                                    cast(Callable[[], Any], lambda offset=recovery_addr, name=item_function.name: _recover_lst_function(
-                                        project,
-                                        lst_metadata,
-                                        offset,
-                                        name,
-                                        timeout=local_recover_timeout,
-                                        window=args.window,
-                                        low_memory=low_memory_path,
-                                    )),
-                                    timeout=local_recover_timeout + 1,
-                                ),
-                            )
-                        except (FuturesTimeoutError, TimeoutError):
-                            raise
-                        except Exception:
-                            function_cfg, function = cast(
-                                _FunctionCfgPair8616,
-                                _run_with_timeout_in_daemon_thread(
-                                    cast(Callable[[], Any], lambda offset=recovery_addr, name=item_function.name: _recover_lst_function(
-                                        project,
-                                        lst_metadata,
-                                        offset,
-                                        name,
-                                        timeout=local_recover_timeout,
-                                        window=args.window,
-                                        low_memory=low_memory_path,
-                                    )),
-                                    timeout=local_recover_timeout + 1,
-                                    thread_name_prefix="lst-recover",
-                                ),
-                            )
-                    else:
-                        function_cfg, function = cast(
-                            _FunctionCfgPair8616,
-                            _run_with_timeout_in_daemon_thread(
-                                cast(Callable[[], Any], lambda offset=recovery_addr, name=item_function.name: _recover_lst_function(
-                                    project,
-                                    lst_metadata,
-                                    offset,
-                                    name,
-                                    timeout=local_recover_timeout,
-                                    window=args.window,
-                                    low_memory=low_memory_path,
-                                )),
-                                timeout=local_recover_timeout + 1,
-                                thread_name_prefix="lst-recover",
-                            ),
-                        )
-                else:
-                    local_recover_timeout = recover_timeout
-                    if remaining_sweep_budget is not None:
-                        local_recover_timeout = max(1, min(local_recover_timeout, remaining_sweep_budget))
-                    print(
-                        f"[dbg] recovery worker: start {recovery_addr:#x} {item_function.name} "
-                        f"mode=ranked recovery_timeout={local_recover_timeout}s"
-                    )
-                    if _analysis_timeout_use_fork_8616():
-                        try:
-                            function_cfg, function = cast(
-                                _FunctionCfgPair8616,
-                                _run_with_timeout_in_fork(
-                                    cast(Callable[[], Any], lambda addr=recovery_addr, name=item_function.name: (
-                                        _recover_ranked_binary_function(
-                                            project,
-                                            addr,
-                                            name,
-                                            timeout=local_recover_timeout,
-                                            window=args.window,
-                                            low_memory=low_memory_path,
-                                        )
-                                    )),
-                                    timeout=local_recover_timeout + 1,
-                                ),
-                            )
-                        except (FuturesTimeoutError, TimeoutError):
-                            raise
-                        except Exception:
-                            function_cfg, function = cast(
-                                _FunctionCfgPair8616,
-                                _run_with_timeout_in_daemon_thread(
-                                    cast(Callable[[], Any], lambda addr=recovery_addr, name=item_function.name: (
-                                        _recover_ranked_binary_function(
-                                            project,
-                                            addr,
-                                            name,
-                                            timeout=local_recover_timeout,
-                                            window=args.window,
-                                            low_memory=low_memory_path,
-                                        )
-                                    )),
-                                    timeout=local_recover_timeout + 1,
-                                    thread_name_prefix="ranked-recover",
-                                ),
-                            )
-                    else:
-                        function_cfg, function = cast(
-                            _FunctionCfgPair8616,
-                            _run_with_timeout_in_daemon_thread(
-                                cast(Callable[[], Any], lambda addr=recovery_addr, name=item_function.name: (
-                                    _recover_ranked_binary_function(
-                                        project,
-                                        addr,
-                                        name,
-                                        timeout=local_recover_timeout,
-                                        window=args.window,
-                                        low_memory=low_memory_path,
-                                    )
-                                )),
-                                timeout=local_recover_timeout + 1,
-                                thread_name_prefix="ranked-recover",
-                            ),
-                        )
-                if result is None:
-                    if recovery_mode == "lst" and function is not None and lst_metadata is not None:
-                        try:
-                            recovered_blocks, recovered_bytes = _function_complexity(function)
-                        except Exception:
-                            recovered_blocks, recovered_bytes = (0, 0)
-                        region = _lst_code_region(lst_metadata, recovery_addr)
-                        region_span = (
-                            max(0, int(region[1]) - int(region[0]))
-                            if isinstance(region, tuple) and len(region) == 2
-                            else 0
-                        )
-                        # Sidecar regions that span much more than a tiny
-                        # one-block body often indicate that entry recovery
-                        # latched onto a stub/prefix. Retry ranked recovery
-                        # and keep the larger candidate when available.
-                        if recovered_blocks <= 1 and recovered_bytes <= 16 and region_span >= 64:
-                            try:
-                                ranked_cfg, ranked_func = _recover_ranked_binary_function(
-                                    project,
-                                    recovery_addr,
-                                    item_function.name,
-                                    timeout=max(recover_timeout, 12),
-                                    window=args.window,
-                                    low_memory=low_memory_path,
-                                )
-                            except Exception:
-                                pass
-                            else:
-                                function_cfg, function = ranked_cfg, ranked_func
-                    active_item = FunctionWorkItem(
-                        index=item.index,
-                        function_cfg=function_cfg,
-                        function=function,
-                        recovery_addr=_function_work_item_recovery_addr_8616(item),
-                    )
-                    _configure_recovered_work_item_project_8616(active_item)
-                    _preserve_source_label_for_recovered_function_8616(item.function, active_item.function)
-            except (FuturesTimeoutError, TimeoutError):
-                payload = (
-                    f"Timed out while recovering {item_function.name} at {recovery_addr:#x} "
-                    f"(stage=recovery timeout={recover_timeout}s mode={recovery_mode})."
+                ranked_cfg, ranked_func = _recover_ranked_binary_function(
+                    project,
+                    recovery_addr,
+                    item_function.name,
+                    timeout=max(recover_timeout, 12),
+                    window=args.window,
+                    low_memory=context.low_memory_path,
                 )
-                result = FunctionWorkResult(
-                    index=item.index,
-                    status="timeout",
-                    payload=payload,
-                    debug_output=recovery_cache_bypass_debug,
-                    function=item_function,
-                    function_cfg=None,
-                    skip_heavy_fallbacks=True,
-                    elapsed=float(recover_timeout),
-                    failure_stage=f"recovery:{recovery_mode}",
-                )
-            except Exception as ex:
-                result = FunctionWorkResult(
-                    index=item.index,
-                    status="error",
-                    payload=f"Recovery failed for {item_function.name} at {recovery_addr:#x}: {_describe_exception(ex)}",
-                    debug_output="",
-                    function=item_function,
-                    function_cfg=None,
-                    failure_stage=f"recovery:{recovery_mode}",
-                )
-        if result is None:
-            _configure_recovered_work_item_project_8616(active_item)
-            active_function = cast(_AngrFunction, active_item.function)
-            if active_item.function_cfg is None:
-                result_map[item.index] = FunctionWorkResult(
-                    index=item.index,
-                    status="error",
-                    payload=(
-                        f"Recovery failed to produce a function CFG for "
-                        f"{item_function.name} at {recovery_addr:#x}."
-                    ),
-                    debug_output="",
-                    function=item_function,
-                    function_cfg=None,
-                    failure_stage=f"recovery:{recovery_mode}",
-                )
-                result = result_map[item.index]
-                if item.index not in emitted_indexes:
-                    d, f = _emit_function_result(
-                        item,
-                        result,
-                        project=project,
-                        args=args,
-                        lst_metadata=lst_metadata,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        precise_sidecar_regions=precise_sidecar_regions,
-                        allow_heavy_fallbacks=allow_heavy_fallbacks,
-                        interactive_stdout=interactive_stdout,
-                        use_serial_fork_per_function=use_serial_fork_per_function,
-                        fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                        result_state_by_index=result_map,
-                        timeout_was_explicit=timeout_was_explicit,
-                    )
-                    decompiled += d
-                    failed += f
-                    emitted_indexes.add(item.index)
-                return _SerialFunctionOutcome8616(decompiled=decompiled, failed=failed)
-            decompile_timeout = _batch_function_decompile_timeout_8616(
-                context,
-                active_function,
-                adaptive_timeout_model,
-            )
-            if use_serial_fork_per_function:
-                hard_timeout = _serial_clean_worker_outer_timeout_8616(decompile_timeout)
-                print(
-                    f"[dbg] clean serial function worker: start {active_function.addr:#x} "
-                    f"{active_function.name} requested_timeout={decompile_timeout}s hard_timeout={hard_timeout}s"
-                )
-                result = _run_serial_clean_process_work_item_8616(
-                    context,
-                    active_item,
-                    timeout=decompile_timeout,
-                )
-            else:
-                try:
-                    result = _run_with_timeout_in_daemon_thread(
-                        lambda: _run_function_work_item(
-                            active_item,
-                            timeout=decompile_timeout,
-                            api_style=args.api_style,
-                            binary_path=args.binary,
-                            cod_metadata=cod_metadata,
-                            synthetic_globals=synthetic_globals,
-                            lst_metadata=lst_metadata,
-                            enable_structured_simplify=True,
-                            force_isolated_project=_force_isolated_project_for_work_item(active_item),
-                            allow_isolated_retry=allow_isolated_retry_in_function_tasks,
-                        ),
-                        timeout=_enforce_function_timeout_cap(
-                            max(1, decompile_timeout + 1),
-                            context="sweep function serial daemon timeout",
-                            explicit_timeout_floor=args.timeout if timeout_was_explicit else None,
-                        ),
-                        thread_name_prefix="func-serial",
-                    )
-                except (FuturesTimeoutError, TimeoutError):
-                    result = FunctionWorkResult(
-                        index=item.index,
-                        status="timeout",
-                        payload=f"Timed out after {args.timeout}s.",
-                        debug_output="",
-                        function=active_item.function,
-                        function_cfg=active_item.function_cfg,
-                        skip_heavy_fallbacks=True,
-                        elapsed=float(args.timeout),
-                        failure_stage="decompilation",
-                    )
-                except Exception as ex:
-                    result = FunctionWorkResult(
-                        index=item.index,
-                        status="error",
-                        payload=f"Serial function worker failed: {_describe_exception(ex)}",
-                        debug_output="",
-                        function=active_item.function,
-                        function_cfg=active_item.function_cfg,
-                        failure_stage="decompilation",
-                    )
-        if result is not None and result.status == "ok":
-            result_payload = result.payload if isinstance(result.payload, str) else ""
-            normalized_result_payload = _normalize_accepted_payload_8616(result_payload)
-            if normalized_result_payload != result_payload:
-                result = replace(result, payload=normalized_result_payload)
-        if result is not None and result.status == "ok":
-            byte_count = result.byte_count
-            elapsed = result.elapsed
-            if isinstance(byte_count, int) and isinstance(elapsed, (int, float)):
-                adaptive_timeout_model.observe_success(byte_count, float(elapsed))
-        # Sweep-only timeout bridge: retry timed-out functions once with a
-        # larger per-function budget using the same work-item path.
-        if result is not None and result.status == "timeout" and args.addr is None and not use_serial_fork_per_function:
-            base_timeout = max(1, args.timeout)
-            # Ensure sweep retry actually expands the lane budget.
-            # The previous 120s cap could become a no-op when the base
-            # timeout was already 120s, leaving flaky one-off timeouts
-            # unrecovered.
-            retry_timeout = min(360, max(int(decompile_timeout) * 2, base_timeout * 2, 40))
-            retry_timeout = _enforce_function_timeout_cap(
-                retry_timeout,
-                context="sweep timeout bridge",
-                explicit_timeout_floor=args.timeout if timeout_was_explicit else None,
-            )
-            try:
-                retry_result = _run_with_timeout_in_daemon_thread(
-                    lambda: _run_function_work_item(
-                        active_item,
-                        timeout=retry_timeout,
-                        api_style=args.api_style,
-                        binary_path=args.binary,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        lst_metadata=lst_metadata,
-                        enable_structured_simplify=True,
-                        force_isolated_project=_force_isolated_project_for_work_item(active_item),
-                        allow_isolated_retry=allow_isolated_retry_in_function_tasks,
-                    ),
-                    timeout=_enforce_function_timeout_cap(
-                        max(1, retry_timeout + 2),
-                        context="sweep retry bridge thread timeout",
-                        explicit_timeout_floor=args.timeout if timeout_was_explicit else None,
-                    ),
-                    thread_name_prefix="func-timeout-bridge",
-                )
-                if isinstance(retry_result, FunctionWorkResult) and retry_result.status == "ok":
-                    result = retry_result
             except Exception:
                 pass
-        result_map[item.index] = result
-        if result is not None and item.index not in emitted_indexes:
-            d, f = _emit_function_result(
-                item,
-                result,
-                project=project,
-                args=args,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-                synthetic_globals=synthetic_globals,
-                precise_sidecar_regions=precise_sidecar_regions,
-                allow_heavy_fallbacks=allow_heavy_fallbacks,
-                interactive_stdout=interactive_stdout,
-                use_serial_fork_per_function=use_serial_fork_per_function,
-                fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                result_state_by_index=result_map,
-                timeout_was_explicit=timeout_was_explicit,
+            else:
+                function_cfg, function = ranked_cfg, ranked_func
+    active_item = FunctionWorkItem(
+        index=item.index,
+        function_cfg=function_cfg,
+        function=function,
+        recovery_addr=_function_work_item_recovery_addr_8616(item),
+    )
+    context.configure_recovered_project_for(active_item)
+    _preserve_source_label_for_recovered_function_8616(item.function, active_item.function)
+    return active_item
+
+
+def _serial_recover_function_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    item_function: _AngrFunction,
+    recovery_addr: int,
+    recover_timeout: int,
+) -> tuple[FunctionWorkResult | None, str, FunctionWorkItem]:
+    """Recover the function CFG for a work item that lacks one."""
+    args = context.args
+    project = context.project
+    lst_metadata = context.lst_metadata
+    recovery_mode = "lst" if lst_metadata is not None and context.visible_code_labels else "ranked"
+    result: FunctionWorkResult | None = None
+    cached_work_result, _cache_bypass_debug, _cache_key, _tail_enabled, _expected_stages = (
+        _function_work_cache_lookup(
+            item,
+            binary_path=args.binary,
+            timeout=args.timeout,
+            api_style=args.api_style,
+            enable_structured_simplify=True,
+            enable_postprocess=True,
+            cod_metadata=context.cod_metadata,
+            synthetic_globals=context.synthetic_globals,
+            lst_metadata=lst_metadata,
+        )
+    )
+    if cached_work_result is not None:
+        result = cached_work_result
+    if result is None:
+        cached_recovery_result, recovery_cache_bypass_debug, _recovery_cache_key = (
+            _lookup_persistent_recovery_timeout(
+                binary_path=args.binary,
+                addr=recovery_addr,
+                mode=recovery_mode,
+                window=args.window,
+                low_memory=context.low_memory_path,
+                timeout=recover_timeout,
             )
-            decompiled += d
-            failed += f
-            emitted_indexes.add(item.index)
-            if f and args.addr is not None:
-                _emit_tail_validation_console_summary(function_tasks, result_map, binary_path=args.binary)
-                return _SerialFunctionOutcome8616(decompiled=decompiled, failed=failed, stop_requested=True)
+        )
+        if cached_recovery_result is not None:
+            result = replace(
+                cached_recovery_result,
+                index=item.index,
+                function=item.function,
+                function_cfg=None,
+            )
+    active_item = item
+    try:
+        remaining_sweep_budget = context.remaining_sweep_budget_sec()
+        if remaining_sweep_budget is not None and remaining_sweep_budget <= 0:
+            raise TimeoutError("Whole-sweep budget exhausted before recovery.")
+        if result is None:
+            local_recover_timeout = _serial_local_recover_timeout_8616(recover_timeout, remaining_sweep_budget)
+            if lst_metadata is not None and context.visible_code_labels:
+                print(
+                    f"[dbg] recovery worker: start {recovery_addr:#x} {item_function.name} "
+                    f"mode=lst recovery_timeout={local_recover_timeout}s"
+                )
+                function_cfg, function = _serial_recover_call_8616(
+                    cast(Callable[[], object], lambda offset=recovery_addr, name=item_function.name: _recover_lst_function(
+                        project,
+                        lst_metadata,
+                        offset,
+                        name,
+                        timeout=local_recover_timeout,
+                        window=args.window,
+                        low_memory=context.low_memory_path,
+                    )),
+                    local_recover_timeout,
+                    "lst-recover",
+                )
+            else:
+                print(
+                    f"[dbg] recovery worker: start {recovery_addr:#x} {item_function.name} "
+                    f"mode=ranked recovery_timeout={local_recover_timeout}s"
+                )
+                function_cfg, function = _serial_recover_call_8616(
+                    cast(Callable[[], object], lambda addr=recovery_addr, name=item_function.name: (
+                        _recover_ranked_binary_function(
+                            project,
+                            addr,
+                            name,
+                            timeout=local_recover_timeout,
+                            window=args.window,
+                            low_memory=context.low_memory_path,
+                        ))
+                    ),
+                    local_recover_timeout,
+                    "ranked-recover",
+                )
+            active_item = _serial_stub_rerank_and_item_8616(
+                context,
+                item,
+                item_function,
+                function_cfg,
+                function,
+                recovery_addr,
+                recovery_mode,
+                recover_timeout,
+            )
+    except (FuturesTimeoutError, TimeoutError):
+        payload = (
+            f"Timed out while recovering {item_function.name} at {recovery_addr:#x} "
+            f"(stage=recovery timeout={recover_timeout}s mode={recovery_mode})."
+        )
+        result = FunctionWorkResult(
+            index=item.index,
+            status="timeout",
+            payload=payload,
+            debug_output=recovery_cache_bypass_debug,
+            function=item_function,
+            function_cfg=None,
+            skip_heavy_fallbacks=True,
+            elapsed=float(recover_timeout),
+            failure_stage=f"recovery:{recovery_mode}",
+        )
+    except Exception as ex:
+        result = FunctionWorkResult(
+            index=item.index,
+            status="error",
+            payload=f"Recovery failed for {item_function.name} at {recovery_addr:#x}: {_describe_exception(ex)}",
+            debug_output="",
+            function=item_function,
+            function_cfg=None,
+            failure_stage=f"recovery:{recovery_mode}",
+        )
+    return result, recovery_mode, active_item
+
+
+def _serial_no_cfg_error_outcome_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    item_function: _AngrFunction,
+    recovery_addr: int,
+    recovery_mode: str,
+    emitted_indexes: set[int],
+) -> _SerialFunctionOutcome8616:
+    """Emit the no-CFG recovery error and its outcome."""
+    decompiled = 0
+    failed = 0
+    result = FunctionWorkResult(
+        index=item.index,
+        status="error",
+        payload=(
+            f"Recovery failed to produce a function CFG for "
+            f"{item_function.name} at {recovery_addr:#x}."
+        ),
+        debug_output="",
+        function=item_function,
+        function_cfg=None,
+        failure_stage=f"recovery:{recovery_mode}",
+    )
+    context.result_map[item.index] = result
+    if item.index not in emitted_indexes:
+        d, f = _serial_emit_result_8616(context, item, result)
+        decompiled += d
+        failed += f
+        emitted_indexes.add(item.index)
+    return _SerialFunctionOutcome8616(decompiled=decompiled, failed=failed)
+
+
+def _serial_emit_result_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    result: FunctionWorkResult,
+) -> tuple[int, int]:
+    """Emit one serial function result through the shared emission lane."""
+    return _emit_function_result(
+        item,
+        result,
+        project=context.project,
+        args=context.args,
+        lst_metadata=context.lst_metadata,
+        cod_metadata=context.cod_metadata,
+        synthetic_globals=context.synthetic_globals,
+        precise_sidecar_regions=context.precise_sidecar_regions,
+        allow_heavy_fallbacks=context.allow_heavy_fallbacks,
+        interactive_stdout=context.interactive_stdout,
+        use_serial_fork_per_function=context.use_serial_fork_per_function,
+        fallback_tail_validation_by_index=context.fallback_tail_validation_by_index,
+        result_state_by_index=context.result_map,
+        timeout_was_explicit=context.timeout_was_explicit,
+    )
+
+
+def _serial_decompile_active_item_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    active_item: FunctionWorkItem,
+    decompile_timeout: float,
+    allow_isolated_retry_in_function_tasks: bool,
+) -> FunctionWorkResult:
+    """Run the serial decompile for a recovered work item."""
+    args = context.args
+    if context.use_serial_fork_per_function:
+        active_function = cast(_AngrFunction, active_item.function)
+        hard_timeout = _serial_clean_worker_outer_timeout_8616(int(decompile_timeout))
+        print(
+            f"[dbg] clean serial function worker: start {active_function.addr:#x} "
+            f"{active_function.name} requested_timeout={decompile_timeout}s hard_timeout={hard_timeout}s"
+        )
+        return _run_serial_clean_process_work_item_8616(
+            context,
+            active_item,
+            timeout=int(decompile_timeout),
+        )
+    try:
+        return _run_with_timeout_in_daemon_thread(
+            lambda: _run_function_work_item(
+                active_item,
+                timeout=int(decompile_timeout),
+                api_style=args.api_style,
+                binary_path=args.binary,
+                cod_metadata=context.cod_metadata,
+                synthetic_globals=context.synthetic_globals,
+                lst_metadata=context.lst_metadata,
+                enable_structured_simplify=True,
+                force_isolated_project=context.force_isolated_project_for(active_item),
+                allow_isolated_retry=allow_isolated_retry_in_function_tasks,
+            ),
+            timeout=_enforce_function_timeout_cap(
+                max(1, int(decompile_timeout) + 1),
+                context="sweep function serial daemon timeout",
+                explicit_timeout_floor=args.timeout if context.timeout_was_explicit else None,
+            ),
+            thread_name_prefix="func-serial",
+        )
+    except (FuturesTimeoutError, TimeoutError):
+        return FunctionWorkResult(
+            index=item.index,
+            status="timeout",
+            payload=f"Timed out after {args.timeout}s.",
+            debug_output="",
+            function=active_item.function,
+            function_cfg=active_item.function_cfg,
+            skip_heavy_fallbacks=True,
+            elapsed=float(args.timeout),
+            failure_stage="decompilation",
+        )
+    except Exception as ex:
+        return FunctionWorkResult(
+            index=item.index,
+            status="error",
+            payload=f"Serial function worker failed: {_describe_exception(ex)}",
+            debug_output="",
+            function=active_item.function,
+            function_cfg=active_item.function_cfg,
+            failure_stage="decompilation",
+        )
+
+
+def _serial_post_result_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    active_item: FunctionWorkItem,
+    result: FunctionWorkResult | None,
+    decompile_timeout: float,
+    adaptive_timeout_model: _AdaptivePerByteTimeoutModel,
+    allow_isolated_retry_in_function_tasks: bool,
+) -> FunctionWorkResult | None:
+    """Normalize, observe, and bridge-retry a serial work result."""
+    args = context.args
+    if result is not None and result.status == "ok":
+        result_payload = result.payload if isinstance(result.payload, str) else ""
+        normalized_result_payload = _normalize_accepted_payload_8616(result_payload)
+        if normalized_result_payload != result_payload:
+            result = replace(result, payload=normalized_result_payload)
+    if result is not None and result.status == "ok":
+        byte_count = result.byte_count
+        elapsed = result.elapsed
+        if isinstance(byte_count, int) and isinstance(elapsed, (int, float)):
+            adaptive_timeout_model.observe_success(byte_count, float(elapsed))
+    # Sweep-only timeout bridge: retry timed-out functions once with a
+    # larger per-function budget using the same work-item path.
+    if result is not None and result.status == "timeout" and args.addr is None and not context.use_serial_fork_per_function:
+        base_timeout = max(1, args.timeout)
+        # Ensure sweep retry actually expands the lane budget.
+        # The previous 120s cap could become a no-op when the base
+        # timeout was already 120s, leaving flaky one-off timeouts
+        # unrecovered.
+        retry_timeout = min(360, max(int(decompile_timeout) * 2, base_timeout * 2, 40))
+        retry_timeout = _enforce_function_timeout_cap(
+            retry_timeout,
+            context="sweep timeout bridge",
+            explicit_timeout_floor=args.timeout if context.timeout_was_explicit else None,
+        )
+        try:
+            retry_result = _run_with_timeout_in_daemon_thread(
+                lambda: _run_function_work_item(
+                    active_item,
+                    timeout=retry_timeout,
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                    cod_metadata=context.cod_metadata,
+                    synthetic_globals=context.synthetic_globals,
+                    lst_metadata=context.lst_metadata,
+                    enable_structured_simplify=True,
+                    force_isolated_project=context.force_isolated_project_for(active_item),
+                    allow_isolated_retry=allow_isolated_retry_in_function_tasks,
+                ),
+                timeout=_enforce_function_timeout_cap(
+                    max(1, retry_timeout + 2),
+                    context="sweep retry bridge thread timeout",
+                    explicit_timeout_floor=args.timeout if context.timeout_was_explicit else None,
+                ),
+                thread_name_prefix="func-timeout-bridge",
+            )
+            if isinstance(retry_result, FunctionWorkResult) and retry_result.status == "ok":
+                result = retry_result
+        except Exception:
+            pass
+    return result
+
+
+def _serial_missing_result_lane_8616(
+    context: _BatchCliContext8616,
+    item: FunctionWorkItem,
+    item_function: _AngrFunction,
+    recovery_addr: int,
+    *,
+    recover_timeout: int,
+    adaptive_timeout_model: _AdaptivePerByteTimeoutModel,
+    allow_isolated_retry_in_function_tasks: bool,
+    emitted_indexes: set[int],
+) -> _SerialFunctionOutcome8616:
+    """Recover, decompile, retry, and emit a work item without a cached result."""
+    args = context.args
+    decompiled = 0
+    failed = 0
+    result: FunctionWorkResult | None = None
+    active_item = item
+    recovery_mode = "existing"
+    decompile_timeout: float = max(1, args.timeout)
+    if item.function_cfg is None:
+        result, recovery_mode, active_item = _serial_recover_function_8616(
+            context,
+            item,
+            item_function,
+            recovery_addr,
+            recover_timeout,
+        )
+    if result is None:
+        context.configure_recovered_project_for(active_item)
+        active_function = cast(_AngrFunction, active_item.function)
+        if active_item.function_cfg is None:
+            return _serial_no_cfg_error_outcome_8616(
+                context, item, item_function, recovery_addr, recovery_mode, emitted_indexes
+            )
+        decompile_timeout = _batch_function_decompile_timeout_8616(
+            context,
+            active_function,
+            adaptive_timeout_model,
+        )
+        result = _serial_decompile_active_item_8616(
+            context,
+            item,
+            active_item,
+            decompile_timeout,
+            allow_isolated_retry_in_function_tasks,
+        )
+    result = _serial_post_result_8616(
+        context,
+        item,
+        active_item,
+        result,
+        decompile_timeout,
+        adaptive_timeout_model,
+        allow_isolated_retry_in_function_tasks,
+    )
+    context.result_map[item.index] = result
+    if result is not None and item.index not in emitted_indexes:
+        d, f = _serial_emit_result_8616(context, item, result)
+        decompiled += d
+        failed += f
+        emitted_indexes.add(item.index)
+        if f and args.addr is not None:
+            _emit_tail_validation_console_summary(context.function_tasks, context.result_map, binary_path=args.binary)
+            return _SerialFunctionOutcome8616(decompiled=decompiled, failed=failed, stop_requested=True)
     return _SerialFunctionOutcome8616(decompiled=decompiled, failed=failed)
 
 
@@ -7543,41 +9170,14 @@ def _finish_batch_cli_8616(
     result_map = context.result_map
     fallback_tail_validation_by_index = context.fallback_tail_validation_by_index
     lst_metadata = context.lst_metadata
-    cod_metadata = context.cod_metadata
-    synthetic_globals = context.synthetic_globals
-    precise_sidecar_regions = context.precise_sidecar_regions
-    allow_heavy_fallbacks = context.allow_heavy_fallbacks
-    interactive_stdout = context.interactive_stdout
-    use_serial_fork_per_function = context.use_serial_fork_per_function
     shown_total = context.shown_total
     skipped_signature_labels = context.skipped_signature_labels
     attempted = sum(1 for item in function_tasks if result_map.get(item.index) is not None)
     attempted_target = "selected" if args.max_functions <= 0 and args.addr is None else "displayed"
     print(f"/* info: decompilation attempted for {attempted}/{shown_total} {attempted_target} function(s) */")
-    for item in function_tasks:
-        if item.index in emitted_indexes:
-            continue
-        result = result_map.get(item.index)
-        if result is None:
-            continue
-        d, f = _emit_function_result(
-            item,
-            result,
-            project=project,
-            args=args,
-            lst_metadata=lst_metadata,
-            cod_metadata=cod_metadata,
-            synthetic_globals=synthetic_globals,
-            precise_sidecar_regions=precise_sidecar_regions,
-            allow_heavy_fallbacks=allow_heavy_fallbacks,
-            interactive_stdout=interactive_stdout,
-            use_serial_fork_per_function=use_serial_fork_per_function,
-            fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-            result_state_by_index=result_map,
-            timeout_was_explicit=context.timeout_was_explicit,
-        )
-        decompiled += d
-        failed += f
+    d, f = _emit_pending_batch_results_8616(context, emitted_indexes)
+    decompiled += d
+    failed += f
     for index, snapshot in fallback_tail_validation_by_index.items():
         existing = result_map.get(index)
         if existing is not None:
@@ -7624,22 +9224,12 @@ def _finish_batch_cli_8616(
         {label for result in result_map.values() for label in result.fallback_family_labels if label},
         key=lambda item: (item.casefold(), item),
     )
-    dead_setup_candidates = 0
-    dead_setup_pruned = 0
-    dead_setup_refused = 0
-    dead_setup_escaped = 0
-    for result in result_map.values():
-        function_obj = result.function
-        info = getattr(function_obj, "info", None)
-        if not isinstance(info, dict):
-            continue
-        ds = info.get("x86_16_dead_setup")
-        if not isinstance(ds, dict):
-            continue
-        dead_setup_candidates += int(ds.get("dead_setup_candidates", 0) or 0)
-        dead_setup_pruned += int(ds.get("dead_setup_pruned", 0) or 0)
-        dead_setup_refused += int(ds.get("dead_setup_refused", 0) or 0)
-        dead_setup_escaped += int(ds.get("dead_setup_escaped", 0) or 0)
+    (
+        dead_setup_candidates,
+        dead_setup_pruned,
+        dead_setup_refused,
+        dead_setup_escaped,
+    ) = _dead_setup_counters_8616(result_map.values())
     emit_file_decompilation_summary(
         project,
         lst_metadata,
@@ -7663,6 +9253,60 @@ def _finish_batch_cli_8616(
         total_shown=total_shown,
     )
     return 2 if batch_c_output.failed else exit_code
+
+
+def _emit_pending_batch_results_8616(
+    context: _BatchCliContext8616, emitted_indexes: set[int]
+) -> tuple[int, int]:
+    """Emit every un-emitted function result, returning (decompiled, failed) deltas."""
+    decompiled = 0
+    failed = 0
+    for item in context.function_tasks:
+        if item.index in emitted_indexes:
+            continue
+        result = context.result_map.get(item.index)
+        if result is None:
+            continue
+        d, f = _emit_function_result(
+            item,
+            result,
+            project=context.project,
+            args=context.args,
+            lst_metadata=context.lst_metadata,
+            cod_metadata=context.cod_metadata,
+            synthetic_globals=context.synthetic_globals,
+            precise_sidecar_regions=context.precise_sidecar_regions,
+            allow_heavy_fallbacks=context.allow_heavy_fallbacks,
+            interactive_stdout=context.interactive_stdout,
+            use_serial_fork_per_function=context.use_serial_fork_per_function,
+            fallback_tail_validation_by_index=context.fallback_tail_validation_by_index,
+            result_state_by_index=context.result_map,
+            timeout_was_explicit=context.timeout_was_explicit,
+        )
+        decompiled += d
+        failed += f
+    return decompiled, failed
+
+
+def _dead_setup_counters_8616(results: Iterable[FunctionWorkResult]) -> tuple[int, int, int, int]:
+    """Aggregate dead-setup evidence counters across function results."""
+    candidates = 0
+    pruned = 0
+    refused = 0
+    escaped = 0
+    for result in results:
+        function_obj = result.function
+        info = getattr(function_obj, "info", None)
+        if not isinstance(info, dict):
+            continue
+        ds = info.get("x86_16_dead_setup")
+        if not isinstance(ds, dict):
+            continue
+        candidates += int(ds.get("dead_setup_candidates", 0) or 0)
+        pruned += int(ds.get("dead_setup_pruned", 0) or 0)
+        refused += int(ds.get("dead_setup_refused", 0) or 0)
+        escaped += int(ds.get("dead_setup_escaped", 0) or 0)
+    return candidates, pruned, refused, escaped
 
 
 def _batch_exit_code_8616(
@@ -7759,1150 +9403,1654 @@ def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> int:
     )
 
 
-def _run_main_cli_8616(argv: list[str] | None) -> int:
-    """Run CLI orchestration after the mandatory architecture guard succeeds."""
-    args, timeout_was_explicit, effective_signature_catalog = _prepare_main_cli_args_8616(argv)
+@dataclass(slots=True)
+class _MainCliRun8616:
+    """Mutable run state for main CLI orchestration."""
 
-    print(f"/* loading: {args.binary} */", flush=True)
-    runtime_header = render_c_runtime_header_8616(args.c_target)
-    if runtime_header:
-        print(runtime_header, end="" if runtime_header.endswith("\n") else "\n", flush=True)
-    try:
-        setup = _prepare_main_project_8616(args, effective_signature_catalog)
-    except PackedExecutableRefusedError as ex:
-        print(f"error: {ex}", file=sys.stderr, flush=True)
-        return 7
-    project = setup.project
-    function_label = setup.function_label
-    cod_metadata = setup.cod_metadata
-    synthetic_globals = setup.synthetic_globals
-    lst_metadata = setup.lst_metadata
-    prefer_fast_recovery = setup.prefer_fast_recovery
-    proc_resolved_to_linked_binary = setup.proc_resolved_to_linked_binary
-    low_memory_path = _prefer_low_memory_path()
-    _configure_display_catalog_cache_policy_8616(
-        project,
-        DisplayCatalogCachePolicy8616.from_runtime(
-            ignore_local_sidecar_hints=bool(args.ignore_local_sidecar_hints),
-            include_library_functions=bool(args.include_library_functions),
-            function_discovery_backend=args.function_discovery_backend,
-            pat_backend=args.pat_backend,
-            max_functions=args.max_functions,
-            timeout=args.timeout,
-            window=args.window,
-            rizin_timeout=args.rizin_timeout,
-            low_memory=low_memory_path,
-            auto_rizin_policy=os.environ.get("INERTIA_AUTO_RIZIN_8616", "default"),
-            signature_catalog=effective_signature_catalog,
-            catalog_timeout=args.catalog_timeout,
-        ),
-    )
-    interactive_stdout = _stdout_is_interactive()
-    precise_sidecar_regions = metadata_has_precise_code_regions(cast(Any, lst_metadata))
-    if args.addr is not None:
-        request_cache_inputs = DirectRequestCacheInputs8616.from_cli(
-            args,
-            signature_catalog=effective_signature_catalog,
-        )
-        assert request_cache_inputs is not None
-        direct_context = _DirectAddrCliContext8616(
-            args=args,
-            project=project,
-            function_label=function_label,
-            cod_metadata=cod_metadata,
-            synthetic_globals=synthetic_globals,
-            lst_metadata=lst_metadata,
-            prefer_fast_recovery=prefer_fast_recovery,
-            proc_resolved_to_linked_binary=proc_resolved_to_linked_binary,
-            low_memory_path=low_memory_path,
-            interactive_stdout=interactive_stdout,
-            precise_sidecar_regions=precise_sidecar_regions,
-            timeout_was_explicit=timeout_was_explicit,
-            request_cache_inputs=request_cache_inputs,
-        )
-        direct_lock_key = build_direct_request_cache_key_8616(request_cache_inputs)
-        if not _direct_addr_work_requires_parent_lock_8616(direct_lock_key):
-            return _run_direct_addr_cli_8616(direct_context)
-        assert direct_lock_key is not None
-        with _cache_key_lock("direct_addr_work", direct_lock_key):
-            return _run_direct_addr_cli_8616(direct_context)
+    _: Any = None
+    _seeded_pairs_and_addrs: Any = None
+    addr: Any = None
+    allow_heavy_fallbacks: Any = None
+    allow_isolated_retry_for_parallel_tasks: Any = None
+    args: Any = None
+    argv: Any = None
+    batch_context: Any = None
+    cached_catalog_addrs: Any = None
+    cached_catalog_int_addrs: Any = None
+    catalog_error: Any = None
+    cfg: Any = None
+    cfg_any: Any = None
+    cod_metadata: Any = None
+    code_name: Any = None
+    current_result: Any = None
+    d: Any = None
+    deadlines: Any = None
+    decompiled: Any = None
+    defer_limit_until_after_seed_ranking: Any = None
+    deferred_exe_display_cap: Any = None
+    detail: Any = None
+    direct_context: Any = None
+    direct_inventory_total: Any = None
+    direct_lock_key: Any = None
+    discovered_addrs: Any = None
+    discovery_limit: Any = None
+    display_cache_key: Any = None
+    done: Any = None
+    done_now: Any = None
+    effective_signature_catalog: Any = None
+    emitted_indexes: Any = None
+    end: Any = None
+    ex: Any = None
+    executor: Any = None
+    existing: Any = None
+    existing_addrs: Any = None
+    existing_by_addr: Any = None
+    expired: Any = None
+    f: Any = None
+    failed: Any = None
+    fallback_tail_validation_by_index: Any = None
+    fast_seed_pairs: Any = None
+    force_isolated_function_projects: Any = None
+    forced_serial_function_decomp: Any = None
+    func: Any = None
+    function: Any = None
+    function_cfg: Any = None
+    function_cfg_pairs: Any = None
+    function_label: Any = None
+    function_tasks: Any = None
+    function_timeout: Any = None
+    functions: Any = None
+    future: Any = None
+    future_map: Any = None
+    has_expired_futures: Any = None
+    has_non_library_sidecar_hints: Any = None
+    include_library_functions: Any = None
+    index: Any = None
+    interactive_stdout: Any = None
+    isolated_function_decompilation_required: Any = None
+    item: Any = None
+    item_by_future: Any = None
+    labeled_offsets: Any = None
+    library_label_skipped_count: Any = None
+    limit: Any = None
+    linked_base: Any = None
+    low_memory_path: Any = None
+    lst_metadata: Any = None
+    name: Any = None
+    now: Any = None
+    offset: Any = None
+    packed_exe: Any = None
+    parallel_timeout_model: Any = None
+    pending: Any = None
+    placeholder: Any = None
+    precise_sidecar_regions: Any = None
+    prefer_bounded_catalog: Any = None
+    prefer_fast_recovery: Any = None
+    prefer_ranked_hidden_sidecar_full_queue: Any = None
+    preview_addrs: Any = None
+    proc_resolved_to_linked_binary: Any = None
+    project: Any = None
+    ranked_binary_offsets: Any = None
+    ranked_labeled_total: Any = None
+    ranking_cache_hit: Any = None
+    ranking_elapsed_ms: Any = None
+    ranking_start: Any = None
+    recovered_seed_addrs: Any = None
+    recovery_code_labels: Any = None
+    recovery_filter: Any = None
+    replacement_tasks: Any = None
+    request_cache_inputs: Any = None
+    requested_workers: Any = None
+    result: Any = None
+    result_map: Any = None
+    rizin_names: Any = None
+    runtime_header: Any = None
+    rz_name: Any = None
+    seed_code_labels: Any = None
+    seeded_addrs: Any = None
+    seeded_catalog_addrs: Any = None
+    seeded_pairs: Any = None
+    seeded_recovery_result: Any = None
+    seen_existing: Any = None
+    selection_target: Any = None
+    setup: Any = None
+    shown_total: Any = None
+    sidecar_preview_limit: Any = None
+    skipped_signature_labels: Any = None
+    source_catalog: Any = None
+    source_region_evidence: Any = None
+    start: Any = None
+    supplemental_pairs: Any = None
+    supplemented_cached_result: Any = None
+    sweep_budget_sec: Any = None
+    sweep_budget_sec_raw: Any = None
+    sweep_deadline: Any = None
+    synthetic_globals: Any = None
+    timeout_by_index: Any = None
+    timeout_was_explicit: Any = None
+    total_functions: Any = None
+    uncapped_function_cfg_pairs: Any = None
+    use_serial_fork_per_function: Any = None
+    visible_code_labels: Any = None
+    visible_filter: Any = None
+    work_name: Any = None
+    work_offset: Any = None
+    worker_debug: Any = None
+    worker_policy: Any = None
+    workers: Any = None
 
-    print("/* discovering likely functions... */", flush=True)
-    typing.cast(typing.Any, project)._inertia_cached_catalog_mode = False
-    typing.cast(typing.Any, project)._inertia_hidden_signature_mode = False
-    typing.cast(typing.Any, project)._inertia_display_truncated = False
-    typing.cast(typing.Any, project)._inertia_uncapped_seeded_recovery = False
-    cfg: object | None = None
-    function_cfg_pairs: list[_FunctionCfgPair8616] = []
-    ranked_binary_offsets: list[int] = []
-    labeled_offsets: list[tuple[int, str]] = []
-    ranked_labeled_total = 0
-    total_functions = 0
-    shown_total = 0
-    direct_inventory_total: int | None = None
-    prefer_ranked_hidden_sidecar_full_queue = False
-    visible_code_labels = _function_discovery_code_labels(lst_metadata)
-    recovery_code_labels = _recovery_code_labels(lst_metadata) if lst_metadata is not None else {}
-    has_non_library_sidecar_hints = bool(visible_code_labels)
-    include_library_functions = args.include_library_functions
-    library_label_skipped_count = 0
-    if include_library_functions and lst_metadata is not None:
-        visible_code_labels = dict(getattr(lst_metadata, "code_labels", {}) or {})
-        recovery_code_labels = dict(visible_code_labels)
-    elif lst_metadata is not None:
-        visible_filter = filter_code_labels_for_library_policy(lst_metadata, visible_code_labels)
-        recovery_filter = filter_code_labels_for_library_policy(lst_metadata, recovery_code_labels)
-        visible_code_labels = visible_filter.labels
-        recovery_code_labels = recovery_filter.labels
-        library_label_skipped_count = max(visible_filter.skipped_count, recovery_filter.skipped_count)
-        if not visible_code_labels and not recovery_code_labels and getattr(lst_metadata, "code_labels", None):
-            print(
-                "/* sidecar labels are signature/library-only; skipping them by default "
-                "(use --include-library-functions to include). */"
-            )
-    seed_code_labels = visible_code_labels or recovery_code_labels
-    skipped_signature_labels = (
-        len(_signature_matched_code_addrs(lst_metadata))
-        if lst_metadata is not None and not include_library_functions
-        else 0
-    )
-    if low_memory_path:
-        print("/* Low-memory mode: using a smaller, safer function-discovery pass. */")
-    packed_exe = None if args.proc is not None else getattr(project, "_inertia_packed_exe", None)
-    if lst_metadata is not None and visible_code_labels:
+    def run_8616(self) -> int:
+        """Run the main CLI phases and return the process exit code."""
+        phases: tuple[Callable[[], int | None], ...] = (
+            self._phase_setup_8616,
+            self._phase_seed_rank_dispatch_8616,
+            self._phase_seed_inputs_8616,
+            self._phase_build_pairs_dispatch_8616,
+            self._phase_configure_display_8616,
+            self._phase_build_tasks_dispatch_8616,
+            self._phase_configure_execution_8616,
+            self._phase_serial_fork_batch_dispatch_8616,
+        )
+        for phase in phases:
+            _rc = phase()
+            if _rc is not None:
+                return _rc
+        return _finish_batch_cli_8616(
+            self.batch_context,
+            decompiled=self.decompiled,
+            failed=self.failed,
+            emitted_indexes=self.emitted_indexes,
+        )
+
+
+    def _phase_setup_8616(self) -> int | None:
+        """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
+        self.args, self.timeout_was_explicit, self.effective_signature_catalog = _prepare_main_cli_args_8616(self.argv)
+        print(f"/* loading: {self.args.binary} */", flush=True)
+        self.runtime_header = render_c_runtime_header_8616(self.args.c_target)
+        if self.runtime_header:
+            print(self.runtime_header, end="" if self.runtime_header.endswith("\n") else "\n", flush=True)
         try:
-            ranking_start = time.perf_counter()
-            labeled_offsets, ranking_cache_hit = _rank_labeled_function_entries_cached(
-                project,
-                list(seed_code_labels.items()),
-                lst_metadata,
+            self.setup = _prepare_main_project_8616(self.args, self.effective_signature_catalog)
+        except PackedExecutableRefusedError as ex:
+            print(f"error: {ex}", file=sys.stderr, flush=True)
+            return 7
+        self.project = self.setup.project
+        self.function_label = self.setup.function_label
+        self.cod_metadata = self.setup.cod_metadata
+        self.synthetic_globals = self.setup.synthetic_globals
+        self.lst_metadata = self.setup.lst_metadata
+        self.prefer_fast_recovery = self.setup.prefer_fast_recovery
+        self.proc_resolved_to_linked_binary = self.setup.proc_resolved_to_linked_binary
+        self.low_memory_path = _prefer_low_memory_path()
+        _configure_display_catalog_cache_policy_8616(
+            self.project,
+            DisplayCatalogCachePolicy8616.from_runtime(
+                ignore_local_sidecar_hints=bool(self.args.ignore_local_sidecar_hints),
+                include_library_functions=bool(self.args.include_library_functions),
+                function_discovery_backend=self.args.function_discovery_backend,
+                pat_backend=self.args.pat_backend,
+                max_functions=self.args.max_functions,
+                timeout=self.args.timeout,
+                window=self.args.window,
+                rizin_timeout=self.args.rizin_timeout,
+                low_memory=self.low_memory_path,
+                auto_rizin_policy=os.environ.get("INERTIA_AUTO_RIZIN_8616", "default"),
+                signature_catalog=self.effective_signature_catalog,
+                catalog_timeout=self.args.catalog_timeout,
+            ),
+        )
+        self.interactive_stdout = _stdout_is_interactive()
+        self.precise_sidecar_regions = metadata_has_precise_code_regions(cast(Any, self.lst_metadata))
+        if self.args.addr is not None:
+            self.request_cache_inputs = DirectRequestCacheInputs8616.from_cli(
+                self.args,
+                signature_catalog=self.effective_signature_catalog,
             )
-            ranking_elapsed_ms = (time.perf_counter() - ranking_start) * 1000.0
+            assert self.request_cache_inputs is not None
+            self.direct_context = _DirectAddrCliContext8616(
+                args=self.args,
+                project=self.project,
+                function_label=self.function_label,
+                cod_metadata=self.cod_metadata,
+                synthetic_globals=self.synthetic_globals,
+                lst_metadata=self.lst_metadata,
+                prefer_fast_recovery=self.prefer_fast_recovery,
+                proc_resolved_to_linked_binary=self.proc_resolved_to_linked_binary,
+                low_memory_path=self.low_memory_path,
+                interactive_stdout=self.interactive_stdout,
+                precise_sidecar_regions=self.precise_sidecar_regions,
+                timeout_was_explicit=self.timeout_was_explicit,
+                request_cache_inputs=self.request_cache_inputs,
+            )
+            self.direct_lock_key = build_direct_request_cache_key_8616(self.request_cache_inputs)
+            if not _direct_addr_work_requires_parent_lock_8616(self.direct_lock_key):
+                return _run_direct_addr_cli_8616(self.direct_context)
+            assert self.direct_lock_key is not None
+            with _cache_key_lock("direct_addr_work", self.direct_lock_key):
+                return _run_direct_addr_cli_8616(self.direct_context)
+        print("/* discovering likely functions... */", flush=True)
+        typing.cast(typing.Any, self.project)._inertia_cached_catalog_mode = False
+        typing.cast(typing.Any, self.project)._inertia_hidden_signature_mode = False
+        typing.cast(typing.Any, self.project)._inertia_display_truncated = False
+        typing.cast(typing.Any, self.project)._inertia_uncapped_seeded_recovery = False
+        self.cfg: object | None = None
+        self.function_cfg_pairs: list[_FunctionCfgPair8616] = []
+        self.ranked_binary_offsets: list[int] = []
+        self.labeled_offsets: list[tuple[int, str]] = []
+        self.ranked_labeled_total = 0
+        self.total_functions = 0
+        self.shown_total = 0
+        self.direct_inventory_total: int | None = None
+        self.prefer_ranked_hidden_sidecar_full_queue = False
+        self.visible_code_labels = _function_discovery_code_labels(self.lst_metadata)
+        self.recovery_code_labels = _recovery_code_labels(self.lst_metadata) if self.lst_metadata is not None else {}
+        self.has_non_library_sidecar_hints = bool(self.visible_code_labels)
+        self.include_library_functions = self.args.include_library_functions
+        self.library_label_skipped_count = 0
+        if self.include_library_functions and self.lst_metadata is not None:
+            self.visible_code_labels = dict(getattr(self.lst_metadata, "code_labels", {}) or {})
+            self.recovery_code_labels = dict(self.visible_code_labels)
+        elif self.lst_metadata is not None:
+            self.visible_filter = filter_code_labels_for_library_policy(self.lst_metadata, self.visible_code_labels)
+            self.recovery_filter = filter_code_labels_for_library_policy(self.lst_metadata, self.recovery_code_labels)
+            self.visible_code_labels = self.visible_filter.labels
+            self.recovery_code_labels = self.recovery_filter.labels
+            self.library_label_skipped_count = max(self.visible_filter.skipped_count, self.recovery_filter.skipped_count)
+            if not self.visible_code_labels and not self.recovery_code_labels and getattr(self.lst_metadata, "code_labels", None):
+                print(
+                    "/* sidecar labels are signature/library-only; skipping them by default "
+                    "(use --include-library-functions to include). */"
+                )
+        self.seed_code_labels = self.visible_code_labels or self.recovery_code_labels
+        self.skipped_signature_labels = (
+            len(_signature_matched_code_addrs(self.lst_metadata))
+            if self.lst_metadata is not None and not self.include_library_functions
+            else 0
+        )
+        if self.low_memory_path:
+            print("/* Low-memory mode: using a smaller, safer function-discovery pass. */")
+        self.packed_exe = None if self.args.proc is not None else getattr(self.project, "_inertia_packed_exe", None)
+        return None
+    def _phase_seed_inputs_8616(self) -> int | None:
+        """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
+        if self.skipped_signature_labels > 0:
+            print(f"/* skipping {self.skipped_signature_labels} signature-matched function(s) by default. */")
+        if self.library_label_skipped_count > 0:
+            print(f"/* skipping {self.library_label_skipped_count} library-like sidecar function(s) by default. */")
+        elif self.include_library_functions and self.lst_metadata is not None:
+            print("/* including signature/library-labeled functions as requested. */")
+        if self.cfg is not None:
+            self.cfg_any = cast(Any, self.cfg)
+            if self.function_label is not None and self.project.entry in self.cfg_any.functions:
+                self.cfg_any.functions[self.project.entry].name = self.function_label
+            else:
+                self.rizin_names = getattr(self.project, "_inertia_rizin_function_names", {}) or {}
+                for _addr_lp8616, _func_lp8616 in self.cfg_any.functions.items():
+                    self.addr = _addr_lp8616
+                    self.func = _func_lp8616
+                    self.code_name = _lst_code_label(self.lst_metadata, _addr_lp8616, self.project.entry) if self.lst_metadata is not None else None
+                    if self.code_name is not None:
+                        _func_lp8616.name = self.code_name
+                    elif isinstance(self.rizin_names, dict):
+                        self.rz_name = self.rizin_names.get(_addr_lp8616)
+                        if isinstance(self.rz_name, str) and self.rz_name:
+                            _func_lp8616.name = self.rz_name
+        return None
+    def _phase_configure_display_8616(self) -> int | None:
+        """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
+        self.sidecar_preview_limit = None
+        if (
+            self.lst_metadata is not None
+            and self.visible_code_labels
+            and self.interactive_stdout
+            and self.args.max_functions > 0
+            and self.total_functions > self.args.max_functions
+        ):
+            self.sidecar_preview_limit = self.args.max_functions
+        if self.lst_metadata is not None and self.visible_code_labels:
+            print("/* == known function catalog (sidecar-backed) == */")
             print(
-                f"/* sidecar label ranking prepared {len(labeled_offsets)} entries in "
-                f"{ranking_elapsed_ms:.1f}ms{' (cache hit)' if ranking_cache_hit else ''}. */"
+                _format_sidecar_function_catalog(self.lst_metadata, limit=self.sidecar_preview_limit, code_labels=self.visible_code_labels)
             )
-            ranked_labeled_total = len(labeled_offsets)
-            if args.max_functions > 0:
-                labeled_offsets = labeled_offsets[: args.max_functions]
+            if self.sidecar_preview_limit is not None and self.total_functions > self.sidecar_preview_limit:
+                print(f"/* catalog preview limited to first {self.sidecar_preview_limit} entries for responsiveness. */")
+        if (
+            self.args.addr is None
+            and self.args.binary.suffix.lower() == ".exe"
+            and self.function_cfg_pairs
+            and len(self.function_cfg_pairs) > 1
+            and not (
+                self.lst_metadata is not None and not self.visible_code_labels and self.ranked_binary_offsets and self.args.max_functions > 0
+            )
+        ):
+            self.function_cfg_pairs = _rank_function_cfg_pairs_for_display(self.project, self.function_cfg_pairs)
+        if _exe_unlabeled_batch_gate_8616(
+            self.args, self.lst_metadata, self.visible_code_labels
+        ) and _seeded_supplement_needed_8616(self.args, self.function_cfg_pairs, self.ranked_binary_offsets):
+            self.function_cfg_pairs = _supplement_function_cfg_pairs_with_seeded_recovery(
+                self.project,
+                self.function_cfg_pairs,
+                timeout=self.args.timeout,
+                target_count=self.args.max_functions,
+            )
+            self.function_cfg_pairs = _supplement_function_cfg_pairs_with_ranked_preview(
+                self.project,
+                self.function_cfg_pairs,
+                self.ranked_binary_offsets,
+                target_count=self.args.max_functions,
+                timeout=self.args.timeout,
+                window=self.args.window,
+                low_memory=self.low_memory_path,
+            )
+            self.function_cfg_pairs = _rank_function_cfg_pairs_for_display(self.project, self.function_cfg_pairs)
+            self.shown_total = len(self.function_cfg_pairs)
+        self.uncapped_function_cfg_pairs = list(self.function_cfg_pairs)
+        self.source_catalog = _source_region_catalog_evidence_8616(self.project)
+        if (
+            self.project.arch.name == "86_16"
+            and self.source_catalog is not None
+            and self.source_catalog.complete
+            and self.uncapped_function_cfg_pairs
+        ):
+            attach_project_argument_evidence_ranges_8616(self.project, self.project)
+            publish_discovered_indexed_alias_program_8616(
+                self.project,
+                tuple(function for _cfg, function in self.uncapped_function_cfg_pairs),
+            )
+        if (
+            self.args.addr is None
+            and self.args.binary.suffix.lower() == ".exe"
+            and self.args.max_functions > 0
+            and len(self.function_cfg_pairs) > self.args.max_functions
+        ):
+            self.function_cfg_pairs = self.function_cfg_pairs[: self.args.max_functions]
+            self.shown_total = len(self.function_cfg_pairs)
+        print(f"/* binary: {self.args.binary} */")
+        print(f"/* arch: {self.project.arch.name} */")
+        print(f"/* entry: {self.project.entry:#x} */")
+        print(f"/* functions queued for decompilation: {self.total_functions} */")
+        if self.args.max_functions > 0 and self.total_functions > self.shown_total:
+            typing.cast(typing.Any, self.project)._inertia_display_truncated = True
+            print(
+                f"/* showing first {self.shown_total} functions because --max-functions={self.args.max_functions}; "
+                "raise it or omit the option to decompile all queued functions */"
+            )
+        if (
+            _exe_addr_none_batch_gate_8616(self.args)
+            and self.lst_metadata is None
+            and self.uncapped_function_cfg_pairs
+            and _catalog_address_cache_storable_8616(self.project)
+        ):
+            _store_catalog_address_cache(self.project, self.args.binary, self.uncapped_function_cfg_pairs)
+        self.function_tasks: list[FunctionWorkItem] = []
+        self.result_map: dict[int, FunctionWorkResult] = {}
+        self.fallback_tail_validation_by_index: dict[int, dict[str, object]] = {}
+        return None
+    def _phase_configure_execution_8616(self) -> int | None:
+        """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
+        _rc = self._exec_parallel_banner_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._exec_policy_fields_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._exec_batch_context_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _sweep_budget_exhausted(self) -> bool:
+        """Hoisted nested function (callable via `self`)."""
+        return self.sweep_deadline is not None and time.monotonic() >= self.sweep_deadline
+
+    def _phase_seed_rank_8616(self) -> int | None:
+        """Phase extracted from `_run_main_cli_8616`."""
+        try:
+            self.ranking_start = time.perf_counter()
+            self.labeled_offsets, self.ranking_cache_hit = _rank_labeled_function_entries_cached(
+                self.project,
+                list(self.seed_code_labels.items()),
+                self.lst_metadata,
+            )
+            self.ranking_elapsed_ms = (time.perf_counter() - self.ranking_start) * 1000.0
+            print(
+                f"/* sidecar label ranking prepared {len(self.labeled_offsets)} entries in "
+                f"{self.ranking_elapsed_ms:.1f}ms{' (cache hit)' if self.ranking_cache_hit else ''}. */"
+            )
+            self.ranked_labeled_total = len(self.labeled_offsets)
+            if self.args.max_functions > 0:
+                self.labeled_offsets = self.labeled_offsets[: self.args.max_functions]
         except Exception as ex:
             print(f"/* Listing-backed function catalog setup failed: {ex} */")
             print("\n/* == entry asm == */")
-            print(_format_first_block_asm(project, project.entry))
+            print(_format_first_block_asm(self.project, self.project.entry))
             return 5
-    else:
-        catalog_error: BaseException | None = None
-        deferred_exe_display_cap = args.addr is None and args.binary.suffix.lower() == ".exe" and args.max_functions > 0
-        if args.addr is None and args.binary.suffix.lower() == ".exe":
-            ranked_binary_offsets = _discover_ranked_binary_offsets(project, args=args)
-            linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", None)
-            if isinstance(linked_base, int):
-                ranked_binary_offsets = [addr for addr in ranked_binary_offsets if addr != linked_base]
-            direct_inventory_total = len(ranked_binary_offsets) if ranked_binary_offsets else None
-            if direct_inventory_total is not None:
-                print(
-                    f"/* info: direct-binary recovery found {direct_inventory_total} likely non-library function entries */"
+        return None
+
+    def _phase_seed_rank_8616_else_8616(self) -> int | None:
+        """Else-branch of the extracted phase."""
+        _rc = self._phase_seed_rank_8616_else_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_seed_rank_8616_else_8616_part1_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_seed_rank_8616_else_8616_part2_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_seed_rank_8616_else_8616_part3_8616()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_seed_rank_8616_else_8616_part4_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+
+    def _phase_build_pairs_8616(self) -> int | None:
+        """Phase extracted from `_run_main_cli_8616`."""
+        self.total_functions = self.ranked_labeled_total or len(self.labeled_offsets)
+        self.shown_total = len(self.labeled_offsets)
+        return None
+
+    def _phase_build_pairs_8616_else_8616(self) -> int | None:
+        """Else-branch of the extracted phase."""
+        _rc = self._phase_build_pairs_8616_else_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _phase_build_tasks_8616(self) -> int | None:
+        """Phase extracted from `_run_main_cli_8616`."""
+        for _index_lp8616, (_offset_lp8616, _name_lp8616) in enumerate(self.labeled_offsets, start=1):
+            self.index = _index_lp8616
+            self.offset = _offset_lp8616
+            self.name = _name_lp8616
+            self.work_offset, self.work_name = _canonicalize_sidecar_work_offset_8616(
+                self.project,
+                self.lst_metadata,
+                _offset_lp8616,
+                _name_lp8616,
+            )
+            self.placeholder = _make_placeholder_function(self.project, self.work_offset, self.work_name or _name_lp8616)
+            self.function_tasks.append(
+                FunctionWorkItem(
+                    index=_index_lp8616,
+                    function_cfg=None,
+                    function=self.placeholder,
+                    recovery_addr=_offset_lp8616,
                 )
-        discovery_limit = (
-            _expanded_exe_discovery_limit(args.max_functions)
-            if deferred_exe_display_cap
-            else (args.max_functions if args.max_functions > 0 else None)
+            )
+        return None
+    def _phase_build_tasks_8616_else_8616(self) -> int | None:
+        """Else-branch of the extracted phase."""
+        _rc = self._phase_build_tasks_8616_else_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _phase_serial_fork_batch_8616(self) -> int | None:
+        """Phase extracted from `_run_main_cli_8616`."""
+        self.parallel_timeout_model = build_parallel_clean_worker_timeout_model(
+            self.args.timeout,
+            explicit_timeout=self.timeout_was_explicit,
         )
-        if lst_metadata is not None and not visible_code_labels:
-            if recovery_code_labels:
+        self.timeout_by_index = {
+            item.index: _batch_function_decompile_timeout_8616(
+                self.batch_context,
+                cast(_AngrFunction, item.function),
+                self.parallel_timeout_model,
+            )
+            for item in self.function_tasks
+        }
+        self.executor = DaemonThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="func-clean")
+        try:
+            self.item_by_future = {
+                self.executor.submit(
+                    _run_serial_clean_process_work_item_8616,
+                    self.batch_context,
+                    item,
+                    timeout=self.timeout_by_index[item.index],
+                ): item
+                for item in prioritize_clean_function_work_8616(
+                    self.function_tasks,
+                    function_complexity=_function_complexity,
+                )
+            }
+            self.pending = set(self.item_by_future)
+            while self.pending:
+                self.done, self._ = wait(self.pending, return_when=FIRST_COMPLETED)
+                for _future_lp8616 in sorted(self.done, key=lambda candidate: self.item_by_future[candidate].index):
+                    self.future = _future_lp8616
+                    self.item = self.item_by_future[_future_lp8616]
+                    self.function = cast(_AngrFunction, self.item.function)
+                    self.function_timeout = self.timeout_by_index[self.item.index]
+                    self.worker_debug = (
+                        f"[dbg] clean parallel function worker: start "
+                        f"{_function_work_item_recovery_addr_8616(self.item):#x} {self.function.name} "
+                        f"requested_timeout={self.function_timeout}s "
+                        f"hard_timeout={_serial_clean_worker_outer_timeout_8616(self.function_timeout)}s\n"
+                    )
+                    try:
+                        self.result = _future_lp8616.result()
+                    except Exception as ex:
+                        self.result = FunctionWorkResult(
+                            index=self.item.index,
+                            status="error",
+                            payload=f"Clean parallel worker failed: {_describe_exception(ex)}",
+                            debug_output=self.worker_debug,
+                            function=self.item.function,
+                            function_cfg=self.item.function_cfg,
+                            elapsed=float(self.function_timeout),
+                        )
+                    else:
+                        self.result = replace(
+                            self.result,
+                            debug_output=self.worker_debug + self.result.debug_output,
+                        )
+                    self.result_map[self.item.index] = self.result
+                    self.d, self.f = _emit_function_result(
+                        self.item,
+                        self.result,
+                        project=self.project,
+                        args=self.args,
+                        lst_metadata=self.lst_metadata,
+                        cod_metadata=self.cod_metadata,
+                        synthetic_globals=self.synthetic_globals,
+                        precise_sidecar_regions=self.precise_sidecar_regions,
+                        allow_heavy_fallbacks=self.allow_heavy_fallbacks,
+                        interactive_stdout=self.interactive_stdout,
+                        use_serial_fork_per_function=self.use_serial_fork_per_function,
+                        fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
+                        result_state_by_index=self.result_map,
+                        timeout_was_explicit=self.timeout_was_explicit,
+                    )
+                    self.decompiled += self.d
+                    self.failed += self.f
+                    self.emitted_indexes.add(self.item.index)
+                    self.pending.discard(_future_lp8616)
+        finally:
+            self.executor.shutdown(wait=True, cancel_futures=False)
+        return None
+
+    def _phase_serial_fork_batch_8616_else_8616(self) -> int | None:
+        """Else-branch of the extracted phase."""
+        _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616()
+        if _rc is not None:
+            return _rc
+        return None
+    def _exec_parallel_banner_8616(self) -> int | None:
+        """Run an extracted execution-config phase; return an exit code to abort."""
+        self.selection_target = "decompilation" if self.args.max_functions <= 0 and self.args.addr is None else "display"
+        if (self.selection_target == "decompilation" and self.lst_metadata is None
+                and self.direct_inventory_total is not None and self.shown_total < self.direct_inventory_total):
+            print(f"[catalog] queued {self.shown_total} of {self.direct_inventory_total} candidate entries; "
+                  f"catalog recovery budget={self.args.catalog_timeout}s. Unqueued candidates are not decompiled. "
+                  "Increasing --catalog-timeout may recover more; candidates are not proven functions.", file=sys.stderr)
+        print(f"/* info: selected {self.shown_total} function(s) for {self.selection_target} */")
+        self.requested_workers = _choose_function_parallelism(len(self.function_tasks))
+        self.workers = self.requested_workers
+        if self.lst_metadata is not None and self.visible_code_labels:
+            self.workers = 1
+        if any(item.function_cfg is None for item in self.function_tasks):
+            self.workers = 1
+        if _exe_unlabeled_batch_gate_8616(self.args, self.lst_metadata, self.visible_code_labels):
+            self.workers = 1
+        if getattr(self.project, "_inertia_supplemental_scan_used", False) and _should_force_serial_supplemental_decompilation(
+            len(self.function_tasks)
+        ):
+            self.workers = 1
+        if (
+            _exe_addr_none_batch_gate_8616(self.args)
+            and 0 < self.args.max_functions <= 2
+            and self.lst_metadata is not None
+            and self.include_library_functions
+        ):
+            self.workers = 1
+        return None
+    def _exec_policy_fields_8616(self) -> int | None:
+        """Run an extracted execution-config phase; return an exit code to abort."""
+        if (
+            _exe_addr_none_batch_gate_8616(self.args)
+            and 0 < self.args.max_functions <= 2
+            and self.low_memory_path
+        ):
+            self.workers = 1
+        self.isolated_function_decompilation_required = requires_isolated_function_decompilation(
+            architecture=self.project.arch.name,
+            binary_suffix=self.args.binary.suffix,
+            address_requested=self.args.addr is not None,
+        )
+        self.forced_serial_function_decomp = os.environ.get(_FORCE_SERIAL_FUNCTION_DECOMP_ENV, "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.worker_policy = select_function_worker_policy_8616(
+            isolation_required=self.isolated_function_decompilation_required,
+            sidecar_available=self.lst_metadata is not None,
+            full_sweep=self.args.addr is None and self.args.max_functions <= 0,
+            include_library_functions=self.include_library_functions,
+            posix_available=os.name == "posix",
+            function_count=len(self.function_tasks),
+            shared_worker_count=(
+                self.requested_workers if self.isolated_function_decompilation_required else self.workers
+            ),
+            clean_process_override=clean_process_override_8616(
+                os.environ.get("INERTIA_ENABLE_SERIAL_FORK_PER_FUNCTION")
+            ),
+        )
+        self.workers = self.worker_policy.workers
+        self.use_serial_fork_per_function = self.worker_policy.mode is FunctionWorkerMode8616.CLEAN_PROCESS
+        if self.use_serial_fork_per_function and self.workers > 1:
+            print(f"/* parallel function decompilation: {self.workers} clean processes, one function per process */")
+        elif self.workers > 1:
+            print(f"/* parallel function decompilation: {self.workers} workers, shared imports */")
+        elif self.use_serial_fork_per_function:
+            print("/* parallel function decompilation: disabled; using one clean serial process at a time */")
+        elif self.forced_serial_function_decomp:
+            print("/* parallel function decompilation: disabled (forced serial) */")
+        else:
+            print("/* parallel function decompilation: disabled (RAM pressure or single function) */")
+        self.force_isolated_function_projects = self.isolated_function_decompilation_required
+        typing.cast(typing.Any, self.project)._inertia_fast_direct_probe = bool(
+                self.args.addr is not None
+                and os.environ.get("INERTIA_FAST_DIRECT_PROBE", "").strip().lower() in {"1", "true", "yes", "on"}
+                and self.timeout_was_explicit
+                and isinstance(self.args.timeout, int)
+                and self.args.timeout <= 6
+            )
+        if self.force_isolated_function_projects:
+            print("/* parallel x86-16 decompilation: using one fresh analysis project per shown function for stability. */")
+        self.allow_heavy_fallbacks = allows_heavy_fallbacks_for_run(
+            interactive_stdout=self.interactive_stdout,
+            max_functions=self.args.max_functions,
+            addr_requested=self.args.addr is not None,
+        )
+        return None
+    def _exec_batch_context_8616(self) -> int | None:
+        """Run an extracted execution-config phase; return an exit code to abort."""
+        self.sweep_deadline: float | None = None
+        self.sweep_budget_sec_raw = os.environ.get("INERTIA_SWEEP_BUDGET_SEC")
+        if self.args.addr is None:
+            self.sweep_budget_sec: int | None = None
+            if self.sweep_budget_sec_raw is not None and self.sweep_budget_sec_raw.strip():
+                try:
+                    self.sweep_budget_sec = int(self.sweep_budget_sec_raw.strip())
+                except ValueError:
+                    self.sweep_budget_sec = None
+            if self.sweep_budget_sec is None:
+                # Default to unbounded whole-binary sweeps. Callers can opt into a
+                # hard cap with INERTIA_SWEEP_BUDGET_SEC=<seconds>.
+                self.sweep_budget_sec = 0
+            if self.sweep_budget_sec <= 0:
+                self.sweep_deadline = None
+                print("/* sweep budget: disabled via INERTIA_SWEEP_BUDGET_SEC */")
+            else:
+                self.sweep_deadline = time.monotonic() + float(self.sweep_budget_sec)
+                print(f"/* sweep budget: {self.sweep_budget_sec}s (set INERTIA_SWEEP_BUDGET_SEC=0 to disable) */")
+        self.batch_context = _BatchCliContext8616(
+            args=self.args,
+            project=self.project,
+            function_tasks=self.function_tasks,
+            result_map=self.result_map,
+            fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
+            lst_metadata=self.lst_metadata,
+            cod_metadata=self.cod_metadata,
+            synthetic_globals=self.synthetic_globals,
+            visible_code_labels=self.visible_code_labels,
+            include_library_functions=self.include_library_functions,
+            low_memory_path=self.low_memory_path,
+            interactive_stdout=self.interactive_stdout,
+            precise_sidecar_regions=self.precise_sidecar_regions,
+            timeout_was_explicit=self.timeout_was_explicit,
+            use_serial_fork_per_function=self.use_serial_fork_per_function,
+            allow_heavy_fallbacks=self.allow_heavy_fallbacks,
+            force_isolated_function_projects=self.force_isolated_function_projects,
+            sweep_deadline=self.sweep_deadline,
+            shown_total=self.shown_total,
+            skipped_signature_labels=self.skipped_signature_labels,
+        )
+        if self.workers <= 1:
+            return _run_serial_batch_cli_8616(self.batch_context)
+        self.decompiled = 0
+        self.failed = 0
+        self.emitted_indexes: set[int] = set()
+        self.allow_isolated_retry_for_parallel_tasks = self.interactive_stdout or self.args.max_functions <= 0 or self.args.addr is not None
+        return None
+    def _seed_else_ranked_offsets_8616(self) -> int | None:
+        """Recover ranked binary offsets for the seed catalog; return an exit code to abort."""
+        if self.lst_metadata is not None and not self.visible_code_labels:
+            if self.recovery_code_labels:
                 print(
                     "/* Signature-bounded sidecar labels available as bounded hints; "
                     "recovering binary-owned functions from direct call/prologue evidence before generic CFG recovery. */"
                 )
-            if args.max_functions <= 0 and ranked_binary_offsets and not has_non_library_sidecar_hints:
-                prefer_ranked_hidden_sidecar_full_queue = True
-                total_functions = len(ranked_binary_offsets)
-                shown_total = len(ranked_binary_offsets)
+            if self.args.max_functions <= 0 and self.ranked_binary_offsets and not self.has_non_library_sidecar_hints:
+                self.prefer_ranked_hidden_sidecar_full_queue = True
+                self.total_functions = len(self.ranked_binary_offsets)
+                self.shown_total = len(self.ranked_binary_offsets)
                 print(
                     "/* hidden-sidecar EXE: queueing ranked direct-binary function candidates for full decompilation "
                     "without waiting for whole-program CFG recovery. */"
                 )
-            if deferred_exe_display_cap and ranked_binary_offsets and not has_non_library_sidecar_hints:
+            if self.deferred_exe_display_cap and self.ranked_binary_offsets and not self.has_non_library_sidecar_hints:
                 # Hidden-sidecar EXEs only have signature/library labels. Do not
                 # spend time pre-recovering a capped preview here; queue ranked
                 # binary-owned candidates and recover each one in the streaming
-                # serial lane so the first function can be emitted sooner.
-                prefer_ranked_hidden_sidecar_full_queue = True
-                total_functions = len(ranked_binary_offsets)
-                shown_total = min(len(ranked_binary_offsets), args.max_functions)
+                # serial lane so the first self.function can be emitted sooner.
+                self.prefer_ranked_hidden_sidecar_full_queue = True
+                self.total_functions = len(self.ranked_binary_offsets)
+                self.shown_total = min(len(self.ranked_binary_offsets), self.args.max_functions)
                 print(
                     "/* hidden-sidecar EXE: using ranked direct-binary function candidates; "
                     "recovering selected functions lazily for streaming output. */"
                 )
             try:
-                if not function_cfg_pairs and not prefer_ranked_hidden_sidecar_full_queue:
-                    seeded_recovery_result = _run_with_timeout_in_daemon_thread(
+                if not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
+                    self.seeded_recovery_result = _run_with_timeout_in_daemon_thread(
                         lambda: _recover_seeded_exe_functions(
-                            project,
-                            timeout=args.catalog_timeout,
-                            limit=discovery_limit,
+                            self.project,
+                            timeout=self.args.catalog_timeout,
+                            limit=self.discovery_limit,
                             return_addrs=True,
                         ),
-                        timeout=args.catalog_timeout + 2,
+                        timeout=self.args.catalog_timeout + 2,
                         thread_name_prefix="seed-catalog",
                     )
-                    if isinstance(seeded_recovery_result, tuple) and len(seeded_recovery_result) == 2:
-                        function_cfg_pairs = cast(list[_FunctionCfgPair8616], seeded_recovery_result[0])
-                        seeded_catalog_addrs = seeded_recovery_result[1]
+                    if isinstance(self.seeded_recovery_result, tuple) and len(self.seeded_recovery_result) == 2:
+                        self.function_cfg_pairs = cast(list[_FunctionCfgPair8616], self.seeded_recovery_result[0])
+                        self.seeded_catalog_addrs = self.seeded_recovery_result[1]
                     else:
-                        function_cfg_pairs = seeded_recovery_result
-                        seeded_catalog_addrs = [function.addr for _, function in function_cfg_pairs]
+                        self.function_cfg_pairs = self.seeded_recovery_result
+                        self.seeded_catalog_addrs = [function.addr for _, function in self.function_cfg_pairs]
             except Exception as ex:
-                catalog_error = ex
-                function_cfg_pairs = function_cfg_pairs if function_cfg_pairs else []
-                seeded_catalog_addrs = []
+                self.catalog_error = ex
+                self.function_cfg_pairs = self.function_cfg_pairs if self.function_cfg_pairs else []
+                self.seeded_catalog_addrs = []
             else:
                 pass
-            if function_cfg_pairs and not total_functions:
-                total_functions = len(seeded_catalog_addrs)
-                shown_total = len(function_cfg_pairs)
-
-        prefer_bounded_catalog = (
-            lst_metadata is None and project.arch.name == "86_16" and args.binary.suffix.lower() == ".exe"
-        )
-        cached_catalog_addrs = _load_catalog_address_cache(project, args.binary) if prefer_bounded_catalog else []
-        if cached_catalog_addrs:
-            typing.cast(typing.Any, project)._inertia_cached_catalog_mode = True
-            print("/* using cached discovered function addresses before running new control-flow recovery. */")
-            function_cfg_pairs = _recover_cached_function_pairs(
-                project,
-                addrs=cached_catalog_addrs,
-                timeout=args.catalog_timeout,
-                limit=discovery_limit,
-            )
-            if function_cfg_pairs:
-                try:
-                    display_cache_key = _catalog_address_cache_key_8616(project, args.binary)
-                    cached_catalog_int_addrs = [addr for addr in cached_catalog_addrs if isinstance(addr, int)]
-                    supplemented_cached_result = cast(
-                        tuple[list[_FunctionCfgPair8616], list[int]],
-                        _run_with_timeout_in_daemon_thread(
-                            lambda: _supplement_cached_seeded_recovery(
-                                project,
-                                function_cfg_pairs,
-                                cached_catalog_int_addrs,
-                                region_span=0x120,
-                                per_function_timeout=1,
-                                limit=discovery_limit,
-                                cache_key=display_cache_key,
-                            ),
-                            timeout=min(max(1, args.timeout), 2),
-                            thread_name_prefix="cached-display-supplement",
-                        ),
-                    )
-                    function_cfg_pairs, cached_catalog_addrs = supplemented_cached_result
-                except FuturesTimeoutError:
-                    pass
-                total_functions = len(cached_catalog_addrs)
-                shown_total = len(function_cfg_pairs)
-
-        if prefer_bounded_catalog and not function_cfg_pairs:
-            try:
-                # This recovery mutates the shared angr project. Its internal
-                # candidate deadlines provide the bound; an outer daemon
-                # timeout would leave a live worker polluting fallback CFGs.
-                function_cfg_pairs = _recover_fast_exe_catalog(
-                    project,
-                    catalog_timeout=args.catalog_timeout,
-                    timeout=args.timeout,
-                    window=args.window,
-                    low_memory=low_memory_path,
-                    limit=discovery_limit,
-                )
-            except (_AnalysisTimeout, Exception) as ex:
-                catalog_error = ex
-                print(
-                    "/* Quick EXE function discovery timed out; falling back to a bounded control-flow recovery pass. */"
-                )
-                function_cfg_pairs = []
-            if function_cfg_pairs:
-                source_region_evidence = _source_region_catalog_evidence_8616(project)
-                if source_region_evidence is not None and not source_region_evidence.complete:
-                    print(
-                        "/* Function catalog recovery failed: startup-bounded source catalog was incomplete; "
-                        f"failed addresses={','.join(hex(addr) for addr in source_region_evidence.failed_addrs) or 'none'} */"
-                    )
-                    return 5
-                total_functions = max(
-                    len(function_cfg_pairs),
-                    source_region_evidence.raw_fact_count if source_region_evidence is not None else 0,
-                )
-                shown_total = len(function_cfg_pairs)
-
-        if prefer_bounded_catalog and not function_cfg_pairs:
-            print(
-                "/* No helper metadata for this x86-16 EXE; first trying a small scan near program entry before whole-program control-flow recovery. */"
-            )
-            if not function_cfg_pairs:
-                try:
-                    cfg = _run_with_timeout_in_daemon_thread(
-                        lambda: _recover_partial_cfg(
-                            project,
-                            window=args.window,
-                            low_memory=low_memory_path,
-                        ),
-                        timeout=args.timeout,
-                        thread_name_prefix="catalog-fallback",
-                    )
-                except Exception as ex:
-                    catalog_error = ex
-
-        if cfg is None and not function_cfg_pairs and not prefer_ranked_hidden_sidecar_full_queue:
-            if prefer_bounded_catalog:
-                print(
-                    "/* Small entry-area recovery failed; attempting whole-program control-flow recovery as a last resort. */"
-                )
-            try:
-                cfg = _run_with_timeout_in_daemon_thread(
-                    lambda: _recover_cfg(
-                        project,
-                        args.binary,
-                        base_addr=args.base_addr,
-                        window=args.window,
-                        low_memory=low_memory_path,
-                    ),
-                    timeout=args.timeout,
-                    thread_name_prefix="catalog",
-                )
-            except Exception as ex:
-                catalog_error = ex
-
-        if (
-            cfg is None
-            and not function_cfg_pairs
-            and project.arch.name == "86_16"
-            and not prefer_bounded_catalog
-            and not prefer_ranked_hidden_sidecar_full_queue
-        ):
-            print("/* Whole-program function discovery failed; attempting a smaller entry-area recovery pass. */")
-            try:
-                cfg = _run_with_timeout_in_daemon_thread(
-                    lambda: _recover_partial_cfg(
-                        project,
-                        window=args.window,
-                        low_memory=low_memory_path,
-                    ),
-                    timeout=args.timeout,
-                    thread_name_prefix="catalog-fallback",
-                )
-            except Exception as ex:
-                catalog_error = ex
-
-        if cfg is None and not function_cfg_pairs and not prefer_ranked_hidden_sidecar_full_queue:
-            fast_seed_pairs: list[_FunctionCfgPair8616] = []
+            if self.function_cfg_pairs and not self.total_functions:
+                self.total_functions = len(self.seeded_catalog_addrs)
+                self.shown_total = len(self.function_cfg_pairs)
+        return None
+    def _seed_else_sweep_tail_8616(self) -> int | None:
+        """Run an extracted seed-tail lane; return an exit code to abort."""
+        if self.cfg is None and not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
+            self.fast_seed_pairs: list[_FunctionCfgPair8616] = []
             print("/* Whole-program control-flow recovery failed; attempting a quick function-entry scan fallback. */")
-            fast_seed_pairs = cast(
+            self.fast_seed_pairs = cast(
                 list[_FunctionCfgPair8616],
                 _recover_fast_seed_functions(
-                    project,
-                    timeout=args.catalog_timeout,
-                    limit=discovery_limit,
+                    self.project,
+                    timeout=self.args.catalog_timeout,
+                    limit=self.discovery_limit,
                 ),
             )
-            if fast_seed_pairs:
-                function_cfg_pairs = fast_seed_pairs
-                total_functions = len(function_cfg_pairs)
-                shown_total = len(function_cfg_pairs)
-                cfg = None
-            elif prefer_ranked_hidden_sidecar_full_queue:
+            if self.fast_seed_pairs:
+                self.function_cfg_pairs = self.fast_seed_pairs
+                self.total_functions = len(self.function_cfg_pairs)
+                self.shown_total = len(self.function_cfg_pairs)
+                self.cfg = None
+            elif self.prefer_ranked_hidden_sidecar_full_queue:
                 pass
-            elif not prefer_ranked_hidden_sidecar_full_queue and (
-                args.addr is None and args.binary.suffix.lower() == ".exe" and ranked_binary_offsets
+            elif not self.prefer_ranked_hidden_sidecar_full_queue and (
+                self.args.addr is None and self.args.binary.suffix.lower() == ".exe" and self.ranked_binary_offsets
             ):
                 print(
                     "/* Falling back to ranked direct-binary function addresses; "
                     "recovering only the shown subset lazily. */"
                 )
             else:
-                if isinstance(catalog_error, FuturesTimeoutError):
-                    detail = "Timed out"
-                elif isinstance(catalog_error, Exception):
-                    detail = _describe_exception(catalog_error)
-                elif catalog_error is not None:
-                    detail = str(catalog_error)
+                if isinstance(self.catalog_error, FuturesTimeoutError):
+                    self.detail = "Timed out"
+                elif isinstance(self.catalog_error, Exception):
+                    self.detail = _describe_exception(self.catalog_error)
+                elif self.catalog_error is not None:
+                    self.detail = str(self.catalog_error)
                 else:
-                    detail = "Unknown failure"
-                print(f"/* Function catalog recovery failed: {detail} */")
-                if packed_exe is not None:
+                    self.detail = "Unknown failure"
+                print(f"/* Function catalog recovery failed: {self.detail} */")
+                if self.packed_exe is not None:
                     print(
-                        f"/* hint: {args.binary.name} looks packed ({packed_exe}); startup-stub output may be the current limit. */"
+                        f"/* hint: {self.args.binary.name} looks packed ({self.packed_exe}); startup-stub output may be the current limit. */"
                     )
                 print("\n/* == lift break probe == */")
-                print(_probe_lift_break(project, project.entry))
+                print(_probe_lift_break(self.project, self.project.entry))
                 print("\n/* == entry asm == */")
-                print(_format_first_block_asm(project, project.entry))
+                print(_format_first_block_asm(self.project, self.project.entry))
                 print("\n/* == non-optimized disassembly == */")
-                start, end = _infer_linear_disassembly_window(project, project.entry)
-                print(_format_asm_range(project, start, end))
+                self.start, self.end = _infer_linear_disassembly_window(self.project, self.project.entry)
+                print(_format_asm_range(self.project, self.start, self.end))
                 return 5
+        return None
+    def _seed_else_showcase_8616(self) -> int | None:
+        """Run an extracted seed-tail lane; return an exit code to abort."""
+        if (
+            self.cfg is None
+            and not self.function_cfg_pairs
+            and self.project.arch.name == "86_16"
+            and not self.prefer_bounded_catalog
+            and not self.prefer_ranked_hidden_sidecar_full_queue
+        ):
+            print("/* Whole-program function discovery failed; attempting a smaller entry-area recovery pass. */")
+            try:
+                self.cfg = _run_with_timeout_in_daemon_thread(
+                    lambda: _recover_partial_cfg(
+                        self.project,
+                        window=self.args.window,
+                        low_memory=self.low_memory_path,
+                    ),
+                    timeout=self.args.timeout,
+                    thread_name_prefix="catalog-fallback",
+                )
+            except Exception as ex:
+                self.catalog_error = ex
+        return None
 
-    if skipped_signature_labels > 0:
-        print(f"/* skipping {skipped_signature_labels} signature-matched function(s) by default. */")
-    if library_label_skipped_count > 0:
-        print(f"/* skipping {library_label_skipped_count} library-like sidecar function(s) by default. */")
-    elif include_library_functions and lst_metadata is not None:
-        print("/* including signature/library-labeled functions as requested. */")
 
-    if cfg is not None:
-        cfg_any = cast(Any, cfg)
-        if function_label is not None and project.entry in cfg_any.functions:
-            cfg_any.functions[project.entry].name = function_label
-        else:
-            rizin_names = getattr(project, "_inertia_rizin_function_names", {}) or {}
-            for addr, func in cfg_any.functions.items():
-                code_name = _lst_code_label(lst_metadata, addr, project.entry) if lst_metadata is not None else None
-                if code_name is not None:
-                    func.name = code_name
-                elif isinstance(rizin_names, dict):
-                    rz_name = rizin_names.get(addr)
-                    if isinstance(rz_name, str) and rz_name:
-                        func.name = rz_name
-
-    if lst_metadata is not None and visible_code_labels:
-        total_functions = ranked_labeled_total or len(labeled_offsets)
-        shown_total = len(labeled_offsets)
-    elif not function_cfg_pairs and cfg is not None:
-        limit = args.max_functions if args.max_functions > 0 else None
-        defer_limit_until_after_seed_ranking = args.addr is None and args.binary.suffix.lower() == ".exe"
-        functions, total_functions = cast(
-            tuple[list[_AngrFunction], int],
-            _interesting_functions(cfg, limit=None if defer_limit_until_after_seed_ranking else limit),
+    def _phase_seed_rank_8616_else_8616_part1_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        self.prefer_bounded_catalog = (
+            self.lst_metadata is None and self.project.arch.name == "86_16" and self.args.binary.suffix.lower() == ".exe"
         )
-        shown_total = len(functions)
-        function_cfg_pairs = [(cfg, function) for function in functions]
-        if args.addr is None and args.binary.suffix.lower() == ".exe":
-            _seeded_pairs_and_addrs = _recover_seeded_exe_functions(
-                project,
-                timeout=args.catalog_timeout,
-                limit=None if (limit is None or defer_limit_until_after_seed_ranking) else max(0, limit - shown_total),
+        self.cached_catalog_addrs = _load_catalog_address_cache(self.project, self.args.binary) if self.prefer_bounded_catalog else []
+        if self.cached_catalog_addrs:
+            typing.cast(typing.Any, self.project)._inertia_cached_catalog_mode = True
+            print("/* using cached discovered function addresses before running new control-flow recovery. */")
+            self.function_cfg_pairs = _recover_cached_function_pairs(
+                self.project,
+                addrs=self.cached_catalog_addrs,
+                timeout=self.args.catalog_timeout,
+                limit=self.discovery_limit,
+            )
+            if self.function_cfg_pairs:
+                try:
+                    self.display_cache_key = _catalog_address_cache_key_8616(self.project, self.args.binary)
+                    self.cached_catalog_int_addrs = [addr for addr in self.cached_catalog_addrs if isinstance(addr, int)]
+                    self.supplemented_cached_result = cast(
+                        tuple[list[_FunctionCfgPair8616], list[int]],
+                        _run_with_timeout_in_daemon_thread(
+                            lambda: _supplement_cached_seeded_recovery(
+                                self.project,
+                                self.function_cfg_pairs,
+                                self.cached_catalog_int_addrs,
+                                region_span=0x120,
+                                per_function_timeout=1,
+                                limit=self.discovery_limit,
+                                cache_key=self.display_cache_key,
+                            ),
+                            timeout=min(max(1, self.args.timeout), 2),
+                            thread_name_prefix="cached-display-supplement",
+                        ),
+                    )
+                    self.function_cfg_pairs, self.cached_catalog_addrs = self.supplemented_cached_result
+                except FuturesTimeoutError:
+                    pass
+                self.total_functions = len(self.cached_catalog_addrs)
+                self.shown_total = len(self.function_cfg_pairs)
+        return None
+    def _phase_seed_rank_8616_else_8616_part2_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if self.prefer_bounded_catalog and not self.function_cfg_pairs:
+            try:
+                # This recovery mutates the shared angr self.project. Its internal
+                # candidate self.deadlines provide the bound; an outer daemon
+                # timeout would leave a live worker polluting fallback CFGs.
+                self.function_cfg_pairs = _recover_fast_exe_catalog(
+                    self.project,
+                    catalog_timeout=self.args.catalog_timeout,
+                    timeout=self.args.timeout,
+                    window=self.args.window,
+                    low_memory=self.low_memory_path,
+                    limit=self.discovery_limit,
+                )
+            except (_AnalysisTimeout, Exception) as ex:
+                self.catalog_error = ex
+                print(
+                    "/* Quick EXE function discovery timed out; falling back to a bounded control-flow recovery pass. */"
+                )
+                self.function_cfg_pairs = []
+            if self.function_cfg_pairs:
+                self.source_region_evidence = _source_region_catalog_evidence_8616(self.project)
+                if self.source_region_evidence is not None and not self.source_region_evidence.complete:
+                    print(
+                        "/* Function catalog recovery failed: startup-bounded source catalog was incomplete; "
+                        f"failed addresses={','.join(hex(addr) for addr in self.source_region_evidence.failed_addrs) or 'none'} */"
+                    )
+                    return 5
+                self.total_functions = max(
+                    len(self.function_cfg_pairs),
+                    self.source_region_evidence.raw_fact_count if self.source_region_evidence is not None else 0,
+                )
+                self.shown_total = len(self.function_cfg_pairs)
+        return None
+    def _phase_seed_rank_8616_else_8616_part3_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if self.prefer_bounded_catalog and not self.function_cfg_pairs:
+            print(
+                "/* No helper metadata for this x86-16 EXE; first trying a small scan near program entry before whole-program control-flow recovery. */"
+            )
+            if not self.function_cfg_pairs:
+                try:
+                    self.cfg = _run_with_timeout_in_daemon_thread(
+                        lambda: _recover_partial_cfg(
+                            self.project,
+                            window=self.args.window,
+                            low_memory=self.low_memory_path,
+                        ),
+                        timeout=self.args.timeout,
+                        thread_name_prefix="catalog-fallback",
+                    )
+                except Exception as ex:
+                    self.catalog_error = ex
+        if self.cfg is None and not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
+            if self.prefer_bounded_catalog:
+                print(
+                    "/* Small entry-area recovery failed; attempting whole-program control-flow recovery as a last resort. */"
+                )
+            try:
+                self.cfg = _run_with_timeout_in_daemon_thread(
+                    lambda: _recover_cfg(
+                        self.project,
+                        self.args.binary,
+                        base_addr=self.args.base_addr,
+                        window=self.args.window,
+                        low_memory=self.low_memory_path,
+                    ),
+                    timeout=self.args.timeout,
+                    thread_name_prefix="catalog",
+                )
+            except Exception as ex:
+                self.catalog_error = ex
+        return None
+    def _phase_build_pairs_8616_else_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if not self.function_cfg_pairs and self.cfg is not None:
+            _rc = self._phase_build_pairs_8616_else_8616_part0_8616_b0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_build_pairs_8616_else_8616_part0_8616_b1()
+            if _rc is not None:
+                return _rc
+        elif (
+            not self.function_cfg_pairs
+            and self.args.addr is None
+            and self.args.binary.suffix.lower() == ".exe"
+            and self.ranked_binary_offsets
+        ):
+            self.shown_total = len(self.ranked_binary_offsets)
+            if self.args.max_functions > 0:
+                self.shown_total = min(self.shown_total, self.args.max_functions)
+        return None
+    def _phase_build_tasks_8616_else_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        if (
+            self.args.addr is None and self.args.binary.suffix.lower() == ".exe" and not self.function_cfg_pairs and self.ranked_binary_offsets
+        ):
+            self.preview_addrs = self.ranked_binary_offsets
+            if (
+                self.lst_metadata is not None
+                and not self.visible_code_labels
+                and self.include_library_functions
+                and self.args.max_functions <= 0
+            ):
+                self.function_tasks = [
+                    FunctionWorkItem(
+                        index=index,
+                        function_cfg=None,
+                        function=_make_placeholder_function(self.project, addr, f"sub_{addr:x}"),
+                        recovery_addr=addr,
+                    )
+                    for index, addr in enumerate(self.preview_addrs, start=1)
+                ]
+                self.shown_total = len(self.function_tasks)
+            else:
+                if self.args.max_functions > 0:
+                    self.preview_addrs = self.preview_addrs[: self.args.max_functions]
+                elif self.interactive_stdout and len(self.preview_addrs) > 24:
+                    self.preview_addrs = self.preview_addrs[: _default_exe_showcase_cap(len(self.preview_addrs), self.args.timeout)]
+                self.shown_total = len(self.preview_addrs)
+                if self.lst_metadata is not None and not self.visible_code_labels:
+                    self.function_tasks = [
+                        FunctionWorkItem(
+                            index=index,
+                            function_cfg=None,
+                            function=_make_placeholder_function(self.project, addr, f"sub_{addr:x}"),
+                            recovery_addr=addr,
+                        )
+                        for index, addr in enumerate(self.preview_addrs, start=1)
+                    ]
+                else:
+                    self.function_tasks = _prepare_ranked_binary_preview_items(
+                        self.project,
+                        self.ranked_binary_offsets,
+                        max_count=self.shown_total,
+                        timeout=self.args.timeout,
+                        window=self.args.window,
+                        low_memory=self.low_memory_path,
+                    )
+        else:
+            _rc = self._phase_build_tasks_8616_else_8616_part0_8616_o0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_build_tasks_8616_else_8616_part0_8616_o1()
+            if _rc is not None:
+                return _rc
+        return None
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b0()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1()
+        if _rc is not None:
+            return _rc
+        return None
+
+
+    def _phase_seed_rank_8616_else_8616_part4_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if (
+            self.cfg is None
+            and not self.function_cfg_pairs
+            and self.project.arch.name == "86_16"
+            and not self.prefer_bounded_catalog
+            and not self.prefer_ranked_hidden_sidecar_full_queue
+        ):
+            print("/* Whole-program function discovery failed; attempting a smaller entry-area recovery pass. */")
+            try:
+                self.cfg = _run_with_timeout_in_daemon_thread(
+                    lambda: _recover_partial_cfg(
+                        self.project,
+                        window=self.args.window,
+                        low_memory=self.low_memory_path,
+                    ),
+                    timeout=self.args.timeout,
+                    thread_name_prefix="catalog-fallback",
+                )
+            except Exception as ex:
+                self.catalog_error = ex
+        return None
+    def _phase_build_pairs_8616_else_8616_part0_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.limit = self.args.max_functions if self.args.max_functions > 0 else None
+        self.defer_limit_until_after_seed_ranking = self.args.addr is None and self.args.binary.suffix.lower() == ".exe"
+        self.functions, self.total_functions = cast(
+            tuple[list[_AngrFunction], int],
+            _interesting_functions(self.cfg, limit=None if self.defer_limit_until_after_seed_ranking else self.limit),
+        )
+        self.shown_total = len(self.functions)
+        self.function_cfg_pairs = [(self.cfg, function) for function in self.functions]
+        if self.args.addr is None and self.args.binary.suffix.lower() == ".exe":
+            self._seeded_pairs_and_addrs = _recover_seeded_exe_functions(
+                self.project,
+                timeout=self.args.catalog_timeout,
+                limit=None if (self.limit is None or self.defer_limit_until_after_seed_ranking) else max(0, self.limit - self.shown_total),
                 return_addrs=True,
             )
-            if isinstance(_seeded_pairs_and_addrs, tuple) and len(_seeded_pairs_and_addrs) == 2:
-                seeded_pairs = cast(list[_FunctionCfgPair8616], _seeded_pairs_and_addrs[0])
-                seeded_addrs = _seeded_pairs_and_addrs[1]
+            if isinstance(self._seeded_pairs_and_addrs, tuple) and len(self._seeded_pairs_and_addrs) == 2:
+                self.seeded_pairs = cast(list[_FunctionCfgPair8616], self._seeded_pairs_and_addrs[0])
+                self.seeded_addrs = self._seeded_pairs_and_addrs[1]
             else:
-                seeded_pairs, seeded_addrs = _seeded_pairs_and_addrs, []
-            if seeded_pairs:
-                if isinstance(seeded_addrs, (list, tuple)):
-                    discovered_addrs = set(seeded_addrs)
-                    existing_addrs = {function.addr for function in functions}
-                    recovered_seed_addrs = {function.addr for _, function in seeded_pairs}
-                    if discovered_addrs - (existing_addrs | recovered_seed_addrs):
-                        typing.cast(typing.Any, project)._inertia_uncapped_seeded_recovery = True
-                seen_existing = {function.addr for function in functions}
-                seeded_pairs = _rank_function_cfg_pairs_for_display(project, seeded_pairs)
-                for function_cfg, function in seeded_pairs:
-                    if function.addr in seen_existing:
+                self.seeded_pairs, self.seeded_addrs = self._seeded_pairs_and_addrs, []
+            if self.seeded_pairs:
+                if isinstance(self.seeded_addrs, (list, tuple)):
+                    self.discovered_addrs = set(self.seeded_addrs)
+                    self.existing_addrs = {function.addr for function in self.functions}
+                    self.recovered_seed_addrs = {function.addr for _, function in self.seeded_pairs}
+                    if self.discovered_addrs - (self.existing_addrs | self.recovered_seed_addrs):
+                        typing.cast(typing.Any, self.project)._inertia_uncapped_seeded_recovery = True
+                self.seen_existing = {function.addr for function in self.functions}
+                self.seeded_pairs = _rank_function_cfg_pairs_for_display(self.project, self.seeded_pairs)
+                for _function_cfg_lp8616, _function_lp8616 in self.seeded_pairs:
+                    self.function_cfg = _function_cfg_lp8616
+                    self.function = _function_lp8616
+                    if _function_lp8616.addr in self.seen_existing:
                         continue
-                    function_cfg_pairs.append((function_cfg, function))
-                    seen_existing.add(function.addr)
-                function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
-                if limit is not None and defer_limit_until_after_seed_ranking:
-                    function_cfg_pairs = function_cfg_pairs[:limit]
-                shown_total = len(function_cfg_pairs)
-                total_functions = max(total_functions, len(seen_existing | set(seeded_addrs)))
-                typing.cast(typing.Any, project)._inertia_supplemental_scan_used = True
-            elif limit is not None and defer_limit_until_after_seed_ranking:
-                function_cfg_pairs = function_cfg_pairs[:limit]
-                shown_total = len(function_cfg_pairs)
+                    self.function_cfg_pairs.append((_function_cfg_lp8616, _function_lp8616))
+                    self.seen_existing.add(_function_lp8616.addr)
+                self.function_cfg_pairs = _rank_function_cfg_pairs_for_display(self.project, self.function_cfg_pairs)
+                if self.limit is not None and self.defer_limit_until_after_seed_ranking:
+                    self.function_cfg_pairs = self.function_cfg_pairs[:self.limit]
+                self.shown_total = len(self.function_cfg_pairs)
+                self.total_functions = max(self.total_functions, len(self.seen_existing | set(self.seeded_addrs)))
+                typing.cast(typing.Any, self.project)._inertia_supplemental_scan_used = True
+            elif self.limit is not None and self.defer_limit_until_after_seed_ranking:
+                self.function_cfg_pairs = self.function_cfg_pairs[:self.limit]
+                self.shown_total = len(self.function_cfg_pairs)
+        return None
+    def _phase_build_pairs_8616_else_8616_part0_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
         if (
-            args.addr is None
-            and args.binary.suffix.lower() == ".exe"
-            and shown_total <= 1
-            and not (lst_metadata is not None and not visible_code_labels and ranked_binary_offsets)
+            self.args.addr is None
+            and self.args.binary.suffix.lower() == ".exe"
+            and self.shown_total <= 1
+            and not (self.lst_metadata is not None and not self.visible_code_labels and self.ranked_binary_offsets)
         ):
-            supplemental_pairs = _supplement_functions_from_prologue_scan(
-                project,
-                {function.addr for function in functions},
+            self.supplemental_pairs = _supplement_functions_from_prologue_scan(
+                self.project,
+                {function.addr for function in self.functions},
             )
-            if supplemental_pairs:
-                function_cfg_pairs.extend(supplemental_pairs)
-                function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
-                shown_total = len(function_cfg_pairs)
-                total_functions = max(total_functions, shown_total)
-                typing.cast(typing.Any, project)._inertia_supplemental_scan_used = True
-    elif (
-        not function_cfg_pairs
-        and args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and ranked_binary_offsets
-    ):
-        shown_total = len(ranked_binary_offsets)
-        if args.max_functions > 0:
-            shown_total = min(shown_total, args.max_functions)
-
-    sidecar_preview_limit = None
-    if (
-        lst_metadata is not None
-        and visible_code_labels
-        and interactive_stdout
-        and args.max_functions > 0
-        and total_functions > args.max_functions
-    ):
-        sidecar_preview_limit = args.max_functions
-    if lst_metadata is not None and visible_code_labels:
-        print("/* == known function catalog (sidecar-backed) == */")
-        print(
-            _format_sidecar_function_catalog(lst_metadata, limit=sidecar_preview_limit, code_labels=visible_code_labels)
-        )
-        if sidecar_preview_limit is not None and total_functions > sidecar_preview_limit:
-            print(f"/* catalog preview limited to first {sidecar_preview_limit} entries for responsiveness. */")
-
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and function_cfg_pairs
-        and len(function_cfg_pairs) > 1
-        and not (
-            lst_metadata is not None and not visible_code_labels and ranked_binary_offsets and args.max_functions > 0
-        )
-    ):
-        function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
-
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and lst_metadata is not None
-        and not visible_code_labels
-        and args.max_functions > 0
-        and function_cfg_pairs
-        and len(function_cfg_pairs) < args.max_functions
-        and ranked_binary_offsets
-    ):
-        function_cfg_pairs = _supplement_function_cfg_pairs_with_seeded_recovery(
-            project,
-            function_cfg_pairs,
-            timeout=args.timeout,
-            target_count=args.max_functions,
-        )
-        function_cfg_pairs = _supplement_function_cfg_pairs_with_ranked_preview(
-            project,
-            function_cfg_pairs,
-            ranked_binary_offsets,
-            target_count=args.max_functions,
-            timeout=args.timeout,
-            window=args.window,
-            low_memory=low_memory_path,
-        )
-        function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
-        shown_total = len(function_cfg_pairs)
-    uncapped_function_cfg_pairs = list(function_cfg_pairs)
-    source_catalog = _source_region_catalog_evidence_8616(project)
-    if (
-        project.arch.name == "86_16"
-        and source_catalog is not None
-        and source_catalog.complete
-        and uncapped_function_cfg_pairs
-    ):
-        attach_project_argument_evidence_ranges_8616(project, project)
-        publish_discovered_indexed_alias_program_8616(
-            project,
-            tuple(function for _cfg, function in uncapped_function_cfg_pairs),
-        )
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and args.max_functions > 0
-        and len(function_cfg_pairs) > args.max_functions
-    ):
-        function_cfg_pairs = function_cfg_pairs[: args.max_functions]
-        shown_total = len(function_cfg_pairs)
-
-    print(f"/* binary: {args.binary} */")
-    print(f"/* arch: {project.arch.name} */")
-    print(f"/* entry: {project.entry:#x} */")
-    print(f"/* functions queued for decompilation: {total_functions} */")
-
-    if args.max_functions > 0 and total_functions > shown_total:
-        typing.cast(typing.Any, project)._inertia_display_truncated = True
-        print(
-            f"/* showing first {shown_total} functions because --max-functions={args.max_functions}; "
-            "raise it or omit the option to decompile all queued functions */"
-        )
-
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and lst_metadata is None
-        and uncapped_function_cfg_pairs
-        and (
-            (source_region_evidence := _source_region_catalog_evidence_8616(project)) is None
-            or source_region_evidence.complete
-        )
-    ):
-        _store_catalog_address_cache(project, args.binary, uncapped_function_cfg_pairs)
-
-    function_tasks: list[FunctionWorkItem] = []
-    result_map: dict[int, FunctionWorkResult] = {}
-    fallback_tail_validation_by_index: dict[int, dict[str, object]] = {}
-    if lst_metadata is not None and visible_code_labels:
-        for index, (offset, name) in enumerate(labeled_offsets, start=1):
-            work_offset, work_name = _canonicalize_sidecar_work_offset_8616(
-                project,
-                lst_metadata,
-                offset,
-                name,
-            )
-            placeholder = _make_placeholder_function(project, work_offset, work_name or name)
-            function_tasks.append(
+            if self.supplemental_pairs:
+                self.function_cfg_pairs.extend(self.supplemental_pairs)
+                self.function_cfg_pairs = _rank_function_cfg_pairs_for_display(self.project, self.function_cfg_pairs)
+                self.shown_total = len(self.function_cfg_pairs)
+                self.total_functions = max(self.total_functions, self.shown_total)
+                typing.cast(typing.Any, self.project)._inertia_supplemental_scan_used = True
+        return None
+    def _phase_build_tasks_8616_else_8616_part0_8616_o0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        for _index_lp8616, (_function_cfg_lp8616, _function_lp8616) in enumerate(self.function_cfg_pairs, start=1):
+            self.index = _index_lp8616
+            self.function_cfg = _function_cfg_lp8616
+            self.function = _function_lp8616
+            self.function_tasks.append(
                 FunctionWorkItem(
-                    index=index,
-                    function_cfg=None,
-                    function=placeholder,
-                    recovery_addr=offset,
+                    index=_index_lp8616,
+                    function_cfg=_function_cfg_lp8616,
+                    function=_function_lp8616,
+                    recovery_addr=function_original_addr(_function_lp8616),
                 )
             )
-    elif (
-        args.addr is None and args.binary.suffix.lower() == ".exe" and not function_cfg_pairs and ranked_binary_offsets
-    ):
-        preview_addrs = ranked_binary_offsets
-        if (
-            lst_metadata is not None
-            and not visible_code_labels
-            and include_library_functions
-            and args.max_functions <= 0
-        ):
-            function_tasks = [
-                FunctionWorkItem(
-                    index=index,
-                    function_cfg=None,
-                    function=_make_placeholder_function(project, addr, f"sub_{addr:x}"),
-                    recovery_addr=addr,
-                )
-                for index, addr in enumerate(preview_addrs, start=1)
-            ]
-            shown_total = len(function_tasks)
-        else:
-            if args.max_functions > 0:
-                preview_addrs = preview_addrs[: args.max_functions]
-            elif interactive_stdout and len(preview_addrs) > 24:
-                preview_addrs = preview_addrs[: _default_exe_showcase_cap(len(preview_addrs), args.timeout)]
-            shown_total = len(preview_addrs)
-            if lst_metadata is not None and not visible_code_labels:
-                function_tasks = [
-                    FunctionWorkItem(
-                        index=index,
-                        function_cfg=None,
-                        function=_make_placeholder_function(project, addr, f"sub_{addr:x}"),
-                        recovery_addr=addr,
-                    )
-                    for index, addr in enumerate(preview_addrs, start=1)
-                ]
-            else:
-                function_tasks = _prepare_ranked_binary_preview_items(
-                    project,
-                    ranked_binary_offsets,
-                    max_count=shown_total,
-                    timeout=args.timeout,
-                    window=args.window,
-                    low_memory=low_memory_path,
-                )
-    else:
-        for index, (function_cfg, function) in enumerate(function_cfg_pairs, start=1):
-            function_tasks.append(
-                FunctionWorkItem(
-                    index=index,
-                    function_cfg=function_cfg,
-                    function=function,
-                    recovery_addr=function_original_addr(function),
-                )
-            )
-        if (
-            args.addr is None
-            and args.binary.suffix.lower() == ".exe"
-            and lst_metadata is not None
-            and not visible_code_labels
-            and include_library_functions
-            and ranked_binary_offsets
-            and args.max_functions <= 0
-        ):
-            existing_by_addr = {
+        if _library_ranked_task_gate_8616(
+            self.args, self.lst_metadata, self.visible_code_labels, self.include_library_functions, self.ranked_binary_offsets
+        ) and self.args.max_functions <= 0:
+            self.existing_by_addr = {
                 getattr(item.function, "addr", None): item
-                for item in function_tasks
+                for item in self.function_tasks
                 if isinstance(getattr(item.function, "addr", None), int)
             }
-            function_tasks = []
-            for index, addr in enumerate(ranked_binary_offsets, start=1):
-                existing = existing_by_addr.get(addr)
-                if existing is not None:
-                    function_tasks.append(
+            self.function_tasks = []
+            for _index_lp8616, _addr_lp8616 in enumerate(self.ranked_binary_offsets, start=1):
+                self.index = _index_lp8616
+                self.addr = _addr_lp8616
+                self.existing = self.existing_by_addr.get(_addr_lp8616)
+                if self.existing is not None:
+                    self.function_tasks.append(
                         FunctionWorkItem(
-                            index=index,
-                            function_cfg=existing.function_cfg,
-                            function=existing.function,
-                            recovery_addr=existing.recovery_addr,
+                            index=_index_lp8616,
+                            function_cfg=self.existing.function_cfg,
+                            function=self.existing.function,
+                            recovery_addr=self.existing.recovery_addr,
                         )
                     )
                     continue
-                function_tasks.append(
+                self.function_tasks.append(
                     FunctionWorkItem(
-                        index=index,
+                        index=_index_lp8616,
                         function_cfg=None,
-                        function=_make_placeholder_function(project, addr, f"sub_{addr:x}"),
-                        recovery_addr=addr,
+                        function=_make_placeholder_function(self.project, _addr_lp8616, f"sub_{_addr_lp8616:x}"),
+                        recovery_addr=_addr_lp8616,
                     )
                 )
-            shown_total = len(function_tasks)
-        if (
-            args.addr is None
-            and args.binary.suffix.lower() == ".exe"
-            and lst_metadata is not None
-            and not visible_code_labels
-            and include_library_functions
-            and ranked_binary_offsets
-            and args.max_functions > 0
-        ):
-            existing_by_addr = {
+            self.shown_total = len(self.function_tasks)
+        return None
+    def _phase_build_tasks_8616_else_8616_part0_8616_o1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if _library_ranked_task_gate_8616(
+            self.args, self.lst_metadata, self.visible_code_labels, self.include_library_functions, self.ranked_binary_offsets
+        ) and self.args.max_functions > 0:
+            self.existing_by_addr = {
                 getattr(item.function, "addr", None): item
-                for item in function_tasks
+                for item in self.function_tasks
                 if isinstance(getattr(item.function, "addr", None), int)
             }
-            replacement_tasks: list[FunctionWorkItem] = []
-            for index, addr in enumerate(ranked_binary_offsets[: args.max_functions], start=1):
-                existing = existing_by_addr.get(addr)
-                if existing is not None:
-                    replacement_tasks.append(
+            self.replacement_tasks: list[FunctionWorkItem] = []
+            for _index_lp8616, _addr_lp8616 in enumerate(self.ranked_binary_offsets, start=1):
+                self.index = _index_lp8616
+                self.addr = _addr_lp8616
+                self.existing = self.existing_by_addr.get(_addr_lp8616)
+                if self.existing is not None:
+                    self.function_tasks.append(
                         FunctionWorkItem(
-                            index=index,
-                            function_cfg=existing.function_cfg,
-                            function=existing.function,
-                            recovery_addr=existing.recovery_addr,
+                            index=_index_lp8616,
+                            function_cfg=self.existing.function_cfg,
+                            function=self.existing.function,
+                            recovery_addr=self.existing.recovery_addr,
                         )
                     )
                     continue
-                replacement_tasks.append(
+                self.function_tasks.append(
                     FunctionWorkItem(
-                        index=index,
+                        index=_index_lp8616,
                         function_cfg=None,
-                        function=_make_placeholder_function(project, addr, f"sub_{addr:x}"),
-                        recovery_addr=addr,
+                        function=_make_placeholder_function(self.project, _addr_lp8616, f"sub_{_addr_lp8616:x}"),
+                        recovery_addr=_addr_lp8616,
                     )
                 )
-            function_tasks = replacement_tasks
-            shown_total = len(function_tasks)
-
-    selection_target = "decompilation" if args.max_functions <= 0 and args.addr is None else "display"
-    if (selection_target == "decompilation" and lst_metadata is None
-            and direct_inventory_total is not None and shown_total < direct_inventory_total):
-        print(f"[catalog] queued {shown_total} of {direct_inventory_total} candidate entries; "
-              f"catalog recovery budget={args.catalog_timeout}s. Unqueued candidates are not decompiled. "
-              "Increasing --catalog-timeout may recover more; candidates are not proven functions.", file=sys.stderr)
-    print(f"/* info: selected {shown_total} function(s) for {selection_target} */")
-
-    requested_workers = _choose_function_parallelism(len(function_tasks))
-    workers = requested_workers
-    if lst_metadata is not None and visible_code_labels:
-        workers = 1
-    if any(item.function_cfg is None for item in function_tasks):
-        workers = 1
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and lst_metadata is not None
-        and not visible_code_labels
-    ):
-        workers = 1
-    if getattr(project, "_inertia_supplemental_scan_used", False) and _should_force_serial_supplemental_decompilation(
-        len(function_tasks)
-    ):
-        workers = 1
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and args.max_functions > 0
-        and args.max_functions <= 2
-        and lst_metadata is not None
-        and include_library_functions
-    ):
-        workers = 1
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and args.max_functions > 0
-        and args.max_functions <= 2
-        and low_memory_path
-    ):
-        workers = 1
-    isolated_function_decompilation_required = requires_isolated_function_decompilation(
-        architecture=project.arch.name,
-        binary_suffix=args.binary.suffix,
-        address_requested=args.addr is not None,
-    )
-    forced_serial_function_decomp = os.environ.get(_FORCE_SERIAL_FUNCTION_DECOMP_ENV, "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    worker_policy = select_function_worker_policy_8616(
-        isolation_required=isolated_function_decompilation_required,
-        sidecar_available=lst_metadata is not None,
-        full_sweep=args.addr is None and args.max_functions <= 0,
-        include_library_functions=include_library_functions,
-        posix_available=os.name == "posix",
-        function_count=len(function_tasks),
-        shared_worker_count=(
-            requested_workers if isolated_function_decompilation_required else workers
-        ),
-        clean_process_override=clean_process_override_8616(
-            os.environ.get("INERTIA_ENABLE_SERIAL_FORK_PER_FUNCTION")
-        ),
-    )
-    workers = worker_policy.workers
-    use_serial_fork_per_function = worker_policy.mode is FunctionWorkerMode8616.CLEAN_PROCESS
-    if use_serial_fork_per_function and workers > 1:
-        print(f"/* parallel function decompilation: {workers} clean processes, one function per process */")
-    elif workers > 1:
-        print(f"/* parallel function decompilation: {workers} workers, shared imports */")
-    elif use_serial_fork_per_function:
-        print("/* parallel function decompilation: disabled; using one clean serial process at a time */")
-    elif forced_serial_function_decomp:
-        print("/* parallel function decompilation: disabled (forced serial) */")
-    else:
-        print("/* parallel function decompilation: disabled (RAM pressure or single function) */")
-    force_isolated_function_projects = isolated_function_decompilation_required
-    typing.cast(typing.Any, project)._inertia_fast_direct_probe = bool(
-            args.addr is not None
-            and os.environ.get("INERTIA_FAST_DIRECT_PROBE", "").strip().lower() in {"1", "true", "yes", "on"}
-            and timeout_was_explicit
-            and isinstance(args.timeout, int)
-            and args.timeout <= 6
-        )
-
-    if force_isolated_function_projects:
-        print("/* parallel x86-16 decompilation: using one fresh analysis project per shown function for stability. */")
-
-    allow_heavy_fallbacks = allows_heavy_fallbacks_for_run(
-        interactive_stdout=interactive_stdout,
-        max_functions=args.max_functions,
-        addr_requested=args.addr is not None,
-    )
-
-    sweep_deadline: float | None = None
-    sweep_budget_sec_raw = os.environ.get("INERTIA_SWEEP_BUDGET_SEC")
-    if args.addr is None:
-        sweep_budget_sec: int | None = None
-        if sweep_budget_sec_raw is not None and sweep_budget_sec_raw.strip():
-            try:
-                sweep_budget_sec = int(sweep_budget_sec_raw.strip())
-            except ValueError:
-                sweep_budget_sec = None
-        if sweep_budget_sec is None:
-            # Default to unbounded whole-binary sweeps. Callers can opt into a
-            # hard cap with INERTIA_SWEEP_BUDGET_SEC=<seconds>.
-            sweep_budget_sec = 0
-        if sweep_budget_sec <= 0:
-            sweep_deadline = None
-            print("/* sweep budget: disabled via INERTIA_SWEEP_BUDGET_SEC */")
-        else:
-            sweep_deadline = time.monotonic() + float(sweep_budget_sec)
-            print(f"/* sweep budget: {sweep_budget_sec}s (set INERTIA_SWEEP_BUDGET_SEC=0 to disable) */")
-
-    def _sweep_budget_exhausted() -> bool:
-        return sweep_deadline is not None and time.monotonic() >= sweep_deadline
-
-    batch_context = _BatchCliContext8616(
-        args=args,
-        project=project,
-        function_tasks=function_tasks,
-        result_map=result_map,
-        fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-        lst_metadata=lst_metadata,
-        cod_metadata=cod_metadata,
-        synthetic_globals=synthetic_globals,
-        visible_code_labels=visible_code_labels,
-        include_library_functions=include_library_functions,
-        low_memory_path=low_memory_path,
-        interactive_stdout=interactive_stdout,
-        precise_sidecar_regions=precise_sidecar_regions,
-        timeout_was_explicit=timeout_was_explicit,
-        use_serial_fork_per_function=use_serial_fork_per_function,
-        allow_heavy_fallbacks=allow_heavy_fallbacks,
-        force_isolated_function_projects=force_isolated_function_projects,
-        sweep_deadline=sweep_deadline,
-        shown_total=shown_total,
-        skipped_signature_labels=skipped_signature_labels,
-    )
-    if workers <= 1:
-        return _run_serial_batch_cli_8616(batch_context)
-    decompiled = 0
-    failed = 0
-    emitted_indexes: set[int] = set()
-    allow_isolated_retry_for_parallel_tasks = interactive_stdout or args.max_functions <= 0 or args.addr is not None
-    if use_serial_fork_per_function:
-        parallel_timeout_model = build_parallel_clean_worker_timeout_model(
-            args.timeout,
-            explicit_timeout=timeout_was_explicit,
-        )
-        timeout_by_index = {
-            item.index: _batch_function_decompile_timeout_8616(
-                batch_context,
-                cast(_AngrFunction, item.function),
-                parallel_timeout_model,
-            )
-            for item in function_tasks
-        }
-        executor = DaemonThreadPoolExecutor(max_workers=workers, thread_name_prefix="func-clean")
+            self.function_tasks = self.replacement_tasks
+            self.shown_total = len(self.function_tasks)
+        return None
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.executor = DaemonThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="func")
+        return None
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
         try:
-            item_by_future = {
-                executor.submit(
-                    _run_serial_clean_process_work_item_8616,
-                    batch_context,
-                    item,
-                    timeout=timeout_by_index[item.index],
-                ): item
-                for item in prioritize_clean_function_work_8616(
-                    function_tasks,
-                    function_complexity=_function_complexity,
-                )
-            }
-            pending = set(item_by_future)
-            while pending:
-                done, _ = wait(pending, return_when=FIRST_COMPLETED)
-                for future in sorted(done, key=lambda candidate: item_by_future[candidate].index):
-                    item = item_by_future[future]
-                    function = cast(_AngrFunction, item.function)
-                    function_timeout = timeout_by_index[item.index]
-                    worker_debug = (
-                        f"[dbg] clean parallel function worker: start "
-                        f"{_function_work_item_recovery_addr_8616(item):#x} {function.name} "
-                        f"requested_timeout={function_timeout}s "
-                        f"hard_timeout={_serial_clean_worker_outer_timeout_8616(function_timeout)}s\n"
-                    )
+            _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb0()
+            if _rc is not None:
+                return _rc
+            _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1()
+            if _rc is not None:
+                return _rc
+        finally:
+            self.executor.shutdown(wait=not self.has_expired_futures, cancel_futures=True)
+        return None
+
+
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.future_map = {
+            self.executor.submit(
+                _run_function_work_item,
+                item,
+                timeout=self.args.timeout,
+                api_style=self.args.api_style,
+                binary_path=self.args.binary,
+                cod_metadata=self.cod_metadata,
+                synthetic_globals=self.synthetic_globals,
+                lst_metadata=self.lst_metadata,
+                enable_structured_simplify=True,
+                force_isolated_project=self.force_isolated_function_projects,
+                allow_isolated_retry=self.allow_isolated_retry_for_parallel_tasks,
+            ): item
+            for item in self.function_tasks
+            if item.function_cfg is not None
+        }
+        self.pending = set(self.future_map)
+        return None
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.deadlines = {future: time.monotonic() + max(1, self.args.timeout) for future in self.future_map}
+        self.has_expired_futures = False
+        while self.pending:
+            if self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0():
+                break
+            self.done, self._ = wait(self.pending, timeout=0.25, return_when=FIRST_COMPLETED)
+            _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w1()
+            if _rc is not None:
+                return _rc
+            self.now = time.monotonic()
+            self.expired = [future for future in self.pending if self.now >= self.deadlines[future]]
+            _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w2()
+            if _rc is not None:
+                return _rc
+        return None
+
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w2(self) -> int | None:
+        """Expire pending futures past their deadlines; return an exit code to abort."""
+        for _future_lp8616 in self.expired:
+            item = self.future_map[_future_lp8616]
+            if not _future_lp8616.done():
+                done_now, _ = wait({_future_lp8616}, timeout=0.0, return_when=FIRST_COMPLETED)
+                if done_now or _future_lp8616.done():
                     try:
-                        result = future.result()
+                        self.result_map[item.index] = _future_lp8616.result()
                     except Exception as ex:
-                        result = FunctionWorkResult(
+                        self.result_map[item.index] = FunctionWorkResult(
                             index=item.index,
                             status="error",
-                            payload=f"Clean parallel worker failed: {_describe_exception(ex)}",
-                            debug_output=worker_debug,
-                            function=item.function,
-                            function_cfg=item.function_cfg,
-                            elapsed=float(function_timeout),
-                        )
-                    else:
-                        result = replace(
-                            result,
-                            debug_output=worker_debug + result.debug_output,
-                        )
-                    result_map[item.index] = result
-                    d, f = _emit_function_result(
-                        item,
-                        result,
-                        project=project,
-                        args=args,
-                        lst_metadata=lst_metadata,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        precise_sidecar_regions=precise_sidecar_regions,
-                        allow_heavy_fallbacks=allow_heavy_fallbacks,
-                        interactive_stdout=interactive_stdout,
-                        use_serial_fork_per_function=use_serial_fork_per_function,
-                        fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                        result_state_by_index=result_map,
-                        timeout_was_explicit=timeout_was_explicit,
-                    )
-                    decompiled += d
-                    failed += f
-                    emitted_indexes.add(item.index)
-                    pending.discard(future)
-        finally:
-            executor.shutdown(wait=True, cancel_futures=False)
-    else:
-        executor = DaemonThreadPoolExecutor(max_workers=workers, thread_name_prefix="func")
-        try:
-            future_map = {
-                executor.submit(
-                    _run_function_work_item,
-                    item,
-                    timeout=args.timeout,
-                    api_style=args.api_style,
-                    binary_path=args.binary,
-                    cod_metadata=cod_metadata,
-                    synthetic_globals=synthetic_globals,
-                    lst_metadata=lst_metadata,
-                    enable_structured_simplify=True,
-                    force_isolated_project=force_isolated_function_projects,
-                    allow_isolated_retry=allow_isolated_retry_for_parallel_tasks,
-                ): item
-                for item in function_tasks
-                if item.function_cfg is not None
-            }
-            pending = set(future_map)
-            deadlines = {future: time.monotonic() + max(1, args.timeout) for future in future_map}
-            has_expired_futures = False
-            while pending:
-                if _sweep_budget_exhausted():
-                    for future in list(pending):
-                        item = future_map[future]
-                        result_map[item.index] = FunctionWorkResult(
-                            index=item.index,
-                            status="timeout",
-                            payload="Whole-sweep budget exhausted before decompilation completed.",
+                            payload=str(ex),
                             debug_output="",
                             function=item.function,
                             function_cfg=item.function_cfg,
-                            elapsed=0.0,
-                            failure_stage="sweep_budget",
-                            skip_heavy_fallbacks=True,
                         )
-                    pending.clear()
-                    has_expired_futures = True
-                    break
-                done, _ = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
-                if done:
-                    for future in done:
-                        item = future_map[future]
-                        try:
-                            result_map[item.index] = future.result()
-                        except Exception as ex:
-                            result_map[item.index] = FunctionWorkResult(
-                                index=item.index,
-                                status="error",
-                                payload=str(ex),
-                                debug_output="",
-                                function=item.function,
-                                function_cfg=item.function_cfg,
-                            )
-                        current_result = result_map.get(item.index)
-                        if current_result is not None and item.index not in emitted_indexes:
-                            d, f = _emit_function_result(
-                                item,
-                                current_result,
-                                project=project,
-                                args=args,
-                                lst_metadata=lst_metadata,
-                                cod_metadata=cod_metadata,
-                                synthetic_globals=synthetic_globals,
-                                precise_sidecar_regions=precise_sidecar_regions,
-                                allow_heavy_fallbacks=allow_heavy_fallbacks,
-                                interactive_stdout=interactive_stdout,
-                                use_serial_fork_per_function=use_serial_fork_per_function,
-                                fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                                result_state_by_index=result_map,
-                                timeout_was_explicit=timeout_was_explicit,
-                            )
-                            decompiled += d
-                            failed += f
-                            emitted_indexes.add(item.index)
-                            if f and args.addr is not None:
-                                _emit_tail_validation_console_summary(
-                                    function_tasks, result_map, binary_path=args.binary
-                                )
-                                return 2
-                        pending.discard(future)
-                now = time.monotonic()
-                expired = [future for future in pending if now >= deadlines[future]]
-                for future in expired:
-                    item = future_map[future]
-                    if not future.done():
-                        done_now, _ = wait({future}, timeout=0.0, return_when=FIRST_COMPLETED)
-                        if done_now or future.done():
-                            try:
-                                result_map[item.index] = future.result()
-                            except Exception as ex:
-                                result_map[item.index] = FunctionWorkResult(
-                                    index=item.index,
-                                    status="error",
-                                    payload=str(ex),
-                                    debug_output="",
-                                    function=item.function,
-                                    function_cfg=item.function_cfg,
-                                )
-                            current_result = result_map.get(item.index)
-                            if current_result is not None and item.index not in emitted_indexes:
-                                d, f = _emit_function_result(
-                                    item,
-                                    current_result,
-                                    project=project,
-                                    args=args,
-                                    lst_metadata=lst_metadata,
-                                    cod_metadata=cod_metadata,
-                                    synthetic_globals=synthetic_globals,
-                                    precise_sidecar_regions=precise_sidecar_regions,
-                                    allow_heavy_fallbacks=allow_heavy_fallbacks,
-                                    interactive_stdout=interactive_stdout,
-                                    use_serial_fork_per_function=use_serial_fork_per_function,
-                                    fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                                    result_state_by_index=result_map,
-                                    timeout_was_explicit=timeout_was_explicit,
-                                )
-                                decompiled += d
-                                failed += f
-                                emitted_indexes.add(item.index)
-                                if f and args.addr is not None:
-                                    _emit_tail_validation_console_summary(
-                                        function_tasks, result_map, binary_path=args.binary
-                                    )
-                                    return 2
-                            pending.discard(future)
-                            continue
-                    if future.done():
-                        try:
-                            result_map[item.index] = future.result()
-                        except Exception as ex:
-                            result_map[item.index] = FunctionWorkResult(
-                                index=item.index,
-                                status="error",
-                                payload=str(ex),
-                                debug_output="",
-                                function=item.function,
-                                function_cfg=item.function_cfg,
-                            )
-                        current_result = result_map.get(item.index)
-                        if current_result is not None and item.index not in emitted_indexes:
-                            d, f = _emit_function_result(
-                                item,
-                                current_result,
-                                project=project,
-                                args=args,
-                                lst_metadata=lst_metadata,
-                                cod_metadata=cod_metadata,
-                                synthetic_globals=synthetic_globals,
-                                precise_sidecar_regions=precise_sidecar_regions,
-                                allow_heavy_fallbacks=allow_heavy_fallbacks,
-                                interactive_stdout=interactive_stdout,
-                                use_serial_fork_per_function=use_serial_fork_per_function,
-                                fallback_tail_validation_by_index=fallback_tail_validation_by_index,
-                                result_state_by_index=result_map,
-                                timeout_was_explicit=timeout_was_explicit,
-                            )
-                            decompiled += d
-                            failed += f
-                            emitted_indexes.add(item.index)
-                            if f and args.addr is not None:
-                                _emit_tail_validation_console_summary(
-                                    function_tasks, result_map, binary_path=args.binary
-                                )
-                                return 2
-                        pending.discard(future)
-                        continue
-                    result_map[item.index] = FunctionWorkResult(
+                    current_result = self.result_map.get(item.index)
+                    _rc = self._expire_late_done_emit_8616(item, current_result)
+                    if _rc is not None:
+                        return _rc
+                    self.pending.discard(_future_lp8616)
+                    continue
+            if _future_lp8616.done():
+                try:
+                    self.result_map[item.index] = _future_lp8616.result()
+                except Exception as ex:
+                    self.result_map[item.index] = FunctionWorkResult(
                         index=item.index,
-                        status="timeout",
-                        payload=f"Timed out after {args.timeout}s.",
+                        status="error",
+                        payload=str(ex),
                         debug_output="",
                         function=item.function,
                         function_cfg=item.function_cfg,
-                        elapsed=float(args.timeout),
                     )
-                    has_expired_futures = True
-                    pending.discard(future)
-        finally:
-            executor.shutdown(wait=not has_expired_futures, cancel_futures=True)
+                current_result = self.result_map.get(item.index)
+                if current_result is not None and item.index not in self.emitted_indexes:
+                    _rc = self._expire_late_done_emit_8616(item, current_result)
+                    if _rc is not None:
+                        return _rc
+                self.pending.discard(_future_lp8616)
+                continue
+            self.result_map[item.index] = FunctionWorkResult(
+                index=item.index,
+                status="timeout",
+                payload=f"Timed out after {self.args.timeout}s.",
+                debug_output="",
+                function=item.function,
+                function_cfg=item.function_cfg,
+                elapsed=float(self.args.timeout),
+            )
+            self.has_expired_futures = True
+            self.pending.discard(_future_lp8616)
+        return None
 
-    return _finish_batch_cli_8616(
-        batch_context,
-        decompiled=decompiled,
-        failed=failed,
-        emitted_indexes=emitted_indexes,
-    )
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w1(self) -> int | None:
+        """Run an extracted loop sub-phase; return an exit code to abort."""
+        if self.done:
+            for _future_lp8616 in sorted(self.done, key=lambda candidate: self.item_by_future[candidate].index):
+                self.future = _future_lp8616
+                self.item = self.item_by_future[_future_lp8616]
+                self.function = cast(_AngrFunction, self.item.function)
+                self.function_timeout = self.timeout_by_index[self.item.index]
+                self.worker_debug = (
+                    f"[dbg] clean parallel function worker: start "
+                    f"{_function_work_item_recovery_addr_8616(self.item):#x} {self.function.name} "
+                    f"requested_timeout={self.function_timeout}s "
+                    f"hard_timeout={_serial_clean_worker_outer_timeout_8616(self.function_timeout)}s\n"
+                )
+                try:
+                    self.result = _future_lp8616.result()
+                except Exception as ex:
+                    self.result = FunctionWorkResult(
+                        index=self.item.index,
+                        status="error",
+                        payload=f"Clean parallel worker failed: {_describe_exception(ex)}",
+                        debug_output=self.worker_debug,
+                        function=self.item.function,
+                        function_cfg=self.item.function_cfg,
+                        elapsed=float(self.function_timeout),
+                    )
+                else:
+                    self.result = replace(
+                        self.result,
+                        debug_output=self.worker_debug + self.result.debug_output,
+                    )
+                self.result_map[self.item.index] = self.result
+                self.d, self.f = _emit_function_result(
+                    self.item,
+                    self.result,
+                    project=self.project,
+                    args=self.args,
+                    lst_metadata=self.lst_metadata,
+                    cod_metadata=self.cod_metadata,
+                    synthetic_globals=self.synthetic_globals,
+                    precise_sidecar_regions=self.precise_sidecar_regions,
+                    allow_heavy_fallbacks=self.allow_heavy_fallbacks,
+                    interactive_stdout=self.interactive_stdout,
+                    use_serial_fork_per_function=self.use_serial_fork_per_function,
+                    fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
+                    result_state_by_index=self.result_map,
+                    timeout_was_explicit=self.timeout_was_explicit,
+                )
+                self.decompiled += self.d
+                self.failed += self.f
+                self.emitted_indexes.add(self.item.index)
+                self.pending.discard(_future_lp8616)
+        return None
+
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0(self) -> bool:
+        """Handle the budget-exhausted sweep; return True when the caller must break out of its wait loop."""
+        if self._sweep_budget_exhausted():
+            for _future_lp8616 in sorted(self.done, key=lambda candidate: self.item_by_future[candidate].index):
+                self.future = _future_lp8616
+                self.item = self.item_by_future[_future_lp8616]
+                self.function = cast(_AngrFunction, self.item.function)
+                self.function_timeout = self.timeout_by_index[self.item.index]
+                self.worker_debug = (
+                    f"[dbg] clean parallel function worker: start "
+                    f"{_function_work_item_recovery_addr_8616(self.item):#x} {self.function.name} "
+                    f"requested_timeout={self.function_timeout}s "
+                    f"hard_timeout={_serial_clean_worker_outer_timeout_8616(self.function_timeout)}s\n"
+                )
+                try:
+                    self.result = _future_lp8616.result()
+                except Exception as ex:
+                    self.result = FunctionWorkResult(
+                        index=self.item.index,
+                        status="error",
+                        payload=f"Clean parallel worker failed: {_describe_exception(ex)}",
+                        debug_output=self.worker_debug,
+                        function=self.item.function,
+                        function_cfg=self.item.function_cfg,
+                        elapsed=float(self.function_timeout),
+                    )
+                else:
+                    self.result = replace(
+                        self.result,
+                        debug_output=self.worker_debug + self.result.debug_output,
+                    )
+                self.result_map[self.item.index] = self.result
+                self.d, self.f = _emit_function_result(
+                    self.item,
+                    self.result,
+                    project=self.project,
+                    args=self.args,
+                    lst_metadata=self.lst_metadata,
+                    cod_metadata=self.cod_metadata,
+                    synthetic_globals=self.synthetic_globals,
+                    precise_sidecar_regions=self.precise_sidecar_regions,
+                    allow_heavy_fallbacks=self.allow_heavy_fallbacks,
+                    interactive_stdout=self.interactive_stdout,
+                    use_serial_fork_per_function=self.use_serial_fork_per_function,
+                    fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
+                    result_state_by_index=self.result_map,
+                    timeout_was_explicit=self.timeout_was_explicit,
+                )
+                self.decompiled += self.d
+                self.failed += self.f
+                self.emitted_indexes.add(self.item.index)
+                self.pending.discard(_future_lp8616)
+            self.pending.clear()
+            self.has_expired_futures = True
+            return True
+        return False
+
+    def _phase_seed_rank_8616_else_8616_part4_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.cfg is None and not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
+            self.fast_seed_pairs: list[_FunctionCfgPair8616] = []
+            print("/* Whole-program control-flow recovery failed; attempting a quick function-entry scan fallback. */")
+            self.fast_seed_pairs = cast(
+                list[_FunctionCfgPair8616],
+                _recover_fast_seed_functions(
+                    self.project,
+                    timeout=self.args.catalog_timeout,
+                    limit=self.discovery_limit,
+                ),
+            )
+            if self.fast_seed_pairs:
+                self.function_cfg_pairs = self.fast_seed_pairs
+                self.total_functions = len(self.function_cfg_pairs)
+                self.shown_total = len(self.function_cfg_pairs)
+                self.cfg = None
+            elif self.prefer_ranked_hidden_sidecar_full_queue:
+                pass
+            elif not self.prefer_ranked_hidden_sidecar_full_queue and (
+                self.args.addr is None and self.args.binary.suffix.lower() == ".exe" and self.ranked_binary_offsets
+            ):
+                print(
+                    "/* Falling back to ranked direct-binary function addresses; "
+                    "recovering only the shown subset lazily. */"
+                )
+            else:
+                if isinstance(self.catalog_error, FuturesTimeoutError):
+                    self.detail = "Timed out"
+                elif isinstance(self.catalog_error, Exception):
+                    self.detail = _describe_exception(self.catalog_error)
+                elif self.catalog_error is not None:
+                    self.detail = str(self.catalog_error)
+                else:
+                    self.detail = "Unknown failure"
+                print(f"/* Function catalog recovery failed: {self.detail} */")
+                if self.packed_exe is not None:
+                    print(
+                        f"/* hint: {self.args.binary.name} looks packed ({self.packed_exe}); startup-stub output may be the current limit. */"
+                    )
+                print("\n/* == lift break probe == */")
+                print(_probe_lift_break(self.project, self.project.entry))
+                print("\n/* == entry asm == */")
+                print(_format_first_block_asm(self.project, self.project.entry))
+                print("\n/* == non-optimized disassembly == */")
+                self.start, self.end = _infer_linear_disassembly_window(self.project, self.project.entry)
+                print(_format_asm_range(self.project, self.start, self.end))
+                return 5
+        return None
+
+    def _phase_seed_rank_8616_else_8616_part0_8616_b1(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.lst_metadata is not None and not self.visible_code_labels:
+            if self.recovery_code_labels:
+                print(
+                    "/* Signature-bounded sidecar labels available as bounded hints; "
+                    "recovering binary-owned functions from direct call/prologue evidence before generic CFG recovery. */"
+                )
+            if self.args.max_functions <= 0 and self.ranked_binary_offsets and not self.has_non_library_sidecar_hints:
+                self.prefer_ranked_hidden_sidecar_full_queue = True
+                self.total_functions = len(self.ranked_binary_offsets)
+                self.shown_total = len(self.ranked_binary_offsets)
+                print(
+                    "/* hidden-sidecar EXE: queueing ranked direct-binary function candidates for full decompilation "
+                    "without waiting for whole-program CFG recovery. */"
+                )
+            if self.deferred_exe_display_cap and self.ranked_binary_offsets and not self.has_non_library_sidecar_hints:
+                # Hidden-sidecar EXEs only have signature/library labels. Do not
+                # spend time pre-recovering a capped preview here; queue ranked
+                # binary-owned candidates and recover each one in the streaming
+                # serial lane so the first self.function can be emitted sooner.
+                self.prefer_ranked_hidden_sidecar_full_queue = True
+                self.total_functions = len(self.ranked_binary_offsets)
+                self.shown_total = min(len(self.ranked_binary_offsets), self.args.max_functions)
+                print(
+                    "/* hidden-sidecar EXE: using ranked direct-binary function candidates; "
+                    "recovering selected functions lazily for streaming output. */"
+                )
+            try:
+                if not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
+                    self.seeded_recovery_result = _run_with_timeout_in_daemon_thread(
+                        lambda: _recover_seeded_exe_functions(
+                            self.project,
+                            timeout=self.args.catalog_timeout,
+                            limit=self.discovery_limit,
+                            return_addrs=True,
+                        ),
+                        timeout=self.args.catalog_timeout + 2,
+                        thread_name_prefix="seed-catalog",
+                    )
+                    if isinstance(self.seeded_recovery_result, tuple) and len(self.seeded_recovery_result) == 2:
+                        self.function_cfg_pairs = cast(list[_FunctionCfgPair8616], self.seeded_recovery_result[0])
+                        self.seeded_catalog_addrs = self.seeded_recovery_result[1]
+                    else:
+                        self.function_cfg_pairs = self.seeded_recovery_result
+                        self.seeded_catalog_addrs = [function.addr for _, function in self.function_cfg_pairs]
+            except Exception as ex:
+                self.catalog_error = ex
+                self.function_cfg_pairs = self.function_cfg_pairs if self.function_cfg_pairs else []
+                self.seeded_catalog_addrs = []
+            else:
+                pass
+            if self.function_cfg_pairs and not self.total_functions:
+                self.total_functions = len(self.seeded_catalog_addrs)
+                self.shown_total = len(self.function_cfg_pairs)
+        return None
+
+    def _phase_seed_rank_8616_else_8616_part0_8616_b0(self) -> int | None:
+        """Run an extracted zone sub-phase; return an exit code to abort."""
+        self.catalog_error: BaseException | None = None
+        self.deferred_exe_display_cap = self.args.addr is None and self.args.binary.suffix.lower() == ".exe" and self.args.max_functions > 0
+        if self.args.addr is None and self.args.binary.suffix.lower() == ".exe":
+            self.ranked_binary_offsets = _discover_ranked_binary_offsets(self.project, args=self.args)
+            self.linked_base = getattr(getattr(self.project.loader, "main_object", None), "linked_base", None)
+            if isinstance(self.linked_base, int):
+                self.ranked_binary_offsets = [addr for addr in self.ranked_binary_offsets if addr != self.linked_base]
+            self.direct_inventory_total = len(self.ranked_binary_offsets) if self.ranked_binary_offsets else None
+            if self.direct_inventory_total is not None:
+                print(
+                    f"/* info: direct-binary recovery found {self.direct_inventory_total} likely non-library function entries */"
+                )
+        self.discovery_limit = (
+            _expanded_exe_discovery_limit(self.args.max_functions)
+            if self.deferred_exe_display_cap
+            else (self.args.max_functions if self.args.max_functions > 0 else None)
+        )
+        return None
+
+    def _phase_seed_rank_8616_else_8616_part4_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        _rc = self._phase_seed_rank_8616_else_8616_part4_8616_b0()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_seed_rank_8616_else_8616_part4_8616_b1()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _phase_seed_rank_8616_else_8616_part0_8616(self) -> int | None:
+        """Run an extracted sub-phase; return an exit code to abort."""
+        _rc = self._phase_seed_rank_8616_else_8616_part0_8616_b0()
+        if _rc is not None:
+            return _rc
+        _rc = self._phase_seed_rank_8616_else_8616_part0_8616_b1()
+        if _rc is not None:
+            return _rc
+        return None
+
+    def _expire_late_done_emit_8616(self, item: FunctionWorkItem, current_result: FunctionWorkResult) -> int | None:
+        """Emit one late-completed future result and count it; return an exit code to abort."""
+        d, f = _emit_function_result(
+            item,
+            current_result,
+            project=self.project,
+            args=self.args,
+            lst_metadata=self.lst_metadata,
+            cod_metadata=self.cod_metadata,
+            synthetic_globals=self.synthetic_globals,
+            precise_sidecar_regions=self.precise_sidecar_regions,
+            allow_heavy_fallbacks=self.allow_heavy_fallbacks,
+            interactive_stdout=self.interactive_stdout,
+            use_serial_fork_per_function=self.use_serial_fork_per_function,
+            fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
+            result_state_by_index=self.result_map,
+            timeout_was_explicit=self.timeout_was_explicit,
+        )
+        self.decompiled += d
+        self.failed += f
+        self.emitted_indexes.add(item.index)
+        if f and self.args.addr is not None:
+            _emit_tail_validation_console_summary(
+                self.function_tasks, self.result_map, binary_path=self.args.binary
+            )
+            return 2
+        return None
+
+    def _catalog_ready_8616(self) -> bool:
+        """Return whether sidecar-visible code labels enable the catalog lane."""
+        return self.lst_metadata is not None and bool(self.visible_code_labels)
+
+    def _phase_seed_rank_dispatch_8616(self) -> int | None:
+        """Dispatch the seed-ranking phase between catalog and non-catalog lanes."""
+        return (self._phase_seed_rank_8616() if self._catalog_ready_8616()
+                else self._phase_seed_rank_8616_else_8616())
+
+    def _phase_build_pairs_dispatch_8616(self) -> int | None:
+        """Dispatch the pair-building phase between catalog and non-catalog lanes."""
+        return (self._phase_build_pairs_8616() if self._catalog_ready_8616()
+                else self._phase_build_pairs_8616_else_8616())
+
+    def _phase_build_tasks_dispatch_8616(self) -> int | None:
+        """Dispatch the task-building phase between catalog and non-catalog lanes."""
+        return (self._phase_build_tasks_8616() if self._catalog_ready_8616()
+                else self._phase_build_tasks_8616_else_8616())
+
+    def _phase_serial_fork_batch_dispatch_8616(self) -> int | None:
+        """Dispatch the batch phase between clean-process and in-process lanes."""
+        return (self._phase_serial_fork_batch_8616() if self.use_serial_fork_per_function
+                else self._phase_serial_fork_batch_8616_else_8616())
+def _run_main_cli_8616(argv: list[str] | None) -> int:
+    """Run CLI orchestration after the mandatory architecture guard succeeds."""
+    return _MainCliRun8616(argv=argv).run_8616()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -8921,3 +11069,7 @@ def main(argv: list[str] | None = None) -> int:
             return _impl()
         finally:
             emit_compact_summary()
+
+
+
+

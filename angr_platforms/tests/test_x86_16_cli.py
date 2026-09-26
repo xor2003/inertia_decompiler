@@ -11802,12 +11802,23 @@ def test_serial_clean_worker_completion_stops_before_parent_owned_retries(monkey
     assert decompile._complete_serial_clean_worker_result_8616(result) is True
     assert result_path.exists()
 
-    direct_source = inspect.getsource(decompile._run_direct_addr_cli_8616)
-    completion_offset = direct_source.index(
-        "_complete_serial_clean_worker_result_8616(direct_result, project=direct_project)"
+    def _method_containing(snippet: str) -> str:
+        return next(
+            name for name in dir(decompile._DirectAddrCliRun8616)
+            if not name.startswith("__")
+            and inspect.isfunction(getattr(decompile._DirectAddrCliRun8616, name, None))
+            and snippet in inspect.getsource(getattr(decompile._DirectAddrCliRun8616, name))
+        )
+
+    completion_caller = _method_containing(
+        "_complete_serial_clean_worker_result_8616(self.direct_result, project=self.direct_project)"
     )
-    robust_retry_offset = direct_source.index("_direct_addr_robust_retry_enabled_8616")
-    assert completion_offset < robust_retry_offset
+    robust_retry_caller = _method_containing("_direct_addr_robust_retry_enabled_8616(timeout_was_explicit=")
+    robust_retry_mid = _method_containing(f"self.{robust_retry_caller}(")
+    batch_source = inspect.getsource(decompile._DirectAddrCliRun8616.run_8616_part5_8616_b1)
+    assert batch_source.index(f"self.{completion_caller}()") < batch_source.index(
+        f"self.{robust_retry_mid}()"
+    )
 
 
 def test_serial_clean_worker_uses_single_process_and_protocol_overhead(monkeypatch, tmp_path):
