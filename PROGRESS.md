@@ -8,6 +8,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Coverage now selects address-only recovery by default with same-build labels
+  used only for harness binding. Original bodies and behavioral checks survive;
+  injected prefixes and incomplete bindings refuse. 99 focused tests plus both
+  artifact controls pass. Live `cmp_i16` exposes a DCE phase return-contract
+  exception; raw artifacts retained. No new DOS witness admitted.
+
 - Removed harness-side stack-argument/signature/global repair from acceptance;
   generated defects now remain visible to compilation. Four controls failed
   before removal; 70 focused tests pass, including real GCC corruption controls.
@@ -1087,3 +1093,30 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   5 focused slice-entry/non-optimized-policy tests pass; the
   ownership-manifest failure in the same run is pre-existing on bare
   HEAD.
+## Compiler coverage: address-only replay checkpoint (2026-09-26 12:13 UTC)
+
+- Verified the concurrent DCE repair with the saved fresh 77-test pass; this
+  thread made no DCE implementation change.
+- The original live `cmp_i16` replay is now terminal: CLI exit 3, analysis
+  timeout, no emitted function body, tail validation uncollected. Full evidence
+  is retained under `.cache/compiler-coverage/compare16-address-only-001/`.
+- Identified an honest-reporting gap: the harness labels the inner timeout as
+  validation failure. CLI exit 3 is also used for architecture-guard failure;
+  a numeric-only timeout inference would be wrong.
+- Started a bounded diagnostic profile in `.cache/cmp16-address-profile.*`;
+  result pending. Routine deadline and acceptance requirements are unchanged.
+  No DOS witness admitted; the full compiler-coverage plan remains incomplete.
+## Lint debt: dce.py cleanup (2026-09-26)
+
+- `angr_platforms/X86_16/postprocess/optimization/dce.py`: Ruff complexity
+  debt cleared to zero (was 14 findings incl. the 424-complexity state-class
+  conversion landed earlier this thread; this session extracted purity arm
+  helpers `_dirty/_cvariable/_call/_indexed/_typecast/_binary_value_purity_8616`,
+  `_expr_value_purity_dispatch_8616`, debug-shape/pair formatters, statement
+  walk/read/protected-key helpers, and the part5 debug/fixpoint lanes).
+- Fixed converter fallout: `run_8616_part5` returned a bare `bool` where the
+  phase runner unpacks `(done, value)` (now `return True, self.changed`);
+  `__slots__`/`__init__` dropped method-name collisions; `for self._` loop
+  var removed.
+- Verified: ruff 0, mypy 0, 125 dce tests pass, zero architecture violations
+  against this file.
