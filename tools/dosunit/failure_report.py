@@ -114,16 +114,7 @@ def _render_region_compare(document: dict[str, Any], *, limit: int, mismatch_lim
 def _format_region_mismatch(mismatch: dict[str, Any]) -> list[str]:
     kind = mismatch.get("kind", "unknown")
     lines = [f"- Mismatch: `{kind}`"]
-    if "instruction_index" in mismatch:
-        lines.append(f"  - Instruction index: {mismatch.get('instruction_index')}")
-    if mismatch.get("mnemonic"):
-        lines.append(f"  - Mnemonic: `{mismatch.get('mnemonic')}`")
-    oracle_instruction = mismatch.get("oracle_instruction")
-    candidate_instruction = mismatch.get("candidate_instruction")
-    if isinstance(oracle_instruction, dict):
-        lines.append(f"  - Oracle instruction: `{_format_instruction(oracle_instruction)}`")
-    if isinstance(candidate_instruction, dict):
-        lines.append(f"  - Candidate instruction: `{_format_instruction(candidate_instruction)}`")
+    lines.extend(_region_mismatch_instruction_lines(mismatch))
     if kind == "region_missing":
         lines.append(f"  - Detail: {mismatch.get('detail')}")
         return lines
@@ -135,12 +126,26 @@ def _format_region_mismatch(mismatch: dict[str, Any]) -> list[str]:
         lines.append(f"  - Oracle: `{_compact_json(mismatch.get('oracle'))}`")
     if "candidate" in mismatch:
         lines.append(f"  - Candidate: `{_compact_json(mismatch.get('candidate'))}`")
-    if mismatch.get("kind") in {"call_boundary", "call_target_mismatch", "direct_call"} and mismatch.get(
-        "call_compare"
-    ):
+    if kind in {"call_boundary", "call_target_mismatch", "direct_call"} and mismatch.get("call_compare"):
         lines.extend(_format_ssa_call_compare(mismatch.get("call_compare", {})))
     if kind == "loop_bound_incomplete" and mismatch.get("loop_summary"):
         lines.append(f"  - Loop summary: `{_compact_json(mismatch.get('loop_summary'))}`")
+    return lines
+
+
+def _region_mismatch_instruction_lines(mismatch: dict[str, Any]) -> list[str]:
+    """Render the instruction fields shared by every region mismatch kind."""
+    lines: list[str] = []
+    if "instruction_index" in mismatch:
+        lines.append(f"  - Instruction index: {mismatch.get('instruction_index')}")
+    if mismatch.get("mnemonic"):
+        lines.append(f"  - Mnemonic: `{mismatch.get('mnemonic')}`")
+    oracle_instruction = mismatch.get("oracle_instruction")
+    candidate_instruction = mismatch.get("candidate_instruction")
+    if isinstance(oracle_instruction, dict):
+        lines.append(f"  - Oracle instruction: `{_format_instruction(oracle_instruction)}`")
+    if isinstance(candidate_instruction, dict):
+        lines.append(f"  - Candidate instruction: `{_format_instruction(candidate_instruction)}`")
     return lines
 
 
@@ -172,15 +177,15 @@ def _render_vector_results(document: dict[str, Any], *, limit: int, mismatch_lim
         return "\n".join(lines) + "\n"
     shown_failing = _limited(failing, limit)
     for index, result in enumerate(shown_failing, start=1):
-        verdict = result.get("verdict", {}) if isinstance(result.get("verdict"), dict) else {}
+        verdict = _dict_field(result, "verdict")
         lines.append(f"### {index}. `{result.get('function')}` `{result.get('status')}`")
         lines.append(f"- Vector: `{result.get('vector_id')}`")
         lines.append(f"- Verdict: `{verdict.get('kind')}`")
         changed_fields = list(verdict.get("changed_fields", []) or [])
         if changed_fields:
             lines.append(f"- Changed fields: `{', '.join(str(field) for field in changed_fields)}`")
-            oracle = result.get("oracle", {}) if isinstance(result.get("oracle"), dict) else {}
-            candidate = result.get("candidate", {}) if isinstance(result.get("candidate"), dict) else {}
+            oracle = _dict_field(result, "oracle")
+            candidate = _dict_field(result, "candidate")
             for field in changed_fields[:mismatch_limit]:
                 lines.append(f"  - `{field}` oracle: `{_compact_json(oracle.get(field))}`")
                 lines.append(f"  - `{field}` candidate: `{_compact_json(candidate.get(field))}`")
@@ -194,10 +199,16 @@ def _render_vector_results(document: dict[str, Any], *, limit: int, mismatch_lim
     return "\n".join(lines) + "\n"
 
 
-def _collect_ssa_compare_data(  # noqa: ANN202
+def _dict_field(mapping: dict[str, Any], key: str) -> dict[str, Any]:
+    """Return the dict value stored under ``key``, or an empty dict."""
+    value = mapping.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _collect_ssa_compare_data(
     document: dict[str, Any], *, show_unresolved_call_targets: bool, failed_only: bool = False
-):
-    summary = document.get("summary", {}) if isinstance(document.get("summary"), dict) else {}
+) -> tuple[Any, ...]:
+    summary = _dict_field(document, "summary")
     results = [result for result in document.get("results", []) or [] if isinstance(result, dict)]
     failing = [
         result
@@ -230,14 +241,14 @@ def _collect_ssa_compare_data(  # noqa: ANN202
         for mismatch in (result.get("mismatches", []) or [])
         if isinstance(mismatch, dict)
     )
-    region_equality = document.get("region_equality") if isinstance(document.get("region_equality"), dict) else {}
+    region_equality = _dict_field(document, "region_equality")
     region_results = [result for result in region_equality.get("results", []) or [] if isinstance(result, dict)]
-    connectivity = document.get("connectivity") if isinstance(document.get("connectivity"), dict) else {}
-    external_parts = document.get("external_parts") if isinstance(document.get("external_parts"), dict) else {}
+    connectivity = _dict_field(document, "connectivity")
+    external_parts = _dict_field(document, "external_parts")
     external_results = [result for result in external_parts.get("results", []) or [] if isinstance(result, dict)]
     failing_external_parts = [result for result in external_results if result.get("status") != "passed"]
-    loop_scc = document.get("loop_scc") if isinstance(document.get("loop_scc"), dict) else {}
-    call_scc = document.get("call_scc") if isinstance(document.get("call_scc"), dict) else {}
+    loop_scc = _dict_field(document, "loop_scc")
+    call_scc = _dict_field(document, "call_scc")
     skipped_region_function_missing = [
         result
         for result in region_results
@@ -323,7 +334,7 @@ def _render_data_compare(document: dict[str, Any], *, limit: int, mismatch_limit
 
 
 def _render_complexity(document: dict[str, Any], *, limit: int, mismatch_limit: int) -> str:
-    counters = document.get("counters", {}) if isinstance(document.get("counters"), dict) else {}
+    counters = _dict_field(document, "counters")
     lines = [
         "# DOS Unit Failure Report",
         "",
@@ -352,37 +363,7 @@ def _render_complexity(document: dict[str, Any], *, limit: int, mismatch_limit: 
         lines.append("No complex functions.")
     shown_complex_functions = _limited(complex_functions, limit)
     for index, item in enumerate(shown_complex_functions, start=1):
-        function = item.get("function", {}) if isinstance(item.get("function"), dict) else {}
-        entry = _format_address(item.get("entry"))
-        risk = item.get("risk", {}) if isinstance(item.get("risk"), dict) else {}
-        lines.append(f"### {index}. `{function.get('name', function.get('id', '<unknown>'))}`")
-        if entry:
-            lines.append(f"- Entry: `{entry}`")
-        lines.append(f"- Classification: `{item.get('classification')}`")
-        lines.append(f"- Risk score: {risk.get('score', 0)}")
-        blockers = [blocker for blocker in item.get("blockers", []) or [] if isinstance(blocker, dict)]
-        if blockers:
-            lines.append(
-                f"- Blockers: `{', '.join(str(blocker.get('kind')) for blocker in blockers[:mismatch_limit])}`"
-            )
-        metrics = item.get("metrics", {}) if isinstance(item.get("metrics"), dict) else {}
-        metric_summary = {
-            "insns": metrics.get("instruction_count"),
-            "conditions": metrics.get("condition_count"),
-            "calls": metrics.get("call_count"),
-            "indirect": metrics.get("indirect_control_count"),
-            "symbolic_memory": metrics.get("explicit_symbolic_memory_count"),
-            "backward": metrics.get("backward_branch_count"),
-        }
-        lines.append(f"- Metrics: `{_compact_json(metric_summary)}`")
-        risk_points = [point for point in item.get("risk_points", []) or [] if isinstance(point, dict)]
-        for point in risk_points[:mismatch_limit]:
-            address = _format_address(point.get("address"))
-            location = f"{address}: " if address else ""
-            lines.append(
-                f"  - `{', '.join(str(kind) for kind in point.get('kinds', []))}` {location}{point.get('disassembly')}"
-            )
-        lines.append("")
+        lines.extend(_format_complex_function(item, index=index, mismatch_limit=mismatch_limit))
     if len(complex_functions) > len(shown_complex_functions):
         lines.append(f"... {len(complex_functions) - len(shown_complex_functions)} more complex functions not shown.")
         lines.append("")
@@ -393,17 +374,59 @@ def _render_complexity(document: dict[str, Any], *, limit: int, mismatch_limit: 
         lines.append("")
         shown_refusals = _limited(refusals, limit)
         for index, item in enumerate(shown_refusals, start=1):
-            detail = item.get("detail", {}) if isinstance(item.get("detail"), dict) else {}
-            lines.append(f"### {index}. `{item.get('reason')}`")
-            if detail.get("function_id"):
-                lines.append(f"- Function: `{detail.get('function_id')}`")
-            if detail.get("message"):
-                lines.append(f"- Message: {detail.get('message')}")
-            lines.append("")
+            lines.extend(_format_refusal_entry(item, index=index))
         if len(refusals) > len(shown_refusals):
             lines.append(f"... {len(refusals) - len(shown_refusals)} more refusals not shown.")
             lines.append("")
     return "\n".join(lines) + "\n"
+
+
+def _format_complex_function(item: dict[str, Any], *, index: int, mismatch_limit: int) -> list[str]:
+    """Render one complex-function entry with risk and metrics detail."""
+    function = _dict_field(item, "function")
+    entry = _format_address(item.get("entry"))
+    risk = _dict_field(item, "risk")
+    lines = [f"### {index}. `{function.get('name', function.get('id', '<unknown>'))}`"]
+    if entry:
+        lines.append(f"- Entry: `{entry}`")
+    lines.append(f"- Classification: `{item.get('classification')}`")
+    lines.append(f"- Risk score: {risk.get('score', 0)}")
+    blockers = [blocker for blocker in item.get("blockers", []) or [] if isinstance(blocker, dict)]
+    if blockers:
+        lines.append(
+            f"- Blockers: `{', '.join(str(blocker.get('kind')) for blocker in blockers[:mismatch_limit])}`"
+        )
+    metrics = _dict_field(item, "metrics")
+    metric_summary = {
+        "insns": metrics.get("instruction_count"),
+        "conditions": metrics.get("condition_count"),
+        "calls": metrics.get("call_count"),
+        "indirect": metrics.get("indirect_control_count"),
+        "symbolic_memory": metrics.get("explicit_symbolic_memory_count"),
+        "backward": metrics.get("backward_branch_count"),
+    }
+    lines.append(f"- Metrics: `{_compact_json(metric_summary)}`")
+    risk_points = [point for point in item.get("risk_points", []) or [] if isinstance(point, dict)]
+    for point in risk_points[:mismatch_limit]:
+        address = _format_address(point.get("address"))
+        location = f"{address}: " if address else ""
+        lines.append(
+            f"  - `{', '.join(str(kind) for kind in point.get('kinds', []))}` {location}{point.get('disassembly')}"
+        )
+    lines.append("")
+    return lines
+
+
+def _format_refusal_entry(item: dict[str, Any], *, index: int) -> list[str]:
+    """Render one refusal entry's reason and optional detail."""
+    detail = _dict_field(item, "detail")
+    lines = [f"### {index}. `{item.get('reason')}`"]
+    if detail.get("function_id"):
+        lines.append(f"- Function: `{detail.get('function_id')}`")
+    if detail.get("message"):
+        lines.append(f"- Message: {detail.get('message')}")
+    lines.append("")
+    return lines
 
 
 def _render_ssa_compare(
@@ -439,8 +462,8 @@ def _render_ssa_compare(
         show_unresolved_call_targets=show_unresolved_call_targets,
         failed_only=failed_only,
     )
-    candidate_only_parts = (
-        document.get("candidate_only_parts") if isinstance(document.get("candidate_only_parts"), dict) else {}
+    candidate_only_parts: dict[str, Any] = (
+        _dict_field(document, "candidate_only_parts")
     )
     lines = [
         "# DOS Unit Failure Report",
@@ -498,20 +521,7 @@ def _render_ssa_compare(
         )
 
     if region_results:
-        lines.append("## Function Region Equality")
-        lines.append("")
-        if not failing_regions:
-            lines.append("No failed or refused function-region proofs.")
-            lines.append("")
-        else:
-            shown_regions = _limited(failing_regions, limit)
-            for index, result in enumerate(shown_regions, start=1):
-                lines.extend(_format_ssa_region_result(result, index=index, mismatch_limit=mismatch_limit))
-            if len(failing_regions) > len(shown_regions):
-                lines.append(
-                    f"... {len(failing_regions) - len(shown_regions)} more failed/refused region proofs not shown."
-                )
-                lines.append("")
+        _append_region_equality_section(lines, failing_regions, limit, mismatch_limit)
 
     lines.append("## Semantic Mismatches")
     lines.append("")
@@ -519,11 +529,10 @@ def _render_ssa_compare(
         lines.append("No semantic SSA mismatches.")
         lines.append("")
     shown_semantic_failures = _limited(semantic_failures, limit)
-    for index, result in enumerate(shown_semantic_failures, start=1):
-        lines.extend(_format_ssa_result(result, index=index, mismatch_limit=mismatch_limit, show_candidate=True))
-    if len(semantic_failures) > len(shown_semantic_failures):
-        lines.append(f"... {len(semantic_failures) - len(shown_semantic_failures)} more semantic mismatches not shown.")
-        lines.append("")
+    _append_ssa_result_rows(
+        lines, shown_semantic_failures, semantic_failures, "semantic mismatches",
+        limit, mismatch_limit, show_candidate=True,
+    )
 
     lines.append("## Mapping / Lowering Gaps")
     lines.append("")
@@ -531,22 +540,93 @@ def _render_ssa_compare(
         lines.append("No mapping or candidate-lowering gaps.")
         lines.append("")
     shown_mapping_gaps = _limited(mapping_gaps, limit)
-    for index, result in enumerate(shown_mapping_gaps, start=1):
-        lines.extend(_format_ssa_result(result, index=index, mismatch_limit=mismatch_limit, show_candidate=False))
-    if len(mapping_gaps) > len(shown_mapping_gaps):
-        lines.append(f"... {len(mapping_gaps) - len(shown_mapping_gaps)} more mapping/lowering gaps not shown.")
-        lines.append("")
+    _append_ssa_result_rows(
+        lines, shown_mapping_gaps, mapping_gaps, "mapping/lowering gaps",
+        limit, mismatch_limit, show_candidate=False,
+    )
 
     if other_refusals:
         lines.append("## Other Refusals")
         lines.append("")
         shown_other_refusals = _limited(other_refusals, limit)
-        for index, result in enumerate(shown_other_refusals, start=1):
-            lines.extend(_format_ssa_result(result, index=index, mismatch_limit=mismatch_limit, show_candidate=True))
-        if len(other_refusals) > len(shown_other_refusals):
-            lines.append(f"... {len(other_refusals) - len(shown_other_refusals)} more other refusals not shown.")
-            lines.append("")
+        _append_ssa_result_rows(
+            lines, shown_other_refusals, other_refusals, "other refusals",
+            limit, mismatch_limit, show_candidate=True,
+        )
 
+    _append_connectivity_gap_section(lines, connectivity, limit)
+    _append_external_parts_section(lines, failing_external_parts, limit, mismatch_limit)
+    _append_candidate_only_sections(lines, candidate_only_parts, limit, with_description=True)
+    displayed_count = len(shown_semantic_failures) + len(shown_mapping_gaps) + len(_limited(other_refusals, limit))
+    if len(displayed_failing) > displayed_count:
+        lines.append(f"Total hidden by per-section limits: {len(displayed_failing) - displayed_count}.")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _append_region_equality_section(
+    lines: list[str], failing_regions: list[dict[str, Any]], limit: int, mismatch_limit: int
+) -> None:
+    """Append the function region-equality proofs section."""
+    lines.append("## Function Region Equality")
+    lines.append("")
+    if not failing_regions:
+        lines.append("No failed or refused function-region proofs.")
+        lines.append("")
+        return
+    shown_regions = _limited(failing_regions, limit)
+    for index, result in enumerate(shown_regions, start=1):
+        lines.extend(_format_ssa_region_result(result, index=index, mismatch_limit=mismatch_limit))
+    if len(failing_regions) > len(shown_regions):
+        lines.append(
+            f"... {len(failing_regions) - len(shown_regions)} more failed/refused region proofs not shown."
+        )
+        lines.append("")
+
+
+def _append_external_parts_section(
+    lines: list[str], failing_external_parts: list[dict[str, Any]], limit: int, mismatch_limit: int
+) -> None:
+    """Append the external shared-tail proof-gap section."""
+    if not failing_external_parts:
+        return
+    lines.append("## External Shared-Tail Proof Gaps")
+    lines.append("")
+    lines.append(
+        "These are out-of-declared-body SSA parts reached by functions. They are matched and proved separately when a unique candidate block can be found."
+    )
+    lines.append("")
+    for index, result in enumerate(_limited(failing_external_parts, limit), start=1):
+        lines.extend(_format_ssa_result(result, index=index, mismatch_limit=mismatch_limit, show_candidate=True))
+    if len(failing_external_parts) > limit:
+        lines.append(f"... {len(failing_external_parts) - limit} more external shared-tail proof gaps not shown.")
+        lines.append("")
+
+
+def _append_ssa_result_rows(
+    lines: list[str],
+    shown: list[dict[str, Any]],
+    total_items: list[dict[str, Any]],
+    overflow_label: str,
+    limit: int,
+    mismatch_limit: int,
+    *,
+    show_candidate: bool,
+) -> None:
+    """Append one limited SSA result section plus its overflow note."""
+    for index, result in enumerate(shown, start=1):
+        lines.extend(
+            _format_ssa_result(result, index=index, mismatch_limit=mismatch_limit, show_candidate=show_candidate)
+        )
+    if len(total_items) > len(shown):
+        lines.append(f"... {len(total_items) - len(shown)} more {overflow_label} not shown.")
+        lines.append("")
+
+
+def _append_connectivity_gap_section(
+    lines: list[str], connectivity: dict[str, Any], limit: int
+) -> None:
+    """Append the connectivity proof-gap section when gaps exist."""
     connectivity_gaps = [
         item
         for item in [
@@ -555,38 +635,38 @@ def _render_ssa_compare(
         ]
         if isinstance(item, dict)
     ]
-    if connectivity_gaps:
-        lines.append("## Connectivity Proof Gaps")
+    if not connectivity_gaps:
+        return
+    lines.append("## Connectivity Proof Gaps")
+    lines.append("")
+    lines.append(
+        "These are block-edge proof gaps, not semantic mismatches. They mean the predecessor block was proved locally, but the successor edge could not be paired or state-checked."
+    )
+    lines.append("")
+    shown_connectivity_gaps = _limited(connectivity_gaps, limit)
+    for index, gap in enumerate(shown_connectivity_gaps, start=1):
+        lines.extend(_format_connectivity_gap(gap, index=index))
+    if len(connectivity_gaps) > len(shown_connectivity_gaps):
+        lines.append(f"... {len(connectivity_gaps) - len(shown_connectivity_gaps)} more connectivity proof gaps not shown.")
         lines.append("")
-        lines.append(
-            "These are block-edge proof gaps, not semantic mismatches. They mean the predecessor block was proved locally, but the successor edge could not be paired or state-checked."
-        )
-        lines.append("")
-        shown_connectivity_gaps = _limited(connectivity_gaps, limit)
-        for index, gap in enumerate(shown_connectivity_gaps, start=1):
-            lines.extend(_format_connectivity_gap(gap, index=index))
-        if len(connectivity_gaps) > len(shown_connectivity_gaps):
-            lines.append(f"... {len(connectivity_gaps) - len(shown_connectivity_gaps)} more connectivity proof gaps not shown.")
-            lines.append("")
-    if failing_external_parts:
-        lines.append("## External Shared-Tail Proof Gaps")
-        lines.append("")
-        lines.append(
-            "These are out-of-declared-body SSA parts reached by functions. They are matched and proved separately when a unique candidate block can be found."
-        )
-        lines.append("")
-        for index, result in enumerate(_limited(failing_external_parts, limit), start=1):
-            lines.extend(_format_ssa_result(result, index=index, mismatch_limit=mismatch_limit, show_candidate=True))
-        if len(failing_external_parts) > limit:
-            lines.append(f"... {len(failing_external_parts) - limit} more external shared-tail proof gaps not shown.")
-            lines.append("")
+
+
+def _append_candidate_only_sections(
+    lines: list[str],
+    candidate_only_parts: dict[str, Any],
+    limit: int,
+    *,
+    with_description: bool = False,
+) -> None:
+    """Append the candidate-only and alias-only SSA leftover sections."""
     if candidate_only_parts.get("enabled") and int(candidate_only_parts.get("total", 0) or 0) > 0:
         lines.append("## Candidate-Only SSA Parts")
         lines.append("")
-        lines.append(
-            "These rebuilt SSA parts were not paired with any oracle body or external/shared-tail part. They are coverage leftovers, not semantic mismatches by themselves."
-        )
-        lines.append("")
+        if with_description:
+            lines.append(
+                "These rebuilt SSA parts were not paired with any oracle body or external/shared-tail part. They are coverage leftovers, not semantic mismatches by themselves."
+            )
+            lines.append("")
         for index, part in enumerate(_limited(candidate_only_parts.get("parts", []) or [], limit), start=1):
             lines.extend(_format_candidate_only_part(part, index=index))
         total = int(candidate_only_parts.get("total", 0) or 0)
@@ -596,21 +676,17 @@ def _render_ssa_compare(
     if candidate_only_parts.get("enabled") and int(candidate_only_parts.get("alias_total", 0) or 0) > 0:
         lines.append("## Candidate Alias-Only SSA Parts")
         lines.append("")
-        lines.append(
-            "These rebuilt SSA parts were not directly paired, but their entry/part/code signature aliases a candidate block that was paired and checked."
-        )
-        lines.append("")
+        if with_description:
+            lines.append(
+                "These rebuilt SSA parts were not directly paired, but their entry/part/code signature aliases a candidate block that was paired and checked."
+            )
+            lines.append("")
         for index, part in enumerate(_limited(candidate_only_parts.get("alias_parts", []) or [], limit), start=1):
             lines.extend(_format_candidate_only_part(part, index=index))
         total = int(candidate_only_parts.get("alias_total", 0) or 0)
         if total > limit:
             lines.append(f"... {total - limit} more candidate alias-only SSA parts not shown.")
             lines.append("")
-    displayed_count = len(shown_semantic_failures) + len(shown_mapping_gaps) + len(_limited(other_refusals, limit))
-    if len(displayed_failing) > displayed_count:
-        lines.append(f"Total hidden by per-section limits: {len(displayed_failing) - displayed_count}.")
-        lines.append("")
-    return "\n".join(lines) + "\n"
 
 
 def _render_ssa_compare_grouped(
@@ -649,7 +725,7 @@ def _render_ssa_compare_grouped(
 
     by_function: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in displayed_failing:
-        function = result.get("function", {}) if isinstance(result.get("function"), dict) else {}
+        function = _dict_field(result, "function")
         name = function.get("name") or function.get("id") or "<unknown>"
         by_function[name].append(result)
 
@@ -698,63 +774,7 @@ def _render_ssa_compare_grouped(
     for index, (name, entries) in enumerate(sorted(by_function.items()), start=1):
         if limit > 0 and index > limit:
             break
-        representative = entries[0]
-        function = representative.get("function", {}) if isinstance(representative.get("function"), dict) else {}
-        function_id = function.get("id", name)
-        status_counts = Counter(f"{entry.get('status')}:{entry.get('reason')}" for entry in entries)
-        lines.append(f"### {index}. `{name}`")
-        lines.append(f"- Function id: `{function_id}`")
-        lines.append(f"- Entries for function: `{len(entries)}`")
-        lines.append(f"- Statuses: `{_compact_json(dict(sorted(status_counts.items())))}`")
-        lines.append(f"- Oracle SSA: `{representative.get('oracle_function', '<none>')}`")
-        lines.append(f"- Candidate SSA: `{representative.get('candidate_function', '<none>')}`")
-        oracle_detail = (
-            representative.get("oracle_detail") if isinstance(representative.get("oracle_detail"), dict) else None
-        )
-        candidate_detail = (
-            representative.get("candidate_detail") if isinstance(representative.get("candidate_detail"), dict) else None
-        )
-        if representative.get("mapped_candidate"):
-            mapped_candidate = representative["mapped_candidate"]
-            lines.append(
-                f"- Mapped candidate: `{mapped_candidate.get('name') or mapped_candidate.get('id')} {_format_ssa_entry(mapped_candidate.get('entry'))}`"
-            )
-        if oracle_detail:
-            lines.extend(_format_ssa_side("Oracle", oracle_detail))
-        if candidate_detail:
-            lines.extend(_format_ssa_side("Candidate", candidate_detail))
-        call_compare = (
-            representative.get("call_compare") if isinstance(representative.get("call_compare"), dict) else None
-        )
-        if call_compare:
-            lines.extend(_format_ssa_call_compare(call_compare))
-        mismatches = []
-        for entry in entries:
-            for mismatch in entry.get("mismatches", []) or []:
-                if not isinstance(mismatch, dict):
-                    continue
-                mismatches.append(_format_ssa_mismatch(mismatch))
-                break
-        if mismatches:
-            lines.append("- Mismatches:")
-            for mismatch in mismatches[:mismatch_limit]:
-                lines.extend(mismatch)
-        else:
-            lines.append("- No mismatch detail recorded.")
-        if representative.get("layout_normalization", {}):
-            lines.append("- Layout constant normalization:")
-            pairs = [
-                pair
-                for pair in representative.get("layout_normalization", {}).get("pairs", []) or []
-                if isinstance(pair, dict)
-            ]
-            for pair in pairs[:4]:
-                lines.append(
-                    f"  - candidate `{pair.get('candidate')}` -> oracle `{pair.get('oracle')}` ({pair.get('reason', 'unknown')})"
-                )
-            if len(pairs) > 4:
-                lines.append(f"  - ... {len(pairs) - 4} more")
-        lines.append("")
+        lines.extend(_format_grouped_function(name, entries, index=index, mismatch_limit=mismatch_limit))
 
     if len(by_function) > limit > 0:
         lines.append(f"... {len(by_function) - limit} more failed/refused functions not shown.")
@@ -773,55 +793,149 @@ def _render_ssa_compare_grouped(
     return "\n".join(lines) + "\n"
 
 
+def _format_grouped_function(
+    name: str, entries: list[dict[str, Any]], *, index: int, mismatch_limit: int
+) -> list[str]:
+    """Render one function's grouped SSA entries headed by the representative."""
+    lines: list[str] = []
+    representative = entries[0]
+    function = _dict_field(representative, "function")
+    function_id = function.get("id", name)
+    status_counts = Counter(f"{entry.get('status')}:{entry.get('reason')}" for entry in entries)
+    lines.append(f"### {index}. `{name}`")
+    lines.append(f"- Function id: `{function_id}`")
+    lines.append(f"- Entries for function: `{len(entries)}`")
+    lines.append(f"- Statuses: `{_compact_json(dict(sorted(status_counts.items())))}`")
+    lines.append(f"- Oracle SSA: `{representative.get('oracle_function', '<none>')}`")
+    lines.append(f"- Candidate SSA: `{representative.get('candidate_function', '<none>')}`")
+    oracle_detail = (
+        representative.get("oracle_detail") if isinstance(representative.get("oracle_detail"), dict) else None
+    )
+    candidate_detail = (
+        representative.get("candidate_detail") if isinstance(representative.get("candidate_detail"), dict) else None
+    )
+    if representative.get("mapped_candidate"):
+        mapped_candidate = representative["mapped_candidate"]
+        lines.append(
+            f"- Mapped candidate: `{mapped_candidate.get('name') or mapped_candidate.get('id')} {_format_ssa_entry(mapped_candidate.get('entry'))}`"
+        )
+    if oracle_detail:
+        lines.extend(_format_ssa_side("Oracle", oracle_detail))
+    if candidate_detail:
+        lines.extend(_format_ssa_side("Candidate", candidate_detail))
+    call_compare = (
+        representative.get("call_compare") if isinstance(representative.get("call_compare"), dict) else None
+    )
+    if call_compare:
+        lines.extend(_format_ssa_call_compare(call_compare))
+    lines.extend(_format_first_entry_mismatches(entries, mismatch_limit))
+    if representative.get("layout_normalization", {}):
+        lines.extend(_format_grouped_layout_normalization(representative["layout_normalization"]))
+    lines.append("")
+    return lines
+
+
+def _format_first_entry_mismatches(entries: list[dict[str, Any]], mismatch_limit: int) -> list[str]:
+    """Render the first mismatch recorded per grouped entry."""
+    mismatches = []
+    for entry in entries:
+        for mismatch in entry.get("mismatches", []) or []:
+            if not isinstance(mismatch, dict):
+                continue
+            mismatches.append(_format_ssa_mismatch(mismatch))
+            break
+    if not mismatches:
+        return ["- No mismatch detail recorded."]
+    lines = ["- Mismatches:"]
+    for mismatch in mismatches[:mismatch_limit]:
+        lines.extend(mismatch)
+    return lines
+
+
+def _format_grouped_layout_normalization(layout_normalization: dict[str, Any]) -> list[str]:
+    """Render up to four layout-constant normalization pairs."""
+    lines = ["- Layout constant normalization:"]
+    pairs = [
+        pair
+        for pair in layout_normalization.get("pairs", []) or []
+        if isinstance(pair, dict)
+    ]
+    for pair in pairs[:4]:
+        lines.append(
+            f"  - candidate `{pair.get('candidate')}` -> oracle `{pair.get('oracle')}` ({pair.get('reason', 'unknown')})"
+        )
+    if len(pairs) > 4:
+        lines.append(f"  - ... {len(pairs) - 4} more")
+    return lines
+
+
 def _format_ssa_region_result(result: dict[str, Any], *, index: int, mismatch_limit: int) -> list[str]:
-    function = result.get("function", {}) if isinstance(result.get("function"), dict) else {}
+    function = _dict_field(result, "function")
     name = function.get("name", function.get("id", "<unknown>"))
     lines = [f"### {index}. `{name}` region `{result.get('status')}`"]
     if function.get("id"):
         lines.append(f"- Function id: `{function.get('id')}`")
     if result.get("reason"):
         lines.append(f"- Reason: `{result.get('reason')}`")
-    observables = result.get("observables") if isinstance(result.get("observables"), dict) else {}
+    observables = _dict_field(result, "observables")
     if observables:
         regs = ", ".join(f"`{item}`" for item in observables.get("regs", []) or [])
         memory = "whole memory" if observables.get("whole_memory") else "declared memory only"
         lines.append(f"- Region observables: regs {regs or '`<none>`'}, {memory}")
     for label, key in (("Oracle", "oracle_region_detail"), ("Candidate", "candidate_region_detail")):
         detail = result.get(key) if isinstance(result.get(key), dict) else None
-        if not detail:
-            continue
-        lines.append(f"- {label} region entry: `{_format_ssa_entry(detail.get('entry'))}`")
-        if detail.get("part_count") is not None:
-            lines.append(f"  - Parts: `{detail.get('part_count')}`")
-        instructions = [item for item in detail.get("instructions", []) or [] if isinstance(item, dict)]
-        if instructions:
-            lines.append(f"  - {label} region first instructions:")
-            if detail.get("instructions_truncated"):
-                total = len(instructions) + int(detail.get("instructions_truncated") or 0)
-                lines.append(f"    - Instruction preview: first `{len(instructions)}` of `{total}`")
-            for instruction in instructions:
-                lines.append(f"    - `{_format_instruction(instruction)}`")
+        if detail:
+            lines.extend(_format_region_detail_side(label, detail))
     for label, key in (("Oracle summary", "oracle_summary"), ("Candidate summary", "candidate_summary")):
         summary = result.get(key) if isinstance(result.get(key), dict) else None
-        if not summary:
-            continue
-        lines.append(
-            f"- {label}: status `{summary.get('status')}`, parts `{summary.get('part_count')}`, terminals `{summary.get('terminal_count')}`, blocks `{summary.get('blocks_composed')}`, branches `{summary.get('branch_merges')}`, branch prunes `{summary.get('branch_prunes')}`, loop cuts `{summary.get('loop_cuts')}`, inputs `{summary.get('input_count')}`, assignments `{summary.get('assignment_count')}`"
-        )
-        if summary.get("outputs"):
-            lines.append(f"  - Outputs: `{', '.join(str(item) for item in summary.get('outputs', []) or [])}`")
-        if summary.get("reason"):
-            lines.append(f"  - Refusal: `{summary.get('reason')}`")
-    mismatches = [item for item in result.get("mismatches", []) or [] if isinstance(item, dict)]
-    if mismatches:
-        lines.append("- Mismatches:")
-        for mismatch in mismatches[:mismatch_limit]:
-            lines.extend(_format_ssa_mismatch(mismatch))
-        if len(mismatches) > mismatch_limit:
-            lines.append(f"  - ... {len(mismatches) - mismatch_limit} more mismatches")
-    else:
-        lines.append("- No mismatch detail recorded.")
+        if summary:
+            lines.extend(_format_summary_side(summary, label, include_refusal=True))
+    lines.extend(_format_result_mismatches(result, mismatch_limit))
     lines.append("")
+    return lines
+
+
+def _format_region_detail_side(label: str, detail: dict[str, Any]) -> list[str]:
+    """Render one side's region entry and first instructions."""
+    lines = [f"- {label} region entry: `{_format_ssa_entry(detail.get('entry'))}`"]
+    if detail.get("part_count") is not None:
+        lines.append(f"  - Parts: `{detail.get('part_count')}`")
+    instructions = [item for item in detail.get("instructions", []) or [] if isinstance(item, dict)]
+    if instructions:
+        lines.append(f"  - {label} region first instructions:")
+        if detail.get("instructions_truncated"):
+            total = len(instructions) + int(detail.get("instructions_truncated") or 0)
+            lines.append(f"    - Instruction preview: first `{len(instructions)}` of `{total}`")
+        for instruction in instructions:
+            lines.append(f"    - `{_format_instruction(instruction)}`")
+    return lines
+
+
+def _format_summary_side(
+    summary: dict[str, Any], label: str, *, include_unroll: bool = False, include_refusal: bool = False
+) -> list[str]:
+    """Render one side's composed-region summary counters."""
+    unroll = f", unroll `{summary.get('loop_unroll_bound')}`" if include_unroll else ""
+    lines = [
+        f"- {label}: status `{summary.get('status')}`, parts `{summary.get('part_count')}`, terminals `{summary.get('terminal_count')}`, blocks `{summary.get('blocks_composed')}`, branches `{summary.get('branch_merges')}`, branch prunes `{summary.get('branch_prunes')}`, loop cuts `{summary.get('loop_cuts')}`{unroll}, inputs `{summary.get('input_count')}`, assignments `{summary.get('assignment_count')}`"
+    ]
+    if summary.get("outputs"):
+        lines.append(f"  - Outputs: `{', '.join(str(item) for item in summary.get('outputs', []) or [])}`")
+    if include_refusal and summary.get("reason"):
+        lines.append(f"  - Refusal: `{summary.get('reason')}`")
+    return lines
+
+
+def _format_result_mismatches(result: dict[str, Any], mismatch_limit: int) -> list[str]:
+    """Render the shared mismatches block used by SSA result formats."""
+    mismatches = [item for item in result.get("mismatches", []) or [] if isinstance(item, dict)]
+    if not mismatches:
+        return ["- No mismatch detail recorded."]
+    lines = ["- Mismatches:"]
+    for mismatch in mismatches[:mismatch_limit]:
+        lines.extend(_format_ssa_mismatch(mismatch))
+    if len(mismatches) > mismatch_limit:
+        lines.append(f"  - ... {len(mismatches) - mismatch_limit} more mismatches")
     return lines
 
 
@@ -832,7 +946,7 @@ def _has_mismatch_kind(result: dict[str, Any], kind: str) -> bool:
 
 
 def _render_ssa_abi_compare(document: dict[str, Any], *, limit: int, mismatch_limit: int) -> str:
-    summary = document.get("summary", {}) if isinstance(document.get("summary"), dict) else {}
+    summary = _dict_field(document, "summary")
     results = [result for result in document.get("results", []) or [] if isinstance(result, dict)]
     failing = [result for result in results if result.get("status") != "passed"]
     status_reasons = Counter(f"{result.get('status')}:{result.get('reason')}" for result in failing)
@@ -890,15 +1004,32 @@ def _render_ssa_abi_compare(document: dict[str, Any], *, limit: int, mismatch_li
 
 
 def _format_ssa_abi_result(result: dict[str, Any], *, index: int, mismatch_limit: int) -> list[str]:
-    function = result.get("function", {}) if isinstance(result.get("function"), dict) else {}
+    function = _dict_field(result, "function")
     name = function.get("name", "<unknown>")
     lines = [f"### {index}. `{name}` `{result.get('status')}`"]
+    lines.extend(_format_abi_function_meta(function))
+    if result.get("reason"):
+        lines.append(f"- Reason: `{result.get('reason')}`")
+    lines.extend(_format_abi_observables(result))
+    constraints = [item for item in result.get("input_constraints", []) or [] if isinstance(item, dict)]
+    if constraints:
+        lines.append("- Input constraints: `" + _compact_json(constraints) + "`")
+    for label, key in (("Oracle summary", "oracle_summary"), ("Candidate summary", "candidate_summary")):
+        summary = result.get(key) if isinstance(result.get(key), dict) else None
+        if summary:
+            lines.extend(_format_summary_side(summary, label, include_unroll=True))
+    lines.extend(_format_result_mismatches(result, mismatch_limit))
+    lines.append("")
+    return lines
+
+
+def _format_abi_function_meta(function: dict[str, Any]) -> list[str]:
+    """Render ABI kind, convention, inputs, stack args, returns, and reg sets."""
+    lines: list[str] = []
     if function.get("kind"):
         lines.append(f"- Kind: `{function.get('kind')}`")
     if function.get("calling_convention"):
         lines.append(f"- Calling convention: `{function.get('calling_convention')}`")
-    if result.get("reason"):
-        lines.append(f"- Reason: `{result.get('reason')}`")
     if function.get("inputs"):
         lines.append(
             "- Register inputs: "
@@ -926,40 +1057,24 @@ def _format_ssa_abi_result(result: dict[str, Any], *, index: int, mismatch_limit
         lines.append("- Preserved: " + ", ".join(f"`{item}`" for item in function.get("preserved", []) or []))
     if function.get("clobbers"):
         lines.append("- Clobbers: " + ", ".join(f"`{item}`" for item in function.get("clobbers", []) or []))
-    observables = result.get("observables") if isinstance(result.get("observables"), dict) else {}
-    if observables:
-        lines.append("- Compared regs: " + ", ".join(f"`{item}`" for item in observables.get("regs", []) or []))
-        effects = [item for item in observables.get("memory", []) or [] if isinstance(item, dict)]
-        if effects:
-            lines.append(
-                "- Compared memory effects: "
-                + ", ".join(
-                    f"`{item.get('space', 'SEG')}:{item.get('offset')} {item.get('name', '')}`".strip()
-                    for item in effects
-                )
-            )
-    constraints = [item for item in result.get("input_constraints", []) or [] if isinstance(item, dict)]
-    if constraints:
-        lines.append("- Input constraints: `" + _compact_json(constraints) + "`")
-    for label, key in (("Oracle summary", "oracle_summary"), ("Candidate summary", "candidate_summary")):
-        summary = result.get(key) if isinstance(result.get(key), dict) else None
-        if not summary:
-            continue
+    return lines
+
+
+def _format_abi_observables(result: dict[str, Any]) -> list[str]:
+    """Render the compared register and memory-effect observables."""
+    observables = _dict_field(result, "observables")
+    if not observables:
+        return []
+    lines = ["- Compared regs: " + ", ".join(f"`{item}`" for item in observables.get("regs", []) or [])]
+    effects = [item for item in observables.get("memory", []) or [] if isinstance(item, dict)]
+    if effects:
         lines.append(
-            f"- {label}: status `{summary.get('status')}`, parts `{summary.get('part_count')}`, terminals `{summary.get('terminal_count')}`, blocks `{summary.get('blocks_composed')}`, branches `{summary.get('branch_merges')}`, branch prunes `{summary.get('branch_prunes')}`, loop cuts `{summary.get('loop_cuts')}`, unroll `{summary.get('loop_unroll_bound')}`, inputs `{summary.get('input_count')}`, assignments `{summary.get('assignment_count')}`"
+            "- Compared memory effects: "
+            + ", ".join(
+                f"`{item.get('space', 'SEG')}:{item.get('offset')} {item.get('name', '')}`".strip()
+                for item in effects
+            )
         )
-        if summary.get("outputs"):
-            lines.append(f"  - Outputs: `{', '.join(str(item) for item in summary.get('outputs', []) or [])}`")
-    mismatches = [item for item in result.get("mismatches", []) or [] if isinstance(item, dict)]
-    if mismatches:
-        lines.append("- Mismatches:")
-        for mismatch in mismatches[:mismatch_limit]:
-            lines.extend(_format_ssa_mismatch(mismatch))
-        if len(mismatches) > mismatch_limit:
-            lines.append(f"  - ... {len(mismatches) - mismatch_limit} more mismatches")
-    else:
-        lines.append("- No mismatch detail recorded.")
-    lines.append("")
     return lines
 
 
@@ -975,9 +1090,26 @@ def _has_unresolved_call_target(result: dict[str, Any]) -> bool:
 
 
 def _format_ssa_result(result: dict[str, Any], *, index: int, mismatch_limit: int, show_candidate: bool) -> list[str]:
-    function = result.get("function", {}) if isinstance(result.get("function"), dict) else {}
+    function = _dict_field(result, "function")
     name = function.get("name", function.get("id", "<unknown>"))
     lines = [f"### {index}. `{name}` `{result.get('status')}`"]
+    lines.extend(_format_ssa_result_header(function, result))
+
+    oracle_detail = result.get("oracle_detail") if isinstance(result.get("oracle_detail"), dict) else None
+    candidate_detail = result.get("candidate_detail") if isinstance(result.get("candidate_detail"), dict) else None
+    lines.extend(_format_ssa_side("Oracle", oracle_detail))
+    if show_candidate:
+        lines.extend(_format_ssa_side("Candidate", candidate_detail))
+    lines.extend(_format_ssa_result_call_detail(oracle_detail, candidate_detail, result))
+
+    lines.extend(_format_result_mismatches(result, mismatch_limit))
+    lines.append("")
+    return lines
+
+
+def _format_ssa_result_header(function: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    """Render identity, reason, SSA ids, and mapped-candidate fields."""
+    lines: list[str] = []
     if function.get("id"):
         lines.append(f"- Function id: `{function.get('id')}`")
     if result.get("reason"):
@@ -991,12 +1123,16 @@ def _format_ssa_result(result: dict[str, Any], *, index: int, mismatch_limit: in
         lines.append(
             f"- Mapped candidate: `{mapped_candidate.get('name') or mapped_candidate.get('id')}` `{_format_ssa_entry(mapped_candidate.get('entry'))}`"
         )
+    return lines
 
-    oracle_detail = result.get("oracle_detail") if isinstance(result.get("oracle_detail"), dict) else None
-    candidate_detail = result.get("candidate_detail") if isinstance(result.get("candidate_detail"), dict) else None
-    lines.extend(_format_ssa_side("Oracle", oracle_detail))
-    if show_candidate:
-        lines.extend(_format_ssa_side("Candidate", candidate_detail))
+
+def _format_ssa_result_call_detail(
+    oracle_detail: dict[str, Any] | None,
+    candidate_detail: dict[str, Any] | None,
+    result: dict[str, Any],
+) -> list[str]:
+    """Render the call-boundary note, call compare, and layout normalization."""
+    lines: list[str] = []
     if _ssa_jumpkind(oracle_detail) == "Ijk_Call" or _ssa_jumpkind(candidate_detail) == "Ijk_Call":
         lines.append(
             "- Call-boundary note: this bounded SSA block stops at a call; memory differences may reflect pushed arguments/return state or an unmapped call-target summary."
@@ -1009,17 +1145,6 @@ def _format_ssa_result(result: dict[str, Any], *, index: int, mismatch_limit: in
     )
     if layout_normalization:
         lines.extend(_format_layout_normalization(layout_normalization))
-
-    mismatches = [item for item in result.get("mismatches", []) or [] if isinstance(item, dict)]
-    if mismatches:
-        lines.append("- Mismatches:")
-    for mismatch in mismatches[:mismatch_limit]:
-        lines.extend(_format_ssa_mismatch(mismatch))
-    if len(mismatches) > mismatch_limit:
-        lines.append(f"  - ... {len(mismatches) - mismatch_limit} more mismatches")
-    if not mismatches:
-        lines.append("- No mismatch detail recorded.")
-    lines.append("")
     return lines
 
 
@@ -1079,12 +1204,12 @@ def _format_ssa_call_compare(call_compare: dict[str, Any]) -> list[str]:
     ]
     proof_fact = call_compare.get("proof_fact") if isinstance(call_compare.get("proof_fact"), dict) else None
     if proof_fact:
-        oracle = proof_fact.get("oracle") if isinstance(proof_fact.get("oracle"), dict) else {}
-        candidate = proof_fact.get("candidate") if isinstance(proof_fact.get("candidate"), dict) else {}
+        pf_oracle = _dict_field(proof_fact, "oracle")
+        pf_candidate = _dict_field(proof_fact, "candidate")
         lines.append(
             "  - Callee proof: "
             f"`{proof_fact.get('proof')}` "
-            f"oracle `{oracle.get('name') or oracle.get('id')}` -> candidate `{candidate.get('name') or candidate.get('id')}`"
+            f"oracle `{pf_oracle.get('name') or pf_oracle.get('id')}` -> candidate `{pf_candidate.get('name') or pf_candidate.get('id')}`"
         )
     semantic_target = (
         call_compare.get("semantic_target") if isinstance(call_compare.get("semantic_target"), dict) else None
@@ -1179,49 +1304,7 @@ def _format_ssa_mismatch(mismatch: dict[str, Any]) -> list[str]:
         "connectivity_state_mismatch",
         "connectivity_state_refused",
     }:
-        for key, label in (
-            ("oracle_from_delta", "Oracle from delta"),
-            ("oracle_successor_delta", "Oracle successor delta"),
-            ("candidate_from_delta", "Candidate from delta"),
-            ("expected_candidate_successor_delta", "Expected candidate successor delta"),
-            ("candidate_successor_delta", "Candidate successor delta"),
-            ("mapped_oracle_successor_delta", "Mapped oracle successor delta"),
-        ):
-            if mismatch.get(key):
-                lines.append(f"    - {label}: `{mismatch.get(key)}`")
-        if mismatch.get("candidate_successor_deltas"):
-            lines.append(
-                f"    - Candidate successor deltas: `{', '.join(str(item) for item in mismatch.get('candidate_successor_deltas') or [])}`"
-            )
-        if mismatch.get("oracle_successor_deltas"):
-            lines.append(
-                f"    - Oracle successor deltas: `{', '.join(str(item) for item in mismatch.get('oracle_successor_deltas') or [])}`"
-            )
-        if mismatch.get("oracle_missing_inputs"):
-            lines.append(
-                f"    - Oracle missing successor inputs: `{', '.join(str(item) for item in mismatch.get('oracle_missing_inputs') or [])}`"
-            )
-        if mismatch.get("candidate_missing_inputs"):
-            lines.append(
-                f"    - Candidate missing successor inputs: `{', '.join(str(item) for item in mismatch.get('candidate_missing_inputs') or [])}`"
-            )
-        if mismatch.get("oracle_ignored_inputs"):
-            lines.append(
-                f"    - Oracle ignored successor inputs: `{', '.join(str(item) for item in mismatch.get('oracle_ignored_inputs') or [])}`"
-            )
-        if mismatch.get("candidate_ignored_inputs"):
-            lines.append(
-                f"    - Candidate ignored successor inputs: `{', '.join(str(item) for item in mismatch.get('candidate_ignored_inputs') or [])}`"
-            )
-        if mismatch.get("checked_inputs"):
-            lines.append(
-                f"    - Checked successor inputs: `{', '.join(str(item) for item in mismatch.get('checked_inputs') or [])}`"
-            )
-        edge_mismatches = [item for item in mismatch.get("edge_mismatches", []) or [] if isinstance(item, dict)]
-        if edge_mismatches:
-            lines.append("    - Edge-state mismatches:")
-            for edge_mismatch in edge_mismatches[:3]:
-                lines.extend(f"      {line}" for line in _format_ssa_mismatch(edge_mismatch))
+        lines.extend(_format_connectivity_mismatch_detail(mismatch))
     if mismatch.get("kind") == "output_set_changed":
         lines.append(
             f"    - Oracle-only outputs: `{', '.join(str(item) for item in mismatch.get('oracle_only', []) or [])}`"
@@ -1230,33 +1313,14 @@ def _format_ssa_mismatch(mismatch: dict[str, Any]) -> list[str]:
             f"    - Candidate-only outputs: `{', '.join(str(item) for item in mismatch.get('candidate_only', []) or [])}`"
         )
     if mismatch.get("kind") == "region_incomplete":
-        lines.append(
-            "    - Meaning: SSA lowering stopped before all direct branch successors were present; this is an incomplete artifact, not a proven semantic mismatch."
-        )
-        for key, label in (
-            ("oracle_missing_successors", "Oracle missing successors"),
-            ("candidate_missing_successors", "Candidate missing successors"),
-        ):
-            items = [item for item in mismatch.get(key, []) or [] if isinstance(item, dict)]
-            if not items:
-                continue
-            lines.append(f"    - {label}:")
-            for item in items[:8]:
-                line = f"      - from `{item.get('from_delta')}` to missing `{item.get('missing_successor_delta')}`"
-                instruction = item.get("last_instruction") if isinstance(item.get("last_instruction"), dict) else None
-                if instruction and instruction.get("disassembly"):
-                    line += f" after `{_format_instruction(instruction)}`"
-                lines.append(line)
-                lowering_refusal = item.get("lowering_refusal") if isinstance(item.get("lowering_refusal"), dict) else None
-                if lowering_refusal:
-                    lines.append(
-                        f"        - Lowering refusal: `{lowering_refusal.get('reason')}` {lowering_refusal.get('message')}"
-                    )
-                    metrics = lowering_refusal.get("metrics") if isinstance(lowering_refusal.get("metrics"), dict) else None
-                    if metrics:
-                        lines.append(f"        - Metrics: `{_compact_json(metrics)}`")
-            if len(items) > 8:
-                lines.append(f"      - ... {len(items) - 8} more")
+        lines.extend(_format_region_incomplete_detail(mismatch))
+    lines.extend(_format_mismatch_detail_notes(mismatch))
+    return lines
+
+
+def _format_mismatch_detail_notes(mismatch: dict[str, Any]) -> list[str]:
+    """Render the free-form detail and per-kind investigation notes."""
+    lines: list[str] = []
     if "detail" in mismatch:
         lines.append(f"    - Detail: {mismatch.get('detail')}")
     if mismatch.get("kind") == "memory_expr_changed":
@@ -1267,6 +1331,85 @@ def _format_ssa_mismatch(mismatch: dict[str, Any]) -> list[str]:
         lines.append(
             "    - Investigation: compare the producer of the listed register in the shown blocks; `ip` differences are often control-flow or layout mapping issues."
         )
+    return lines
+
+
+_CONNECTIVITY_DELTA_FIELDS: tuple[tuple[str, str], ...] = (
+    ("oracle_from_delta", "Oracle from delta"),
+    ("oracle_successor_delta", "Oracle successor delta"),
+    ("candidate_from_delta", "Candidate from delta"),
+    ("expected_candidate_successor_delta", "Expected candidate successor delta"),
+    ("candidate_successor_delta", "Candidate successor delta"),
+    ("mapped_oracle_successor_delta", "Mapped oracle successor delta"),
+)
+
+_CONNECTIVITY_INPUT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("oracle_missing_inputs", "Oracle missing successor inputs"),
+    ("candidate_missing_inputs", "Candidate missing successor inputs"),
+    ("oracle_ignored_inputs", "Oracle ignored successor inputs"),
+    ("candidate_ignored_inputs", "Candidate ignored successor inputs"),
+    ("checked_inputs", "Checked successor inputs"),
+)
+
+
+def _format_connectivity_mismatch_detail(mismatch: dict[str, Any]) -> list[str]:
+    """Render deltas, successor-input buckets, and nested edge mismatches."""
+    lines: list[str] = []
+    for key, label in _CONNECTIVITY_DELTA_FIELDS:
+        if mismatch.get(key):
+            lines.append(f"    - {label}: `{mismatch.get(key)}`")
+    for key, label in (
+        ("candidate_successor_deltas", "Candidate successor deltas"),
+        ("oracle_successor_deltas", "Oracle successor deltas"),
+        *_CONNECTIVITY_INPUT_FIELDS,
+    ):
+        if mismatch.get(key):
+            lines.append(
+                f"    - {label}: `{', '.join(str(item) for item in mismatch.get(key) or [])}`"
+            )
+    edge_mismatches = [item for item in mismatch.get("edge_mismatches", []) or [] if isinstance(item, dict)]
+    if edge_mismatches:
+        lines.append("    - Edge-state mismatches:")
+        for edge_mismatch in edge_mismatches[:3]:
+            lines.extend(f"      {line}" for line in _format_ssa_mismatch(edge_mismatch))
+    return lines
+
+
+def _format_missing_successor_item(item: dict[str, Any]) -> list[str]:
+    """Render one missing-successor entry with instruction and refusal detail."""
+    line = f"      - from `{item.get('from_delta')}` to missing `{item.get('missing_successor_delta')}`"
+    instruction = item.get("last_instruction") if isinstance(item.get("last_instruction"), dict) else None
+    if instruction and instruction.get("disassembly"):
+        line += f" after `{_format_instruction(instruction)}`"
+    lines = [line]
+    lowering_refusal = item.get("lowering_refusal") if isinstance(item.get("lowering_refusal"), dict) else None
+    if lowering_refusal:
+        lines.append(
+            f"        - Lowering refusal: `{lowering_refusal.get('reason')}` {lowering_refusal.get('message')}"
+        )
+        metrics = lowering_refusal.get("metrics") if isinstance(lowering_refusal.get("metrics"), dict) else None
+        if metrics:
+            lines.append(f"        - Metrics: `{_compact_json(metrics)}`")
+    return lines
+
+
+def _format_region_incomplete_detail(mismatch: dict[str, Any]) -> list[str]:
+    """Render missing-successor lists for an incomplete-region mismatch."""
+    lines = [
+        "    - Meaning: SSA lowering stopped before all direct branch successors were present; this is an incomplete artifact, not a proven semantic mismatch."
+    ]
+    for key, label in (
+        ("oracle_missing_successors", "Oracle missing successors"),
+        ("candidate_missing_successors", "Candidate missing successors"),
+    ):
+        items = [item for item in mismatch.get(key, []) or [] if isinstance(item, dict)]
+        if not items:
+            continue
+        lines.append(f"    - {label}:")
+        for item in items[:8]:
+            lines.extend(_format_missing_successor_item(item))
+        if len(items) > 8:
+            lines.append(f"      - ... {len(items) - 8} more")
     return lines
 
 
@@ -1292,7 +1435,7 @@ def _ssa_jumpkind(detail: dict[str, Any] | None) -> str | None:
 
 
 def _render_refusals(document: dict[str, Any], *, limit: int) -> str:
-    counters = document.get("counters", {}) if isinstance(document.get("counters"), dict) else {}
+    counters = _dict_field(document, "counters")
     lines = [
         "# DOS Unit Failure Report",
         "",
@@ -1316,7 +1459,7 @@ def _render_refusals(document: dict[str, Any], *, limit: int) -> str:
         return "\n".join(lines) + "\n"
     shown_refusals = _limited(refusals, limit)
     for index, item in enumerate(shown_refusals, start=1):
-        detail = item.get("detail", {}) if isinstance(item.get("detail"), dict) else {}
+        detail = _dict_field(item, "detail")
         lines.append(f"### {index}. `{item.get('reason')}`")
         if detail.get("function_id"):
             lines.append(f"- Function: `{detail.get('function_id')}`")
@@ -1330,11 +1473,15 @@ def _render_refusals(document: dict[str, Any], *, limit: int) -> str:
 
 
 def _render_ssa_batched_compare(document: dict[str, Any], *, limit: int) -> str:
-    summary = document.get("summary", {}) if isinstance(document.get("summary"), dict) else {}
-    region_equality = document.get("region_equality") if isinstance(document.get("region_equality"), dict) else {}
-    connectivity = document.get("connectivity") if isinstance(document.get("connectivity"), dict) else {}
-    loop_scc = document.get("loop_scc") if isinstance(document.get("loop_scc"), dict) else {}
-    call_scc = document.get("call_scc") if isinstance(document.get("call_scc"), dict) else {}
+    summary = _dict_field(document, "summary")
+    region_equality: dict[str, Any] = (
+        _dict_field(document, "region_equality")
+    )
+    connectivity: dict[str, Any] = (
+        _dict_field(document, "connectivity")
+    )
+    loop_scc: dict[str, Any] = _dict_field(document, "loop_scc")
+    call_scc: dict[str, Any] = _dict_field(document, "call_scc")
     batches = [item for item in document.get("batches", []) or [] if isinstance(item, dict)]
     bad_batches = [
         item
@@ -1383,42 +1530,33 @@ def _render_ssa_batched_compare(document: dict[str, Any], *, limit: int) -> str:
         lines.append("")
     else:
         for batch in _limited(bad_batches, limit):
-            lines.append(f"### Batch {batch.get('batch')}")
-            lines.append(f"- Return code: `{batch.get('returncode')}`")
-            lines.append(f"- Compare JSON: `{batch.get('compare')}`")
-            lines.append(f"- Main: passed `{batch.get('main_passed', 0)}/{batch.get('main_total', 0)}`, failed `{batch.get('main_failed', 0)}`, refused `{batch.get('main_refused', 0)}`")
-            lines.append(f"- External/shared-tail: passed `{batch.get('external_passed', 0)}/{batch.get('external_total', 0)}`, failed `{batch.get('external_failed', 0)}`, refused `{batch.get('external_refused', 0)}`, unproved `{batch.get('external_unproved', 0)}`")
-            functions = [str(item) for item in batch.get("functions", []) or []]
-            if functions:
-                preview = ", ".join(functions[:8])
-                suffix = "" if len(functions) <= 8 else f", ... {len(functions) - 8} more"
-                lines.append(f"- Functions: `{preview}{suffix}`")
-            lines.append("")
+            lines.extend(_format_bad_batch(batch))
         if len(bad_batches) > len(_limited(bad_batches, limit)):
             lines.append(f"... {len(bad_batches) - len(_limited(bad_batches, limit))} more failed/refused batches not shown.")
             lines.append("")
-    candidate_only_parts = (
-        document.get("candidate_only_parts") if isinstance(document.get("candidate_only_parts"), dict) else {}
+    candidate_only_parts: dict[str, Any] = (
+        _dict_field(document, "candidate_only_parts")
     )
-    if candidate_only_parts.get("enabled") and int(candidate_only_parts.get("total", 0) or 0) > 0:
-        lines.append("## Candidate-Only SSA Parts")
-        lines.append("")
-        for index, part in enumerate(_limited(candidate_only_parts.get("parts", []) or [], limit), start=1):
-            lines.extend(_format_candidate_only_part(part, index=index))
-        total = int(candidate_only_parts.get("total", 0) or 0)
-        if total > limit:
-            lines.append(f"... {total - limit} more candidate-only SSA parts not shown.")
-            lines.append("")
-    if candidate_only_parts.get("enabled") and int(candidate_only_parts.get("alias_total", 0) or 0) > 0:
-        lines.append("## Candidate Alias-Only SSA Parts")
-        lines.append("")
-        for index, part in enumerate(_limited(candidate_only_parts.get("alias_parts", []) or [], limit), start=1):
-            lines.extend(_format_candidate_only_part(part, index=index))
-        total = int(candidate_only_parts.get("alias_total", 0) or 0)
-        if total > limit:
-            lines.append(f"... {total - limit} more candidate alias-only SSA parts not shown.")
-            lines.append("")
+    _append_candidate_only_sections(lines, candidate_only_parts, limit)
     return "\n".join(lines)
+
+
+def _format_bad_batch(batch: dict[str, Any]) -> list[str]:
+    """Render one failed or refused batch summary."""
+    lines = [
+        f"### Batch {batch.get('batch')}",
+        f"- Return code: `{batch.get('returncode')}`",
+        f"- Compare JSON: `{batch.get('compare')}`",
+        f"- Main: passed `{batch.get('main_passed', 0)}/{batch.get('main_total', 0)}`, failed `{batch.get('main_failed', 0)}`, refused `{batch.get('main_refused', 0)}`",
+        f"- External/shared-tail: passed `{batch.get('external_passed', 0)}/{batch.get('external_total', 0)}`, failed `{batch.get('external_failed', 0)}`, refused `{batch.get('external_refused', 0)}`, unproved `{batch.get('external_unproved', 0)}`",
+    ]
+    functions = [str(item) for item in batch.get("functions", []) or []]
+    if functions:
+        preview = ", ".join(functions[:8])
+        suffix = "" if len(functions) <= 8 else f", ... {len(functions) - 8} more"
+        lines.append(f"- Functions: `{preview}{suffix}`")
+    lines.append("")
+    return lines
 
 
 def _render_unknown(document: dict[str, Any]) -> str:
@@ -1439,7 +1577,9 @@ def _compact_json(value: Any) -> str:  # noqa: ANN401
 
 
 def _format_candidate_only_part(part: dict[str, Any], *, index: int) -> list[str]:
-    function = part.get("function") if isinstance(part.get("function"), dict) else {}
+    function: dict[str, Any] = (
+        _dict_field(part, "function")
+    )
     name = function.get("name") or function.get("id") or part.get("id") or "<unknown>"
     detail = part.get("detail") if isinstance(part.get("detail"), dict) else part
     lines = [f"### {index}. `{name}` candidate-only"]

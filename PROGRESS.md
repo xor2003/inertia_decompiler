@@ -8,6 +8,25 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Fresh-JSON normal-budget replay still times out. Larger-budget diagnostic
+  profiling completes with validated byte-identical C: 12M calls, 56s worker,
+  16.4s cumulative deep AST traversal and 619k boundary classifications.
+  Profile: `.cache/direct-job-profile-1428223.prof`. Next measured target is AST
+  traversal overhead; no new DOS witness or normal-budget acceptance.
+
+- Zero-call snapshot diagnostic comparison passes validation with byte-identical,
+  GCC-clean C: 120 -> 22 snapshots, 2.803 -> 0.338 CPU seconds in that component.
+  No end-to-end speed claim. Normal-budget replay runs in
+  `.cache/zero-call-snapshot-normal.*`. Small-model compare16 still times out
+  at 601.35s with concurrent changes (two batch functions validate); no witness.
+
+- Measured rollback cost: 120 snapshots, 19.384s wall / 2.803s CPU in the
+  diagnostic far-model increment function. Per-pass call-loss snapshots now
+  skip only zero-call/no-named-guard cases; all guards remain active. Two before
+  failures; final 11 rollback tests and scoped Ruff pass. Same-budget profiling
+  comparison is active in `.cache/coverage-repeated-work-no-empty-snapshot.*`.
+  Runtime parity and normal-budget DOS acceptance remain unproven.
+
 - Partial-batch far-model replay ends `timed_out` after 601.30s with concurrent
   implementation changes: two batch functions validate, four time out; no
   complete rebuild/run. Measured completed census/neighbor work is subsecond,
@@ -1405,3 +1424,19 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   condition-slice grouping/object-fact materialization lanes.
 - Verified: ruff 0, mypy 0, 54 call-output/wide-condition tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
+- `tools/dosunit/failure_report.py`: Ruff debt cleared to zero (9
+  findings) and mypy debt reduced 23 -> 0 vs HEAD. Extracted the
+  region-mismatch instruction lane, complexity per-function/refusal
+  lanes, SSA-compare section appenders (result rows, region equality,
+  connectivity gaps, external shared-tail proofs, candidate-only
+  sections), grouped-entry/function and layout-normalization lanes,
+  SSA region/ABI/result side and mismatch helpers, the
+  connectivity-delta/missing-successor/region-incomplete detail lanes,
+  and the batched-compare batch row. Added the typed `_dict_field`
+  document coercer replacing the repeated `get ... if isinstance ...
+  else {}` idiom.
+- Verified: ruff 0, mypy 0 (HEAD baseline was 23), 194 dosunit tests
+  pass; the 4 remaining failures reproduce identically on bare HEAD +
+  uncommitted `straightline_ssa.py` WIP (pre-existing, that file was
+  not touched). Def-integrity vs HEAD clean, zero architecture
+  violations.
