@@ -795,3 +795,20 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   Owning suite 78 passed; 5 failures all pre-existing on bare HEAD —
   cache-policy SimpleNamespace monkeypatch gaps in
   test_discovery_cache_contract / test_cli_function_discovery_regions.
+
+## tail_validation_fingerprint.py — lint debt cleared (was 33 promoted findings)
+
+- Same flatten + extraction recipe: nested `_impl` closures hoisted to typed
+  module helpers (`_expr_fingerprint_impl_8616`, `_location_fingerprint_impl_8616`,
+  `_cvariable_location_fingerprint_impl_8616`, `_iter_call_nodes_impl_8616`,
+  `_contextual_call_fingerprints_run_8616`).
+- Expression fingerprint split into cache ctx (`_FpCacheCtx8616` dataclass),
+  probe lanes, semantic-cast arm, normalized arm dispatch, and typed per-node
+  arms — preserving cache-identity-after-normalization semantics.
+- Contextual call matching became contextual-call collection + two shared
+  key-matching passes (callsite addr, canonical target) + singleton remainder.
+- Location fingerprints split into early typed arms, stack/indexed/deref lanes,
+  stable-SS dereference, and terminal cvar identities.
+- Verification: ruff 0, mypy 0 (HEAD had 1 — improved), arch-check 0 violations
+  in file. Owning suites 87 + 409 passed; 1 failure pre-existing on bare HEAD
+  (test_tail_validation_compare_classifies_switch_decision_tree_without_helper_delta).
