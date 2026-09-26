@@ -8,7 +8,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 from __future__ import annotations
 
 import typing
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -160,6 +160,21 @@ def _interrupt_wrapper_call_kind(name: str | None, args: tuple[object, ...] | No
     return canonical
 
 
+def _interrupt_wrapper_arg_slots(kind: str, args: tuple[object, ...]) -> tuple[object | None, object | None, object | None, object | None]:
+    """Map wrapper kind + positional args to (vector, inregs, outregs, sregs) slots."""
+    if kind in {"int86", "int86x"}:
+        vector_arg = args[0] if len(args) >= 1 else None
+        inregs_arg = args[1] if len(args) >= 2 else None
+        outregs_arg = args[2] if len(args) >= 3 else None
+        sregs_arg = args[3] if kind == "int86x" and len(args) >= 4 else None
+    else:
+        vector_arg = None
+        inregs_arg = args[0] if len(args) >= 1 else None
+        outregs_arg = args[1] if len(args) >= 2 else None
+        sregs_arg = args[2] if kind == "intdosx" and len(args) >= 3 else None
+    return vector_arg, inregs_arg, outregs_arg, sregs_arg
+
+
 def _interrupt_wrapper_call_signature(node: object) -> InterruptWrapperCall | None:
     """Read a dynamic call boundary once and classify its existing wrapper name."""
     def _impl() -> InterruptWrapperCall | None:
@@ -178,16 +193,7 @@ def _interrupt_wrapper_call_signature(node: object) -> InterruptWrapperCall | No
         kind = _interrupt_wrapper_call_kind(callee_name, args)
         if kind is None:
             return None
-        if kind in {"int86", "int86x"}:
-            vector_arg = args[0] if len(args) >= 1 else None
-            inregs_arg = args[1] if len(args) >= 2 else None
-            outregs_arg = args[2] if len(args) >= 3 else None
-            sregs_arg = args[3] if kind == "int86x" and len(args) >= 4 else None
-        else:
-            vector_arg = None
-            inregs_arg = args[0] if len(args) >= 1 else None
-            outregs_arg = args[1] if len(args) >= 2 else None
-            sregs_arg = args[2] if kind == "intdosx" and len(args) >= 3 else None
+        vector_arg, inregs_arg, outregs_arg, sregs_arg = _interrupt_wrapper_arg_slots(kind, args)
 
         return InterruptWrapperCall(
             callee_name=callee_name or kind,
@@ -267,7 +273,7 @@ def collect_interrupt_wrapper_calls(codegen: _CodegenLike) -> list[InterruptWrap
         return []
 
     calls: list[InterruptWrapperCall] = []
-    for node in _iter_c_nodes(cfunc.statements):
+    for node in _iter_c_nodes(cast(Any, cfunc).statements):
         if not isinstance(node, structured_c.CFunctionCall):
             continue
         sig = _interrupt_wrapper_call_signature(node)
@@ -317,7 +323,7 @@ def _attach_interrupt_wrapper_callees(project: angr.Project, codegen: _CodegenLi
     }
 
     changed = False
-    for node in _iter_c_nodes(cfunc.statements):
+    for node in _iter_c_nodes(cast(Any, cfunc).statements):
         if not isinstance(node, structured_c.CFunctionCall):
             continue
         sig = _interrupt_wrapper_call_signature(node)
@@ -356,48 +362,47 @@ def _interrupt_wrapper_record_register_write(
         regs = state.setdefault(base_name, {})
         regs[field_path] = value & 0xFFFF
 
-        if field_path == ("x", "ax"):
-            ax = value & 0xFFFF
-            regs[("h", "ah")] = (ax >> 8) & 0xFF
-            regs[("h", "al")] = ax & 0xFF
-        elif field_path == ("x", "bx"):
-            bx = value & 0xFFFF
-            regs[("h", "bh")] = (bx >> 8) & 0xFF
-            regs[("h", "bl")] = bx & 0xFF
-        elif field_path == ("x", "cx"):
-            cx = value & 0xFFFF
-            regs[("h", "ch")] = (cx >> 8) & 0xFF
-            regs[("h", "cl")] = cx & 0xFF
-        elif field_path == ("x", "dx"):
-            dx = value & 0xFFFF
-            regs[("h", "dh")] = (dx >> 8) & 0xFF
-            regs[("h", "dl")] = dx & 0xFF
-        elif field_path == ("h", "ah"):
-            ah = value & 0xFF
-            regs[("h", "ah")] = ah
-            al = regs.get(("h", "al"))
-            if al is not None:
-                regs[("x", "ax")] = ((ah & 0xFF) << 8) | (al & 0xFF)
-        elif field_path == ("h", "al"):
-            al = value & 0xFF
-            regs[("h", "al")] = al
-            high_ah = regs.get(("h", "ah"))
-            if high_ah is not None:
-                regs[("x", "ax")] = ((high_ah & 0xFF) << 8) | (al & 0xFF)
-        elif field_path == ("h", "bh"):
-            regs[("h", "bh")] = value & 0xFF
-        elif field_path == ("h", "bl"):
-            regs[("h", "bl")] = value & 0xFF
-        elif field_path == ("h", "ch"):
-            regs[("h", "ch")] = value & 0xFF
-        elif field_path == ("h", "cl"):
-            regs[("h", "cl")] = value & 0xFF
-        elif field_path == ("h", "dh"):
-            regs[("h", "dh")] = value & 0xFF
-        elif field_path == ("h", "dl"):
-            regs[("h", "dl")] = value & 0xFF
+        _interrupt_wrapper_mirror_register_write(regs, field_path, value)
 
     return _impl()
+
+
+_X_WORD_TO_HALVES: dict[str, tuple[str, str]] = {
+    "ax": ("ah", "al"),
+    "bx": ("bh", "bl"),
+    "cx": ("ch", "cl"),
+    "dx": ("dh", "dl"),
+}
+
+
+def _interrupt_wrapper_mirror_register_write(
+    regs: dict[tuple[str, ...], int],
+    field_path: tuple[str, ...],
+    value: int,
+) -> None:
+    """Mirror one register write into derived half/word views."""
+    if len(field_path) == 2 and field_path[0] == "x" and field_path[1] in _X_WORD_TO_HALVES:
+        hi_name, lo_name = _X_WORD_TO_HALVES[field_path[1]]
+        word = value & 0xFFFF
+        regs[("h", hi_name)] = (word >> 8) & 0xFF
+        regs[("h", lo_name)] = word & 0xFF
+        return
+    if field_path == ("h", "ah"):
+        ah = value & 0xFF
+        regs[("h", "ah")] = ah
+        al = regs.get(("h", "al"))
+        if al is not None:
+            regs[("x", "ax")] = ((ah & 0xFF) << 8) | (al & 0xFF)
+        return
+    if field_path == ("h", "al"):
+        al = value & 0xFF
+        regs[("h", "al")] = al
+        high_ah = regs.get(("h", "ah"))
+        if high_ah is not None:
+            regs[("x", "ax")] = ((high_ah & 0xFF) << 8) | (al & 0xFF)
+        return
+    if len(field_path) == 2 and field_path[0] == "h" and field_path[1] in {"bh", "bl", "ch", "cl", "dh", "dl"}:
+        regs[field_path] = value & 0xFF
 
 
 def _interrupt_wrapper_helper_call_expr(
@@ -415,89 +420,142 @@ def _interrupt_wrapper_helper_call_expr(
 
         service_call = InterruptCall(insn_addr=0, vector=vector & 0xFF)
         if vector == 0x21:
-            inregs = "inregs"
-            ah = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "ah"))
-            al = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "al"))
-            ax = _interrupt_wrapper_register_state_value(input_state, inregs, ("x", "ax"))
-            if ax is None and ah is not None and al is not None:
-                ax = ((ah & 0xFF) << 8) | (al & 0xFF)
-            if ax is not None and ah is None:
-                ah = (ax >> 8) & 0xFF
-            if ax is not None and al is None:
-                al = ax & 0xFF
-
-            if ah is None:
+            service_call = _interrupt_wrapper_int21_call(input_state)
+            if service_call is None:
                 return None
-
-            service_call = InterruptCall(
-                insn_addr=0,
-                vector=0x21,
-                ah=ah,
-                al=al,
-                ax=ax,
-                bx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "bx")),
-                cx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "cx")),
-                dx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "dx")),
-                ds=_interrupt_wrapper_register_state_value(input_state, inregs, ("ds",)),
-                es=_interrupt_wrapper_register_state_value(input_state, inregs, ("es",)),
-                ss=_interrupt_wrapper_register_state_value(input_state, inregs, ("ss",)),
-                cs=_interrupt_wrapper_register_state_value(input_state, inregs, ("cs",)),
-            )
         elif vector == 0x10:
-            inregs = "inregs"
-            ah = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "ah"))
-            if ah is None:
+            service_call = _interrupt_wrapper_int10_call(input_state)
+            if service_call is None:
                 return None
-            service_call = InterruptCall(
-                insn_addr=0,
-                vector=0x10,
-                ah=ah,
-                al=_interrupt_wrapper_register_state_value(input_state, inregs, ("h", "al")),
-                ax=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "ax")),
-                bx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "bx")),
-                cx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "cx")),
-                dx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "dx")),
-                ds=_interrupt_wrapper_register_state_value(input_state, inregs, ("ds",)),
-                es=_interrupt_wrapper_register_state_value(input_state, inregs, ("es",)),
-                ss=_interrupt_wrapper_register_state_value(input_state, inregs, ("ss",)),
-                cs=_interrupt_wrapper_register_state_value(input_state, inregs, ("cs",)),
-            )
 
         helper_name = interrupt_service_name(service_call, api_style)
         if helper_name.startswith(("int86", "intdos")):
             return None
 
-        helper_args: list[object] = []
-        if sig.kind in {"int86", "int86x"} and vector == 0x10:
-            selector = _interrupt_wrapper_register_state_value(input_state, "inregs", ("h", "ah"))
-            if selector is not None:
-                helper_args.append(structured_c.CConstant(selector, SimTypeShort(False), codegen=codegen))
-        if sig.kind in {"int86", "int86x"} and vector == 0x16:
-            selector = _interrupt_wrapper_register_state_value(input_state, "inregs", ("h", "ah"))
-            if selector is not None:
-                helper_args.append(structured_c.CConstant(selector, SimTypeShort(False), codegen=codegen))
-        if helper_name.endswith("getvect"):
-            helper_args.append(structured_c.CConstant(0x21, SimTypeShort(False), codegen=codegen))
+        helper_args = _interrupt_wrapper_helper_args(sig, vector, input_state, helper_name, codegen)
 
         return cast(object, structured_c.CFunctionCall(helper_name, None, helper_args, codegen=codegen))
 
     return _impl()
 
 
-def _interrupt_wrapper_result_helper_expr(helper_expr: object, codegen: _CodegenLike) -> object | None:
+def _interrupt_wrapper_int21_call(input_state: RegisterState) -> InterruptCall | None:
+    """Build the DOS 0x21 service call from inregs state, or None when AH is unknown."""
+    inregs = "inregs"
+    ah = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "ah"))
+    al = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "al"))
+    ax = _interrupt_wrapper_register_state_value(input_state, inregs, ("x", "ax"))
+    if ax is None and ah is not None and al is not None:
+        ax = ((ah & 0xFF) << 8) | (al & 0xFF)
+    if ax is not None and ah is None:
+        ah = (ax >> 8) & 0xFF
+    if ax is not None and al is None:
+        al = ax & 0xFF
+
+    if ah is None:
+        return None
+
+    return InterruptCall(
+        insn_addr=0,
+        vector=0x21,
+        ah=ah,
+        al=al,
+        ax=ax,
+        bx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "bx")),
+        cx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "cx")),
+        dx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "dx")),
+        ds=_interrupt_wrapper_register_state_value(input_state, inregs, ("ds",)),
+        es=_interrupt_wrapper_register_state_value(input_state, inregs, ("es",)),
+        ss=_interrupt_wrapper_register_state_value(input_state, inregs, ("ss",)),
+        cs=_interrupt_wrapper_register_state_value(input_state, inregs, ("cs",)),
+    )
+
+
+def _interrupt_wrapper_int10_call(input_state: RegisterState) -> InterruptCall | None:
+    """Build the BIOS 0x10 service call from inregs state, or None when AH is unknown."""
+    inregs = "inregs"
+    ah = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "ah"))
+    if ah is None:
+        return None
+    return InterruptCall(
+        insn_addr=0,
+        vector=0x10,
+        ah=ah,
+        al=_interrupt_wrapper_register_state_value(input_state, inregs, ("h", "al")),
+        ax=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "ax")),
+        bx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "bx")),
+        cx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "cx")),
+        dx=_interrupt_wrapper_register_state_value(input_state, inregs, ("x", "dx")),
+        ds=_interrupt_wrapper_register_state_value(input_state, inregs, ("ds",)),
+        es=_interrupt_wrapper_register_state_value(input_state, inregs, ("es",)),
+        ss=_interrupt_wrapper_register_state_value(input_state, inregs, ("ss",)),
+        cs=_interrupt_wrapper_register_state_value(input_state, inregs, ("cs",)),
+    )
+
+
+def _interrupt_wrapper_helper_args(
+    sig: InterruptWrapperCall,
+    vector: int,
+    input_state: RegisterState,
+    helper_name: str,
+    codegen: _CodegenLike,
+) -> list[object]:
+    """Collect selector constants for the lowered helper call."""
+    helper_args: list[object] = []
+    if sig.kind in {"int86", "int86x"} and vector in {0x10, 0x16}:
+        selector = _interrupt_wrapper_register_state_value(input_state, "inregs", ("h", "ah"))
+        if selector is not None:
+            helper_args.append(structured_c.CConstant(selector, SimTypeShort(False), codegen=codegen))
+    if helper_name.endswith("getvect"):
+        helper_args.append(structured_c.CConstant(0x21, SimTypeShort(False), codegen=codegen))
+    return helper_args
+
+
+def _interrupt_wrapper_callee_name(call_expr: object) -> str | None:
+    """Resolve a call node's callee name across the dynamic callee_target/callee_func boundary."""
     # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
-    helper_name = getattr(helper_expr, "callee_target", None)
+    helper_name = getattr(call_expr, "callee_target", None)
     if not isinstance(helper_name, str):
         # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
-        helper_func = getattr(helper_expr, "callee_func", None)
+        helper_func = getattr(call_expr, "callee_func", None)
         # Dynamic codegen boundary: angr callee function names are optional.
         helper_name = getattr(helper_func, "name", None)
-    if not isinstance(helper_name, str) or not helper_name:
+    return helper_name if isinstance(helper_name, str) else None
+
+
+def _interrupt_wrapper_result_helper_expr(helper_expr: object, codegen: _CodegenLike) -> object | None:
+    helper_name = _interrupt_wrapper_callee_name(helper_expr)
+    if helper_name is None or not helper_name:
         return None
 
     # Dynamic codegen boundary: CFunctionCall args may be absent on synthetic nodes.
     helper_args = list(getattr(helper_expr, "args", ()) or ())
     return cast(object, structured_c.CFunctionCall(helper_name, None, helper_args, codegen=codegen))
+
+
+def _interrupt_wrapper_high_byte_extract(helper_call: object, codegen: _CodegenLike) -> object:
+    """Build `(helper_call >> 8) & 0xFF` for a high-half register read."""
+    return cast(object, structured_c.CBinaryOp(
+        "And",
+        structured_c.CBinaryOp(
+            "Shr",
+            helper_call,
+            structured_c.CConstant(8, SimTypeShort(), codegen=codegen),
+            codegen=codegen,
+        ),
+        structured_c.CConstant(0xFF, SimTypeShort(), codegen=codegen),
+        codegen=codegen,
+    ))
+
+
+def _interrupt_wrapper_low_byte_extract(helper_call: object, codegen: _CodegenLike) -> object:
+    """Build `helper_call & 0xFF` for a low-half register read."""
+    return cast(object, structured_c.CBinaryOp(
+        "And",
+        helper_call,
+        structured_c.CConstant(0xFF, SimTypeShort(), codegen=codegen),
+        codegen=codegen,
+    ))
 
 
 def _interrupt_wrapper_result_extract_expr(
@@ -508,13 +566,7 @@ def _interrupt_wrapper_result_extract_expr(
         if helper_call is None:
             return None
 
-        # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
-        helper_name = getattr(helper_call, "callee_target", None)
-        if not isinstance(helper_name, str):
-            # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
-            helper_func = getattr(helper_call, "callee_func", None)
-            # Dynamic codegen boundary: angr callee function names are optional.
-            helper_name = getattr(helper_func, "name", None)
+        helper_name = _interrupt_wrapper_callee_name(helper_call)
 
         if access.base_name == "outregs" and access.field_path == ("x", "ax"):
             return helper_call
@@ -530,25 +582,10 @@ def _interrupt_wrapper_result_extract_expr(
             return helper_call
 
         if access.base_name == "outregs" and access.field_path == ("h", "ah"):
-            return cast(object, structured_c.CBinaryOp(
-                "And",
-                structured_c.CBinaryOp(
-                    "Shr",
-                    helper_call,
-                    structured_c.CConstant(8, SimTypeShort(), codegen=codegen),
-                    codegen=codegen,
-                ),
-                structured_c.CConstant(0xFF, SimTypeShort(), codegen=codegen),
-                codegen=codegen,
-            ))
+            return _interrupt_wrapper_high_byte_extract(helper_call, codegen)
 
         if access.base_name == "outregs" and access.field_path == ("h", "al"):
-            return cast(object, structured_c.CBinaryOp(
-                "And",
-                helper_call,
-                structured_c.CConstant(0xFF, SimTypeShort(), codegen=codegen),
-                codegen=codegen,
-            ))
+            return _interrupt_wrapper_low_byte_extract(helper_call, codegen)
 
         if "getvect" in str(helper_name) and access.base_name == "sregs" and access.field_path == ("es",):
             return cast(object, structured_c.CFunctionCall(
@@ -595,52 +632,57 @@ def _interrupt_wrapper_result_expr_replacement(
             if replacement is not None:
                 return replacement
 
-        # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
-        helper_name = getattr(helper_expr, "callee_target", None)
-        if not isinstance(helper_name, str):
-            # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
-            helper_func = getattr(helper_expr, "callee_func", None)
-            # Dynamic codegen boundary: angr callee function names are optional.
-            helper_name = getattr(helper_func, "name", None)
-        if not isinstance(helper_name, str) or not helper_name:
+        helper_name = _interrupt_wrapper_callee_name(helper_expr)
+        if helper_name is None or not helper_name:
             return None
 
         if helper_name in {"get_dos_version", "_dos_get_version", "dos_get_version"}:
-            current_expr = cast(Any, _unwrap_c_casts(expr))
-            if not isinstance(current_expr, structured_c.CBinaryOp) or current_expr.op not in {"Or", "Add"}:
-                return None
-
-            for high_expr, low_expr in ((current_expr.lhs, current_expr.rhs), (current_expr.rhs, current_expr.lhs)):
-                high_expr = cast(Any, _unwrap_c_casts(high_expr))
-                low_expr = _unwrap_c_casts(low_expr)
-                if not isinstance(high_expr, structured_c.CBinaryOp) or high_expr.op not in {"Shl", "Mul"}:
-                    continue
-
-                scale = _c_constant_value(_unwrap_c_casts(high_expr.rhs))
-                if scale != 8:
-                    continue
-
-                high_access = _interrupt_wrapper_field_path(high_expr.lhs)
-                low_access = _interrupt_wrapper_field_path(low_expr)
-                if (
-                    high_access is not None
-                    and low_access is not None
-                    and high_access.base_name == low_access.base_name == "outregs"
-                    and high_access.field_path == ("h", "ah")
-                    and low_access.field_path == ("h", "al")
-                ):
-                    return cast(object, structured_c.CFunctionCall(
-                        helper_name,
-                        # Dynamic codegen boundary: helper calls may carry callee_func.
-                        getattr(helper_expr, "callee_func", None),
-                        # Dynamic codegen boundary: CFunctionCall args may be absent on synthetic nodes.
-                        list(getattr(helper_expr, "args", ()) or ()),
-                        codegen=codegen,
-                    ))
+            return _interrupt_wrapper_dos_version_replacement(expr, helper_name, helper_expr, codegen)
 
         return None
 
     return _impl()
+
+
+def _interrupt_wrapper_dos_version_replacement(
+    expr: object,
+    helper_name: str,
+    helper_expr: object,
+    codegen: _CodegenLike,
+) -> object | None:
+    """Rebuild a dos_version helper call from a `(ah<<8)|al` outregs shape."""
+    current_expr = cast(Any, _unwrap_c_casts(expr))
+    if not isinstance(current_expr, structured_c.CBinaryOp) or current_expr.op not in {"Or", "Add"}:
+        return None
+
+    for high_expr, low_expr in ((current_expr.lhs, current_expr.rhs), (current_expr.rhs, current_expr.lhs)):
+        high_expr = cast(Any, _unwrap_c_casts(high_expr))
+        low_expr = _unwrap_c_casts(low_expr)
+        if not isinstance(high_expr, structured_c.CBinaryOp) or high_expr.op not in {"Shl", "Mul"}:
+            continue
+
+        scale = _c_constant_value(_unwrap_c_casts(high_expr.rhs))
+        if scale != 8:
+            continue
+
+        high_access = _interrupt_wrapper_field_path(high_expr.lhs)
+        low_access = _interrupt_wrapper_field_path(low_expr)
+        if (
+            high_access is not None
+            and low_access is not None
+            and high_access.base_name == low_access.base_name == "outregs"
+            and high_access.field_path == ("h", "ah")
+            and low_access.field_path == ("h", "al")
+        ):
+            return cast(object, structured_c.CFunctionCall(
+                helper_name,
+                # Dynamic codegen boundary: helper calls may carry callee_func.
+                getattr(helper_expr, "callee_func", None),
+                # Dynamic codegen boundary: CFunctionCall args may be absent on synthetic nodes.
+                list(getattr(helper_expr, "args", ()) or ()),
+                codegen=codegen,
+            ))
+    return None
 
 
 def _lower_interrupt_wrapper_result_reads(project: angr.Project, codegen: _CodegenLike, api_style: str) -> bool:
@@ -648,91 +690,176 @@ def _lower_interrupt_wrapper_result_reads(project: angr.Project, codegen: _Codeg
     if cfunc is None:
         return False
 
+    return _visit_wrapper_result_node(cfunc.statements, {}, None, api_style, codegen)
+
+
+def _copy_register_state(state: RegisterState) -> RegisterState:
+    """Deep-copy the per-block register-state mapping for a child scope."""
+    return cast(RegisterState, {base_name: dict(values) for base_name, values in state.items()})
+
+
+def _visit_wrapper_assignment(
+    stmt: object,
+    local_state: RegisterState,
+    current_helper: object | None,
+    api_style: str,
+    codegen: _CodegenLike,
+) -> tuple[object, bool]:
+    """Record an assignment's register write and rewrite its RHS result reads."""
+    stmt_node = cast(Any, stmt)
+    lhs_access = _interrupt_wrapper_field_path(stmt_node.lhs)
+    if lhs_access is not None and lhs_access.base_name in {"inregs", "outregs", "sregs"}:
+        const_value = _c_constant_value(_unwrap_c_casts(stmt_node.rhs))
+        _interrupt_wrapper_record_register_write(
+            local_state,
+            lhs_access.base_name,
+            lhs_access.field_path,
+            const_value,
+        )
+
+    changed = False
+    if current_helper is not None:
+        replacement = _interrupt_wrapper_result_expr_replacement(
+            stmt_node.rhs,
+            current_helper,
+            api_style,
+            codegen,
+        )
+        if replacement is not None and not _same_c_expression(stmt_node.rhs, replacement):
+            stmt = structured_c.CAssignment(stmt_node.lhs, replacement, codegen=codegen)
+            changed = True
+    return stmt, changed
+
+
+def _visit_wrapper_call_stmt(
+    stmt: object,
+    local_state: RegisterState,
+    current_helper: object | None,
+    api_style: str,
+    codegen: _CodegenLike,
+) -> tuple[object, object | None, bool]:
+    """Lower a wrapper call statement and update the active result helper."""
+    sig = _interrupt_wrapper_call_signature(stmt)
+    if sig is None:
+        return stmt, current_helper, False
+    helper = _interrupt_wrapper_helper_call_expr(sig, local_state, api_style, codegen)
+    if helper is None:
+        # Preserve the wrapper call itself as the result source when
+        # service-specific lowering is not possible yet.
+        return stmt, stmt, False
+    if not _same_c_expression(stmt, helper):
+        return helper, helper, True
+    return stmt, helper, False
+
+
+def _visit_wrapper_expr_stmt(
+    stmt: object,
+    local_state: RegisterState,
+    current_helper: object | None,
+    api_style: str,
+    codegen: _CodegenLike,
+) -> tuple[object, object | None, bool]:
+    """Lower a wrapper call held in an expression statement."""
+    # Dynamic codegen boundary: expression statements can omit expr in synthetic nodes.
+    expr = getattr(stmt, "expr", None)
+    if not isinstance(expr, structured_c.CFunctionCall):
+        return stmt, current_helper, False
+    sig = _interrupt_wrapper_call_signature(expr)
+    if sig is None:
+        return stmt, current_helper, False
+    helper = _interrupt_wrapper_helper_call_expr(sig, local_state, api_style, codegen)
+    if helper is None:
+        return stmt, expr, False
+    if not _same_c_expression(expr, helper):
+        return structured_c.CExpressionStatement(cast(Any, helper), codegen=codegen), helper, True
+    return stmt, helper, False
+
+
+def _visit_wrapper_statements(
+    node: object,
+    state: RegisterState,
+    active_helper: object | None,
+    api_style: str,
+    codegen: _CodegenLike,
+) -> bool:
+    """Walk one statement block, tracking register state and active helper."""
+    node_statements = cast(Any, node)
+    local_state = _copy_register_state(state)
+    current_helper = active_helper
+    new_statements = []
     changed = False
 
-    def visit(node: object, state: RegisterState, active_helper: object | None) -> None:
-        nonlocal changed
+    for stmt in node_statements.statements:
+        if isinstance(stmt, structured_c.CAssignment):
+            stmt, stmt_changed = _visit_wrapper_assignment(
+                stmt, local_state, current_helper, api_style, codegen
+            )
+            changed = stmt_changed or changed
+        elif isinstance(stmt, structured_c.CFunctionCall):
+            stmt, current_helper, stmt_changed = _visit_wrapper_call_stmt(
+                stmt, local_state, current_helper, api_style, codegen
+            )
+            changed = stmt_changed or changed
+        elif isinstance(stmt, structured_c.CExpressionStatement):
+            stmt, current_helper, stmt_changed = _visit_wrapper_expr_stmt(
+                stmt, local_state, current_helper, api_style, codegen
+            )
+            changed = stmt_changed or changed
 
-        if isinstance(node, structured_c.CStatements):
-            node_statements = cast(Any, node)
-            local_state = {base_name: dict(values) for base_name, values in state.items()}
-            current_helper = active_helper
-            new_statements = []
+        changed = _visit_wrapper_result_node(stmt, local_state, current_helper, api_style, codegen) or changed
+        new_statements.append(stmt)
 
-            for stmt in node_statements.statements:
-                if isinstance(stmt, structured_c.CAssignment):
-                    lhs_access = _interrupt_wrapper_field_path(stmt.lhs)
-                    if lhs_access is not None and lhs_access.base_name in {"inregs", "outregs", "sregs"}:
-                        const_value = _c_constant_value(_unwrap_c_casts(stmt.rhs))
-                        _interrupt_wrapper_record_register_write(
-                            local_state,
-                            lhs_access.base_name,
-                            lhs_access.field_path,
-                            const_value,
-                        )
-
-                    if current_helper is not None:
-                        replacement = _interrupt_wrapper_result_expr_replacement(
-                            stmt.rhs,
-                            current_helper,
-                            api_style,
-                            codegen,
-                        )
-                        if replacement is not None and not _same_c_expression(stmt.rhs, replacement):
-                            stmt = structured_c.CAssignment(stmt.lhs, replacement, codegen=codegen)
-                            changed = True
-
-                elif isinstance(stmt, structured_c.CFunctionCall):
-                    sig = _interrupt_wrapper_call_signature(stmt)
-                    if sig is not None:
-                        helper = _interrupt_wrapper_helper_call_expr(sig, local_state, api_style, codegen)
-                        if helper is not None:
-                            current_helper = helper
-                            if not _same_c_expression(stmt, helper):
-                                stmt = helper
-                                changed = True
-                        else:
-                            # Preserve the wrapper call itself as the result source when
-                            # service-specific lowering is not possible yet.
-                            current_helper = stmt
-
-                elif isinstance(stmt, structured_c.CExpressionStatement):
-                    # Dynamic codegen boundary: expression statements can omit expr in synthetic nodes.
-                    expr = getattr(stmt, "expr", None)
-                    if isinstance(expr, structured_c.CFunctionCall):
-                        sig = _interrupt_wrapper_call_signature(expr)
-                        if sig is not None:
-                            helper = _interrupt_wrapper_helper_call_expr(sig, local_state, api_style, codegen)
-                            if helper is not None:
-                                current_helper = helper
-                                if not _same_c_expression(expr, helper):
-                                    stmt = structured_c.CExpressionStatement(
-                                        cast(Any, helper), codegen=codegen
-                                    )
-                                    changed = True
-                            else:
-                                current_helper = expr
-
-                visit(stmt, local_state, current_helper)
-                new_statements.append(stmt)
-
-            if new_statements != list(node_statements.statements):
-                node_statements.statements = new_statements
-            return
-
-        if isinstance(node, structured_c.CIfElse):
-            node_ifelse = cast(Any, node)
-            for _cond, body in node_ifelse.condition_and_nodes:
-                visit(body, {base_name: dict(values) for base_name, values in state.items()}, active_helper)
-            if node_ifelse.else_node is not None:
-                visit(
-                    node_ifelse.else_node,
-                    {base_name: dict(values) for base_name, values in state.items()},
-                    active_helper,
-                )
-
-    visit(cfunc.statements, {}, None)
+    if new_statements != list(node_statements.statements):
+        node_statements.statements = new_statements
     return changed
+
+
+def _visit_wrapper_result_node(
+    node: object,
+    state: RegisterState,
+    active_helper: object | None,
+    api_style: str,
+    codegen: _CodegenLike,
+) -> bool:
+    """Dispatch structured-C node shapes to their wrapper-result lowering lane."""
+    if isinstance(node, structured_c.CStatements):
+        return _visit_wrapper_statements(node, state, active_helper, api_style, codegen)
+    if isinstance(node, structured_c.CIfElse):
+        node_ifelse = cast(Any, node)
+        changed = False
+        for _cond, body in node_ifelse.condition_and_nodes:
+            changed = _visit_wrapper_result_node(
+                body, _copy_register_state(state), active_helper, api_style, codegen
+            ) or changed
+        if node_ifelse.else_node is not None:
+            changed = _visit_wrapper_result_node(
+                node_ifelse.else_node, _copy_register_state(state), active_helper, api_style, codegen
+            ) or changed
+        return changed
+    return False
+
+
+def _dos_pseudo_functions(project: angr.Project, function: _FunctionLike, dos_calls: Iterable[InterruptCall]) -> list[object]:
+    """Resolve the function objects behind each DOS int21 call target."""
+    pseudo_funcs: list[object] = []
+    for call in dos_calls:
+        target = function.get_call_target(call.insn_addr)
+        if target is None:
+            continue
+        pseudo_funcs.append(project.kb.functions.function(addr=target))
+    return pseudo_funcs
+
+
+def _unbound_c_call_nodes(cfunc: object) -> list[Any]:
+    """Collect structured-C call nodes that still lack a callee_func binding."""
+    call_nodes: list[object] = []
+    for node in _iter_c_nodes(cast(Any, cfunc).statements):
+        if not isinstance(node, structured_c.CFunctionCall):
+            continue
+        node_call = cast(Any, node)
+        if node_call.callee_func is None:
+            call_nodes.append(node_call)
+    return call_nodes
 
 
 def _attach_dos_pseudo_callees(
@@ -747,23 +874,12 @@ def _attach_dos_pseudo_callees(
         if not dos_calls:
             return False
 
-        pseudo_funcs = []
-        for call in dos_calls:
-            target = function.get_call_target(call.insn_addr)
-            if target is None:
-                continue
-            pseudo_funcs.append(project.kb.functions.function(addr=target))
+        pseudo_funcs = _dos_pseudo_functions(project, function, dos_calls)
 
         if not pseudo_funcs:
             return False
 
-        call_nodes = []
-        for node in _iter_c_nodes(cfunc.statements):
-            if not isinstance(node, structured_c.CFunctionCall):
-                continue
-            node_call = cast(Any, node)
-            if node_call.callee_func is None:
-                call_nodes.append(node_call)
+        call_nodes = _unbound_c_call_nodes(cfunc)
 
         for node, pseudo_func in zip(call_nodes, pseudo_funcs, strict=False):
             if pseudo_func is not None:

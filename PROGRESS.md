@@ -1106,6 +1106,33 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Started a bounded diagnostic profile in `.cache/cmp16-address-profile.*`;
   result pending. Routine deadline and acceptance requirements are unchanged.
   No DOS witness admitted; the full compiler-coverage plan remains incomplete.
+
+### Follow-up completed 12:17 UTC
+
+- Diagnostic replay finished with generated C and clean whole-tail validation,
+  then failed the integrated compiler gate because `/dev/kvm` is unavailable.
+  Actual spans show 51.94s direct decompilation; the changed isolation/deadline
+  configuration is diagnostic, not routine acceptance or a performance win.
+- Fixed coverage classification of an already-structured final function timeout.
+  Regression before: 1 failed / 40 passed; after: 58 result/runner tests passed
+  in 12.31s. Superseded attempts and malformed timeout fields remain distinct.
+  Scoped Ruff/MyPy pass; quality-dev exits 2 on broader typing debt. Evidence:
+  `.cache/coverage-timeout-classification-*.log`.
+- Still open: structured CLI terminal-status transport, source-free routine
+  round trips, unavailable DOS execution, and full witness/gate obligations.
+
+### Structured timeout transport checkpoint (2026-09-26 12:23 UTC)
+
+- Terminal direct, canonical-worker, and hard-exit timeout paths now publish a
+  versioned typed record consumed by the shared MS C profile reader. No guessing
+  from prose/exit code 3; malformed transport fails explicitly.
+- Before: new profile control failed. After: 135 focused tests pass in 60.23s;
+  scoped MyPy/new-code Ruff and ownership checks pass. Quality-dev exits 2 on
+  broader lint/type debt. `.cache/cli-terminal-timeout-*.log` retains evidence.
+- The live one-second probe exits 3 with the structured timeout record. This
+  verifies transport, not a decompilation witness. Routine deadlines and the
+  full coverage acceptance obligations remain unchanged; DOS execution remains
+  unavailable in the last actual compiler probe.
 ## Lint debt: dce.py cleanup (2026-09-26)
 
 - `angr_platforms/X86_16/postprocess/optimization/dce.py`: Ruff complexity
@@ -1120,3 +1147,14 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   var removed.
 - Verified: ruff 0, mypy 0, 125 dce tests pass, zero architecture violations
   against this file.
+## Lint debt: cli_interrupt_modeling.py cleanup (2026-09-26)
+
+- `inertia_decompiler/cli_interrupt_modeling.py`: Ruff complexity debt
+  cleared to zero (11 findings). Extracted arg-slot mapping, mirror-write
+  table for x/h register views, int21/int10 service-call builders,
+  helper-arg collection, shared `_interrupt_wrapper_callee_name` boundary
+  resolver (replaced 3 copies), byte-extract builders, dos_version rebuild,
+  hoisted `visit` into `_visit_wrapper_result_node` + per-statement lanes,
+  and DOS pseudo-callee collection helpers.
+- Verified: ruff 0, mypy 0, 58 interrupt/helper-modeling tests pass, zero
+  architecture violations against the file.
