@@ -435,6 +435,9 @@ class LowerCtx:
         self.next_expr: S.SsaExpr | None = None
         self.inline_depth = 0
         self.last_disp: S.SsaExpr | None = None   # last stk-space store (`__disp =` token)
+        # True once this path executed a guest RETN_/RETF_ pop — a following
+        # unresolved `__dispatch_call` is then a return to an unknown caller.
+        self.retn_popped = False
         self.bind_args = cfg.m2c
         # The trampoline's first dispatch routes INTO this function — it is
         # the entry, not a call, and must not hit the boundary-call model.
@@ -1395,6 +1398,7 @@ def _m2c_summary(ctx: LowerCtx, tname: str) -> str | None:
     if "RETN_" in tname:
         i = constval(fold(_host_arg(ctx, 0))) if _host_arg(ctx, 0) is not None else 0
         ctx.canon["eip"] = zext(_do_pop(ctx), 32)
+        ctx.retn_popped = True
         if i:
             sp = trunc(ctx.canon["esp"], 16)
             ctx.canon_write("esp", 16, 0, E("add", 16, (sp, _c(i, 16))))
@@ -1402,6 +1406,7 @@ def _m2c_summary(ctx: LowerCtx, tname: str) -> str | None:
     if "RETF_" in tname:
         i = constval(fold(_host_arg(ctx, 0))) if _host_arg(ctx, 0) is not None else 0
         ctx.canon["eip"] = zext(_do_pop(ctx), 32)
+        ctx.retn_popped = True
         ctx.canon_write("cs", 16, 0, _do_pop(ctx))
         if i:
             sp = trunc(ctx.canon["esp"], 16)
@@ -1771,6 +1776,7 @@ def _clone_ctx(ctx: LowerCtx) -> LowerCtx:
     n.next_expr = None
     n.inline_depth = ctx.inline_depth
     n.last_disp = ctx.last_disp
+    n.retn_popped = ctx.retn_popped
     n.bind_args = ctx.bind_args
     n.disp_seen = ctx.disp_seen
     n.probe_stk = None
@@ -2190,13 +2196,15 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                                         "ret", ng2, dict(nctx.canon),
                                         dict(nctx.arrays)))
                         continue
-                # Dispatch token unresolvable: the callee is unknown, so a
-                # plain `ret` here would claim the pre-call state is the
-                # function's result — phantom mismatches.  Mark the path an
-                # unresolved indirect call instead (honest coverage loss).
-                diagnostics.append(f"disp_unres:{addr:x}")
-                terminals.append(TermPath("indirect_call", cond,
-                                          dict(ctx.canon), dict(ctx.arrays)))
+                # Dispatch token unresolvable.  If this path popped the
+                # token via RETN_/RETF_, it is a return to an unknown
+                # caller → `ret` terminal; otherwise it is a stale/foreign
+                # `__disp` (entry arg, unmapped case) → `indirect_call`.
+                diagnostics.append(
+                    f"disp_unres:{addr:x}:{'ret' if ctx.retn_popped else 'fwd'}")
+                terminals.append(TermPath(
+                    "ret" if ctx.retn_popped else "indirect_call", cond,
+                    dict(ctx.canon), dict(ctx.arrays)))
                 continue
             if kind == "retterm":
                 # Return-path trampoline: the game continuation is
@@ -2313,6 +2321,13 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
             if kind == "gamecall":
                 # Compositional boundary: callee verified by its own entry.
                 _boundary_call(ctx, tname)
+                if cfg.m2c and tname and tname.startswith("sub_"):
+                    # Direct `sub_X(0,_state)` tramp calls (tail `return
+                    # sub_X(..)`, dispatch-case `if(!sub_X(0))`) run the
+                    # callee's guest retn, which pops one caller word.
+                    # (`CALL_` pushes its own frame first — net 0 — and is
+                    # summarized separately.)
+                    _do_pop(ctx)
                 work.append((resume, ctx, cond, visits, frames))
                 continue
             if (kind in ("inline", "gamecall") and tconst is not None
