@@ -147,6 +147,15 @@ def declared_bounds_only(*, project: angr.Project, function_base: int, successor
     return False
 
 
+def executable_section_bounds(*, project: angr.Project, function_base: int, successor: int) -> bool:
+    """Admit successors inside executable image bytes — .lst proc extents understate
+    real reachability through shared tails and tail-called neighbors."""
+    section = project.loader.find_section_containing(successor)
+    if section is not None:
+        return bool(section.is_executable)
+    return S._loader_bytes(project, successor, 1) is not None
+
+
 def finish_lowering(
     state: S._IrsbLowerState, *, irsb: pyvex.IRSB, output_regs: tuple[str, ...], max_assignments_per_function: int
 ) -> dict[str, Any] | S.LowerFailure:
@@ -267,8 +276,9 @@ def installed(
     if region:
         # Region mode lowers through the native multi-block scan; the leaf
         # single-block _lower_function override is intentionally absent.
-        # Out-of-bounds successors refuse instead of scanning into neighbours.
-        replacements["_can_add_dynamic_successor_range"] = declared_bounds_only
+        # .lst extents understate reachability through shared tails, so
+        # successors are admitted whenever the target is executable image bytes.
+        replacements["_can_add_dynamic_successor_range"] = executable_section_bounds
     else:
         replacements["_lower_function"] = lower_function
     # This is the explicitly isolated monkey-patch boundary, not owned data access.

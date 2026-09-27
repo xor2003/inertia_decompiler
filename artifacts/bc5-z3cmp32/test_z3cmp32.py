@@ -1,5 +1,6 @@
 """Regression evidence for the bc5 flat32 region comparator seams."""
 
+import json
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -10,8 +11,9 @@ import pytest
 import pyvex
 
 sys.path.insert(0, str(Path(__file__).parent))
+import flat32_catalog
 from flat32_adapter import OUTPUT_REGS, S, installed
-from flat32_catalog import Symbol
+from flat32_catalog import Symbol, cached_lst_data_symbols, cached_lst_functions
 from flat32_region import RegionLimits, RegionRefusal, compare_region, summarize
 from z3cmp32 import (
     REGION_DEFAULT_BLOCK_CAP,
@@ -106,6 +108,69 @@ def test_region_normalizes_relocation_constant_inside_solve() -> None:
     assert normalized["status"] == "passed"
 
 
+def test_flat32_repeat_movsd_lowers_summary_with_fallthrough_eip() -> None:
+    """`rep movsd` must produce a summary part, not a raw back-edge ip."""
+    instructions = [
+        {
+            "disassembly": "rep movsd",
+            "mnemonic": "rep movsd",
+            "size": 2,
+            "address": {"linear": "0x401000", "ip": "0x1000"},
+        }
+    ]
+    with installed(region=True):
+        transfer = S._repeat_string_transfer(instructions)
+        lowered = S._lower_repeat_string_summary(
+            instructions,
+            output_regs=(*OUTPUT_REGS, "ecx", "edx", "ip"),
+            max_assignments_per_function=2048,
+        )
+    assert transfer is not None and lowered is not None
+    assert transfer["summary"] == "repeat_string"
+    assert lowered["summary"]["kind"] == "repeat_string"
+    assert lowered["outputs"]["eip"] == {"op": "const", "value": "0x401002", "width": 32}
+    assert lowered["outputs"]["ip"]["op"] == "const"
+    assignments = {item["id"]: item for item in lowered["assignments"]}
+
+    def resolved_op(reg: str) -> str:
+        term = lowered["outputs"][reg]
+        if "ref" in term:
+            return str(assignments[term["ref"]]["op"])
+        return str(term["op"])
+
+    for reg in ("ecx", "esi", "edi"):
+        assert resolved_op(reg).startswith("summary_rep_movs32")
+    assert resolved_op("memory").startswith("summary_rep_movs32")
+
+
+def test_region_rewrites_div_fault_exit_as_trap_terminal() -> None:
+    """A mid-block `div` fault exit composes as a trap terminal, not a missing block."""
+    # xor edx,edx; mov ebx,12; mov eax,1; div ebx; ret
+    good = "31 d2 bb 0c 00 00 00 b8 01 00 00 00 f7 f3 c3"
+    # identical shape but the divisor is 0 — guaranteed #DE divergence
+    div0 = "31 d2 bb 00 00 00 00 b8 01 00 00 00 f7 f3 c3"
+    with installed(region=True):
+        oracle = _region_parts(good, 0x401000, [(0, 15)])
+        candidate = _region_parts(good, 0x501000, [(0, 15)])
+        trapping = _region_parts(div0, 0x501000, [(0, 15)])
+    assert oracle[0].get("trap_exits"), "div fault exit must be recorded"
+    with installed(region=True):
+        equal = compare_region(oracle, candidate, outputs=("eax", "edx"), timeout_ms=5000)
+        divergent = compare_region(oracle, trapping, outputs=("eax", "edx"), timeout_ms=5000)
+    assert equal["status"] == "passed"
+    assert divergent["status"] == "failed"
+
+
+def test_executable_section_bounds_admits_image_code_only() -> None:
+    """Region successors are admitted on executable image bytes, not lst extents."""
+    import angr
+    from flat32_adapter import executable_section_bounds
+
+    project = angr.load_shellcode(b"\x90\xc3", arch="x86", load_address=0x401000)
+    assert executable_section_bounds(project=project, function_base=0x401000, successor=0x401001)
+    assert not executable_section_bounds(project=project, function_base=0x401000, successor=0x900000)
+
+
 def test_region_composes_branchy_acyclic_body() -> None:
     """Reblocked conditional bodies compose both arms and merge state."""
     oracle_code = "e3 06 b8 01 00 00 00 c3 b8 02 00 00 00 c3"
@@ -146,6 +211,50 @@ def test_call_entry_resolution_uses_full_mapped_catalog_and_refuses_alias_ambigu
     oracle, candidate = mapped_call_entries(boundaries, symbols, 0)
     assert oracle == {0x401000: "sub_caller"}
     assert candidate == {0x501000: "sub_caller"}
+
+
+def test_listing_cache_preserves_bounds_and_data_and_invalidates_on_change(tmp_path: Path) -> None:
+    """Parsed sidecars can be shared without carrying stale proof addresses."""
+    listing = tmp_path / "module.lst"
+    cache_dir = tmp_path / "cache"
+    listing.write_text(
+        "CODE:00401000 sub_401000 proc near\n"
+        "CODE:00401002 sub_401000 endp\n"
+        "CODE:00402000 jump_table\tdd offset sub_401000\n"
+        "CODE:00402004                 mov eax, dword_402100\n"
+        "DATA:00403000 data_label db 0\n"
+    )
+    assert cached_lst_functions(listing, cache_dir) == {"sub_401000": (0x401000, 0x401002)}
+    assert cached_lst_data_symbols(listing, cache_dir) == {
+        "jump_table": 0x402000, "data_label": 0x403000
+    }
+    assert cached_lst_functions(listing, cache_dir) == {"sub_401000": (0x401000, 0x401002)}
+    data_cache = next(cache_dir.glob("lst-v*-data-*.json"))
+    altered = json.loads(data_cache.read_text())
+    altered["entries"]["jump_table"] = 0xDEADBEEF
+    data_cache.write_text(json.dumps(altered))
+    assert cached_lst_data_symbols(listing, cache_dir)["jump_table"] == 0x402000
+    data_cache.write_text("broken cache")
+    assert cached_lst_data_symbols(listing, cache_dir)["jump_table"] == 0x402000
+    listing.write_text("CODE:00401010 sub_new proc near\nCODE:00401011 sub_new endp\n")
+    assert cached_lst_functions(listing, cache_dir) == {"sub_new": (0x401010, 0x401011)}
+    assert cached_lst_data_symbols(listing, cache_dir) == {}
+
+
+def test_listing_cache_rejects_file_changed_during_parse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A racing sidecar edit cannot seed a cache under the old content hash."""
+    listing = tmp_path / "module.lst"
+    listing.write_text("CODE:00401000 sub_old proc near\nCODE:00401001 sub_old endp\n")
+    original_parser = flat32_catalog.lst_functions
+
+    def parse_then_change(path: Path) -> dict[str, tuple[int, int]]:
+        result = original_parser(path)
+        path.write_text("CODE:00402000 sub_new proc near\nCODE:00402001 sub_new endp\n")
+        return result
+
+    monkeypatch.setattr(flat32_catalog, "lst_functions", parse_then_change)
+    with pytest.raises(RuntimeError, match="listing changed while parsing"):
+        cached_lst_functions(listing, tmp_path / "cache")
 
 
 def test_region_refuses_missing_successor_and_low_budget() -> None:

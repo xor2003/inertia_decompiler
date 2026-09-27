@@ -6,6 +6,7 @@ Calls, loops, indirect edges, partial scans, and budget exhaustion refuse.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,48 @@ class RegionLimits:
 
 class RegionRefusal(ValueError):
     """An incomplete or unsupported region, never an equivalence verdict."""
+
+
+# Canonical eip assigned to paths ending in a VEX signal exit (Ijk_Sig*, e.g.
+# the fault re-entry of `div`). Both sides encode the same trap condition
+# through the ite guard, so equivalence still covers fault reachability.
+TRAP_EIP = 0x0DEAD000
+
+
+def _rewrite_trap_leaves(node: dict[str, Any], trap_targets: frozenset[int]) -> dict[str, Any]:
+    """Replace fault re-entry const leaves in an ip term with the TRAP marker."""
+    target = _constant_target(node)
+    if target is not None:
+        if target in trap_targets:
+            return {"op": "const", "value": hex(TRAP_EIP), "width": 32}
+        return node
+    args = node.get("args")
+    if node.get("op") == "ite" and isinstance(args, list) and len(args) == 3:
+        return {
+            "op": "ite",
+            "width": node.get("width", 32),
+            "args": [args[0], _rewrite_trap_leaves(args[1], trap_targets), _rewrite_trap_leaves(args[2], trap_targets)],
+        }
+    return node
+
+
+def _ite_leaves(node: dict[str, Any], acc: list[dict[str, Any]]) -> None:
+    """Collect the non-ite leaves of an ip exit chain."""
+    args = node.get("args")
+    if node.get("op") == "ite" and isinstance(args, list) and len(args) == 3:
+        _ite_leaves(args[1], acc)
+        _ite_leaves(args[2], acc)
+        return
+    acc.append(node)
+
+
+def _refusal_result(message: str) -> dict[str, Any]:
+    """Build a refusal verdict; `reason` stays canonical, detail after ':' is kept."""
+    reason, _, detail = message.partition(":")
+    result: dict[str, Any] = {"status": Status.REFUSED, "reason": reason}
+    if detail:
+        result["refusal_detail"] = detail
+    return result
 
 
 def _linear(part: dict[str, Any]) -> int:
@@ -208,7 +251,7 @@ def summarize(  # noqa: C901
             raise RegionRefusal("loop_requires_inductive_proof")
         block = blocks.get(address)
         if block is None:
-            raise RegionRefusal("successor_outside_complete_region")
+            raise RegionRefusal(f"successor_outside_complete_region:{hex(address)}")
         compositions += 1
         if compositions > limits.max_compositions:
             raise RegionRefusal("region_composition_limit")
@@ -229,27 +272,45 @@ def summarize(  # noqa: C901
             next_path = path | {address}
             fallthrough = _apply_bounded_call(block, state, incoming, len(calls), call_resolver, calls)
             return walk(fallthrough, state, next_path)
+        trap_targets = frozenset(
+            target for target in block.get("trap_exits", ()) if isinstance(target, int)
+        )
         if jumpkind == "Ijk_Ret":
-            if ip.get("op") == "ite":
+            rewritten = _rewrite_trap_leaves(ip, trap_targets)
+            leaves: list[dict[str, Any]] = []
+            _ite_leaves(rewritten, leaves)
+            non_trap = [leaf for leaf in leaves if _constant_target(leaf) != TRAP_EIP]
+            if len({json.dumps(leaf, sort_keys=True) for leaf in non_trap}) != 1:
                 raise RegionRefusal("conditional_exit_in_return_block")
-            state["eip"] = ip
+            state["eip"] = rewritten
             return state
         next_path = path | {address}
-        target = _constant_target(ip)
-        if target is not None:
-            return walk(target, state, next_path)
-        args = ip.get("args")
-        if ip.get("op") != "ite" or not isinstance(args, list) or len(args) != 3:
-            raise RegionRefusal("indirect_or_unmodeled_branch")
-        true_target, false_target = _constant_target(args[1]), _constant_target(args[2])
-        if true_target is None or false_target is None or not isinstance(args[0], dict):
-            raise RegionRefusal("indirect_or_unmodeled_branch")
-        true_state = walk(true_target, state, next_path)
-        false_state = walk(false_target, state, next_path)
-        merged = S._merge_abi_states(args[0], true_state, false_state)
-        if _term_nodes(merged, limits.max_term_nodes) > limits.max_term_nodes:
-            raise RegionRefusal("region_expression_limit")
-        return merged
+        trap_state = dict(state)
+        trap_state["eip"] = {"op": "const", "value": hex(TRAP_EIP), "width": 32}
+
+        def compose_target(node: dict[str, Any]) -> dict[str, dict[str, Any]]:
+            """Decompose a (possibly nested) exit-ite chain into walk/trap arms."""
+            node_target = _constant_target(node)
+            if node_target is not None:
+                if node_target in trap_targets:
+                    return trap_state
+                return walk(node_target, state, next_path)
+            node_args = node.get("args")
+            if (
+                node.get("op") != "ite"
+                or not isinstance(node_args, list)
+                or len(node_args) != 3
+                or not isinstance(node_args[0], dict)
+            ):
+                raise RegionRefusal("indirect_or_unmodeled_branch")
+            true_state = compose_target(node_args[1])
+            false_state = compose_target(node_args[2])
+            merged = S._merge_abi_states(node_args[0], true_state, false_state)
+            if _term_nodes(merged, limits.max_term_nodes) > limits.max_term_nodes:
+                raise RegionRefusal("region_expression_limit")
+            return merged
+
+        return compose_target(ip)
 
     final_state = walk(start, _initial_state(), frozenset())
     observed = tuple(dict.fromkeys((*outputs, "eip", "memory", "io")))
@@ -339,7 +400,7 @@ def compare_region(
         if gate is not None:
             raise RegionRefusal(str(gate["reason"]))
     except RegionRefusal as error:
-        return {"status": Status.REFUSED, "reason": str(error)}
+        return _refusal_result(str(error))
     comparison = S._compare_functions(oracle, candidate, timeout_ms=timeout_ms)
     if comparison.get("skipped_layout_outputs"):
         return {"status": Status.REFUSED, "reason": "observable_output_skipped"}

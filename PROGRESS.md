@@ -2020,3 +2020,48 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `call_target_unmapped` functions moved 17 to `paired_call_assumptions`
   conditional; the rest still have genuinely unmapped callees.
 - `test_z3cmp32.py`: 14/14 pass. ruff clean on touched files.
+
+## BC5 z3cmp32: successor_outside_complete_region root-caused and fixed (3 defects)
+
+The 83-function `successor_outside_complete_region` class was a coverage
+defect, not honest frontier. Root causes found and fixed:
+
+- `.lst` proc extents understate real reachability: functions jump into
+  shared tails (`sub_45E3DA` → `loc_45E408`) owned by no proc. Region scan
+  policy changed from `declared_bounds_only` to `executable_section_bounds`
+  (any successor inside executable image bytes is admissible; budgets still
+  bound the walk). 70/83 converted past the wall on rerun.
+- Rep-string asymmetry: `_repeat_string_transfer` rewrote successors to
+  fallthrough-only unconditionally, while `_lower_repeat_string_summary`
+  was gated on the 16-bit reg set (`_has_16_bit_repeat_state`) — under
+  flat32 the transfer promised successors the lowering could not deliver,
+  and the raw back-edge `ite` stayed in `ip` (e.g. `rep movsd` at
+  sub_4023A8). `_lower_repeat_string_summary` + `_repeat_string_family_versions`
+  are now width-parametric via `_repeat_string_state()` (16-bit ax/cx/si/di/
+  flags or flat32 eax/ecx/esi/edi/eip + cc_op/cc_dep1/cc_dep2/cc_ndep), and
+  the transfer is gated on the same check. rep movs/stos/scas/cmps now lower
+  to congruence-comparable `summary_rep_*` ops under flat32.
+- Mid-block `div`/`idiv` fault exits (`Ist_Exit` with `Ijk_SigFPE*`) folded
+  into `ip` as ite arms pointing at the faulting instruction — a VEX trap
+  edge, not a CFG successor. `state.exits` now records the exit jumpkind;
+  `_finish_irsb_lowering` emits `trap_exits` (const Sig* targets) on the
+  part; the region walk canonicalizes trap arms to a shared `TRAP_EIP`
+  terminal (fault reachability still compared through the guard — div-by-0
+  candidate vs div-by-12 oracle correctly FAILs). `Ijk_Ret` blocks accept
+  `ite` chains whose only leaves are TRAP markers + one shared ret spine
+  (`conditional_exit_in_return_block` still refuses real multi-ret cases).
+- Refusals now carry `refusal_detail` (e.g. the missing successor address);
+  `reason` stays canonical for aggregation.
+
+Rerun of the 83 affected functions: 0 remain in
+`successor_outside_complete_region`. Conversions: 3 conditional
+(paired_call_assumptions), 1 failed (observable_mismatch, real diff), and
+the rest refuse deeper and honestly — `call_target_unmapped` (13),
+`loop_requires_inductive_proof` (17), `region_expression_limit` (6),
+`region_lowering_incomplete` (9), `unmatched_call_order` (10),
+`slice_too_large` (1), `region_composition_limit` (1),
+`call_target_mismatch` (1).
+
+`test_z3cmp32.py`: 19/19 pass (3 new: flat32 rep summary, div trap
+terminal, executable-section bounds). `test_dosunit_tool.py`: 206 pass /
+4 failed — the same pre-existing failures as bare HEAD. Ruff clean.

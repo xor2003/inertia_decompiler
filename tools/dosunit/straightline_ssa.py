@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    import angr
     import capstone
 
 from tools.dosunit.data_compare import load_mz_image
@@ -217,12 +218,13 @@ def lower_straightline_ssa_document(  # noqa: D103
     follow_call_fallthrough: bool = True,
     max_lift_block_ms: int = 10000,
     max_function_ms: int = 60000,
+    lifter_project: angr.Project | None = None,
 ) -> dict[str, Any]:
     if source_ir not in SUPPORTED_SOURCE_IRS:
         raise DosUnitError(f"unsupported SSA source IR: {source_ir}")
     functions = list(functions_catalog.get("functions", []) or [])
     segment_paragraphs = _catalog_segment_paragraphs(functions_catalog)
-    project = _load_lifter_project(exe_path)
+    project = _lifter_project_for_exe(exe_path, lifter_project)
     linked_base = int(getattr(project.loader.main_object, "linked_base", 0))
     exe_digest = _file_sha256(exe_path)
     cache_document = _load_vex_cache(cache_dir=cache_dir, exe_digest=exe_digest) if cache_dir is not None else None
@@ -320,6 +322,16 @@ def lower_straightline_ssa_document(  # noqa: D103
     document = dict(document_without_id)
     document["id"] = stable_id("ssa", document_without_id)
     return document
+
+
+def _lifter_project_for_exe(exe_path: Path, project: angr.Project | None) -> angr.Project:
+    """Reuse a previously loaded image only when it belongs to this executable."""
+    if project is None:
+        return _load_lifter_project(exe_path)
+    project_path = getattr(project, "filename", None)  # angr's dynamic Project boundary
+    if project_path is None or Path(project_path).resolve() != exe_path.resolve():
+        raise DosUnitError("supplied lifter project does not match SSA executable")
+    return project
 
 
 @dataclass(frozen=True)
@@ -2662,7 +2674,7 @@ def _entry_segment_para(entry: dict[str, Any], *, segment_paragraphs: dict[str, 
 
 def _repeat_string_transfer(instructions: list[dict[str, Any]]) -> dict[str, Any] | None:
     info = _repeat_string_info(instructions)
-    if info is None:
+    if info is None or _repeat_string_state() is None:
         return None
     fallthrough = _call_fallthrough_linear_from_instructions(instructions)
     if fallthrough is None:
@@ -2722,52 +2734,75 @@ def _repeat_string_info(instructions: list[dict[str, Any]]) -> dict[str, Any] | 
     return {"repeat": tokens[0], "family": family, "width": width, "mnemonic": base}
 
 
+def _repeat_string_state() -> dict[str, Any] | None:
+    """Register-name map for repeat-string summaries; None when required regs are absent.
+
+    Under the 16-bit offsets the counter/index regs are cx/si/di with a single
+    `flags` carrier; under flat32 they are ecx/esi/edi with the lazy-flag
+    quartet (cc_op/cc_dep1/cc_dep2/cc_ndep) carrying DF and friends.
+    """
+    available = {name for name, _width in REG_BY_OFFSET.values()}
+    if {"ax", "cx", "si", "di", "flags", "ds", "es", "ip"} <= available:
+        return {"ax": "ax", "cx": "cx", "si": "si", "di": "di", "ip": "ip", "flags": ("flags",)}
+    if {"eax", "ecx", "esi", "edi", "ds", "es", "eip", "cc_op", "cc_dep1", "cc_dep2", "cc_ndep"} <= available:
+        return {
+            "ax": "eax",
+            "cx": "ecx",
+            "si": "esi",
+            "di": "edi",
+            "ip": "eip",
+            "flags": ("cc_op", "cc_dep1", "cc_dep2", "cc_ndep"),
+        }
+    return None
+
+
 def _repeat_string_family_versions(
     family: str,
     *,
     tag: str,
     reg_versions: dict[str, SsaExpr],
     mem_input: SsaExpr,
-    cx: SsaExpr,
-    si: SsaExpr,
-    di: SsaExpr,
+    names: dict[str, Any],
+    reg_widths: dict[str, int],
     ax_value: SsaExpr,
-    ds: SsaExpr,
-    es: SsaExpr,
-    flags: SsaExpr,
 ) -> tuple[SsaExpr, bool] | None:
     """Apply the repeat-string family's output versions; return (mem_version, memory_touched) or None."""
+    cx = reg_versions[names["cx"]]
+    si = reg_versions[names["si"]]
+    di = reg_versions[names["di"]]
+    ds = reg_versions["ds"]
+    es = reg_versions["es"]
+    flag_args = tuple(reg_versions[flag_name] for flag_name in names["flags"])
+    cx_width = reg_widths[names["cx"]]
+    si_width = reg_widths[names["si"]]
+    di_width = reg_widths[names["di"]]
     if family == "movs":
-        args = (mem_input, cx, si, di, ds, es, flags)
-        reg_versions["cx"] = SsaExpr(f"{tag}_cx", 16, args)
-        reg_versions["si"] = SsaExpr(f"{tag}_si", 16, args)
-        reg_versions["di"] = SsaExpr(f"{tag}_di", 16, args)
+        args = (mem_input, cx, si, di, ds, es, *flag_args)
+        reg_versions[names["cx"]] = SsaExpr(f"{tag}_cx", cx_width, args)
+        reg_versions[names["si"]] = SsaExpr(f"{tag}_si", si_width, args)
+        reg_versions[names["di"]] = SsaExpr(f"{tag}_di", di_width, args)
         return SsaExpr(f"{tag}_memory", 0, args), True
     if family == "stos":
-        args = (mem_input, cx, di, ax_value, es, flags)
-        reg_versions["cx"] = SsaExpr(f"{tag}_cx", 16, args)
-        reg_versions["di"] = SsaExpr(f"{tag}_di", 16, args)
+        args = (mem_input, cx, di, ax_value, es, *flag_args)
+        reg_versions[names["cx"]] = SsaExpr(f"{tag}_cx", cx_width, args)
+        reg_versions[names["di"]] = SsaExpr(f"{tag}_di", di_width, args)
         return SsaExpr(f"{tag}_memory", 0, args), True
     if family == "scas":
-        args = (mem_input, cx, di, ax_value, es, flags)
-        reg_versions["cx"] = SsaExpr(f"{tag}_cx", 16, args)
-        reg_versions["di"] = SsaExpr(f"{tag}_di", 16, args)
-        reg_versions["flags"] = SsaExpr(f"{tag}_flags", 16, args)
+        args = (mem_input, cx, di, ax_value, es, *flag_args)
+        reg_versions[names["cx"]] = SsaExpr(f"{tag}_cx", cx_width, args)
+        reg_versions[names["di"]] = SsaExpr(f"{tag}_di", di_width, args)
+        for flag_name in names["flags"]:
+            reg_versions[flag_name] = SsaExpr(f"{tag}_{flag_name}", reg_widths[flag_name], args)
         return mem_input, False
     if family == "cmps":
-        args = (mem_input, cx, si, di, ds, es, flags)
-        reg_versions["cx"] = SsaExpr(f"{tag}_cx", 16, args)
-        reg_versions["si"] = SsaExpr(f"{tag}_si", 16, args)
-        reg_versions["di"] = SsaExpr(f"{tag}_di", 16, args)
-        reg_versions["flags"] = SsaExpr(f"{tag}_flags", 16, args)
+        args = (mem_input, cx, si, di, ds, es, *flag_args)
+        reg_versions[names["cx"]] = SsaExpr(f"{tag}_cx", cx_width, args)
+        reg_versions[names["si"]] = SsaExpr(f"{tag}_si", si_width, args)
+        reg_versions[names["di"]] = SsaExpr(f"{tag}_di", di_width, args)
+        for flag_name in names["flags"]:
+            reg_versions[flag_name] = SsaExpr(f"{tag}_{flag_name}", reg_widths[flag_name], args)
         return mem_input, False
     return None
-
-
-def _has_16_bit_repeat_state() -> bool:
-    """Check that the 16-bit repeat summary has every required guest register."""
-    available = {name for name, _width in REG_BY_OFFSET.values()}
-    return all(name in available for name in ("ax", "cx", "si", "di", "flags", "ds", "es"))
 
 
 def _lower_repeat_string_summary(
@@ -2777,7 +2812,8 @@ def _lower_repeat_string_summary(
     max_assignments_per_function: int,
 ) -> dict[str, Any] | None:
     info = _repeat_string_info(instructions)
-    if info is None or not _has_16_bit_repeat_state():
+    names = _repeat_string_state()
+    if info is None or names is None:
         return None
     family = str(info["family"])
     width = int(info["width"])
@@ -2786,27 +2822,18 @@ def _lower_repeat_string_summary(
     reg_versions: dict[str, SsaExpr] = {
         name: SsaExpr("input", reg_width, name=name) for name, reg_width in REG_BY_OFFSET.values()
     }
+    reg_widths = dict(REG_BY_OFFSET.values())
     mem_input = SsaExpr("mem_input", 0, name="mem")
-    cx = reg_versions["cx"]
-    si = reg_versions["si"]
-    di = reg_versions["di"]
-    ax_value = _coerce_width(reg_versions["ax"], 8 if width == 1 else 16)
-    flags = reg_versions["flags"]
-    ds = reg_versions["ds"]
-    es = reg_versions["es"]
+    ax_value = _coerce_width(reg_versions[names["ax"]], width * 8)
 
     family_state = _repeat_string_family_versions(
         family,
         tag=tag,
         reg_versions=reg_versions,
         mem_input=mem_input,
-        cx=cx,
-        si=si,
-        di=di,
+        names=names,
+        reg_widths=reg_widths,
         ax_value=ax_value,
-        ds=ds,
-        es=es,
-        flags=flags,
     )
     if family_state is None:
         return None
@@ -2814,9 +2841,14 @@ def _lower_repeat_string_summary(
 
     fallthrough = _call_fallthrough_linear_from_instructions(instructions)
     if fallthrough is not None:
-        reg_versions["ip"] = SsaExpr("const", 16, value=fallthrough & 0xFFFF)
-    if family in {"scas", "cmps"} and "flags" not in output_regs:
-        output_regs = tuple(dict.fromkeys((*output_regs, "flags")))
+        ip_name = str(names["ip"])
+        ip_mask = (1 << reg_widths[ip_name]) - 1
+        pc_term = SsaExpr("const", reg_widths[ip_name], value=fallthrough & ip_mask)
+        reg_versions[ip_name] = pc_term
+        # "ip" is also the compose-facing control alias consumers request.
+        reg_versions["ip"] = pc_term
+    if family in {"scas", "cmps"}:
+        output_regs = tuple(dict.fromkeys((*output_regs, *names["flags"])))
 
     requested: dict[str, SsaExpr] = {}
     for reg in output_regs:
@@ -3120,7 +3152,7 @@ class _IrsbLowerState:
     memory_touched: bool = False
     io_touched: bool = False
     io_event_index: int = 0
-    exits: list[tuple[SsaExpr, SsaExpr]] = field(default_factory=list)
+    exits: list[tuple[SsaExpr, SsaExpr, str]] = field(default_factory=list)
     ip_expr: SsaExpr | None = None
 
 
@@ -3230,7 +3262,13 @@ def _lower_irsb_exit(
     )
     if isinstance(dst, LowerFailure):
         return dst
-    state.exits.append((_coerce_width(guard, 1), _coerce_width(dst, 16 if dst.width <= 16 else dst.width)))
+    state.exits.append(
+        (
+            _coerce_width(guard, 1),
+            _coerce_width(dst, 16 if dst.width <= 16 else dst.width),
+            str(getattr(statement, "jk", "") or ""),
+        )
+    )
     return None
 
 
@@ -3317,6 +3355,28 @@ def _lower_irsb(
     )
 
 
+def _trap_exit_target(dst: SsaExpr, jumpkind: str) -> int | None:
+    """Return the linear target of a VEX signal (fault) exit, or None."""
+    if jumpkind.startswith("Ijk_Sig") and dst.op == "const" and dst.value is not None:
+        return int(dst.value)
+    return None
+
+
+def _fold_exits_into_ip(state: _IrsbLowerState, ip_expr: SsaExpr, control_width: int) -> list[int]:
+    """Fold pending exits into ip as ite arms; return const signal-exit targets."""
+    trap_exits: list[int] = []
+    for guard, dst, jumpkind in reversed(state.exits):
+        ip_expr = SsaExpr(
+            "ite", control_width,
+            (_coerce_width(guard, 1), _coerce_width(dst, control_width), ip_expr),
+        )
+        trap_target = _trap_exit_target(dst, jumpkind)
+        if trap_target is not None:
+            trap_exits.append(trap_target)
+    state.reg_versions["ip"] = ip_expr
+    return trap_exits
+
+
 def _finish_irsb_lowering(
     state: _IrsbLowerState,
     *,
@@ -3340,12 +3400,7 @@ def _finish_irsb_lowering(
     if isinstance(next_expr, LowerFailure):
         return next_expr
     ip_expr = _coerce_width(next_expr, control_width)
-    for guard, dst in reversed(state.exits):
-        ip_expr = SsaExpr(
-            "ite", control_width,
-            (_coerce_width(guard, 1), _coerce_width(dst, control_width), ip_expr),
-        )
-    state.reg_versions["ip"] = ip_expr
+    trap_exits = _fold_exits_into_ip(state, ip_expr, control_width)
 
     requested: dict[str, SsaExpr] = {}
     for reg in output_regs:
@@ -3370,11 +3425,14 @@ def _finish_irsb_lowering(
         inputs.update(_collect_inputs((state.mem_version,)))
     if state.io_touched:
         inputs.update(_collect_inputs((state.io_version,)))
-    return {
+    lowered = {
         "inputs": _input_items(inputs),
         "outputs": outputs,
         "assignments": assignments,
     }
+    if trap_exits:
+        lowered["trap_exits"] = sorted(set(trap_exits))
+    return lowered
 
 
 def _materialize_irsb_outputs(
@@ -3689,10 +3747,7 @@ def _lower_ail_block(
             return failure
 
     if state.ip_expr is not None:
-        ip_expr = state.ip_expr
-        for guard, dst in reversed(state.exits):
-            ip_expr = SsaExpr("ite", 16, (_coerce_width(guard, 1), _coerce_width(dst, 16), ip_expr))
-        state.reg_versions["ip"] = ip_expr
+        _fold_exits_into_ip(state, state.ip_expr, 16)
 
     return _finish_ail_lowering(state, output_regs, max_assignments_per_function=max_assignments_per_function)
 
@@ -3854,7 +3909,13 @@ def _lower_ail_condjump(
         if isinstance(false_expr, LowerFailure):
             return false_expr
         state.ip_expr = _coerce_width(false_expr, 16)
-    state.exits.append((_coerce_width(guard, 1), _coerce_width(dst, 16 if dst.width <= 16 else dst.width)))
+    state.exits.append(
+        (
+            _coerce_width(guard, 1),
+            _coerce_width(dst, 16 if dst.width <= 16 else dst.width),
+            str(getattr(statement, "jk", "") or ""),
+        )
+    )
     return None
 
 
@@ -11862,6 +11923,7 @@ def _layout_constant_pairs(
     pairs.extend(_call_far_pointer_push_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_relocated_immediate_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_seg_register_far_pointer_pairs(oracle_instructions, candidate_instructions, image_context))
+    pairs.extend(_local_far_pointer_offset_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_entry_shift_immediate_pairs(oracle_function, candidate_function))
     pairs.extend(_stored_pointer_immediate_pairs(oracle_instructions, candidate_instructions))
     pairs.extend(_call_return_address_pairs(oracle_function, candidate_function))
@@ -12389,6 +12451,168 @@ def _weak_witnessed_string_pairs(
                 "reason": "data_string_arg",
             }
         )
+
+
+def _local_far_pointer_offset_pairs(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+    image_context: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Normalize far-pointer offsets assembled through register-relative locals.
+
+    Layer: validation.  Responsibility: extend the push-adjacent far-pointer
+    string proof to pointers built via ``mov word ptr [bp - N], ds`` +
+    ``mov word ptr [bp - M], off`` (e.g. ``uchar far *p = s`` compiled as two
+    local stores before ``push`` of both halves).  A differing
+    ``mov word ptr [local], imm`` qualifies only when a segment half (a
+    segment register or a relocation-materialized segment immediate) is
+    stored to a local within a small window on both sides; acceptance stays
+    the byte-identical string check, extended with a lone-NUL (``""``) case
+    under witnessed paragraphs.
+    """
+    if image_context is None:
+        return []
+    differing = _local_far_pointer_differing_offsets(
+        oracle_instructions, candidate_instructions, image_context
+    )
+    pairs, witnessed_paras = _strong_witnessed_string_pairs(image_context, differing)
+    _weak_witnessed_string_pairs(image_context, differing, pairs, witnessed_paras)
+    _nul_witnessed_string_pairs(image_context, differing, pairs, witnessed_paras)
+    for pair in pairs:
+        pair["reason"] = "local_far_pointer_offset"
+    return pairs
+
+
+def _local_far_pointer_differing_offsets(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+    image_context: dict[str, dict[str, Any]],
+) -> list[tuple[int, int]]:
+    """Differing ``mov word ptr [local], imm`` values next to a segment store."""
+    oracle_seg_stores = _local_segment_store_indexes(
+        oracle_instructions, image_context, "oracle"
+    )
+    candidate_seg_stores = _local_segment_store_indexes(
+        candidate_instructions, image_context, "candidate"
+    )
+    if not oracle_seg_stores or not candidate_seg_stores:
+        return []
+    differing: list[tuple[int, int]] = []
+    for index, (oracle, candidate) in enumerate(
+        zip(oracle_instructions, candidate_instructions, strict=False)
+    ):
+        oracle_off = _local_stored_immediate(oracle)
+        candidate_off = _local_stored_immediate(candidate)
+        if oracle_off is None or candidate_off is None or oracle_off == candidate_off:
+            continue
+        if not _index_nearby(oracle_seg_stores, index) or not _index_nearby(
+            candidate_seg_stores, index
+        ):
+            continue
+        differing.append((oracle_off, candidate_off))
+    return differing
+
+
+def _local_segment_store_indexes(
+    instructions: list[dict[str, Any]],
+    image_context: dict[str, dict[str, Any]],
+    side: str,
+) -> set[int]:
+    """Indexes of ``mov word ptr [local], segr|seg-imm`` far-pointer high-half stores."""
+    seg_targets = frozenset((image_context.get(side) or {}).get("seg_targets") or ())
+    indexes: set[int] = set()
+    for index, instruction in enumerate(instructions):
+        if str(instruction.get("mnemonic", "")).lower() != "mov":
+            continue
+        operands = _split_operands(str(instruction.get("op_str", "")).lower())
+        if len(operands) != 2 or not _register_relative_word_operand(operands[0]):
+            continue
+        source = operands[1].strip()
+        if source in _SEGMENT_PUSH_REGS:
+            indexes.add(index)
+            continue
+        numbers = _number_tokens(source)
+        if (
+            "[" not in source
+            and "]" not in source
+            and len(numbers) == 1
+            and (numbers[0] & 0xFFFF) in seg_targets
+        ):
+            indexes.add(index)
+    return indexes
+
+
+def _local_stored_immediate(instruction: dict[str, Any]) -> int | None:
+    """16-bit immediate of a ``mov word ptr [local], imm`` store, else None."""
+    if str(instruction.get("mnemonic", "")).lower() != "mov":
+        return None
+    operands = _split_operands(str(instruction.get("op_str", "")).lower())
+    if len(operands) != 2 or not _register_relative_word_operand(operands[0]):
+        return None
+    source = operands[1].strip()
+    if "[" in source or "]" in source:
+        return None
+    numbers = _number_tokens(source)
+    if len(numbers) != 1:
+        return None
+    return numbers[0] & 0xFFFF
+
+
+def _register_relative_word_operand(operand: str) -> bool:
+    """True for ``word ptr [reg ...]`` memory operands with a register base."""
+    compact = operand.replace(" ", "")
+    return compact.startswith("wordptr[") and any(
+        register in compact for register in ("bp", "bx", "si", "di")
+    )
+
+
+def _index_nearby(indexes: set[int], index: int, window: int = 3) -> bool:
+    """True when ``indexes`` holds a position within ``window`` of ``index``."""
+    return any(abs(index - other) <= window for other in indexes)
+
+
+def _nul_witnessed_string_pairs(
+    image_context: dict[str, dict[str, Any]],
+    differing: list[tuple[int, int]],
+    pairs: list[dict[str, Any]],
+    witnessed_paras: set[tuple[int, int]],
+) -> None:
+    """Accept ``""`` (lone NUL byte) targets under witnessed paragraphs only.
+
+    A one-byte proof is too weak for unique-match acceptance; the pointer is
+    equal only when a paragraph pair already proven by a longer string maps
+    both offsets onto NUL bytes.
+    """
+    all_witnesses = witnessed_paras | frozenset(image_context.get("witnessed_paras") or ())
+    if not all_witnesses:
+        return
+    oracle_image = (image_context.get("oracle") or {}).get("image")
+    candidate_image = (image_context.get("candidate") or {}).get("image")
+    if not isinstance(oracle_image, bytes) or not isinstance(candidate_image, bytes):
+        return
+    for oracle_off, candidate_off in differing:
+        if any(
+            item["oracle"] == oracle_off and item["candidate"] == candidate_off
+            for item in pairs
+        ):
+            continue
+        for para_oracle, para_candidate in all_witnesses:
+            oracle_addr = para_oracle * 16 + oracle_off
+            candidate_addr = para_candidate * 16 + candidate_off
+            if (
+                0 <= oracle_addr < len(oracle_image)
+                and 0 <= candidate_addr < len(candidate_image)
+                and oracle_image[oracle_addr] == 0
+                and candidate_image[candidate_addr] == 0
+            ):
+                pairs.append(
+                    {
+                        "oracle": oracle_off,
+                        "candidate": candidate_off,
+                        "reason": "data_string_arg",
+                    }
+                )
+                break
 
 
 def _call_far_pointer_push_pairs(
