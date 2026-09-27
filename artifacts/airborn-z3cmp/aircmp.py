@@ -1421,17 +1421,9 @@ def _m2c_summary(ctx: LowerCtx, tname: str) -> str | None:
             cm = re.match(r"^((?:sub|loc)_[0-9a-f]+)", cname)
             cname = cm.group(1) if cm else cname
         if cname is not None and cname.startswith("sub_"):
+            # CALL_ pushes the guest retaddr AND the callee's retn/retf pops
+            # it inside the host call — net zero stack effect at the site.
             _boundary_call(ctx, cname)
-            _do_pop(ctx)  # the return-addr word CALL_ pushed
-            # CALLF frames carry the caller's pushed cs (const 0x1a2) at [sp]
-            # after the retaddr is gone — the callee's retf pops it too.
-            sp16 = trunc(ctx.canon["esp"], 16)
-            sp32 = E("add", 32, (
-                E("shl", 32, (zext(ctx.canon["ss"], 32), _c(4, 32))),
-                zext(sp16, 32)))
-            probe = forward_load(ctx.arrays["data"], sp32, 16)
-            if probe is not None and constval(fold(probe)) == 0x1A2:
-                _do_pop(ctx)
             ctx.reg_versions["eax"] = c32(1)  # CALL_ returns bool ok
             return f"call_boundary_{cname}"
         eip = ctx.canon.get("eip")
