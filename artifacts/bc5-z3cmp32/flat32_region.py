@@ -6,11 +6,14 @@ Calls, loops, indirect edges, partial scans, and budget exhaustion refuse.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from flat32_adapter import REG32, S
 from flat32_verdict import Status
+
+type CallResolver = Callable[[int], str | None]
 
 
 @dataclass(frozen=True)
@@ -73,13 +76,111 @@ def _initial_state() -> dict[str, dict[str, Any]]:
     return state
 
 
+def _optional_linear(value: Any) -> int | None:  # noqa: ANN401
+    """Accept only a full-width integer or 0x-prefixed linear address."""
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and value.startswith("0x"):
+        parsed = int(value, 16)
+    else:
+        return None
+    return parsed if 0 <= parsed <= 0xFFFFFFFF else None
+
+
+def _const_term_int(term: Any) -> int | None:  # noqa: ANN401
+    """Read a full-width constant term's value."""
+    return _constant_target(term)
+
+
+def _esp_delta(term: Any, base: Any) -> int | None:  # noqa: ANN401
+    """Return c when term is base +/- constants, else None (unbalanced/unknown)."""
+    if term == base:
+        return 0
+    if not isinstance(term, dict) or term.get("op") not in {"add", "sub"}:
+        return None
+    args = term.get("args")
+    if not isinstance(args, list) or len(args) != 2 or not isinstance(args[0], dict):
+        return None
+    inner = _esp_delta(args[0], base)
+    const = _const_term_int(args[1])
+    if inner is None or const is None:
+        return None
+    return inner + const if term["op"] == "add" else inner - const
+
+
+def _apply_bounded_call(
+    block: dict[str, Any],
+    state: dict[str, dict[str, Any]],
+    incoming: dict[str, dict[str, Any]],
+    call_index: int,
+    call_resolver: CallResolver,
+    calls: list[dict[str, Any]],
+) -> int:
+    """Model one paired direct call as an effects-complete boundary; return the fallthrough VA.
+
+    The call block's own SSA already pushed the return address and set `ip` to the
+    constant callee target.  Post-call, every register other than esp, plus memory
+    and io, is havoced to a fresh per-callsite input: the callee may clobber any of
+    them, so the solver checks the caller for all callee results.  esp becomes
+    `post_block_esp + delta` where delta is a fresh shared variable modeling the
+    unknown-but-paired callee stack effect; caller-visible esp evidence is kept.
+    """
+    raw_source = block.get("source")
+    source = raw_source if isinstance(raw_source, dict) else {}
+    raw_transfer = source.get("transfer")
+    transfer = raw_transfer if isinstance(raw_transfer, dict) else {}
+    if transfer.get("kind") != "direct_call":
+        raise RegionRefusal("call_indirect_or_unmodeled_target")
+    raw_target = transfer.get("target")
+    target_raw = raw_target if isinstance(raw_target, dict) else {}
+    raw_fallthrough = transfer.get("fallthrough")
+    fallthrough_raw = raw_fallthrough if isinstance(raw_fallthrough, dict) else {}
+    target = _optional_linear(target_raw.get("linear") or target_raw.get("raw"))
+    fallthrough = _optional_linear(fallthrough_raw.get("linear"))
+    if target is None:
+        raise RegionRefusal("call_indirect_or_unmodeled_target")
+    if fallthrough is None:
+        raise RegionRefusal("call_missing_full_fallthrough")
+    callee = call_resolver(target)
+    if callee is None:
+        raise RegionRefusal("call_target_unmapped")
+    ip = state.get("ip")
+    if _const_term_int(ip) != target:
+        raise RegionRefusal("call_target_mismatch")
+    if _esp_delta(state.get("esp"), incoming.get("esp")) is None:
+        raise RegionRefusal("call_esp_unbalanced")
+    for name in list(state):
+        if name in {"esp", "ip", "memory", "io"}:
+            continue
+        term = state[name]
+        width = term.get("width") if isinstance(term, dict) else None
+        state[name] = {"op": "input", "name": f"call{call_index}_{name}", "width": width or 32}
+    state["memory"] = {"op": "mem_input", "name": f"call{call_index}_mem", "addr_width": 32, "value_width": 8}
+    state["io"] = {"op": "mem_input", "name": f"call{call_index}_io", "addr_width": 32, "value_width": 8}
+    state["esp"] = {
+        "op": "add",
+        "width": 32,
+        "args": [state["esp"], {"op": "input", "name": f"call{call_index}_espdelta", "width": 32}],
+    }
+    state["ip"] = {"op": "const", "value": hex(fallthrough), "width": 32}
+    calls.append({"callee": callee, "target": hex(target), "entry": hex(_linear(block))})
+    return fallthrough
+
+
 def summarize(  # noqa: C901
     parts: list[dict[str, Any]],
     *,
     outputs: tuple[str, ...],
     limits: RegionLimits,
+    call_resolver: CallResolver | None = None,
 ) -> dict[str, Any]:
-    """Compose every reachable acyclic path to a near return or refuse."""
+    """Compose every reachable acyclic path to a near return or refuse.
+
+    With `call_resolver` (linear VA -> mapped callee name), direct calls to known
+    mapped callees compose as bounded effect boundaries whose post-state is fully
+    unconstrained except esp; the composed `call_sites` must be paired by the
+    caller and the resulting verdict can never be unconditional PASSED.
+    """
     if not parts or len(parts) > limits.max_blocks:
         raise RegionRefusal("region_block_limit_or_missing")
     blocks: dict[int, dict[str, Any]] = {}
@@ -96,6 +197,7 @@ def summarize(  # noqa: C901
     if start not in blocks:
         raise RegionRefusal("entry_block_missing")
     compositions = 0
+    calls: list[dict[str, Any]] = []
 
     def walk(  # noqa: C901
         address: int, incoming: dict[str, dict[str, Any]], path: frozenset[int]
@@ -113,7 +215,7 @@ def summarize(  # noqa: C901
         raw_source = block.get("source")
         source = raw_source if isinstance(raw_source, dict) else {}
         jumpkind = source.get("jumpkind")
-        if jumpkind not in {"Ijk_Boring", "Ijk_Ret"}:
+        if jumpkind not in {"Ijk_Boring", "Ijk_Ret", "Ijk_Call"}:
             raise RegionRefusal("call_or_exception_boundary")
         state = S._compose_block_outputs(block, block.get("outputs", {}), incoming)
         if _term_nodes(state, limits.max_term_nodes) > limits.max_term_nodes:
@@ -121,6 +223,12 @@ def summarize(  # noqa: C901
         ip = state.get("ip")
         if not isinstance(ip, dict):
             raise RegionRefusal("full_width_ip_unobserved")
+        if jumpkind == "Ijk_Call":
+            if call_resolver is None:
+                raise RegionRefusal("call_or_exception_boundary")
+            next_path = path | {address}
+            fallthrough = _apply_bounded_call(block, state, incoming, len(calls), call_resolver, calls)
+            return walk(fallthrough, state, next_path)
         if jumpkind == "Ijk_Ret":
             if ip.get("op") == "ite":
                 raise RegionRefusal("conditional_exit_in_return_block")
@@ -162,6 +270,7 @@ def summarize(  # noqa: C901
         "outputs": materialized,
         "assignments": assignments,
         "blocks_composed": compositions,
+        "call_sites": calls,
     }
 
 
@@ -194,12 +303,30 @@ def compare_region(
     timeout_ms: int,
     limits: RegionLimits | None = None,
     normalization: dict[int, int] | None = None,
+    call_resolver_oracle: CallResolver | None = None,
+    call_resolver_candidate: CallResolver | None = None,
 ) -> dict[str, Any]:
-    """Use dosunit Z3 on complete composed regions with bounded resources."""
+    """Use dosunit Z3 on complete composed regions with bounded resources.
+
+    With per-side call resolvers, paired direct calls to the same mapped callee
+    name compose as havoced effect boundaries. Equality can only yield
+    Status.CONDITIONAL under explicit paired post-call-state equality assumptions;
+    unmatched calls and unsupported transfers refuse. A mismatch with havoced
+    callee results is inconclusive for the real binaries and also refuses.
+    """
     limits = limits or RegionLimits()
     try:
-        oracle = summarize(oracle_parts, outputs=outputs, limits=limits)
-        candidate = summarize(candidate_parts, outputs=outputs, limits=limits)
+        oracle = summarize(oracle_parts, outputs=outputs, limits=limits, call_resolver=call_resolver_oracle)
+        candidate = summarize(
+            candidate_parts, outputs=outputs, limits=limits, call_resolver=call_resolver_candidate
+        )
+        oracle_calls = oracle["call_sites"]
+        candidate_calls = candidate["call_sites"]
+        if len(oracle_calls) != len(candidate_calls) or any(
+            site["callee"] != pair["callee"]
+            for site, pair in zip(oracle_calls, candidate_calls, strict=True)
+        ):
+            raise RegionRefusal("unmatched_call_order")
         if normalization:
             candidate["_constant_normalization"] = normalization
             candidate["_constant_normalization_reasons"] = dict.fromkeys(normalization, "global_reloc")
@@ -221,8 +348,41 @@ def compare_region(
     ):
         comparison["status"] = Status.REFUSED
         comparison["reason"] = "uninterpreted_x86_flags"
+    if oracle["call_sites"]:
+        paired_assumptions = {
+                "kind": "paired_post_call_state_equality",
+                "paired_callees": [
+                    {
+                        "callee": site["callee"],
+                        "oracle_target": site["target"],
+                        "oracle_callsite": site["entry"],
+                        "candidate_target": pair["target"],
+                        "candidate_callsite": pair["entry"],
+                    }
+                    for site, pair in zip(oracle["call_sites"], candidate["call_sites"], strict=True)
+                ],
+                "scope": (
+                    "each paired call is assumed to return with equal post-call register, memory, io, "
+                    "flag and stack effects, even when its pre-call states differ; matching names alone "
+                    "do not establish this relation"
+                ),
+        }
+        comparison["paired_call_assumptions"] = paired_assumptions
+        if comparison["status"] == Status.PASSED:
+            comparison.update(
+                status=Status.CONDITIONAL,
+                reason="paired_call_assumptions",
+                assumptions=paired_assumptions,
+            )
+        elif comparison["status"] == Status.FAILED:
+            comparison.update(
+                status=Status.REFUSED,
+                reason="paired_call_model_counterexample",
+                backend_status=Status.FAILED,
+            )
     return {
         **comparison,
         "oracle_blocks_composed": oracle["blocks_composed"],
         "candidate_blocks_composed": candidate["blocks_composed"],
+        "paired_calls": len(oracle["call_sites"]),
     }

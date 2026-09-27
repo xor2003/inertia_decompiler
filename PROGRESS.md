@@ -1890,3 +1890,103 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   expectations (reproduce on bare HEAD). Repo-wide mypy debt in unrelated
   modules still fails `quality-fast` globally (pre-existing, none in touched
   files).
+
+## BC5 z3cmp32: reviewed Devin 256-block scanner experiment
+
+- Devin tested the first 12 sorted functions from the 53 unique functions
+  represented by 104 saved 128-block-limit events (53 oracle, 51 candidate).
+  At 256 blocks, 8/12 became `call_or_exception_boundary`, 4/12 reached the
+  256-block limit, and **0/12 gained a proof or conditional verdict**.
+- The bounded warm-cache sample took 3:18 wall time, 41.2 s user CPU, and
+  peaked at 634 MiB RSS. Because that cost bought no proofs in the sample,
+  the reviewed driver keeps 128 as the default and offers
+  `--region-max-blocks 256` for targeted experiments. Scanner and composition
+  caps share the selected value; composition, expression, and store limits
+  remain unchanged. Partial scans still refuse.
+- Focused BC5 tests: 8 passed; scoped Ruff and Pyright: clean. Full corpus
+  rerun and the call-boundary proof work remain outstanding. The changed-file
+  gate passed. `quality-dev` reached the unrelated existing mypy error in
+  `interprocedural_storage_simtypes.py:174` (`no-any-return`); its mypyc smoke
+  passed after setting a writable project-local `TMPDIR`.
+  `test_dosunit_tool.py` reported 200 passed, 5 skipped, and the same four
+  compare-SSA assertion failures recorded above; no shared dosunit code was
+  changed in this experiment.
+
+## BC5 z3cmp32: reviewed Devin direct-call abstraction
+
+- `--assume-paired-calls` is an opt-in region/auto policy. It resolves only
+  uniquely addressed `sub_*` pairs from the full oracle boundary and candidate
+  symbol catalogs, so six-way sharding does not hide mapped callees. Indirect,
+  unmapped, mismatched, and unsupported transfers still refuse.
+- A paired direct call havocs all modeled post-call registers, memory, and IO,
+  keeps the composed caller ESP plus a shared unknown stack effect, and resumes
+  at the full-width fallthrough. Equality is **conditional** on an explicit
+  paired post-call-state relation; matching names do not prove that relation.
+  A counterexample under havoc refuses rather than reporting a real binary
+  mismatch. Relocation and call assumptions are both retained in the verdict.
+- On 15 formerly call-boundary-refused BCC functions with 5 s solver timeouts,
+  the opt-in policy produced 2 conditional, 13 refused, 0 passes. The focused
+  three-function recheck after refusal classification yielded 2 conditional
+  and 1 `paired_call_model_counterexample` refusal. No unconditional proof gain
+  is claimed. Focused BC5 tests: 14 passed; scoped Ruff, Pyright, and the
+  changed-file gate: clean. A later `quality-dev` retry exceeded its 120 s
+  bound during the repository-wide linter stage; a prior run reached unrelated
+  mypy debt at `interprocedural_storage_simtypes.py:174`.
+
+## Riptide corpus: v6 rerun + string-content bug sweep (session checkpoint)
+
+- v5 shard compare (fixed comparator) surfaced ~23 `observable_mismatch`
+  rows; triage split them into real source bugs vs comparator artifacts.
+- Real source bugs fixed in `decomp/` (all verified byte-equal vs oracle
+  strings in RIPTIDE.EXE):
+  - `menu.cpp`/`game.cpp`: 12 string literals used `\t` where the original
+    uses literal spaces (about-screen credits, "Goodies           : ",
+    "Bonus X 50/100", "New setting?", "  Enter new shot size:  ",
+    "In Search of Dr. Riptide", "Riptide (Registered) 1.0 (C)", etc.).
+  - `end_game`: "you are a big cheater, so no cigar." -> oracle text
+    "you used the cheat code...  Sorry!".
+  - `init_game`: truncated message restored ("... Increase memory or run
+    with the -pcsound option.").
+  - `dump_pcx` inform: "Riptide.pcx has been written" ->
+    "'riptide.pcx' has been dumped.".
+  - menu labels: "Run Benchmark"->"Run benchmark", "Your Score"->
+    "Your score: ", joystick prompt "fire button." -> "fire button...",
+    "show_stats" divide message trailing '.'.
+  - `seg2608.asm`: 6 extracted-data strings had `?` corrupted to `q`
+    ("Continueq"/"leaveq"/"settingq"/"scoresq"/"beginingq"/"gameq") —
+    restored to `?`.
+- Known remaining comparator-artifact fails (not source bugs):
+  `check_new_pos` 0x20/0x80 arm cross-pairing (semantics verified identical
+  — oracle `jnl`->0x20 / cand `jl`->0x80), `___fpreset`/`terminate`
+  relocated far-pointer stores via locals, `check_user` function-extent
+  mismatch (oracle part pushes reset-scores string), frame-slot
+  permutation fails (pull_down/show_pcx/explode_pcx/dump_pcx/text_pager),
+  `do_probe` para-witness gap ('prober.l' identical under 0x2708/0x22bc).
+- Rebuilt `decomp/link/RIPTIDE.EXE` (194001 B) and re-lowered recon corpus
+  to `recon.ssa.v6.json`; shard rerun launched via `run_shards_v6.sh`
+  (batches_v6_s*, --resume + progress.json checkpoints for reboot safety).
+
+## BC5 z3cmp32: full-corpus paired-calls measurement + wider callee map
+
+- Full `--all-mapped` rerun (2228 fns, `--mode auto --normalize-globals
+  --assume-paired-calls`, 6 shards, ~22 min): **325 conditional / 131 failed /
+  1772 refused** — up from 83 conditional without the call policy.
+  242 verdicts carry `paired_call_assumptions`; 74 carry
+  `relocation_assumptions`; 9 `matched_cfg_induction`.
+- Call-boundary decomposition (was one 1639-class refusal): 242 conditional
+  pairings, 274 `call_target_unmapped` (x87 helpers / unimplemented RTL /
+  VAs not at mapped entries), 195 `paired_call_model_counterexample`
+  (inconclusive under havoc — refuses, never false-fails), 149
+  `call_indirect_or_unmodeled_target`, 10 `unmatched_call_order`,
+  9 `call_target_mismatch` (guarded calls: jcc inside the call block — a
+  correct refusal, unimplemented).
+- Havocing calls lets callers compose deeper, surfacing the real blockers:
+  `loop_requires_inductive_proof` is now the largest class (451), then
+  `region_expression_limit` (249), `slice_too_large` (94, the 4096-assignment
+  cap), `successor_outside_complete_region` (83).
+- `mapped_call_entries` no longer requires the `sub_` prefix: the oracle/cand
+  name intersection also covers `nullsub_1`, `__matherr`, Win32 import thunks
+  etc. (2279 mapped names vs 2228). A targeted rerun of the 315
+  `call_target_unmapped` functions moved 17 to `paired_call_assumptions`
+  conditional; the rest still have genuinely unmapped callees.
+- `test_z3cmp32.py`: 14/14 pass. ruff clean on touched files.

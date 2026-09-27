@@ -3,8 +3,9 @@
 
 Responsibility: compare complete PE32/ELF32 leaf functions through dosunit SSA/Z3.
 The `region` mode composes complete acyclic call-free CFGs; `auto` retries its
-loop refusals with bounded matched-CFG induction. Calls, unsupported loops, and
-partial scans remain explicit refusals. No refusal is counted as a proof.
+loop refusals with bounded matched-CFG induction. Paired direct calls are an
+explicit opt-in conditional assumption; other calls and partial scans refuse.
+No refusal or conditional result is counted as an unconditional proof.
 """
 
 from __future__ import annotations
@@ -13,12 +14,50 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import angr
 from flat32_adapter import OUTPUT_REGS, S, installed, load32
 from flat32_catalog import Symbol, catalog, global_map, lst_data_symbols, lst_functions, mapping, nm_symbols
+from flat32_region import RegionLimits
 from flat32_verdict import REPORT_SCHEMA, Status, checked_results, exit_code, summarize
+
+REGION_DEFAULT_BLOCK_CAP: Final = 128
+REGION_MAX_BLOCK_CAP: Final = 256
+
+
+def region_limits(max_blocks: int = REGION_DEFAULT_BLOCK_CAP) -> RegionLimits:
+    """Return composition budgets aligned with the region scanner boundary."""
+    return RegionLimits(
+        max_blocks=max_blocks,
+        max_compositions=256,
+        max_term_nodes=16000,
+        max_memory_stores=256,
+    )
+
+
+def mapped_call_entries(
+    boundaries: dict[str, tuple[int, int]], symbols: dict[str, Symbol], candidate_delta: int
+) -> tuple[dict[int, str], dict[int, str]]:
+    """Resolve only unique addresses of functions mapped by name on both sides."""
+    oracle: dict[int, str] = {}
+    candidate: dict[int, str] = {}
+    ambiguous_oracle: set[int] = set()
+    ambiguous_candidate: set[int] = set()
+    for name in sorted(boundaries.keys() & symbols.keys()):
+        oracle_address = boundaries[name][0]
+        candidate_address = symbols[name].address + candidate_delta
+        if oracle_address in oracle and oracle[oracle_address] != name:
+            ambiguous_oracle.add(oracle_address)
+        if candidate_address in candidate and candidate[candidate_address] != name:
+            ambiguous_candidate.add(candidate_address)
+        oracle[oracle_address] = name
+        candidate[candidate_address] = name
+    for address in ambiguous_oracle:
+        del oracle[address]
+    for address in ambiguous_candidate:
+        del candidate[address]
+    return oracle, candidate
 
 
 def preflight(project: angr.Project, address: int, size: int, scan_limit: int) -> str | None:
@@ -108,6 +147,22 @@ def retry_loop_with_cfg(
             if key not in {"function", "oracle_ssa", "candidate_ssa", "block_compare"}}
 
 
+def _group_region_document(
+    document: dict[str, Any],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    """Index parts by function name and refusals by function name."""
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    by_refusal: dict[str, list[dict[str, Any]]] = {}
+    for part in document["functions"]:
+        function = part.get("function") if isinstance(part.get("function"), dict) else {}
+        by_name.setdefault(str(function.get("name") or ""), []).append(part)
+    for refusal in document["refusals"]:
+        detail = refusal.get("detail") if isinstance(refusal.get("detail"), dict) else {}
+        function_id = str(detail.get("function_id") or "")
+        by_refusal.setdefault(function_id.rsplit(":", 1)[-1], []).append(refusal)
+    return by_name, by_refusal
+
+
 def compare_region_mode(
     args: argparse.Namespace,
     oracle_ssa: dict[str, Any],
@@ -117,27 +172,20 @@ def compare_region_mode(
     existing_results: list[dict[str, Any]],
     relocation: dict[int, int],
     loop_context: tuple[angr.Project, angr.Project, dict[str, tuple[int, int]], dict[str, tuple[int, int]]] | None = None,
+    call_entries: tuple[dict[int, str], dict[int, str]] | None = None,
 ) -> dict[str, Any]:
     """Account for each bounded region; optionally retry loops with CFG induction."""
-    from flat32_region import RegionLimits, compare_region
+    from flat32_region import compare_region
 
     grouped: list[dict[str, list[dict[str, Any]]]] = []
     refusals: list[dict[str, list[dict[str, Any]]]] = []
     for document in (oracle_ssa, candidate_ssa):
-        by_name: dict[str, list[dict[str, Any]]] = {}
-        by_refusal: dict[str, list[dict[str, Any]]] = {}
-        for part in document["functions"]:
-            function = part.get("function") if isinstance(part.get("function"), dict) else {}
-            by_name.setdefault(str(function.get("name") or ""), []).append(part)
-        for refusal in document["refusals"]:
-            detail = refusal.get("detail") if isinstance(refusal.get("detail"), dict) else {}
-            function_id = str(detail.get("function_id") or "")
-            by_refusal.setdefault(function_id.rsplit(":", 1)[-1], []).append(refusal)
+        by_name, by_refusal = _group_region_document(document)
         grouped.append(by_name)
         refusals.append(by_refusal)
 
     # BCC32 -O2 bodies are larger than the sibling comparator's MSC8 corpus.
-    limits = RegionLimits(max_blocks=128, max_compositions=256, max_term_nodes=16000, max_memory_stores=256)
+    limits = region_limits(args.region_max_blocks)
     results = list(existing_results)
     selected = {item["function"]["name"] for item in existing_results}
     return_outputs = tuple(dict.fromkeys((*args.output_regs.split(","), *OUTPUT_REGS[3:])))
@@ -156,6 +204,8 @@ def compare_region_mode(
                 grouped[0].get(name, []), grouped[1].get(name, []),
                 outputs=return_outputs, timeout_ms=args.timeout_ms, limits=limits,
                 normalization=relocation,
+                call_resolver_oracle=call_entries[0].get if call_entries else None,
+                call_resolver_candidate=call_entries[1].get if call_entries else None,
             )
             if (
                 verdict.get("status") == Status.FAILED
@@ -166,20 +216,31 @@ def compare_region_mode(
                     for item in verdict["mismatches"]
                 )
             ):
+                assumptions = dict(verdict.get("paired_call_assumptions") or {})
+                assumptions.update(
+                    constant_relocation_count=len(relocation),
+                    constant_relocation_scope="every output diff is a mapped candidate->oracle data relocation",
+                )
                 verdict = {
                     "status": Status.CONDITIONAL,
                     "reason": "relocation_assumptions",
                     "backend_status": Status.FAILED,
-                    "assumptions": {
-                        "constant_relocation_count": len(relocation),
-                        "scope": "every output diff is a mapped candidate->oracle data relocation",
-                    },
+                    "assumptions": assumptions,
                 }
             verdict = retry_loop_with_cfg(
                 name, verdict, loop_context, return_outputs, args.timeout_ms, normalization=relocation
             )
-            if verdict.get("status") == Status.PASSED and relocation:
-                verdict = {**verdict, "status": Status.CONDITIONAL, "reason": verdict.get("reason") or "region_equal"}
+            if relocation and verdict.get("status") in {Status.PASSED, Status.CONDITIONAL}:
+                assumptions = dict(verdict.get("assumptions") or {})
+                assumptions.update(
+                    constant_relocation_count=len(relocation),
+                    constant_relocation_scope="candidate constants normalized to independently labeled oracle globals",
+                )
+                verdict = {
+                    **verdict, "status": Status.CONDITIONAL,
+                    "reason": verdict.get("reason") if verdict.get("status") == Status.CONDITIONAL else "relocation_assumptions",
+                    "assumptions": assumptions,
+                }
         results.append({"function": {"id": f"oracle:{name}", "name": name}, **verdict})
     results.sort(key=lambda item: item["function"]["name"])
     summary = summarize(results)
@@ -205,7 +266,12 @@ def compare_region_mode(
                 "complete acyclic PE32 region, or closed matched CFG induction for at most eight blocks"
                 if loop_context is not None else "complete acyclic PE32 region, full 32-bit successor targets"
             ),
-            "calls": "refused until a proven flat32 callee summary is available",
+            "calls": (
+                "with --assume-paired-calls, paired direct calls to the same mapped name use "
+                "an explicit post-call-state equality assumption; equality is CONDITIONAL, "
+                "never PASSED; indirect/unmapped targets and unmatched order refuse"
+                if call_entries else "refused until a proven flat32 callee summary is available"
+            ),
             "loops": (
                 "matched CFG fallback: eight blocks and 250 ms per block; unsupported loops refuse"
                 if loop_context is not None else "refused; matched-cfg induction remains available"
@@ -293,7 +359,7 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         kwargs = {
             "output_regs": (*output_regs, "ip"),
             "scan_limit": max(args.scan_limit, 0x10000),
-            "max_blocks_per_function": 128,
+            "max_blocks_per_function": args.region_max_blocks,
             "max_insns_per_function": 512,
             "max_assignments_per_function": 4096,
             "follow_call_fallthrough": True,
@@ -310,9 +376,12 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
             global_map(symbols, candidate, oracle, lst_data_symbols(args.oracle_lst)) if args.normalize_globals else {}
         )
         loop_context = (oracle, candidate, ofuncs, cfuncs) if args.mode == "auto" else None
+        delta = candidate.loader.main_object.mapped_base - candidate.loader.main_object.linked_base
+        call_entries = mapped_call_entries(boundaries, symbols, delta) if args.assume_paired_calls else None
         report = compare_region_mode(
             args, ossa, cssa, names,
             existing_results=results, relocation=normalization, loop_context=loop_context,
+            call_entries=call_entries,
         )
         write_json(args.out_dir, "compare.json", report)
         write_json(args.out_dir, "oracle.ssa.json", ossa)
@@ -411,6 +480,14 @@ def main() -> int:
     group.add_argument("--all-mapped", action="store_true")
     parser.add_argument("--mode", choices=["leaf", "matched-cfg", "region", "auto"], default="leaf")
     parser.add_argument(
+        "--region-max-blocks", type=int, default=REGION_DEFAULT_BLOCK_CAP,
+        help="region/auto scanner and composition block cap (default 128, maximum 256)",
+    )
+    parser.add_argument(
+        "--assume-paired-calls", action="store_true",
+        help="allow matched direct calls under explicit post-call-state equality assumptions (conditional only)",
+    )
+    parser.add_argument(
         "--normalize-globals", action="store_true", help="conditional value relocation; see proof_contract"
     )
     parser.add_argument(
@@ -424,6 +501,10 @@ def main() -> int:
     )
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args()
+    if not 1 <= args.region_max_blocks <= REGION_MAX_BLOCK_CAP:
+        parser.error("region-max-blocks must be between 1 and 256")
+    if args.assume_paired_calls and args.mode not in {"region", "auto"}:
+        parser.error("assume-paired-calls requires region or auto mode")
     if args.scan_limit <= 0 or args.timeout_ms <= 0:
         parser.error("scan-limit and timeout-ms must be positive")
     if args.mode == "matched-cfg" and args.normalize_globals:
