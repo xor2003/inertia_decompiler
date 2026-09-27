@@ -434,6 +434,9 @@ class LowerCtx:
         self.inline_depth = 0
         self.last_disp: S.SsaExpr | None = None   # last stk-space store (`__disp =` token)
         self.bind_args = cfg.m2c
+        # The trampoline's first dispatch routes INTO this function — it is
+        # the entry, not a call, and must not hit the boundary-call model.
+        self.disp_seen = False
         self.probe_stk: list[int] | None = None   # when set, record stk load keys
 
     # -- esp/arg helpers -----------------------------------------------------
@@ -594,6 +597,20 @@ class LowerCtx:
         idx = trunc(zext(idx, 32) if idx.width < 32 else idx, 32)
         hit = forward_load(version, idx, width)
         if hit is not None:
+            # A residual load rooted at the space's input is a forwarding
+            # miss: for const host addresses outside the canonical spaces the
+            # bytes live in the image — resolve them so PIC jump tables
+            # (`jmp *(got + idx*4)`) fold to concrete targets.
+            if (space == "other" and idx.op == "const"
+                    and hit.op == "loadle" and len(hit.args) == 2
+                    and hit.args[0].op == "mem_input"):
+                try:
+                    raw = bytes(self.cfg.project.loader.memory.load(
+                        idx.value, width // 8))
+                except KeyError:
+                    raw = b""
+                if len(raw) == width // 8:
+                    return E("const", width, value=int.from_bytes(raw, "little"))
             return hit
         if space in ("stk", "other"):
             # Host-ABI memory: canonicalize unresolvable loads to the space's
@@ -625,10 +642,14 @@ class LowerCtx:
             self.canon_write(self.cfg.flag_globals[idx.value], 8, 0, data)
             return
         if space == "stk":
-            # `__disp = <token>` is the last host-local store before every
-            # `goto __dispatch_call`; recording it lets the executor resolve
-            # the switch target without walking the case chain.
-            self.last_disp = data
+            # `__disp = <token>` writes are the only stores whose value is a
+            # dispatch token const — recording them tracks the dispatch
+            # variable even when the store chain can't forward later loads
+            # (symbolic-alias gaps in the host frame).
+            dv = constval(fold(data))
+            if (dv is not None and self.cfg.ksub_map
+                    and dv in self.cfg.ksub_map):
+                self.last_disp = fold(data)
         self.arrays[space] = E("storele", 0,
                                (self.arrays[space], trunc(zext(idx, 32) if idx.width < 32 else idx, 32), data))
 
@@ -1120,6 +1141,30 @@ BIOS_PORT_TO_INT = {
 }
 
 
+def _boundary_call(ctx: LowerCtx, name: str) -> None:
+    """Compositional call model: callee effect = opaque named constants.
+
+    Each canonical cell becomes ``summary_call_<name>_<cell>`` — a 0-arity
+    uninterpreted function, i.e. a deterministic-per-name constant that is
+    trivially equal across both sides.  This isolates the comparison to the
+    caller's own observable semantics; the callee is verified by its own
+    comparator entry.  ``esp``/``eip`` are preserved (retn/retf pops exactly
+    the pushed frame → net-balanced), ``cs``/``ss`` too (callee contract —
+    and ``ss`` drives stack addressing, so clobbering it would kill store
+    forwarding for the rest of the caller).
+    """
+    for r in CANON_REGS32:
+        if r == "esp":
+            continue
+        ctx.canon[r] = E(f"summary_call_{name}_g_{r}", 32, ())
+    for f in CANON_FLAGS:
+        ctx.canon[f] = E(f"summary_call_{name}_f_{f}", 8, ())
+    for s in ("ds", "es", "fs", "gs"):
+        ctx.canon[s] = E(f"summary_call_{name}_s_{s}", 16, ())
+    ctx.arrays["data"] = E(f"summary_call_{name}_data", 0, ())
+    ctx.arrays["io"] = E(f"summary_call_{name}_io", 0, ())
+
+
 def _uf_call(ctx: LowerCtx, name: str) -> None:
     """Replace every canonical cell with a shared uninterpreted summary term.
 
@@ -1361,6 +1406,34 @@ def _m2c_summary(ctx: LowerCtx, tname: str) -> str | None:
             ctx.canon_write("esp", 16, 0, E("add", 16, (sp, _c(i, 16))))
         return "retf"
     if "CALL_" in tname:
+        # m2c::CALL_(label, _state, _i, name, retaddr, has_ret): pushes the
+        # guest return addr, calls the trampoline, and the callee's ret pops
+        # the frame.  arg0 is the callee trampoline — resolve it to a proc
+        # and apply the compositional boundary (opaque summary outputs plus
+        # the stack accounting the callee's ret performs).
+        carg = _host_arg(ctx, 0)
+        if carg is not None:
+            carg = ctx._concretize(carg)
+        cv = constval(fold(carg)) if carg is not None else None
+        cname = ctx.cfg.addr2name.get(cv) if cv is not None else None
+        if cname is not None:
+            cname = _demangle_local(cname)
+            cm = re.match(r"^((?:sub|loc)_[0-9a-f]+)", cname)
+            cname = cm.group(1) if cm else cname
+        if cname is not None and cname.startswith("sub_"):
+            _boundary_call(ctx, cname)
+            _do_pop(ctx)  # the return-addr word CALL_ pushed
+            # CALLF frames carry the caller's pushed cs (const 0x1a2) at [sp]
+            # after the retaddr is gone — the callee's retf pops it too.
+            sp16 = trunc(ctx.canon["esp"], 16)
+            sp32 = E("add", 32, (
+                E("shl", 32, (zext(ctx.canon["ss"], 32), _c(4, 32))),
+                zext(sp16, 32)))
+            probe = forward_load(ctx.arrays["data"], sp32, 16)
+            if probe is not None and constval(fold(probe)) == 0x1A2:
+                _do_pop(ctx)
+            ctx.reg_versions["eax"] = c32(1)  # CALL_ returns bool ok
+            return f"call_boundary_{cname}"
         eip = ctx.canon.get("eip")
         _do_push(ctx, E("add", 16, (trunc(eip, 16), _c(2, 16))) if eip is not None
                  else inp("callret", 16))
@@ -1705,6 +1778,7 @@ def _clone_ctx(ctx: LowerCtx) -> LowerCtx:
     n.inline_depth = ctx.inline_depth
     n.last_disp = ctx.last_disp
     n.bind_args = ctx.bind_args
+    n.disp_seen = ctx.disp_seen
     n.probe_stk = None
     return n
 
@@ -1787,29 +1861,44 @@ def _port_helper_kind(name: str) -> str:
 
 
 def _disp_case_operand(g: S.SsaExpr, tokens: dict[int, str]) -> S.SsaExpr | None:
-    """Find `eq/ne(disp, token)` inside a guard; return the disp operand.
+    """Find a dispatch-operand compare inside a guard; return the disp operand.
 
-    Dispatch case-compares are `cmpl __disp, kTOKEN` — the token constant is
-    what makes them recognizable.
+    Recognizes both compare-chain guards (`cmpl __disp, kTOKEN`) and PIC
+    jump-table range checks (`sub(__disp, kMIN); cmp $span; ja default`).
+    The token constant is what makes them recognizable.
     """
     stack = [g]
     seen = 0
     while stack and seen < 256:
         n = stack.pop()
         seen += 1
-        if n.op in ("eq", "ne") and len(n.args) == 2:
+        if n.op in ("eq", "ne", "ult", "ule", "ugt", "uge") and len(n.args) == 2:
             a, b = n.args
             if b.op == "const" and b.value in tokens:
                 return a
             if a.op == "const" and a.value in tokens:
                 return b
-            # calculate_condition form: eq/ne(sub(x, tok), 0)
+            # calculate_condition / range-check form: cmp(sub(x, tok), k)
             for cand in (a, b):
                 if cand.op in ("sub", "xor") and len(cand.args) == 2:
                     if cand.args[1].op == "const" and cand.args[1].value in tokens:
                         return cand.args[0]
                     if cand.args[0].op == "const" and cand.args[0].value in tokens:
                         return cand.args[1]
+        if (n.op == "summary_x86g_calculate_condition"
+                and len(n.args) == 5):
+            # (cond, cc_op, dep1, dep2, nbits): dep1/dep2 are the raw
+            # compare operands — a token const marks a dispatch case or
+            # jump-table range check (`sub(disp,kMIN); cmp $span`).
+            for i, j in ((2, 3), (3, 2)):
+                lhs, rhs = n.args[i], n.args[j]
+                if rhs.op == "const" and rhs.value in tokens:
+                    return lhs
+                if lhs.op in ("sub", "xor") and len(lhs.args) == 2:
+                    if lhs.args[1].op == "const" and lhs.args[1].value in tokens:
+                        return lhs.args[0]
+                    if lhs.args[0].op == "const" and lhs.args[0].value in tokens:
+                        return lhs.args[1]
         stack.extend(n.args)
     return None
 
@@ -1898,6 +1987,39 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
             if kind == "abort":
                 terminals.append(TermPath("abort", cond, dict(ctx.canon), dict(ctx.arrays)))
                 continue
+            if kind == "retterm" and cfg.m2c and tname and "__dispatch_call" in tname:
+                # `return __dispatch_call(__disp, _state)`: the host router
+                # re-dispatches the pushed token.  sub_* tokens are callees
+                # (compositional boundary + ret); loc_*/klocret_* tokens are
+                # continuation labels (RETN resume) — jump to them.
+                darg = _host_arg(ctx, 0)
+                if darg is not None:
+                    darg = ctx._concretize(darg)
+                dval = constval(fold(darg)) if darg is not None else None
+                if dval is None and ctx.last_disp is not None:
+                    dval = constval(fold(ctx.last_disp))
+                dname = cfg.ksub_map.get(dval) if dval is not None else None
+                diagnostics.append(
+                    f"disp_call:{addr:x}:{hex(dval) if dval is not None else 'sym'}:{dname}"
+                    f":{repr(darg)[:100]}")
+                if dname is not None and dname.startswith("sub_"):
+                    # The callee returns through the guest frame our caller
+                    # pushed: [sp]=eip, [sp+2]=cs(0x1a2) for CALLF frames.
+                    _boundary_call(ctx, dname)
+                    _do_pop(ctx)
+                    sp16 = trunc(ctx.canon["esp"], 16)
+                    sp32 = E("add", 32, (
+                        E("shl", 32, (zext(ctx.canon["ss"], 32), _c(4, 32))),
+                        zext(sp16, 32)))
+                    probe = forward_load(ctx.arrays["data"], sp32, 16)
+                    if probe is not None and constval(fold(probe)) == 0x1A2:
+                        _do_pop(ctx)
+                    terminals.append(TermPath("ret", cond, dict(ctx.canon), dict(ctx.arrays)))
+                    continue
+                rtgt = cfg.label_addr.get(dname) if dname else None
+                if rtgt is not None:
+                    work.append((rtgt, ctx, cond, visits, frames))
+                    continue
             if kind == "retterm":
                 # Return-path trampoline: the game continuation is
                 # re-dispatched by the runtime; function-level equivalent
@@ -1922,6 +2044,11 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 terminals.append(TermPath("indirect_call", cond,
                                           dict(ctx.canon), dict(ctx.arrays)))
                 continue
+            if kind == "gamecall":
+                # Compositional boundary: callee verified by its own entry.
+                _boundary_call(ctx, tname)
+                work.append((resume, ctx, cond, visits, frames))
+                continue
             if (kind in ("inline", "gamecall") and tconst is not None
                     and len(frames) < max_inline):
                 nctx = _clone_ctx(ctx)
@@ -1941,7 +2068,9 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
         if cfg.m2c and cfg.ksub_map:
             disp_op = None
             for guard, _d in ctx.exits:
-                t = _disp_case_operand(fold(guard), cfg.ksub_map)
+                # Match the *unfolded* guard: folding `sub(Ktok, Ktok)` to 0
+                # would erase the token the match needs to recognize.
+                t = _disp_case_operand(guard, cfg.ksub_map)
                 if t is not None:
                     disp_op = t
                     break
@@ -1950,21 +2079,58 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 if dd.op in ("loadle", "loadbe") and len(dd.args) >= 2:
                     dd = forward_load(dd.args[0], fold(dd.args[1]), dd.width) or dd
                 dd = fold(dd)
-                if dd.op == "const":
-                    name = cfg.ksub_map.get(dd.value)
-                    tgt = cfg.label_addr.get(name) if name else None
-                    if tgt is not None:
-                        work.append((tgt, ctx, cond, visits, frames))
+                name = cfg.ksub_map.get(dd.value) if dd.op == "const" else None
+                if dd.op != "const" or name is not None:
+                    # A real dispatch: operand resolved to a mapped token, or
+                    # stayed symbolic (a popped retaddr to an unknown caller).
+                    # An unmapped/zero operand is not a dispatch (e.g. the
+                    # `if (__disp == 0)` entry check): leave disp_seen alone
+                    # and take the block's normal edges.
+                    first_dispatch = not ctx.disp_seen
+                    ctx.disp_seen = True
+                    diagnostics.append(
+                        f"disp_hit:{addr:x}:{hex(dd.value) if dd.op=='const' else dd.op}")
+                    if dd.op == "const":
+                        if not first_dispatch and name.startswith("sub_"):
+                            # Compositional call boundary: the callee gets
+                            # opaque named outputs and "returns" by consuming
+                            # the frame the caller pushed — [sp]=eip+2, plus
+                            # cs at [sp+2] for CALLF frames (pushed cs is the
+                            # const 0x1a2).
+                            diagnostics.append(f"boundary:{name}")
+                            _boundary_call(ctx, name)
+                            sp16 = trunc(ctx.canon["esp"], 16)
+                            sp32 = E("add", 32, (
+                                E("shl", 32, (zext(ctx.canon["ss"], 32), _c(4, 32))),
+                                zext(sp16, 32)))
+                            eip_v = _do_pop(ctx)
+                            up2 = E("add", 32, (sp32, _c(2, 32)))
+                            probe = forward_load(ctx.arrays["data"], up2, 16)
+                            cs_c = 0x1A2
+                            if probe is not None and constval(fold(probe)) == 0x1A2:
+                                cs_v = fold(_do_pop(ctx))
+                                cs_c = constval(cs_v) or 0x1A2
+                            e_c = constval(fold(eip_v))
+                            rtok = ((cs_c << 16) | e_c) if e_c is not None else None
+                            rname = cfg.ksub_map.get(rtok) if rtok is not None else None
+                            rtgt = cfg.label_addr.get(rname) if rname else None
+                            if rtgt is not None:
+                                work.append((rtgt, ctx, cond, visits, frames))
+                                continue
+                            diagnostics.append(f"boundary_noresume:{name}")
+                            terminals.append(TermPath("ret", cond, dict(ctx.canon), dict(ctx.arrays)))
+                            continue
+                        tgt = cfg.label_addr.get(name)
+                        if tgt is not None:
+                            work.append((tgt, ctx, cond, visits, frames))
+                            continue
+                        # Mapped token with no label: seed the slot so the
+                        # compare chain folds to a linear walk to default:.
+                        if disp_op.op in ("loadle", "loadbe") and len(disp_op.args) >= 2:
+                            ctx.store(ctx.arrays["stk"], disp_op.args[1], dd)
+                    else:
+                        terminals.append(TermPath("ret", cond, dict(ctx.canon), dict(ctx.arrays)))
                         continue
-                    # Const but unmapped/zero disp: no case matches — write the
-                    # resolved value back into the dispatch slot so every
-                    # case-compare folds to false and the chain collapses to a
-                    # linear walk to `default:` instead of 2^N splits.
-                    if disp_op.op in ("loadle", "loadbe") and len(disp_op.args) >= 2:
-                        ctx.store(ctx.arrays["stk"], disp_op.args[1], dd)
-                else:
-                    terminals.append(TermPath("ret", cond, dict(ctx.canon), dict(ctx.arrays)))
-                    continue
         edges: list[tuple[int, S.SsaExpr]] = []
         exit_guards: list[S.SsaExpr] = []
         for guard, dst in ctx.exits:
@@ -1977,6 +2143,7 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
             else:
                 diagnostics.append(f"indirect_exit:{addr:x}")
         if nxt.op != "const":
+            diagnostics.append(f"indirect:{addr:x}:{repr(nxt)[:140]}")
             terminals.append(TermPath("indirect", cond, dict(ctx.canon), dict(ctx.arrays)))
             continue
         # The implicit fallthrough edge is reachable only when every
@@ -2122,9 +2289,15 @@ def _demangle_local(name: str) -> str:
     return name
 
 
-def _nm_symbols(path: str) -> dict[str, tuple[int, int]]:
-    """name -> (addr, end) from nm, keeping local (static) symbols."""
+def _nm_symbols(path: str) -> tuple[dict[str, tuple[int, int]], set[str]]:
+    """name -> (addr, end) from nm, plus the set of global-binding names.
+
+    Local symbols matter for the port side: generated labels like
+    ``sub_1040b:`` inside TANDYSND functions collide with AR.EXE proc names,
+    so callers can restrict to globals when the name set must be AR-only.
+    """
     out: dict[str, tuple[int, int]] = {}
+    globals_: set[str] = set()
     syms: list[tuple[int, str]] = []
     p = subprocess.run(["nm", "-n", "--defined-only", path],
                        capture_output=True, text=True)
@@ -2136,6 +2309,8 @@ def _nm_symbols(path: str) -> dict[str, tuple[int, int]]:
             except ValueError:
                 continue
             syms.append((a, parts[2]))
+            if parts[1].isupper():
+                globals_.add(parts[2])
     for i, (a, n) in enumerate(syms):
         end = syms[i + 1][0] if i + 1 < len(syms) else a + 0x400
         out.setdefault(n, (a, end))
@@ -2146,7 +2321,8 @@ def _nm_symbols(path: str) -> dict[str, tuple[int, int]]:
     for m in re.finditer(r"(?m)^([0-9a-fA-F]+)\s*<([^>]+)>:", p.stdout):
         name = m.group(2).replace("@plt", "")
         out.setdefault(name, (int(m.group(1), 16), int(m.group(1), 16) + 0x10))
-    return out
+        globals_.add(name)
+    return out, globals_
 
 
 def _refmap_from_source(srcdir: Path) -> dict[str, int]:
@@ -2219,7 +2395,7 @@ def load_side(path: str, m2c: bool, srcdir: Path | None = None) -> SideConfig:
     project = angr.Project(path, auto_load_libs=False, load_debug_info=False)
     obj = project.loader.main_object
     base = obj.mapped_base if getattr(obj, "pic", False) else 0
-    raw_syms = _nm_symbols(path)
+    raw_syms, elf_globals = _nm_symbols(path)
     syms = {n: (a + base, e + base) for n, (a, e) in raw_syms.items()}
     addr2name: dict[int, str] = {a: _demangle_local(n) for n, (a, _e) in syms.items()}
     text_lo, text_hi = 0, 0
@@ -2231,6 +2407,10 @@ def load_side(path: str, m2c: bool, srcdir: Path | None = None) -> SideConfig:
                      m2c=m2c, data_base=0, data_size=0,
                      text_lo=text_lo, text_hi=text_hi)
     for n, (a, _e) in syms.items():
+        if not m2c and n not in elf_globals:
+            # Port-side locals are internal labels (e.g. ``sub_1040b:`` inside
+            # a TANDYSND function) that alias AR proc names — globals only.
+            continue
         dm = _demangle_local(n)
         if re.match(r"^(sub|loc)_[0-9a-f]+$|^(sub|loc)_[0-9a-f]+\(.*", dm) or dm.startswith(("sub_", "loc_")):
             canon = re.match(r"^((?:sub|loc)_[0-9a-f]+)", dm)
