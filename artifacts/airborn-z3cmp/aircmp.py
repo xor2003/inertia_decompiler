@@ -375,6 +375,8 @@ class SideConfig:
     proc_syms: dict[str, int] = field(default_factory=dict)     # canonical proc name -> addr
     text_lo: int = 0
     text_hi: int = 0
+    img_addr: int = 0            # port: host addr of the embedded guest image
+    img_size: int = 0
 
     def classify_const(self, c: int) -> tuple[str, int] | None:
         """Classify a constant host address -> (space, key/offset)."""
@@ -1888,6 +1890,78 @@ def _funcat_tag(cfg: "SideConfig", name: str) -> int:
     return tag
 
 
+def _enum_jpt(cfg: "SideConfig", e: S.SsaExpr, limit: int = 48,
+              valid=None):
+    """Find a sym-indexed 16/32-bit load inside ``e`` sitting on a known
+    jump table, and return ``(load_node, [unique entry values])``.
+
+    Two table forms:
+    - host tables: the load index carries a const naming an ELF symbol with
+      a known extent (m2c ``jpt_*`` arrays, PIC switch tables) — entries
+      come from file bytes, count = symbol size.
+    - port guest tables: a ``data``-space load (guest ``mem[]``) whose index
+      carries a const offset — bytes come from the embedded ``img[]`` at
+      ``img_addr + (off - 0x1a20)``; extent unknown, so entries accumulate
+      while ``valid(entry)`` holds (guest tables are contiguous).
+    """
+    # Every qualifying const leaf in a sym-indexed load index is a candidate
+    # table base; the index often embeds *other* loads/vars whose offsets
+    # also live in range (e.g. `jpt[word_1c96[si]]`). Try them all and keep
+    # the first base whose entries survive ``valid``.
+    cands: list[tuple[S.SsaExpr, str, int, int]] = []
+    stack = [e]
+    seen = 0
+    while stack and seen < 512:
+        n = stack.pop()
+        seen += 1
+        if (n.op in ("loadle", "loadbe") and n.width in (16, 32)
+                and len(n.args) == 2 and n.args[1].op != "const"):
+            w = n.width // 8
+            idx = n.args[1]
+            root = n.args[0]
+            while root.op in ("storele", "storebe") and len(root.args) >= 1:
+                root = root.args[0]
+            is_data = (root.op == "mem_input" and root.name == "data")
+            st = [idx]
+            s2 = 0
+            while st and s2 < 128:
+                m = st.pop()
+                s2 += 1
+                if m.op == "const":
+                    if (is_data and not cfg.m2c and cfg.img_addr
+                            and 0x1A20 <= m.value
+                            and m.value - 0x1A20 < cfg.img_size):
+                        cands.append((n, "img", m.value, limit))
+                    elif (not is_data and m.value in cfg.addr2name):
+                        rng = cfg.symbols.get(cfg.addr2name[m.value])
+                        if rng is not None:
+                            sz = rng[1] - rng[0]
+                            if 0 < sz <= limit * w and sz % w == 0:
+                                cands.append((n, "sym", m.value, sz // w))
+                st.extend(m.args)
+        stack.extend(n.args)
+    mem = cfg.project.loader.memory
+    for node, kind, base, cnt in cands:
+        w = node.width // 8
+        mbase = cfg.img_addr + (base - 0x1A20) if kind == "img" else base
+        entries: list[int] = []
+        for i in range(cnt):
+            try:
+                raw = bytes(mem.load(mbase + i * w, w))
+            except (KeyError, TypeError):
+                break
+            if len(raw) != w:
+                break
+            v = int.from_bytes(raw, "little")
+            if kind == "img" and valid is not None and not valid(v):
+                break
+            if v not in entries:
+                entries.append(v)
+        if entries:
+            return (node, entries)
+    return None
+
+
 def _disp_case_operand(g: S.SsaExpr, tokens: dict[int, str]) -> S.SsaExpr | None:
     """Find a dispatch-operand compare inside a guard; return the disp operand.
 
@@ -2072,6 +2146,50 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 if rtgt is not None:
                     work.append((rtgt, ctx, cond, visits, frames))
                     continue
+                if dname is None and darg is not None:
+                    # Sym-indexed guest jump table (jpt_*): enumerate the
+                    # known-extent table — one path per entry under guard
+                    # tbl[idx]==entry; token = (0x1a2<<16)|entry.
+                    enum = _enum_jpt(
+                        cfg, darg,
+                        valid=lambda ev: (0x1A20000 | ev) in cfg.ksub_map)
+                    if enum is not None:
+                        lnode, entries = enum
+                        diagnostics.append(
+                            f"disp_enum:{addr:x}:{len(entries)}")
+                        for ev in entries:
+                            nm2 = cfg.ksub_map.get(0x1A20000 | ev)
+                            if nm2 is None:
+                                continue
+                            nctx = _clone_ctx(ctx)
+                            ng2 = fold(E("and", 1, (
+                                cond, E("eq", 1, (lnode, _c(ev, 16))))))
+                            if nm2.startswith("sub_"):
+                                _boundary_call(nctx, nm2)
+                                _do_pop(nctx)
+                                sp16 = trunc(nctx.canon["esp"], 16)
+                                sp32 = E("add", 32, (
+                                    E("shl", 32, (zext(nctx.canon["ss"], 32),
+                                                  _c(4, 32))),
+                                    zext(sp16, 32)))
+                                probe = forward_load(
+                                    nctx.arrays["data"], sp32, 16)
+                                if (probe is not None
+                                        and constval(fold(probe)) == 0x1A2):
+                                    _do_pop(nctx)
+                                terminals.append(TermPath(
+                                    "ret", ng2, dict(nctx.canon),
+                                    dict(nctx.arrays)))
+                            else:
+                                rt2 = cfg.label_addr.get(nm2)
+                                if rt2 is not None:
+                                    work.append((rt2, nctx, ng2,
+                                                 visits, frames))
+                                else:
+                                    terminals.append(TermPath(
+                                        "ret", ng2, dict(nctx.canon),
+                                        dict(nctx.arrays)))
+                        continue
             if kind == "retterm":
                 # Return-path trampoline: the game continuation is
                 # re-dispatched by the runtime; function-level equivalent
@@ -2120,6 +2238,43 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                              if aval is not None else None)
                     if aval == 0:
                         fname = "rt_nullfn"
+                    if fname is None and aval is None:
+                        # Sym-indexed jump table (jpt_*): enumerate the
+                        # known-extent entries — path per table value
+                        # under guard tbl[idx]==entry.
+                        fmap = _funcat_map(cfg)
+                        enum = _enum_jpt(
+                            cfg, nxt.args[0],
+                            valid=lambda ev: (0x1A20 + ev) in fmap)
+                        if enum is not None:
+                            lnode, entries = enum
+                            diagnostics.append(
+                                f"funcat_enum:{addr:x}:{len(entries)}")
+                            for ev in entries:
+                                nctx = _clone_ctx(ctx)
+                                ng2 = fold(E("and", 1, (
+                                    cond, E("eq", 1, (lnode, _c(ev, 16))))))
+                                fname2 = _funcat_map(cfg).get(0x1A20 + ev)
+                                if fname2 is None or fname2 == "rt_nullfn":
+                                    # func_at returns NULL/rt_nullfn: the
+                                    # caller's else path is `return`.
+                                    terminals.append(TermPath(
+                                        "ret", ng2,
+                                        *_ret_boundary(cfg, nctx)))
+                                elif fname2.startswith("sub_"):
+                                    _boundary_call(nctx, fname2)
+                                    work.append((resume, nctx, ng2,
+                                                 visits, frames))
+                                else:
+                                    ftgt = cfg.proc_syms.get(fname2)
+                                    if ftgt is not None:
+                                        work.append((ftgt, nctx, ng2,
+                                                     visits, frames))
+                                    else:
+                                        terminals.append(TermPath(
+                                            "ret", ng2,
+                                            *_ret_boundary(cfg, nctx)))
+                            continue
                     if fname is not None:
                         tconst = _c(_funcat_tag(cfg, fname), nxt.width)
                         nxt = tconst
@@ -2246,6 +2401,75 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
             else:
                 diagnostics.append(f"indirect_exit:{addr:x}")
         if nxt.op != "const":
+            # Tail-position vfn call (`jmp *f_` where f_ = func_at(lin)):
+            # dispatch the funcat target — sub_* = boundary + ret (the
+            # callee returns on our behalf), loc_* = continuation jump.
+            if nxt.op == "summary_funcat" and len(nxt.args) == 1:
+                aval = constval(fold(ctx._concretize(nxt.args[0])))
+                enum0 = None
+                cands: list[tuple[S.SsaExpr, str]] = []
+                if aval is not None:
+                    nm = "rt_nullfn" if aval == 0 else _funcat_map(cfg).get(aval)
+                    if nm is not None:
+                        cands.append((E("const", 1, value=1), nm))
+                else:
+                    fmap0 = _funcat_map(cfg)
+                    enum0 = _enum_jpt(
+                        cfg, nxt.args[0],
+                        valid=lambda ev: (0x1A20 + ev) in fmap0)
+                    if enum0 is not None:
+                        lnode, entries = enum0
+                        for ev in entries:
+                            nm = _funcat_map(cfg).get(0x1A20 + ev)
+                            if nm is not None:
+                                cands.append((E("eq", 1, (lnode, _c(ev, 16))), nm))
+                if cands:
+                    diagnostics.append(f"funcat_jmp:{addr:x}:{len(cands)}")
+                    for g0, nm in cands:
+                        nctx = _clone_ctx(ctx)
+                        ng2 = fold(E("and", 1, (cond, g0)))
+                        if nm == "rt_nullfn" or nm.startswith("sub_"):
+                            if nm != "rt_nullfn":
+                                _boundary_call(nctx, nm)
+                            terminals.append(TermPath(
+                                "ret", ng2, *_ret_boundary(cfg, nctx)))
+                        else:
+                            ft = cfg.proc_syms.get(nm)
+                            if ft is not None:
+                                work.append((ft, nctx, ng2, visits, frames))
+                            else:
+                                terminals.append(TermPath(
+                                    "ret", ng2, *_ret_boundary(cfg, nctx)))
+                    continue
+                _dbg = nxt.args[0]
+                _st = [_dbg]
+                while _st:
+                    _n = _st.pop()
+                    if _n.op in ("loadle", "loadbe") and len(_n.args) == 2:
+                        _dbg = _n.args[1]
+                        break
+                    _st.extend(_n.args)
+                diagnostics.append(
+                    f"funcat_unres:{addr:x}:idx={repr(_dbg)[:300]}"
+                    f":enum={'none' if enum0 is None else enum0[1]}")
+                terminals.append(TermPath("indirect", cond, dict(ctx.canon),
+                                          dict(ctx.arrays)))
+                continue
+            # PIC jump table with symbolic index (`jmp *tbl[idx]`):
+            # enumerate known-extent table entries — one edge per host
+            # target under guard tbl[idx]==addr.
+            enum = _enum_jpt(cfg, nxt)
+            if enum is not None:
+                lnode, entries = enum
+                diagnostics.append(f"jpt_enum:{addr:x}:{len(entries)}")
+                for ev in entries:
+                    if not (cfg.text_lo <= ev < cfg.text_hi):
+                        continue
+                    nctx = _clone_ctx(ctx)
+                    ng2 = fold(E("and", 1, (
+                        cond, E("eq", 1, (lnode, _c(ev, lnode.width))))))
+                    work.append((ev, nctx, ng2, visits, frames))
+                continue
             diagnostics.append(f"indirect:{addr:x}:{repr(nxt)[:140]}")
             terminals.append(TermPath("indirect", cond, dict(ctx.canon), dict(ctx.arrays)))
             continue
@@ -2553,6 +2777,9 @@ def load_side(path: str, m2c: bool, srcdir: Path | None = None) -> SideConfig:
         memsym = syms.get("mem")
         cfg.data_base = memsym[0] if memsym else 0
         cfg.data_size = 1 << 20
+        im = syms.get("img")
+        if im:
+            cfg.img_addr, cfg.img_size = im[0], im[1] - im[0]
         for nm_, canon in (("eax", "eax"), ("ebx", "ebx"), ("ecx", "ecx"),
                            ("edx", "edx"), ("esi", "esi"), ("edi", "edi"),
                            ("esp", "esp"), ("ebp", "ebp")):
