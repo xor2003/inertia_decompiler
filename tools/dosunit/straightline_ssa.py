@@ -2404,7 +2404,12 @@ def _record_lowered_part(
     """Append the SSA part body for a lowered block and enqueue its successors."""
     part_index = len(state.lowered_parts)
     entry = ctx.function.get("entry")
-    flat_module = isinstance(entry, dict) and entry.get("kind") == "module_relative"
+    flat_module = (
+        isinstance(entry, dict)
+        and entry.get("kind") == "module_relative"
+        and ctx.project.arch.bits == 32
+        and getattr(ctx.project, "_dosunit_lifter_mode", None) not in {"dos_mz", "blob"}
+    )
     offset_width = 8 if flat_module else 4
     entry_delta = at - ctx.start if flat_module else (at - ctx.start) & 0xFFFF
     block_ip = at - ctx.function_base if flat_module else (at - ctx.function_base) & 0xFFFF
@@ -3584,7 +3589,11 @@ BYTE_REGISTER_ACCESS = {
     13: ("bx", True),
 }
 LOW_HALF_32_REGISTERS = frozenset({"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"})
-X86_PURE_CCALL_ARITIES: dict[str, int] = {"x86g_calculate_condition": 5, "x86g_calculate_eflags_c": 4}
+X86_PURE_CCALL_ARITIES: dict[str, int] = {
+    "x86g_calculate_condition": 5,
+    "x86g_calculate_eflags_c": 4,
+    "x86g_calculate_eflags_all": 4,
+}
 X86_LAZY_FLAG_SUMMARY_OPS = frozenset(f"summary_{name}" for name in X86_PURE_CCALL_ARITIES)
 
 
@@ -8239,7 +8248,7 @@ def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> bool:
         steps += 1
         if not isinstance(term, dict):
             continue
-        if term.get("op") in X86_LAZY_FLAG_SUMMARY_OPS:
+        if term.get("op") in X86_LAZY_FLAG_SUMMARY_OPS and _x86_lazy_flag_summary_is_uninterpreted(term, assignments):
             return True
         ref = term.get("ref")
         if isinstance(ref, str) and ref not in visited:
@@ -8247,6 +8256,41 @@ def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> bool:
             stack.append(assignments.get(ref))
         stack.extend(term.get("args", ()) or ())
     return bool(stack)
+
+
+def _x86_exact_condition_kind(condition: int | None, cc_op: int | None) -> tuple[int, int, bool] | None:
+    """Identify the small x86 lazy-flag subset with exact compare semantics."""
+    if condition is None or cc_op is None:
+        return None
+    if cc_op in {4, 5, 6} and condition in {2, 3, 4, 5, 6, 7, 12, 13, 14, 15}:  # SUBB, SUBW, SUBL.
+        return 8 << (cc_op - 4), condition, True
+    if cc_op in {13, 14, 15} and condition in {4, 5}:  # LOGICB, LOGICW, LOGICL.
+        return 8 << (cc_op - 13), condition, False
+    return None
+
+
+def _x86_lazy_flag_summary_is_uninterpreted(
+    term: dict[str, Any], assignments: dict[str, dict[str, Any]]
+) -> bool:
+    """Keep SAT inconclusive only when the flag helper remains abstract."""
+    if term.get("op") != "summary_x86g_calculate_condition":
+        return True
+    args = term.get("args")
+    if not isinstance(args, list) or len(args) != 5:
+        return True
+
+    def constant(value: Any) -> int | None:  # noqa: ANN401
+        """Resolve a direct constant or one materialized SSA reference."""
+        if not isinstance(value, dict):
+            return None
+        ref = value.get("ref")
+        if isinstance(ref, str):
+            value = assignments.get(ref)
+        if not isinstance(value, dict) or value.get("op") != "const":
+            return None
+        return _optional_int(value.get("value"))
+
+    return _x86_exact_condition_kind(constant(args[0]), constant(args[1])) is None
 
 
 def _ip_term_is_layout(
@@ -8651,6 +8695,17 @@ def _summarize_abi_function(
                 }
             ],
         }
+    except MemoryError:
+        return {
+            "status": "refused",
+            "reason": "compose_budget_exceeded",
+            "mismatches": [
+                {
+                    "kind": "compose_budget_exceeded",
+                    "detail": "bounded loop summary exhausted memory composing branch states",
+                }
+            ],
+        }
     return {
         "status": "passed",
         "part_count": len(parts),
@@ -8766,6 +8821,36 @@ def _stack_address_term(ss_term: dict[str, Any], sp_term: dict[str, Any], offset
     }
 
 
+_COMPOSE_MAX_BLOCKS = 65536
+_COMPOSE_MAX_PATH_DEPTH = 2048
+_COMPOSE_MAX_TERMINALS = 16384
+
+
+def _compose_budget_check(
+    *,
+    path: list[int],
+    compose_stats: dict[str, int] | None,
+) -> None:
+    """Bound ABI composition work; raises LowerFailure when a budget is blown.
+
+    Diamond-heavy CFGs re-compose reconvergent blocks per path, so block visits
+    and path depth grow exponentially without these caps.  Overrun converts to
+    an honest ``compose_budget_exceeded`` refusal upstream.
+    """
+    if compose_stats is not None:
+        compose_stats["blocks_composed"] = compose_stats.get("blocks_composed", 0) + 1
+        if compose_stats["blocks_composed"] > _COMPOSE_MAX_BLOCKS:
+            raise LowerFailure(
+                "compose_budget_exceeded",
+                f"ABI compose exceeded {_COMPOSE_MAX_BLOCKS} block visits",
+            )
+    if len(path) >= _COMPOSE_MAX_PATH_DEPTH:
+        raise LowerFailure(
+            "compose_budget_exceeded",
+            f"ABI compose exceeded path depth {_COMPOSE_MAX_PATH_DEPTH}",
+        )
+
+
 def _compose_abi_state(
     block: dict[str, Any],
     incoming_state: dict[str, dict[str, Any]],
@@ -8781,8 +8866,7 @@ def _compose_abi_state(
 ) -> tuple[dict[str, dict[str, Any]], int]:
     entry = block.get("entry", {}) if isinstance(block.get("entry"), dict) else {}
     key = (_optional_int(entry.get("linear")) or _optional_int(entry.get("ip")) or 0) & 0xFFFF
-    if compose_stats is not None:
-        compose_stats["blocks_composed"] = compose_stats.get("blocks_composed", 0) + 1
+    _compose_budget_check(path=path, compose_stats=compose_stats)
     if _compose_loop_cut(block_key=key, path=path, max_loop_unroll=max_loop_unroll, compose_stats=compose_stats):
         return incoming_state, 0
     source = block.get("source", {}) if isinstance(block.get("source"), dict) else {}
@@ -8946,7 +9030,13 @@ def _compose_branch_step(
         return false_state, false_terminals
     if false_terminals <= 0:
         return true_state, true_terminals
-    return _merge_abi_states(cond, true_state, false_state), true_terminals + false_terminals
+    merged_terminals = true_terminals + false_terminals
+    if merged_terminals > _COMPOSE_MAX_TERMINALS:
+        raise LowerFailure(
+            "compose_budget_exceeded",
+            f"ABI compose exceeded {_COMPOSE_MAX_TERMINALS} terminal states",
+        )
+    return _merge_abi_states(cond, true_state, false_state), merged_terminals
 
 
 def _compose_abi_call(
@@ -13625,6 +13715,10 @@ _Z3_SIGNED_CMPS: dict[str, Callable[[Any, Any, Any], Any]] = {
 
 
 def _z3_apply(op: str, width: int, args: list[Any], z3: Any) -> Any:  # noqa: ANN401
+    if op == "summary_x86g_calculate_condition":
+        exact = _z3_x86_exact_condition(width, args, z3)
+        if exact is not None:
+            return exact
     if op.startswith("summary_"):
         return _z3_uninterpreted_summary(op, width, args, z3)
     if op in _Z3_UNSIGNED_BINOPS:
@@ -13640,6 +13734,36 @@ def _z3_apply(op: str, width: int, args: list[Any], z3: Any) -> Any:  # noqa: AN
     if op in {"loadle", "loadbe", "storele", "storebe"}:
         return _z3_memory_op(op, width, args, z3)
     return _z3_leaf_op(op, width, args, z3)
+
+
+def _z3_x86_exact_condition(width: int, args: list[Any], z3: Any) -> Any | None:  # noqa: ANN401
+    """Model VEX x86 SUB/LOGIC conditions at the operation's actual bit width."""
+    if len(args) != 5 or not z3.is_bv_value(args[0]) or not z3.is_bv_value(args[1]):
+        return None
+    kind = _x86_exact_condition_kind(args[0].as_long(), args[1].as_long())
+    if kind is None:
+        return None
+    operand_width, condition, subtract = kind
+    left = z3.Extract(operand_width - 1, 0, _resize_z3(args[2], args[2].size(), 32, signed=False, z3=z3))
+    right = z3.Extract(operand_width - 1, 0, _resize_z3(args[3], args[3].size(), 32, signed=False, z3=z3))
+    zero = z3.BitVecVal(0, operand_width)
+    if subtract:
+        conditions = {
+            2: lambda: z3.ULT(left, right),
+            3: lambda: z3.UGE(left, right),
+            4: lambda: left == right,
+            5: lambda: left != right,
+            6: lambda: z3.ULE(left, right),
+            7: lambda: z3.UGT(left, right),
+            12: lambda: left < right,
+            13: lambda: left >= right,
+            14: lambda: left <= right,
+            15: lambda: left > right,
+        }
+        predicate = conditions[condition]()
+    else:
+        predicate = left == zero if condition == 4 else left != zero
+    return z3.If(predicate, z3.BitVecVal(1, width), z3.BitVecVal(0, width))
 
 
 def _z3_aligned_binop(
