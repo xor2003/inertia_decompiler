@@ -235,6 +235,8 @@ def cmd_compare_ssa(args: argparse.Namespace) -> int:  # noqa: D103
         max_region_loop_unroll=args.max_region_loop_unroll,
         max_rss_mb=args.max_rss_mb,
     )
+    document["oracle_ssa"] = str(Path(args.oracle_ssa))
+    document["candidate_ssa"] = str(Path(args.candidate_ssa))
     write_json(Path(args.out), document)
     summary = document.get("summary", {})
     return 0 if summary.get("failed") == 0 and summary.get("refused") == 0 else 1
@@ -306,19 +308,22 @@ def _run_ssa_batch(command: list[str], batch_timeout_ms: int) -> tuple[int, bool
 
 def _ssa_batch_compare_reusable(
     batch: list[dict[str, Any]],
+    batch_oracle_path: Path,
     batch_compare_path: Path,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Decide whether an existing compare output already covers this exact batch.
 
-    Reboot-resume consistency check: the recorded main-result total must equal
-    the batch's oracle-part count.  Anything else may be a stale artifact from
-    a different split and is re-compared rather than trusted.
+    Reboot-resume consistency check: the document must name this batch's oracle
+    SSA file (children record ``oracle_ssa``) and report at least one compared
+    result.  Anything else may be a stale artifact and is re-compared.
     """
     try:
         compare_doc = load_json(batch_compare_path)
     except (OSError, ValueError):
         return False, None
     if not isinstance(compare_doc, dict):
+        return False, None
+    if str(compare_doc.get("oracle_ssa") or "") != str(batch_oracle_path):
         return False, None
     summary = compare_doc.get("summary")
     if not isinstance(summary, dict):
@@ -327,7 +332,7 @@ def _ssa_batch_compare_reusable(
         total = int(summary.get("total"))
     except (TypeError, ValueError):
         return False, None
-    if total != len(batch):
+    if total <= 0:
         return False, None
     failed = int(summary.get("failed") or 0)
     refused = int(summary.get("refused") or 0)
@@ -397,7 +402,7 @@ def cmd_compare_ssa_batched(args: argparse.Namespace) -> int:  # noqa: D103
         batch_compare_path = out_dir / f"compare.batch{batch_index:03d}.json"
         write_json(batch_oracle_path, batch_doc)
         if args.resume:
-            reusable, reused = _ssa_batch_compare_reusable(batch, batch_compare_path)
+            reusable, reused = _ssa_batch_compare_reusable(batch, batch_oracle_path, batch_compare_path)
             if reusable and reused is not None:
                 row = _ssa_batch_row(
                     batch_index,

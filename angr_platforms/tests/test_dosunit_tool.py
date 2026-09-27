@@ -800,6 +800,73 @@ def test_dosunit_x86_flag_summary_cannot_turn_a_model_difference_into_a_bug_verd
     changed = straightline_ssa._compare_functions(concrete, candidate, timeout_ms=1000)
     assert changed["status"] == "failed"
 
+    all_flags = {**flag_call, "op": "summary_x86g_calculate_eflags_all"}
+    all_oracle = {"inputs": [], "assignments": [all_flags], "outputs": {"eax": {"ref": "flag_call"}}}
+    all_inconclusive = straightline_ssa._compare_functions(all_oracle, candidate, timeout_ms=1000)
+    assert all_inconclusive["status"] == "refused"
+    assert all_inconclusive["reason"] == "uninterpreted_x86_flags"
+
+
+def test_dosunit_exact_x86_zero_flag_for_sub_and_logic_has_real_verdicts():
+    """Known x86 SUBW/LOGICW zero tests use bitvector semantics, not UF guesses."""
+    def summary(cc_op: int, dep1: dict[str, object], dep2: dict[str, object]) -> dict[str, object]:
+        return {
+            "id": "condition", "op": "summary_x86g_calculate_condition", "width": 32,
+            "args": [
+                {"op": "const", "width": 32, "value": "0x4"},
+                {"op": "const", "width": 32, "value": hex(cc_op)},
+                dep1, dep2, {"op": "const", "width": 32, "value": "0x0"},
+            ],
+        }
+
+    left = {"op": "input", "name": "left", "width": 32}
+    right = {"op": "input", "name": "right", "width": 32}
+    subtraction = {"id": "difference", "op": "sub", "width": 32, "args": [left, right]}
+    oracle = {
+        "inputs": [{"name": "left", "width": 32}, {"name": "right", "width": 32}],
+        "assignments": [summary(5, left, right)], "outputs": {"eax": {"ref": "condition"}},
+    }
+    candidate = {
+        "inputs": oracle["inputs"], "assignments": [subtraction, summary(14, {"ref": "difference"}, right)],
+        "outputs": {"eax": {"ref": "condition"}},
+    }
+    equal = straightline_ssa._compare_functions(oracle, candidate, timeout_ms=1000)
+    assert equal["status"] == "passed"
+
+    changed = {"inputs": oracle["inputs"], "assignments": [],
+               "outputs": {"eax": {"op": "const", "width": 32, "value": "0x0"}}}
+    mismatch = straightline_ssa._compare_functions(oracle, changed, timeout_ms=1000)
+    assert mismatch["status"] == "failed"
+
+
+def test_dosunit_exact_x86_sub_conditions_respect_operand_width_and_signedness():
+    """The bounded x86 helper agrees with integer comparisons at flag edges."""
+    import z3
+
+    for cc_op, bits in ((4, 8), (5, 16), (6, 32)):
+        mask = (1 << bits) - 1
+        sign = 1 << (bits - 1)
+        for left, right in ((0, 0), (sign, 0), (mask, 1), (1, mask)):
+            unsigned_left, unsigned_right = left & mask, right & mask
+            signed_left = unsigned_left - (1 << bits) if unsigned_left & sign else unsigned_left
+            signed_right = unsigned_right - (1 << bits) if unsigned_right & sign else unsigned_right
+            expected = {
+                2: unsigned_left < unsigned_right,
+                3: unsigned_left >= unsigned_right,
+                4: unsigned_left == unsigned_right,
+                5: unsigned_left != unsigned_right,
+                6: unsigned_left <= unsigned_right,
+                7: unsigned_left > unsigned_right,
+                12: signed_left < signed_right,
+                13: signed_left >= signed_right,
+                14: signed_left <= signed_right,
+                15: signed_left > signed_right,
+            }
+            for condition, verdict in expected.items():
+                args = [z3.BitVecVal(value, 32) for value in (condition, cc_op, left, right, 0)]
+                actual = straightline_ssa._z3_apply("summary_x86g_calculate_condition", 32, args, z3)
+                assert z3.simplify(actual).as_long() == int(verdict)
+
 
 def test_dosunit_straightline_ssa_follows_short_boring_vex_fallthrough(tmp_path: Path):
     image = bytearray(0x240)
