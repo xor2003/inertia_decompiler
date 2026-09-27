@@ -1956,7 +1956,12 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                     if tgt is not None:
                         work.append((tgt, ctx, cond, visits, frames))
                         continue
-                    # const but unmapped token -> default: path; run edges.
+                    # Const but unmapped/zero disp: no case matches — write the
+                    # resolved value back into the dispatch slot so every
+                    # case-compare folds to false and the chain collapses to a
+                    # linear walk to `default:` instead of 2^N splits.
+                    if disp_op.op in ("loadle", "loadbe") and len(disp_op.args) >= 2:
+                        ctx.store(ctx.arrays["stk"], disp_op.args[1], dd)
                 else:
                     terminals.append(TermPath("ret", cond, dict(ctx.canon), dict(ctx.arrays)))
                     continue
@@ -2104,8 +2109,14 @@ def _collect_all_inputs(exprs: tuple) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _demangle_local(name: str) -> str:
-    """Reduce a mangled C++ name to a comparable basename."""
-    m = re.search(r"(sub_[0-9a-f]+|loc_[0-9a-f]+|seg000_[0-9a-f]+_proc|nullsub_\d+|_group\d+|asm2C_\w+|eflagsC\d?|get[A-Z]{2}|PUSH_|POP_|CALL_|RETN_|RETF_|JMP_|INT_|IN_|OUT_)", name)
+    """Reduce a mangled C++ name to a comparable basename.
+
+    The match must sit at a non-identifier boundary (start, digit length
+    prefix, ``::``, ``@``): port symbols like ``tw_tnd_sub_106d7`` are
+    TANDYSND-overlay thunks whose embedded ``sub_`` belongs to a different
+    program and must not alias AR.EXE's ``sub_106d7``.
+    """
+    m = re.search(r"(?:^|[^A-Za-z_])(sub_[0-9a-f]+|loc_[0-9a-f]+|seg000_[0-9a-f]+_proc|nullsub_\d+|_group\d+|asm2C_\w+|eflagsC\d?|get[A-Z]{2}|PUSH_|POP_|CALL_|RETN_|RETF_|JMP_|INT_|IN_|OUT_)", name)
     if m:
         return m.group(1)
     return name
