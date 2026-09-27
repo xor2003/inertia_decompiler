@@ -8,7 +8,9 @@ orc = m.load_side("/home/xor/games/airborn/build_sdl/ar_m2c", m2c=True, srcdir=m
 cnd = m.load_side("/home/xor/games/airborn/port/ar_port", m2c=False)
 def handler(s,f): raise TimeoutError()
 signal.signal(signal.SIGALRM, handler)
-subs = sorted(n for n in orc.proc_syms if n.startswith("sub_") and n in cnd.proc_syms)
+ar_names = set(orc.ksub_map.values())  # AR.EXE procs only (0x1a2-space tokens)
+subs = sorted(n for n in orc.proc_syms if n.startswith("sub_")
+              and n in cnd.proc_syms and n in ar_names)
 mine = [n for i,n in enumerate(subs) if i % nw == wid]
 print(f"worker {wid}: {len(mine)} fns", flush=True)
 out = f"{OUTDIR}/z3res_{wid}.json"
