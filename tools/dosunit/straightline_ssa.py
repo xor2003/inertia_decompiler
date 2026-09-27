@@ -9627,7 +9627,7 @@ def _attach_binary_signature_context(
         image = load_mz_image(Path(str(exe))).memory
     except Exception:
         return
-    linked_base = _ssa_document_linked_base(functions)
+    linked_base = _ssa_document_linked_base(functions, len(image))
     if linked_base is None:
         return
     index["_binary_signature_context"] = {
@@ -9637,8 +9637,17 @@ def _attach_binary_signature_context(
     }
 
 
-def _ssa_document_linked_base(functions: list[dict[str, Any]]) -> int | None:
+def _ssa_document_linked_base(functions: list[dict[str, Any]], image_size: int = 0) -> int | None:
+    """Derive the image load bias mapping ``entry.linear`` to image offsets.
+
+    ``entry.ip`` is not uniformly segment-relative across corpora: documents
+    emitted with segment-relative ips make ``linear - ip`` equal the owning
+    segment's base, which is not the image bias.  Score each observed
+    ``linear - ip`` delta by how many function entries it places inside the
+    image; the true bias maximizes coverage.
+    """
     bases: Counter[int] = Counter()
+    linears: list[int] = []
     for function in functions:
         if not isinstance(function, dict):
             continue
@@ -9647,10 +9656,23 @@ def _ssa_document_linked_base(functions: list[dict[str, Any]]) -> int | None:
         ip = _optional_int(entry.get("ip"))
         if linear is None or ip is None:
             continue
+        linears.append(linear)
         bases[(linear - (ip & 0xFFFF)) & 0xFFFFFFFF] += 1
     if not bases:
         return None
-    return bases.most_common(1)[0][0]
+    if image_size <= 0:
+        return bases.most_common(1)[0][0]
+    # The lifter loads the MZ image at paragraph 0x100 (bias 0x1000); keep it
+    # as a candidate even when no entry yields that delta directly.
+    bases.setdefault(0x1000, 0)
+    def coverage(base: int) -> int:
+        return sum(1 for linear in linears if base <= linear < base + image_size)
+    best, best_key = None, (-1, -1, 0)
+    for base, count in bases.items():
+        key = (coverage(base), count, -base)
+        if key > best_key:
+            best, best_key = base, key
+    return best
 
 
 def _binary_signature_target_for_call_raw(
@@ -9691,6 +9713,13 @@ def _candidate_linear_offsets_for_low16(raw: int, image_size: int, linked_base: 
     low16 = raw & 0xFFFF
     seen: set[int] = set()
     candidates: list[tuple[int, int]] = []
+    # The rendered target is already a resolved linear address; try it first
+    # so interior calls land on their real code, not the first same-low16
+    # alias earlier in the image.
+    raw_offset = raw - linked_base
+    if 0 <= raw_offset < image_size:
+        seen.add(raw_offset)
+        candidates.append((raw, raw_offset))
     max_linear = linked_base + max(0, image_size - 1)
     high = 0
     while high <= max_linear + 0x10000:
@@ -9757,6 +9786,7 @@ def _normalized_binary_signature_pattern(blob: bytes, linear: int) -> tuple[int 
             encoding = getattr(insn, "encoding", None)
             mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
             is_control = mnemonic in CONTROL_MNEMONICS and mnemonic != "int"
+            masked_operands = False
             for offset_name, size_name in (("imm_offset", "imm_size"), ("disp_offset", "disp_size")):
                 offset = int(getattr(encoding, offset_name, 0) or 0)
                 size = int(getattr(encoding, size_name, 0) or 0)
@@ -9770,6 +9800,8 @@ def _normalized_binary_signature_pattern(blob: bytes, linear: int) -> tuple[int 
                     continue
                 for idx in range(offset, min(offset + size, len(mask))):
                     mask[idx] = True
+                masked_operands = True
+            _mask_ptr1616_immediate(mask, insn, mnemonic, masked_operands)
             pattern.extend(None if masked else byte for byte, masked in zip(encoded, mask, strict=False))
             if len(pattern) >= len(blob):
                 break
@@ -9797,7 +9829,7 @@ def _layout_binary_signature_pattern(blob: bytes, linear: int) -> tuple[int | No
             encoding = getattr(insn, "encoding", None)
             list(getattr(insn, "operands", []) or [])
             if mnemonic in CONTROL_MNEMONICS:
-                _mask_control_immediates(mask, encoding)
+                _mask_control_immediates(mask, insn, encoding, mnemonic)
             else:
                 _mask_non_control_insn(mask, pattern, pending_reg_immediates, insn, encoding, mnemonic)
             pattern.extend(None if masked else byte for byte, masked in zip(encoded, mask, strict=False))
@@ -9810,8 +9842,11 @@ def _layout_binary_signature_pattern(blob: bytes, linear: int) -> tuple[int | No
         return tuple(blob)
 
 
-def _mask_control_immediates(mask: list[bool], encoding: Any) -> None:  # noqa: ANN401
+def _mask_control_immediates(
+    mask: list[bool], insn: Any, encoding: Any, mnemonic: str  # noqa: ANN401
+) -> None:
     """Mask immediate/displacement bytes of a control-transfer instruction."""
+    masked_operands = False
     for offset_name, size_name in (("imm_offset", "imm_size"), ("disp_offset", "disp_size")):
         offset = int(getattr(encoding, offset_name, 0) or 0)
         size = int(getattr(encoding, size_name, 0) or 0)
@@ -9819,6 +9854,30 @@ def _mask_control_immediates(mask: list[bool], encoding: Any) -> None:  # noqa: 
             continue
         for idx in range(offset, min(offset + size, len(mask))):
             mask[idx] = True
+        masked_operands = True
+    _mask_ptr1616_immediate(mask, insn, mnemonic, masked_operands)
+
+
+def _mask_ptr1616_immediate(
+    mask: list[bool], insn: Any, mnemonic: str, masked_operands: bool  # noqa: ANN401
+) -> None:
+    """Mask the 4-byte ptr16:16 operand that capstone under-reports.
+
+    Capstone encodes ``lcall``/``ljmp`` (opcodes ``0x9a``/``0xea``) with
+    ``imm_offset`` set but ``imm_size`` 0, so the whole far-pointer operand
+    stays visible in the pattern and layout-shifted call targets never
+    signature-match.  When the encoding pass masked nothing, mask every byte
+    after the opcode so the operand is position-insensitive.
+    """
+    if masked_operands or mnemonic not in {"lcall", "ljmp"}:
+        return
+    opcode = 0x9A if mnemonic == "lcall" else 0xEA
+    encoded = bytes(getattr(insn, "bytes", b"") or b"")
+    opcode_index = encoded.find(opcode)
+    if opcode_index < 0 or opcode_index + 1 >= len(mask):
+        return
+    for idx in range(opcode_index + 1, len(mask)):
+        mask[idx] = True
 
 
 def _clear_pending_reg_immediates(
