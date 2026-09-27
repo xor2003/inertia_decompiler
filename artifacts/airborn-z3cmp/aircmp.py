@@ -2274,6 +2274,23 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                     _sh(_g0)
         for d, g in edges:
             ng = cond if g.op == "const" and g.value == 1 else E("and", 1, (cond, g))
+            # Tail-position jump to another proc's entry (TCO `jmp sub_X` =
+            # call + return): same contract as a near call — boundary-UF the
+            # callee and end the path at the ret boundary.  loc_* targets
+            # are in-function continuations and keep their inline path.
+            tn_ = cfg.addr2name.get(d)
+            if (tn_ is not None and tn_.startswith("sub_")
+                    and cfg.proc_syms.get(tn_) == d and d != entry):
+                nctx = _clone_ctx(ctx)
+                diagnostics.append(f"tailcall:{addr:x}:{tn_}")
+                _boundary_call(nctx, tn_)
+                if cfg.m2c:
+                    terminals.append(TermPath("ret", ng, dict(nctx.canon),
+                                              dict(nctx.arrays)))
+                else:
+                    terminals.append(TermPath("ret", ng,
+                                              *_ret_boundary(cfg, nctx)))
+                continue
             if cfg.text_lo <= d < cfg.text_hi:
                 work.append((d, _clone_ctx(ctx), ng, visits, frames))
             elif d in cfg.addr2name:
