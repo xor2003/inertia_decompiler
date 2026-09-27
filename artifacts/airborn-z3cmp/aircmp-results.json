@@ -1,0 +1,405 @@
+{
+ "total": 3,
+ "passed": 0,
+ "failed": 3,
+ "incomplete": 0,
+ "refused": 0,
+ "results": [
+  {
+   "function": "sub_11b81",
+   "oracle": {
+    "diagnostics": [
+     "incomplete_paths:4"
+    ],
+    "terminals": 21,
+    "terminal_kinds": [
+     "ret"
+    ]
+   },
+   "candidate": {
+    "diagnostics": [
+     "incomplete_paths:1"
+    ],
+    "terminals": 2,
+    "terminal_kinds": [
+     "ret"
+    ]
+   },
+   "identical_outputs": [
+    "data",
+    "f_df",
+    "f_if_",
+    "f_tf",
+    "g_ebp",
+    "g_ebx",
+    "g_ecx",
+    "g_edi",
+    "g_esi",
+    "io",
+    "s_ds",
+    "s_es",
+    "s_fs",
+    "s_gs",
+    "s_ss"
+   ],
+   "unmodeled_flag_outputs": [
+    "f_af",
+    "f_of",
+    "f_pf",
+    "f_sf",
+    "f_zf"
+   ],
+   "status": "failed",
+   "reason": "observable_mismatch",
+   "mismatches": [
+    {
+     "kind": "output_expr_changed",
+     "reg": "g_eax",
+     "oracle_value": "0x8",
+     "candidate_value": "0x0",
+     "counterexample": {
+      "esp": "0x00000000",
+      "f_cf": "0x00",
+      "g_eax": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esp": "0x00000000",
+      "gs": "0x0000"
+     }
+    }
+   ],
+   "solver_time_ms": 106,
+   "skipped_layout_outputs": []
+  },
+  {
+   "function": "sub_10a19",
+   "oracle": {
+    "diagnostics": [],
+    "terminals": 1,
+    "terminal_kinds": [
+     "ret"
+    ]
+   },
+   "candidate": {
+    "diagnostics": [
+     "call:422c20:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "call:422c87:sub_10a04->call_sub_10a04",
+     "call:422c30:sub_10a33->call_sub_10a33",
+     "incomplete_paths:25"
+    ],
+    "terminals": 18,
+    "terminal_kinds": [
+     "ret"
+    ]
+   },
+   "identical_outputs": [
+    "io"
+   ],
+   "unmodeled_flag_outputs": [
+    "f_af",
+    "f_cf",
+    "f_df",
+    "f_if_",
+    "f_of",
+    "f_pf",
+    "f_sf",
+    "f_tf",
+    "f_zf"
+   ],
+   "status": "failed",
+   "reason": "observable_mismatch",
+   "mismatches": [
+    {
+     "kind": "memory_expr_changed",
+     "reg": "data",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x02",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0001"
+     }
+    },
+    {
+     "kind": "output_expr_changed",
+     "reg": "g_esp",
+     "oracle_value": "0x0",
+     "candidate_value": "0xfffd",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x02",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0001"
+     }
+    },
+    {
+     "kind": "output_expr_changed",
+     "reg": "s_ss",
+     "oracle_value": "0x1",
+     "candidate_value": "0x0",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x02",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0001"
+     }
+    }
+   ],
+   "solver_time_ms": 324,
+   "skipped_layout_outputs": []
+  },
+  {
+   "function": "sub_10a33",
+   "oracle": {
+    "diagnostics": [],
+    "terminals": 1,
+    "terminal_kinds": [
+     "ret"
+    ]
+   },
+   "candidate": {
+    "diagnostics": [
+     "call:422b14:sub_1130a->call_sub_1130a",
+     "call:422b2e:bios_kbhit->call_int16",
+     "call:422b70:bios_getch->call_int16"
+    ],
+    "terminals": 5,
+    "terminal_kinds": [
+     "ret"
+    ]
+   },
+   "identical_outputs": [
+    "io"
+   ],
+   "unmodeled_flag_outputs": [
+    "f_af",
+    "f_cf",
+    "f_df",
+    "f_if_",
+    "f_of",
+    "f_pf",
+    "f_sf",
+    "f_tf",
+    "f_zf"
+   ],
+   "status": "failed",
+   "reason": "observable_mismatch",
+   "mismatches": [
+    {
+     "kind": "output_expr_changed",
+     "reg": "g_eax",
+     "oracle_value": "0x0",
+     "candidate_value": "0x1",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x00",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0000"
+     }
+    },
+    {
+     "kind": "output_expr_changed",
+     "reg": "g_esi",
+     "oracle_value": "0x0",
+     "candidate_value": "0x1",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x00",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0000"
+     }
+    },
+    {
+     "kind": "output_expr_changed",
+     "reg": "g_esp",
+     "oracle_value": "0x0",
+     "candidate_value": "0x9413",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x00",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0000"
+     }
+    },
+    {
+     "kind": "output_expr_changed",
+     "reg": "s_ss",
+     "oracle_value": "0x0",
+     "candidate_value": "0xfe03",
+     "counterexample": {
+      "f_af": "0x00",
+      "f_cf": "0x00",
+      "f_df": "0x00",
+      "f_if_": "0x00",
+      "f_of": "0x00",
+      "f_pf": "0x00",
+      "f_sf": "0x00",
+      "f_tf": "0x00",
+      "f_zf": "0x00",
+      "g_eax": "0x00000000",
+      "g_ebp": "0x00000000",
+      "g_ebx": "0x00000000",
+      "g_ecx": "0x00000000",
+      "g_edi": "0x00000000",
+      "g_edx": "0x00000000",
+      "g_esi": "0x00000000",
+      "g_esp": "0x00000000",
+      "s_ds": "0x0000",
+      "s_es": "0x0000",
+      "s_fs": "0x0000",
+      "s_gs": "0x0000",
+      "s_ss": "0x0000"
+     }
+    }
+   ],
+   "solver_time_ms": 213,
+   "skipped_layout_outputs": []
+  }
+ ]
+}
