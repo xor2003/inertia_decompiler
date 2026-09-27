@@ -127,6 +127,7 @@ def write_map(db: "DatabaseView", path: Path) -> int:
                 (start, end, name or f"sub_{start:X}", flags or 0))
 
     far_targets = _far_targets(conn)
+    claimed: list[tuple[int, int]] = []
     entries: list[tuple[int, int, str]] = []
     for seg in segments:
         claimed_end = seg.start
@@ -144,6 +145,7 @@ def write_map(db: "DatabaseView", path: Path) -> int:
                 end = _contiguous_end(conn, start, min(next_start, seg.end))
             end = min(end, seg.end)
             claimed_end = max(claimed_end, end)
+            claimed.append((start, end))
             hi = max(lo, end - 1 - seg.start)
             kind = ("FAR" if _is_far(conn, start, end, flags, far_targets)
                     else "NEAR")
@@ -156,8 +158,8 @@ def write_map(db: "DatabaseView", path: Path) -> int:
     if row is not None:
         entry = int(row[0])
         seg = _segment_of(segments, entry)
-        if seg is not None and not any(f[0] == entry
-                                       for f in by_seg.get(seg.start, ())):
+        inside = any(f[0] <= entry < (f[1] or f[0] + 1) for f in claimed)
+        if seg is not None and not inside:
             off = entry - seg.start
             entries.append((seg.base, off,
                             f"start: {seg.name} NEAR {off:04x}-{off:04x}"))
