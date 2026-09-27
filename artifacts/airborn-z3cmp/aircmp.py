@@ -1844,20 +1844,56 @@ def _port_helper_kind(name: str) -> str:
         return "io_" + name
     if name in ("push", "pop", "pushf", "popf"):
         return name
-    if re.match(r"^(sub_|loc_)", name):
+    if re.match(r"^sub_", name):
         return "gamecall"
+    if re.match(r"^loc_", name):
+        # Switch-case continuations — the oracle inlines the matching
+        # label bodies, so the port side must inline them too.
+        return "inline"
     if re.search(r"stack_chk_fail|__assert_fail|^abort$|^exit$", name):
         return "abort"
+    # ``func_at`` maps a guest linear addr to a host fn ptr — model it as a
+    # tagged value so the ``f_()`` indirect call can resolve the target.
+    if re.search(r"(?:^|@)func_at(?:@|$)", name):
+        return "funcat"
     # Host-side helpers: return an opaque host value and never touch guest
-    # canonical state.  ``func_at`` maps a far ptr to a host fn ptr (the
-    # caller tests it for NULL and maybe calls through); stdio prints only
-    # observe.  Memory-mutating calls (memset/memcpy/fread) are excluded —
-    # they can write guest-visible buffers.
-    if re.search(r"(?:^|@)(func_at|rt_far|rt_flat|fprintf|vfprintf|printf|"
+    # canonical state.  stdio prints only observe.  Memory-mutating calls
+    # (memset/memcpy/fread) are excluded — they can write guest-visible
+    # buffers.
+    if re.search(r"(?:^|@)(rt_nullfn|rt_far|rt_flat|fprintf|vfprintf|printf|"
                  r"snprintf|vsnprintf|puts|putchar|fputs|fflush|perror|"
                  r"malloc|calloc|realloc|free|SDL_\w+)(?:@|$)", name):
         return "hostret"
     return "uf"
+
+
+def _funcat_map(cfg: "SideConfig") -> dict[int, str]:
+    """guest linear addr -> port fn name, built from (sub|loc)_<off> syms.
+
+    ``func_at`` keys are ``0x1a20 + (file_off - 0x10000)`` i.e. ``off -
+    0xE5E0`` for AR-segment names (fmap table in the port's memimg.c).
+    """
+    fm = getattr(cfg, "funcat_map", None)
+    if fm is None:
+        fm = {}
+        for nm in cfg.proc_syms:
+            m = re.match(r"^(?:sub|loc)_([0-9a-f]+)$", nm)
+            if m:
+                off = int(m.group(1), 16)
+                if off >= 0x10000:
+                    fm[off - 0xE5E0] = nm
+        cfg.funcat_map = fm
+        cfg.funcat_rev = {}
+    return fm
+
+
+def _funcat_tag(cfg: "SideConfig", name: str) -> int:
+    for tag, nm in cfg.funcat_rev.items():
+        if nm == name:
+            return tag
+    tag = 0xFCA70000 + len(cfg.funcat_rev)
+    cfg.funcat_rev[tag] = name
+    return tag
 
 
 def _disp_case_operand(g: S.SsaExpr, tokens: dict[int, str]) -> S.SsaExpr | None:
@@ -1984,6 +2020,30 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
             tname = cfg.addr2name.get(tconst.value) if tconst is not None else None
             kind = _classify_call(cfg, tname)
             resume = addr + blk.size
+            # funcat-tagged indirect call: `vfn f_ = func_at(lin); f_()`.
+            # The tag encodes the resolved guest target — sub_* is a real
+            # call (boundary UF + continue), loc_* is a tail-position
+            # switch case (jump to its body — caller returns right after),
+            # rt_nullfn is a no-op.
+            frev = getattr(cfg, "funcat_rev", None)
+            if (frev and tconst is not None
+                    and tconst.value in frev):
+                fname = frev[tconst.value]
+                diagnostics.append(f"funcat:{addr:x}:{fname}")
+                if fname == "rt_nullfn":
+                    work.append((resume, ctx, cond, visits, frames))
+                elif fname.startswith("sub_"):
+                    _boundary_call(ctx, fname)
+                    work.append((resume, ctx, cond, visits, frames))
+                else:
+                    ftgt = cfg.proc_syms.get(fname)
+                    if ftgt is not None:
+                        work.append((ftgt, ctx, cond, visits, frames))
+                    else:
+                        terminals.append(TermPath(
+                            "indirect_call", cond, dict(ctx.canon),
+                            dict(ctx.arrays)))
+                continue
             if kind == "abort":
                 terminals.append(TermPath("abort", cond, dict(ctx.canon), dict(ctx.arrays)))
                 continue
@@ -2029,6 +2089,29 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
             if kind == "nop":
                 work.append((resume, ctx, cond, visits, frames))
                 continue
+            if kind == "funcat":
+                # func_at(lin): return a tagged fn ptr when the guest addr
+                # resolves to a known (sub|loc)_* target; const 0 when the
+                # addr is concrete but unmapped (func_at really returns
+                # NULL → caller takes the else/return path); a
+                # summary_funcat UF when the addr is symbolic.
+                retreg = "eax" if cfg.arch == "i386" else "rax"
+                rw = ctx.reg_versions[retreg].width
+                arg = _host_arg(ctx, 0)
+                aval = (constval(fold(ctx._concretize(arg)))
+                        if arg is not None else None)
+                fname = (_funcat_map(cfg).get(aval)
+                         if aval is not None else None)
+                if aval == 0:
+                    fname = "rt_nullfn"
+                if fname is not None:
+                    ctx.reg_versions[retreg] = _c(_funcat_tag(cfg, fname), rw)
+                elif aval is not None:
+                    ctx.reg_versions[retreg] = _c(0, rw)
+                else:
+                    ctx.reg_versions[retreg] = E("summary_funcat", rw, (arg,))
+                work.append((resume, ctx, cond, visits, frames))
+                continue
             if kind == "hostret":
                 # Host helper: opaque return value, no guest-state effect.
                 retreg = "eax" if cfg.arch == "i386" else "rax"
@@ -2037,6 +2120,34 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 work.append((resume, ctx, cond, visits, frames))
                 continue
             if tconst is None:
+                # A summary_funcat(sym) callee: retry resolution — the arg
+                # may concretize now even if it didn't at the call summary.
+                if nxt.op == "summary_funcat" and len(nxt.args) == 1:
+                    aval = constval(fold(ctx._concretize(nxt.args[0])))
+                    fname = (_funcat_map(cfg).get(aval)
+                             if aval is not None else None)
+                    if aval == 0:
+                        fname = "rt_nullfn"
+                    if fname is not None:
+                        tconst = _c(_funcat_tag(cfg, fname), nxt.width)
+                        nxt = tconst
+                        # Re-dispatch through the tag path above.
+                        frev = cfg.funcat_rev
+                        diagnostics.append(f"funcat:{addr:x}:{fname}")
+                        if fname == "rt_nullfn":
+                            work.append((resume, ctx, cond, visits, frames))
+                        elif fname.startswith("sub_"):
+                            _boundary_call(ctx, fname)
+                            work.append((resume, ctx, cond, visits, frames))
+                        else:
+                            ftgt = cfg.proc_syms.get(fname)
+                            if ftgt is not None:
+                                work.append((ftgt, ctx, cond, visits, frames))
+                            else:
+                                terminals.append(TermPath(
+                                    "indirect_call", cond, dict(ctx.canon),
+                                    dict(ctx.arrays)))
+                        continue
                 # Indirect call to an unknown target (e.g. the port's
                 # ``f_()`` far-vector dispatch): the callee and its return
                 # are unmodeled — end the path honestly rather than
