@@ -912,6 +912,209 @@ def _claim_candidate_part(
     return None
 
 
+_CONTROL_TRANSFER_MNEMONICS = frozenset(
+    {
+        "call",
+        "lcall",
+        "jmp",
+        "ljmp",
+        "je",
+        "jne",
+        "jz",
+        "jnz",
+        "ja",
+        "jae",
+        "jb",
+        "jbe",
+        "jg",
+        "jge",
+        "jl",
+        "jle",
+        "jo",
+        "jno",
+        "js",
+        "jns",
+        "jp",
+        "jnp",
+        "jpe",
+        "jpo",
+        "jcxz",
+        "jecxz",
+        "loop",
+        "loope",
+        "loopne",
+        "loopz",
+        "loopnz",
+        "ret",
+        "retf",
+        "iret",
+    }
+)
+
+
+def _part_source_instructions(function: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Source instruction dicts of an SSA part (empty when absent)."""
+    if not isinstance(function, dict):
+        return []
+    source = function.get("source") if isinstance(function.get("source"), dict) else {}
+    return [item for item in source.get("instructions", []) or [] if isinstance(item, dict)]
+
+
+def _seg_adjacent_push(instructions: list[dict[str, Any]], index: int) -> bool:
+    """Whether a neighbour instruction pushes a segment register."""
+    for neighbor in (index - 1, index + 1):
+        if not (0 <= neighbor < len(instructions)):
+            continue
+        for reg in _SEGMENT_PUSH_REGS:
+            if _pushes_register(instructions[neighbor], reg):
+                return True
+    return False
+
+
+def _sibling_covers_diff_position(
+    oracle_instructions: list[dict[str, Any]],
+    sibling_instructions: list[dict[str, Any]],
+    index: int,
+    image_context: dict[str, dict[str, Any]] | None,
+) -> bool:
+    """Whether a sibling part reproduces the oracle operand at ``index``.
+
+    Byte-identical instructions prove the sibling carries the same operand
+    (memory displacement, immediate).  A differing ``push imm16`` is still
+    covered when both pushes are segment-adjacent and the referenced data
+    strings are byte-identical across the two images.
+    """
+    if index >= len(sibling_instructions):
+        return False
+    oracle_insn = oracle_instructions[index]
+    sibling_insn = sibling_instructions[index]
+    if str(sibling_insn.get("mnemonic", "")).lower() != str(oracle_insn.get("mnemonic", "")).lower():
+        return False
+    if (oracle_insn.get("bytes") or "") == (sibling_insn.get("bytes") or ""):
+        return True
+    oracle_value = _push_immediate(oracle_insn)
+    sibling_value = _push_immediate(sibling_insn)
+    if oracle_value is None or sibling_value is None:
+        return False
+    if (oracle_value & 0xFFFF) == (sibling_value & 0xFFFF):
+        return True
+    if not (
+        _seg_adjacent_push(oracle_instructions, index)
+        and _seg_adjacent_push(sibling_instructions, index)
+    ):
+        return False
+    return bool(
+        _seg_pointer_string_matches(
+            image_context, oracle_value & 0xFFFF, sibling_value & 0xFFFF, min_len=4
+        )
+    )
+
+
+def _ambiguous_sibling_part(
+    oracle_function: dict[str, Any],
+    candidate_function: dict[str, Any],
+    candidate_parts_by_function: dict[str, list[dict[str, Any]]],
+    image_context: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Return a same-function candidate part that better matches the oracle.
+
+    When a paired candidate fails only on operand constants (pushed offsets,
+    memory displacements) while another part of the same candidate function
+    carries byte-identical or string-equal operands at every differing
+    position, the pairing is a boundary-fusion/split artifact — no 1:1 part
+    correspondence exists — rather than a semantic divergence.
+    """
+    oracle_instructions = _part_source_instructions(oracle_function)
+    candidate_instructions = _part_source_instructions(candidate_function)
+    if not oracle_instructions or len(oracle_instructions) != len(candidate_instructions):
+        return None
+    soft_positions: list[int] = []
+    for index, (oracle_insn, candidate_insn) in enumerate(
+        zip(oracle_instructions, candidate_instructions, strict=True)
+    ):
+        if (oracle_insn.get("bytes") or "") == (candidate_insn.get("bytes") or ""):
+            continue
+        mnemonic = str(oracle_insn.get("mnemonic", "")).lower()
+        if mnemonic in _CONTROL_TRANSFER_MNEMONICS:
+            continue
+        soft_positions.append(index)
+    if not soft_positions:
+        return None
+    info = candidate_function.get("function", {}) if isinstance(candidate_function, dict) else {}
+    candidate_part_id = str(candidate_function.get("id") or "")
+    siblings = [
+        *candidate_parts_by_function.get(str(info.get("id", "")), []),
+        *candidate_parts_by_function.get(str(info.get("name", "")), []),
+    ]
+    for sibling in siblings:
+        if not isinstance(sibling, dict) or str(sibling.get("id") or "") == candidate_part_id:
+            continue
+        sibling_instructions = _part_source_instructions(sibling)
+        if all(
+            _sibling_covers_diff_position(
+                oracle_instructions, sibling_instructions, index, image_context
+            )
+            for index in soft_positions
+        ):
+            return sibling
+    return None
+
+
+def _candidate_parts_by_function(tables: _SsaCandidateTables) -> dict[str, list[dict[str, Any]]]:
+    """Group all indexed candidate parts under each function key (id and name)."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for table in (tables.all_by_id, tables.all_by_key):
+        for key_part, part in table.items():
+            if isinstance(key_part, tuple) and key_part and isinstance(part, dict):
+                grouped[str(key_part[0])].append(part)
+    return grouped
+
+
+def _ambiguous_candidate_failure_result(
+    result: dict[str, Any], sibling: dict[str, Any]
+) -> dict[str, Any]:
+    """Reclassify a failed pair as refused when a better-matching sibling exists."""
+    out = dict(result)
+    out["status"] = "refused"
+    out["reason"] = "ambiguous_candidate"
+    out["mismatches"] = [
+        {
+            "kind": "ambiguous_candidate",
+            "detail": "candidate function contains another part matching the oracle part's differing operands; no unique 1:1 part correspondence",
+            "sibling_candidate_function": sibling.get("id"),
+        },
+        *[item for item in result.get("mismatches", []) or [] if isinstance(item, dict)],
+    ]
+    return out
+
+
+def _missing_candidate_result(
+    *,
+    function_id: str,
+    function_name: str,
+    oracle_function: dict[str, Any],
+    mapped: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Refusal row for an oracle part with no resolved candidate counterpart."""
+    missing_reason = "mapping_missing" if mapped is None else "candidate_ssa_missing"
+    missing_detail = (
+        "no candidate mapping for oracle SSA function"
+        if mapped is None
+        else "mapping exists but candidate function was not lowered to SSA"
+    )
+    return {
+        "status": "refused",
+        "reason": missing_reason,
+        "function": {"id": function_id, "name": function_name},
+        "oracle_function": oracle_function.get("id"),
+        "candidate_function": None,
+        "mapped_candidate": _mapped_candidate_detail(mapped),
+        "oracle_detail": _ssa_function_report_detail(oracle_function),
+        "candidate_detail": None,
+        "mismatches": [{"kind": "function_missing", "detail": missing_detail}],
+    }
+
+
 def _resolve_oracle_candidate(
     oracle_function: dict[str, Any],
     *,
@@ -952,6 +1155,117 @@ def _resolve_oracle_candidate(
     )
 
 
+@dataclass
+class _SsaPartIterOutcome:
+    """Per-oracle-part iteration product of the pair compare loop."""
+
+    result: dict[str, Any] | None
+    solver_ms: int = 0
+    pending_item: dict[str, Any] | None = None
+    skipped_unmapped: bool = False
+
+
+def _compare_single_oracle_part(
+    oracle_function: dict[str, Any],
+    *,
+    ordinals: dict[str, int],
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
+    candidate_parts_by_function: dict[str, list[dict[str, Any]]],
+    claimed_candidate_parts: set[str],
+    global_constant_normalization: dict[int, int],
+    mapping_document: dict[str, Any] | None,
+    mapped_candidates: dict[str, Any],
+    tables: _SsaCandidateTables,
+    include_unmapped: bool,
+    oracle_index: dict[str, Any],
+    candidate_index: dict[str, Any],
+    allow_aliased_call_targets: bool,
+    proof_cache: _SemanticEqualityCache | None,
+    timeout_ms: int,
+    max_solver_assignments: int,
+    max_solver_inputs: int,
+    max_solver_memory_stores: int,
+    skip_binary_equal: bool,
+    max_rss_mb: int,
+    image_context: dict[str, dict[str, Any]] | None,
+) -> _SsaPartIterOutcome:
+    """Resolve, claim, and compare one oracle part against its candidate."""
+    function = oracle_function.get("function", {}) if isinstance(oracle_function, dict) else {}
+    function_id = str(function.get("id", ""))
+    function_name = str(function.get("name", function_id))
+    candidate_function, mapped = _resolve_oracle_candidate(
+        oracle_function,
+        function_id=function_id,
+        function_name=function_name,
+        mapping_document=mapping_document,
+        mapped_candidates=mapped_candidates,
+        tables=tables,
+        ordinals=ordinals,
+        oracle_parts=oracle_parts,
+    )
+    unmapped = mapping_document is not None and mapped is None
+    if unmapped and not include_unmapped:
+        return _SsaPartIterOutcome(result=None, skipped_unmapped=True)
+    reused_candidate_result = _claim_candidate_part(
+        candidate_function,
+        claimed_candidate_parts,
+        function_id=function_id,
+        function_name=function_name,
+        oracle_function=oracle_function,
+        mapped=mapped,
+    )
+    if reused_candidate_result is not None:
+        return _SsaPartIterOutcome(result=reused_candidate_result)
+    if candidate_function is None:
+        if mapped is not None and _ssa_part_outside_declared_body(oracle_function):
+            return _SsaPartIterOutcome(result=None)
+        return _SsaPartIterOutcome(
+            result=_missing_candidate_result(
+                function_id=function_id,
+                function_name=function_name,
+                oracle_function=oracle_function,
+                mapped=mapped,
+            ),
+            skipped_unmapped=unmapped,
+        )
+    item = {
+        "oracle_function": oracle_function,
+        "candidate_function": candidate_function,
+        "mapped": mapped,
+        "function_id": function_id,
+        "function_name": function_name,
+        "global_constant_normalization": global_constant_normalization,
+        "image_context": image_context,
+    }
+    result, elapsed = _compare_ssa_pair_guarded(
+        item,
+        mapping_document=mapping_document,
+        oracle_index=oracle_index,
+        candidate_index=candidate_index,
+        allow_aliased_call_targets=allow_aliased_call_targets,
+        proof_cache=proof_cache,
+        timeout_ms=timeout_ms,
+        max_solver_assignments=max_solver_assignments,
+        max_solver_inputs=max_solver_inputs,
+        max_solver_memory_stores=max_solver_memory_stores,
+        skip_binary_equal=skip_binary_equal,
+        max_rss_mb=max_rss_mb,
+    )
+    if result.get("status") == "failed":
+        sibling_part = _ambiguous_sibling_part(
+            oracle_function, candidate_function, candidate_parts_by_function, image_context
+        )
+        if sibling_part is not None:
+            result = _ambiguous_candidate_failure_result(result, sibling_part)
+    if result.get("reason") == "callee_not_proven":
+        return _SsaPartIterOutcome(result=result, solver_ms=elapsed, pending_item=item)
+    if result.get("status") == "passed" and proof_cache is not None:
+        proof_cache.record(
+            oracle_function, candidate_function, proof=str(result.get("reason") or "z3_equal")
+        )
+    return _SsaPartIterOutcome(result=result, solver_ms=elapsed)
+
+
 def _run_ssa_pair_compare_loop(
     oracle_functions: list[dict[str, Any]],
     *,
@@ -974,89 +1288,40 @@ def _run_ssa_pair_compare_loop(
     """Compare each oracle SSA function against its resolved candidate."""
     ordinals: dict[str, int] = defaultdict(int)
     oracle_parts = _functions_by_own_key_and_entry(oracle_functions)
-    global_constant_normalization = _collect_global_layout_normalization(
+    global_constant_normalization, witnessed_paras = _collect_global_layout_normalization(
         oracle_functions,
         mapping_document=mapping_document,
         mapped_candidates=mapped_candidates,
         tables=tables,
         oracle_parts=oracle_parts,
+        image_context=image_context,
     )
+    if image_context is not None and witnessed_paras:
+        image_context["witnessed_paras"] = frozenset(witnessed_paras)
     results: list[dict[str, Any]] = []
     pending_callee_proofs: list[tuple[int, dict[str, Any]]] = []
     solver_time_ms = 0
     skipped_unmapped = 0
     aborted: dict[str, Any] | None = None
     claimed_candidate_parts: set[str] = set()
+    candidate_parts_by_function = _candidate_parts_by_function(tables)
     for oracle_function in oracle_functions:
         memory_limit = _compare_memory_limit_status(max_rss_mb)
         if memory_limit is not None:
             aborted = _compare_memory_abort("ssa_pair", memory_limit)
             results.append(_memory_limit_compare_result(aborted))
             break
-        function = oracle_function.get("function", {}) if isinstance(oracle_function, dict) else {}
-        function_id = str(function.get("id", ""))
-        function_name = str(function.get("name", function_id))
-        candidate_function, mapped = _resolve_oracle_candidate(
+        outcome = _compare_single_oracle_part(
             oracle_function,
-            function_id=function_id,
-            function_name=function_name,
+            ordinals=ordinals,
+            oracle_parts=oracle_parts,
+            candidate_parts_by_function=candidate_parts_by_function,
+            claimed_candidate_parts=claimed_candidate_parts,
+            global_constant_normalization=global_constant_normalization,
             mapping_document=mapping_document,
             mapped_candidates=mapped_candidates,
             tables=tables,
-            ordinals=ordinals,
-            oracle_parts=oracle_parts,
-        )
-        if mapping_document is not None and mapped is None:
-            skipped_unmapped += 1
-            if not include_unmapped:
-                continue
-        reused_candidate_result = _claim_candidate_part(
-            candidate_function,
-            claimed_candidate_parts,
-            function_id=function_id,
-            function_name=function_name,
-            oracle_function=oracle_function,
-            mapped=mapped,
-        )
-        if reused_candidate_result is not None:
-            results.append(reused_candidate_result)
-            continue
-        if candidate_function is None:
-            if mapped is not None and _ssa_part_outside_declared_body(oracle_function):
-                skipped_external_oracle_parts += 1  # noqa: F821, F841
-                continue
-            missing_reason = "mapping_missing" if mapped is None else "candidate_ssa_missing"
-            missing_detail = (
-                "no candidate mapping for oracle SSA function"
-                if mapped is None
-                else "mapping exists but candidate function was not lowered to SSA"
-            )
-            results.append(
-                {
-                    "status": "refused",
-                    "reason": missing_reason,
-                    "function": {"id": function_id, "name": function_name},
-                    "oracle_function": oracle_function.get("id"),
-                    "candidate_function": None,
-                    "mapped_candidate": _mapped_candidate_detail(mapped),
-                    "oracle_detail": _ssa_function_report_detail(oracle_function),
-                    "candidate_detail": None,
-                    "mismatches": [{"kind": "function_missing", "detail": missing_detail}],
-                }
-            )
-            continue
-        item = {
-            "oracle_function": oracle_function,
-            "candidate_function": candidate_function,
-            "mapped": mapped,
-            "function_id": function_id,
-            "function_name": function_name,
-            "global_constant_normalization": global_constant_normalization,
-            "image_context": image_context,
-        }
-        result, elapsed = _compare_ssa_pair_guarded(
-            item,
-            mapping_document=mapping_document,
+            include_unmapped=include_unmapped,
             oracle_index=oracle_index,
             candidate_index=candidate_index,
             allow_aliased_call_targets=allow_aliased_call_targets,
@@ -1067,15 +1332,16 @@ def _run_ssa_pair_compare_loop(
             max_solver_memory_stores=max_solver_memory_stores,
             skip_binary_equal=skip_binary_equal,
             max_rss_mb=max_rss_mb,
+            image_context=image_context,
         )
-        solver_time_ms += elapsed
-        result_index = len(results)
-        results.append(result)
-        if result.get("reason") == "callee_not_proven":
-            pending_callee_proofs.append((result_index, item))
+        solver_time_ms += outcome.solver_ms
+        if outcome.skipped_unmapped:
+            skipped_unmapped += 1
+        if outcome.result is None:
             continue
-        if result.get("status") == "passed" and proof_cache is not None:
-            proof_cache.record(oracle_function, candidate_function, proof=str(result.get("reason") or "z3_equal"))
+        results.append(outcome.result)
+        if outcome.pending_item is not None:
+            pending_callee_proofs.append((len(results) - 1, outcome.pending_item))
     return _SsaPairLoopOutcome(
         results=results,
         pending_callee_proofs=pending_callee_proofs,
@@ -11096,6 +11362,22 @@ def _aligned_immediate_pairs(
     return pairs
 
 
+def _accumulate_string_witnesses(
+    witnessed_paras: set[tuple[int, int]],
+    oracle_function: dict[str, Any],
+    candidate_function: dict[str, Any],
+    image_context: dict[str, dict[str, Any]] | None,
+) -> None:
+    """Record paragraph pairs witnessing strong string matches for one part pair."""
+    for oracle_off, candidate_off in _seg_adjacent_differing_pushes(
+        _part_source_instructions(oracle_function),
+        _part_source_instructions(candidate_function),
+    ):
+        witnessed_paras.update(
+            _seg_pointer_string_matches(image_context, oracle_off, candidate_off, min_len=4)
+        )
+
+
 def _collect_global_layout_normalization(
     oracle_functions: list[dict[str, Any]],
     *,
@@ -11103,11 +11385,20 @@ def _collect_global_layout_normalization(
     mapped_candidates: dict[str, Any],
     tables: Any,  # noqa: ANN401
     oracle_parts: dict[tuple[str, int], dict[str, Any]],
-) -> dict[int, int]:
-    """Candidate→oracle constant map for immediates that recur as layout pairs across functions."""
+    image_context: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[int, int], set[tuple[int, int]]]:
+    """Candidate→oracle constant map plus corpus-wide paragraph witnesses.
+
+    Returns ``(promoted_constants, witnessed_paragraphs)``.  The witness set
+    accumulates every ``(para_o, para_c)`` paragraph pair under which a
+    seg-adjacent pushed-offset pair produced a byte-identical >=4-byte string
+    match — these prove the data-segment relocation and let the weak string
+    tier accept shorter matches anywhere in the corpus.
+    """
     if mapping_document is None:
-        return {}
+        return {}, set()
     support: dict[tuple[int, int], set[str]] = defaultdict(set)
+    witnessed_paras: set[tuple[int, int]] = set()
     for oracle_function in oracle_functions:
         function = oracle_function.get("function", {}) if isinstance(oracle_function, dict) else {}
         function_id = str(function.get("id", ""))
@@ -11124,6 +11415,9 @@ def _collect_global_layout_normalization(
             if oracle_value < 0x100 or candidate_value < 0x100:
                 continue
             support[(candidate_value, oracle_value)].add(function_id or function_name)
+        _accumulate_string_witnesses(
+            witnessed_paras, oracle_function, candidate_function, image_context
+        )
     promoted: dict[int, int] = {}
     banned: set[int] = set()
     for (candidate_value, oracle_value), functions in support.items():
@@ -11134,7 +11428,7 @@ def _collect_global_layout_normalization(
             del promoted[candidate_value]
             continue
         promoted[candidate_value] = oracle_value
-    return promoted
+    return promoted, witnessed_paras
 
 
 def _group_layout_constant_pairs(
@@ -11245,6 +11539,33 @@ def _cstring_at(image: bytes, byte_off: int, limit: int = 256) -> bytes | None:
     if end < 0 or end - byte_off > limit:
         return None
     return image[byte_off : end + 1]
+
+
+def _cstring_blob_at(image: bytes, byte_off: int, *, limit: int = 256, max_strings: int = 32) -> bytes | None:
+    """Span of consecutive printable NUL-terminated strings starting at ``byte_off``.
+
+    Menu/option descriptors push a pointer into a string table whose head entry
+    can be 1-2 bytes (``b"?\\0"``) — below the self-proving length a single
+    cstring carries.  Extending the comparison across the run of printable
+    strings keeps short-headed tables provable without weakening evidence: the
+    whole span must still be byte-identical.
+    """
+    if byte_off < 0 or byte_off >= len(image):
+        return None
+    end = byte_off
+    strings = 0
+    while strings < max_strings and end - byte_off < limit:
+        nul = image.find(b"\x00", end)
+        if nul < 0 or nul - end > limit:
+            break
+        piece = image[end:nul]
+        if not piece or not all(b in (0x09, 0x0A, 0x0D) or 0x20 <= b <= 0x7E for b in piece):
+            break
+        end = nul + 1
+        strings += 1
+    if strings == 0:
+        return None
+    return image[byte_off:end]
 
 
 def _mz_reloc_segment_targets(image: bytes, relocs: tuple[tuple[int, int], ...]) -> list[int]:
@@ -11388,9 +11709,17 @@ def _seg_pointer_string_matches(
     for para_o in oracle_side.get("seg_targets") or []:
         s_o = _cstring_at(oracle_image, para_o * 16 + oracle_off)
         if s_o is None or len(s_o) < min_len or not any(0x20 <= b <= 0x7E for b in s_o):
-            continue
+            # A pointer into a string table whose head entry is shorter than
+            # the self-proving floor is still provable when the whole printable
+            # run is byte-identical; require at least 8 bytes of evidence.
+            s_o = _cstring_blob_at(oracle_image, para_o * 16 + oracle_off)
+            if s_o is None or len(s_o) < max(min_len, 8):
+                continue
         for para_c in candidate_side.get("seg_targets") or []:
-            if _cstring_at(candidate_image, para_c * 16 + candidate_off) == s_o:
+            if _cstring_at(candidate_image, para_c * 16 + candidate_off) == s_o or (
+                len(s_o) >= max(min_len, 8)
+                and _cstring_blob_at(candidate_image, para_c * 16 + candidate_off) == s_o
+            ):
                 matches.append((para_o, para_c))
     return matches
 
@@ -11488,19 +11817,22 @@ def _weak_witnessed_string_pairs(
     pairs: list[dict[str, Any]],
     witnessed_paras: set[tuple[int, int]],
 ) -> None:
-    """3-byte string matches accepted only under witnessed/unique paragraphs."""
+    """Short string matches accepted only under witnessed/unique paragraphs."""
+    global_witnesses = frozenset(image_context.get("witnessed_paras") or ())
+    all_witnesses = witnessed_paras | global_witnesses
     for oracle_off, candidate_off in differing:
         if any(item["oracle"] == oracle_off and item["candidate"] == candidate_off for item in pairs):
             continue
         matches = _seg_pointer_string_matches(
-            image_context, oracle_off, candidate_off, min_len=3
+            image_context, oracle_off, candidate_off, min_len=2
         )
         if not matches:
             continue
-        # A 3-byte string is weak evidence alone; accept it only under a
-        # paragraph pair already witnessed by a longer string, or when the
-        # match is unique across the whole relocation table.
-        if not (set(matches) & witnessed_paras or len(matches) == 1):
+        # A short string is weak evidence alone; accept it only under a
+        # paragraph pair already witnessed by a longer string (in this part or
+        # corpus-wide), or when the match is unique across the whole
+        # relocation table.
+        if not (set(matches) & all_witnesses or len(matches) == 1):
             continue
         pairs.append(
             {

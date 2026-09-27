@@ -4667,6 +4667,84 @@ def test_dosunit_compare_ssa_uses_mapping_and_reports_unmapped_by_default(tmp_pa
     assert skipped["summary"]["refused"] == 0
 
 
+def test_dosunit_compare_ssa_refuses_reused_candidate_part(tmp_path: Path):
+    original_image = bytearray(0x280)
+    candidate_image = bytearray(0x280)
+    original_image[0x200:0x206] = b"\x89\xd8\x83\xc0\x01\xc3"  # mov ax, bx; add ax, 1; ret
+    original_image[0x210:0x216] = b"\x89\xd8\x83\xc0\x01\xc3"  # mov ax, bx; add ax, 1; ret
+    candidate_image[0x220:0x226] = b"\x89\xd8\x83\xc0\x01\xc3"  # mov ax, bx; add ax, 1; ret
+    original = tmp_path / "original.exe"
+    candidate = tmp_path / "candidate.exe"
+    original.write_bytes(_mz_exe(bytes(original_image)))
+    candidate.write_bytes(_mz_exe(bytes(candidate_image)))
+    original_catalog = {
+        "schema": "dosunit.functions.v1",
+        "id": "functions:original",
+        "module": "demo.exe",
+        "program_kind": "mz_exe",
+        "functions": [
+            _edge_function("demo.exe:orig_leaf_a", "orig_leaf_a", offset=0x0200, size=6),
+            _edge_function("demo.exe:orig_leaf_b", "orig_leaf_b", offset=0x0210, size=6),
+        ],
+        "diagnostics": [],
+    }
+    candidate_catalog = {
+        "schema": "dosunit.functions.v1",
+        "id": "functions:candidate",
+        "module": "demo.exe",
+        "program_kind": "mz_exe",
+        "functions": [_edge_function("demo.exe:rebuilt_leaf", "rebuilt_leaf", offset=0x0220, size=6)],
+        "diagnostics": [],
+    }
+    # Both oracle functions map onto the same candidate: the second claim of
+    # the shared candidate part must refuse instead of emitting a verdict
+    # computed against an already-paired counterpart.
+    mapping = {
+        "schema": "dosunit.mapping.v1",
+        "id": "mapping:test",
+        "functions": [
+            {
+                "oracle_id": "demo.exe:orig_leaf_a",
+                "oracle_name": "orig_leaf_a",
+                "candidate_id": "demo.exe:rebuilt_leaf",
+                "candidate_name": "rebuilt_leaf",
+                "candidate_entry": {"cs": "0x0000", "ip": "0x0220", "kind": "near"},
+                "sources": ["fixture"],
+            },
+            {
+                "oracle_id": "demo.exe:orig_leaf_b",
+                "oracle_name": "orig_leaf_b",
+                "candidate_id": "demo.exe:rebuilt_leaf",
+                "candidate_name": "rebuilt_leaf",
+                "candidate_entry": {"cs": "0x0000", "ip": "0x0220", "kind": "near"},
+                "sources": ["fixture"],
+            },
+        ],
+    }
+
+    oracle = lower_straightline_ssa_document(
+        exe_path=original,
+        functions_catalog=original_catalog,
+        output_regs=("ax", "bx"),
+        follow_call_fallthrough=False,
+    )
+    candidate_ssa = lower_straightline_ssa_document(
+        exe_path=candidate,
+        functions_catalog=candidate_catalog,
+        output_regs=("ax", "bx"),
+        follow_call_fallthrough=False,
+    )
+    compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, mapping_document=mapping)
+
+    assert compared["summary"]["total"] == 2
+    statuses = {result["function"]["name"]: result for result in compared["results"]}
+    assert statuses["orig_leaf_a"]["status"] == "passed"
+    reused = statuses["orig_leaf_b"]
+    assert reused["status"] == "refused"
+    assert reused["reason"] == "candidate_part_reused"
+    assert reused["mismatches"][0]["kind"] == "ambiguous_candidate"
+
+
 def test_dosunit_failure_report_skips_region_function_missing_by_default():
     report = render_failure_report(
         {
