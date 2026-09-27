@@ -870,6 +870,88 @@ class _SsaPairLoopOutcome:
     aborted: dict[str, Any] | None
 
 
+def _claim_candidate_part(
+    candidate_function: dict[str, Any] | None,
+    claimed_candidate_parts: set[str],
+    *,
+    function_id: str,
+    function_name: str,
+    oracle_function: dict[str, Any],
+    mapped: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Claim ``candidate_function`` for the current oracle part.
+
+    Parts pair 1:1 — a candidate already claimed by another oracle part makes
+    this pairing ambiguous (coverage gap, boundary split, or stale catalog
+    attribution).  Return a refusal row for re-claims; ``None`` when the part
+    is free (recorded as claimed) or absent.
+    """
+    if candidate_function is None:
+        return None
+    candidate_part_id = str(candidate_function.get("id") or "")
+    if not candidate_part_id:
+        return None
+    if candidate_part_id in claimed_candidate_parts:
+        return {
+            "status": "refused",
+            "reason": "candidate_part_reused",
+            "function": {"id": function_id, "name": function_name},
+            "oracle_function": oracle_function.get("id"),
+            "candidate_function": candidate_function.get("id"),
+            "mapped_candidate": _mapped_candidate_detail(mapped),
+            "oracle_detail": _ssa_function_report_detail(oracle_function),
+            "candidate_detail": _ssa_function_report_detail(candidate_function),
+            "mismatches": [
+                {
+                    "kind": "ambiguous_candidate",
+                    "detail": "candidate SSA part was already paired with a different oracle part",
+                }
+            ],
+        }
+    claimed_candidate_parts.add(candidate_part_id)
+    return None
+
+
+def _resolve_oracle_candidate(
+    oracle_function: dict[str, Any],
+    *,
+    function_id: str,
+    function_name: str,
+    mapping_document: dict[str, Any] | None,
+    mapped_candidates: dict[str, Any],
+    tables: _SsaCandidateTables,
+    ordinals: dict[str, int],
+    oracle_parts: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Resolve the candidate SSA part for ``oracle_function``.
+
+    Returns ``(candidate_function, mapped)`` where ``mapped`` is the mapping
+    row when a mapping document is in use (``None`` when unmapped or no
+    mapping document was supplied).
+    """
+    if mapping_document is None:
+        return (
+            _resolve_keyed_candidate(
+                oracle_function,
+                function_id=function_id,
+                function_name=function_name,
+                ordinals=ordinals,
+                tables=tables,
+                oracle_parts=oracle_parts,
+            ),
+            None,
+        )
+    mapped = mapped_candidates.get(function_id) or mapped_candidates.get(function_name)
+    if mapped is None:
+        return None, None
+    return (
+        _resolve_mapped_candidate(
+            oracle_function, mapped=mapped, tables=tables, oracle_parts=oracle_parts
+        ),
+        mapped,
+    )
+
+
 def _run_ssa_pair_compare_loop(
     oracle_functions: list[dict[str, Any]],
     *,
@@ -904,6 +986,7 @@ def _run_ssa_pair_compare_loop(
     solver_time_ms = 0
     skipped_unmapped = 0
     aborted: dict[str, Any] | None = None
+    claimed_candidate_parts: set[str] = set()
     for oracle_function in oracle_functions:
         memory_limit = _compare_memory_limit_status(max_rss_mb)
         if memory_limit is not None:
@@ -913,27 +996,31 @@ def _run_ssa_pair_compare_loop(
         function = oracle_function.get("function", {}) if isinstance(oracle_function, dict) else {}
         function_id = str(function.get("id", ""))
         function_name = str(function.get("name", function_id))
-        mapped: dict[str, Any] | None = None
-        if mapping_document is not None:
-            mapped = mapped_candidates.get(function_id) or mapped_candidates.get(function_name)
-            if mapped is None:
-                skipped_unmapped += 1
-                if not include_unmapped:
-                    continue
-                candidate_function = None
-            else:
-                candidate_function = _resolve_mapped_candidate(
-                    oracle_function, mapped=mapped, tables=tables, oracle_parts=oracle_parts
-                )
-        else:
-            candidate_function = _resolve_keyed_candidate(
-                oracle_function,
-                function_id=function_id,
-                function_name=function_name,
-                ordinals=ordinals,
-                tables=tables,
-                oracle_parts=oracle_parts,
-            )
+        candidate_function, mapped = _resolve_oracle_candidate(
+            oracle_function,
+            function_id=function_id,
+            function_name=function_name,
+            mapping_document=mapping_document,
+            mapped_candidates=mapped_candidates,
+            tables=tables,
+            ordinals=ordinals,
+            oracle_parts=oracle_parts,
+        )
+        if mapping_document is not None and mapped is None:
+            skipped_unmapped += 1
+            if not include_unmapped:
+                continue
+        reused_candidate_result = _claim_candidate_part(
+            candidate_function,
+            claimed_candidate_parts,
+            function_id=function_id,
+            function_name=function_name,
+            oracle_function=oracle_function,
+            mapped=mapped,
+        )
+        if reused_candidate_result is not None:
+            results.append(reused_candidate_result)
+            continue
         if candidate_function is None:
             if mapped is not None and _ssa_part_outside_declared_body(oracle_function):
                 skipped_external_oracle_parts += 1  # noqa: F821, F841
