@@ -2874,6 +2874,19 @@ OUTPUT_KEYS = [f"g_{r}" for r in CANON_REGS32] + \
     [f"s_{s}" for s in CANON_SEGS] + [f"f_{f}" for f in CANON_FLAGS] + ["data", "io"]
 
 
+def _has_op(e: S.SsaExpr, op: str, limit: int = 4096) -> bool:
+    """True iff any node in ``e`` uses ``op`` (bounded structural walk)."""
+    stack = [e]
+    seen = 0
+    while stack and seen < limit:
+        n = stack.pop()
+        seen += 1
+        if n.op == op:
+            return True
+        stack.extend(n.args)
+    return False
+
+
 def compare_function(name: str, oracle_cfg: SideConfig, cand_cfg: SideConfig,
                      *, timeout_ms: int = 10000, budgets: dict | None = None) -> dict[str, Any]:
     """Run SE on both sides, materialize canonical outputs, invoke Z3."""
@@ -2922,6 +2935,18 @@ def compare_function(name: str, oracle_cfg: SideConfig, cand_cfg: SideConfig,
             del cm[k]
     if unmodeled:
         rec["unmodeled_flag_outputs"] = sorted(unmodeled)
+    # `unsupported` leaves mark IR the lifter could not model (dynamic cc_op,
+    # exotic instructions). They cannot be translated to Z3 at all, so cells
+    # containing them are unverifiable — quarantine and report, like flags.
+    unsup = []
+    for k in list(om):
+        if k in cm and (_has_op(om[k], "unsupported")
+                        or _has_op(cm[k], "unsupported")):
+            unsup.append(k)
+            del om[k]
+            del cm[k]
+    if unsup:
+        rec["unsupported_outputs"] = sorted(unsup)
     # Flags are canonical booleans: a side that stores a truthy byte (0xff)
     # and a side that stores 1 mean the same thing.  Normalize both sides'
     # flag cells through !=0 before presolve/compare.
