@@ -2190,6 +2190,14 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                                         "ret", ng2, dict(nctx.canon),
                                         dict(nctx.arrays)))
                         continue
+                # Dispatch token unresolvable: the callee is unknown, so a
+                # plain `ret` here would claim the pre-call state is the
+                # function's result — phantom mismatches.  Mark the path an
+                # unresolved indirect call instead (honest coverage loss).
+                diagnostics.append(f"disp_unres:{addr:x}")
+                terminals.append(TermPath("indirect_call", cond,
+                                          dict(ctx.canon), dict(ctx.arrays)))
+                continue
             if kind == "retterm":
                 # Return-path trampoline: the game continuation is
                 # re-dispatched by the runtime; function-level equivalent
