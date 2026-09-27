@@ -304,6 +304,56 @@ def _run_ssa_batch(command: list[str], batch_timeout_ms: int) -> tuple[int, bool
         return -9, True
 
 
+def _ssa_batch_compare_reusable(
+    batch: list[dict[str, Any]],
+    batch_compare_path: Path,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Decide whether an existing compare output already covers this exact batch.
+
+    Reboot-resume consistency check: the recorded main-result total must equal
+    the batch's oracle-part count.  Anything else may be a stale artifact from
+    a different split and is re-compared rather than trusted.
+    """
+    try:
+        compare_doc = load_json(batch_compare_path)
+    except (OSError, ValueError):
+        return False, None
+    if not isinstance(compare_doc, dict):
+        return False, None
+    summary = compare_doc.get("summary")
+    if not isinstance(summary, dict):
+        return False, None
+    try:
+        total = int(summary.get("total"))
+    except (TypeError, ValueError):
+        return False, None
+    if total != len(batch):
+        return False, None
+    failed = int(summary.get("failed") or 0)
+    refused = int(summary.get("refused") or 0)
+    returncode = 0 if failed == 0 and refused == 0 else 1
+    return True, {"compare_doc": compare_doc, "returncode": returncode}
+
+
+def _ssa_batch_progress_row(
+    rows: list[dict[str, Any]],
+    batch_count: int,
+) -> dict[str, Any]:
+    """Lightweight progress document checkpointed after each batch."""
+    return {
+        "schema": "dosunit.ssa_batched_progress.v1",
+        "batches_total": batch_count,
+        "batches_completed": len(rows),
+        "main_passed": sum(int(row.get("main_passed", 0) or 0) for row in rows),
+        "main_failed": sum(int(row.get("main_failed", 0) or 0) for row in rows),
+        "main_refused": sum(int(row.get("main_refused", 0) or 0) for row in rows),
+        "failed_batches": [
+            row.get("batch") for row in rows if str(row.get("status", "")) != "passed"
+        ],
+        "batches": rows,
+    }
+
+
 def _ssa_batch_failure_row(
     batch_index: int,
     batch: list[dict[str, Any]],
@@ -339,17 +389,36 @@ def cmd_compare_ssa_batched(args: argparse.Namespace) -> int:  # noqa: D103
     if not batches:
         raise DosUnitError("--oracle-ssa has no SSA functions to compare")
 
+    progress_path = out_dir / "progress.json"
     rows: list[dict[str, Any]] = []
     for batch_index, batch in enumerate(batches, start=1):
         batch_doc = _ssa_batch_document(oracle, batch)
         batch_oracle_path = out_dir / f"oracle.batch{batch_index:03d}.ssa.json"
         batch_compare_path = out_dir / f"compare.batch{batch_index:03d}.json"
         write_json(batch_oracle_path, batch_doc)
+        if args.resume:
+            reusable, reused = _ssa_batch_compare_reusable(batch, batch_compare_path)
+            if reusable and reused is not None:
+                row = _ssa_batch_row(
+                    batch_index,
+                    batch,
+                    reused["compare_doc"],
+                    int(reused["returncode"]),
+                    0,
+                    batch_oracle_path,
+                    batch_compare_path,
+                )
+                row["resumed"] = True
+                rows.append(row)
+                write_json(progress_path, _ssa_batch_progress_row(rows, len(batches)))
+                if int(reused["returncode"]) != 0 and not args.keep_going:
+                    break
+                continue
         command = _ssa_batch_command(args, batch_oracle_path, batch_compare_path)
         started = time.time()
         returncode, timed_out = _run_ssa_batch(command, int(args.batch_timeout_ms))
+        elapsed_ms = int((time.time() - started) * 1000)
         if not batch_compare_path.exists():
-            elapsed_ms = int((time.time() - started) * 1000)
             rows.append(
                 _ssa_batch_failure_row(
                     batch_index,
@@ -361,12 +430,13 @@ def cmd_compare_ssa_batched(args: argparse.Namespace) -> int:  # noqa: D103
                     batch_compare_path,
                 )
             )
+            write_json(progress_path, _ssa_batch_progress_row(rows, len(batches)))
             if not args.keep_going:
                 break
             continue
         compare_doc = load_json(batch_compare_path)
-        elapsed_ms = int((time.time() - started) * 1000)
         rows.append(_ssa_batch_row(batch_index, batch, compare_doc, returncode, elapsed_ms, batch_oracle_path, batch_compare_path))
+        write_json(progress_path, _ssa_batch_progress_row(rows, len(batches)))
         if returncode != 0 and not args.keep_going:
             break
 
@@ -1150,6 +1220,15 @@ def build_parser(*, prog: str = "dosunit") -> argparse.ArgumentParser:  # noqa: 
         action="store_false",
         default=argparse.SUPPRESS,
         help="Stop after the first failed/refused/nonzero batch",
+    )
+    compare_ssa_batched.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Skip batches whose compare.batchNNN.json already exists and covers the "
+            "batch (summary.total matches the oracle part count); lets an interrupted "
+            "run continue where it left off. Reused outputs are marked 'resumed'."
+        ),
     )
     _add_max_rss_argument(compare_ssa_batched)
     compare_ssa_batched.add_argument("--skip-unmapped", action="store_true")

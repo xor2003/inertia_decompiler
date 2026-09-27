@@ -67,6 +67,8 @@ REG32_HI16_BY_OFFSET = {
     30: "edi_hi",
 }
 RAW_OUTPUT_REGS = ("ax", "bx", "cx", "dx", "si", "di", "bp", "sp")
+X86_32_RAW_OUTPUT_REGS = ("eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp")
+ALL_X86_RAW_OUTPUT_REGS = (*RAW_OUTPUT_REGS, *X86_32_RAW_OUTPUT_REGS)
 ABI_OUTPUT_REGS = {
     "msc16-near": ("ax", "dx", "sp"),
     "raw-all": RAW_OUTPUT_REGS,
@@ -2401,21 +2403,26 @@ def _record_lowered_part(
 ) -> None:
     """Append the SSA part body for a lowered block and enqueue its successors."""
     part_index = len(state.lowered_parts)
+    entry = ctx.function.get("entry")
+    flat_module = isinstance(entry, dict) and entry.get("kind") == "module_relative"
+    offset_width = 8 if flat_module else 4
+    entry_delta = at - ctx.start if flat_module else (at - ctx.start) & 0xFFFF
+    block_ip = at - ctx.function_base if flat_module else (at - ctx.function_base) & 0xFFFF
     body_without_id = {
         "function": {"id": ctx.function_id, "name": ctx.function_name},
         "part": {
             "kind": "block",
             "index": part_index,
-            "entry_delta": normalize_hex((at - ctx.start) & 0xFFFF, width=4),
+            "entry_delta": normalize_hex(entry_delta, width=offset_width),
         },
         "function_entry": {
             "cs": normalize_hex(ctx.segment_para, width=4),
-            "ip": normalize_hex(ctx.entry_ip, width=4),
+            "ip": normalize_hex(ctx.entry_ip, width=offset_width),
             "linear": normalize_hex(ctx.start),
         },
         "entry": {
             "cs": normalize_hex(ctx.segment_para, width=4),
-            "ip": normalize_hex((at - ctx.function_base) & 0xFFFF, width=4),
+            "ip": normalize_hex(block_ip, width=offset_width),
             "linear": normalize_hex(at),
         },
         "source": {
@@ -2538,9 +2545,12 @@ def _lower_block_ir_source(
 
 
 def _with_control_output_regs(output_regs: tuple[str, ...], transfer: dict[str, Any] | None) -> tuple[str, ...]:
+    """Carry available register state across a direct successor on either x86 width."""
     if not isinstance(transfer, dict) or transfer.get("kind") != "direct_successors":
         return output_regs
-    return tuple(dict.fromkeys((*output_regs, *RAW_OUTPUT_REGS, "ip")))
+    available = {name for name, _width in REG_BY_OFFSET.values()}
+    raw_regs = tuple(name for name in ALL_X86_RAW_OUTPUT_REGS if name in available)
+    return tuple(dict.fromkeys((*output_regs, *raw_regs, "ip")))
 
 
 def _catalog_segment_paragraphs(functions_catalog: dict[str, Any]) -> dict[str, int]:
@@ -2686,6 +2696,12 @@ def _repeat_string_family_versions(
     return None
 
 
+def _has_16_bit_repeat_state() -> bool:
+    """Check that the 16-bit repeat summary has every required guest register."""
+    available = {name for name, _width in REG_BY_OFFSET.values()}
+    return all(name in available for name in ("ax", "cx", "si", "di", "flags", "ds", "es"))
+
+
 def _lower_repeat_string_summary(
     instructions: list[dict[str, Any]],
     *,
@@ -2693,7 +2709,7 @@ def _lower_repeat_string_summary(
     max_assignments_per_function: int,
 ) -> dict[str, Any] | None:
     info = _repeat_string_info(instructions)
-    if info is None:
+    if info is None or not _has_16_bit_repeat_state():
         return None
     family = str(info["family"])
     width = int(info["width"])
@@ -3241,6 +3257,10 @@ def _finish_irsb_lowering(
     max_assignments_per_function: int,
 ) -> dict[str, Any] | LowerFailure:
     """Fold exits into ip, materialize requested outputs, and build the SSA doc."""
+    control_width = next(
+        (width for name, width in REG_BY_OFFSET.values() if name in {"ip", "eip"}),
+        16,
+    )
     next_expr = _lower_expr(
         irsb.next,
         temp_defs=state.temp_defs,
@@ -3251,9 +3271,12 @@ def _finish_irsb_lowering(
     )
     if isinstance(next_expr, LowerFailure):
         return next_expr
-    ip_expr = _coerce_width(next_expr, 16)
+    ip_expr = _coerce_width(next_expr, control_width)
     for guard, dst in reversed(state.exits):
-        ip_expr = SsaExpr("ite", 16, (_coerce_width(guard, 1), _coerce_width(dst, 16), ip_expr))
+        ip_expr = SsaExpr(
+            "ite", control_width,
+            (_coerce_width(guard, 1), _coerce_width(dst, control_width), ip_expr),
+        )
     state.reg_versions["ip"] = ip_expr
 
     requested: dict[str, SsaExpr] = {}
@@ -7715,7 +7738,7 @@ def _successor_required_inputs(successor_detail: Any, successor_body: dict[str, 
     may_defer_passthrough = _has_direct_successor_transfer(successor_body)
     for name, term in outputs.items():
         output_name = str(name)
-        if may_defer_passthrough and output_name in RAW_OUTPUT_REGS and isinstance(term, dict) and _term_is_identity_input(
+        if may_defer_passthrough and output_name in ALL_X86_RAW_OUTPUT_REGS and isinstance(term, dict) and _term_is_identity_input(
             term, output_name, assignments
         ):
             continue
@@ -10625,6 +10648,7 @@ def _resolve_call_target(
         index,
         allow_aliased_call_targets=allow_aliased_call_targets,
         rendered_linear=_rendered_call_target_linear(function),
+        near_segment_base=_near_call_segment_base(function),
     )
     detail = {
         "kind": "direct",
@@ -10696,6 +10720,33 @@ def _direct_call_target_from_instructions(source: dict[str, Any]) -> int | None:
     return _optional_int(operand)
 
 
+def _near_call_segment_base(function: dict[str, Any]) -> int | None:
+    """Caller segment base for near calls whose raw operand is a segment-relative IP.
+
+    A ``call`` (rel16) operand is an IP inside the caller's own segment, so the
+    true target linear is ``raw + (entry.linear - entry.ip)``.  Far ``lcall``
+    operands embed their own segment and must not take this lane.  Returns None
+    for far calls or malformed entries.
+    """
+    source = function.get("source", {}) if isinstance(function.get("source"), dict) else {}
+    instructions = [item for item in source.get("instructions", []) or [] if isinstance(item, dict)]
+    if not instructions:
+        return None
+    last = instructions[-1]
+    mnemonic = str(last.get("mnemonic") or _mnemonic_from_disassembly(last)).lower()
+    if mnemonic != "call":
+        return None
+    operand = str(last.get("op_str") or _operand_from_disassembly(last)).strip().lower()
+    if not operand or operand.startswith("far ") or any(token in operand for token in ("[", "]", ",")):
+        return None
+    entry = function.get("entry") if isinstance(function.get("entry"), dict) else {}
+    linear = _optional_int(entry.get("linear"))
+    ip = _optional_int(entry.get("ip"))
+    if linear is None or ip is None or linear < ip:
+        return None
+    return linear - ip
+
+
 def _rendered_call_target_linear(function: dict[str, Any]) -> int | None:
     """Absolute target linear rendered in the final instruction's operand text.
 
@@ -10715,12 +10766,50 @@ def _rendered_call_target_linear(function: dict[str, Any]) -> int | None:
     return value if value is not None and value > 0xFFFF else None
 
 
+def _near_call_function_for_target(
+    raw: int,
+    low16: int,
+    index: dict[str, dict[Any, dict[str, Any]]],
+    near_segment_base: int,
+    allow_aliased_call_targets: bool,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
+    """Resolve an ordinary near-call operand to an SSA function entry.
+
+    Layer: dosunit.  Near-call operands are IPs in the caller's segment, and
+    the lifter's ``raw`` is already the linear target, so low16 remapping can
+    only bind to a coincidental entry in a *different* segment; it is skipped.
+    """
+    for unique_table, all_table, key in (
+        ("by_linear", "by_linear_all", raw),
+        ("by_linear", "by_linear_all", near_segment_base + raw),
+    ):
+        hit = _call_target_lookup(
+            index, unique_table, all_table, key, allow_aliased=allow_aliased_call_targets
+        )
+        if hit is not None:
+            return hit
+    signature_target, signature_reason = _binary_signature_target_for_call_raw(raw, index)
+    if signature_target is not None:
+        return signature_target, [], signature_reason
+    for unique_table, all_table, key in (
+        ("by_ip", "by_ip_all", raw),
+        ("by_ip", "by_ip_all", low16),
+    ):
+        hit = _call_target_lookup(
+            index, unique_table, all_table, key, allow_aliased=allow_aliased_call_targets
+        )
+        if hit is not None:
+            return hit
+    return None, [], "no SSA function starts at the direct call target"
+
+
 def _function_for_call_target(
     raw: int,
     index: dict[str, dict[Any, dict[str, Any]]],
     *,
     allow_aliased_call_targets: bool,
     rendered_linear: int | None = None,
+    near_segment_base: int | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
     low16 = raw & 0xFFFF
     if rendered_linear is not None:
@@ -10730,6 +10819,10 @@ def _function_for_call_target(
         )
         if hit is not None:
             return hit
+    if near_segment_base is not None:
+        return _near_call_function_for_target(
+            raw, low16, index, near_segment_base, allow_aliased_call_targets
+        )
     for unique_table, all_table, key in (
         ("by_linear", "by_linear_all", raw),
         ("by_linear_low16", "by_linear_low16_all", low16),

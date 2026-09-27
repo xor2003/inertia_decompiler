@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import time
@@ -643,6 +642,165 @@ def test_dosunit_straightline_ssa_drops_flag_noise_and_return_ip_load(tmp_path: 
     assert "load" not in serialized.lower()
 
 
+def test_dosunit_straightline_ssa_lowers_x86_condition_ccall_without_extra_solver_cost():
+    """A real x86 setcc VEX helper remains a deterministic five-argument summary."""
+    import archinfo
+    import pyvex
+    import z3
+
+    irsb = pyvex.IRSB(bytes.fromhex("39d00f94c0c3"), 0x1000, archinfo.ArchX86(), opt_level=0)
+    ccall = next(
+        stmt.data for stmt in irsb.statements
+        if getattr(getattr(stmt, "data", None), "tag", None) == "Iex_CCall"
+    )
+    inputs = {
+        arg.tmp: straightline_ssa.SsaExpr("input", 32, name=f"flag_{index}")
+        for index, arg in enumerate(ccall.args)
+        if arg.tag == "Iex_RdTmp"
+    }
+    lowered = straightline_ssa._lower_expr(
+        ccall, temp_defs=inputs, temp_failures={}, reg_versions={}, tyenv=irsb.tyenv,
+        memory=straightline_ssa.SsaExpr("mem_input", 0, name="memory"),
+    )
+    assert isinstance(lowered, straightline_ssa.SsaExpr)
+    assert lowered.op == "summary_x86g_calculate_condition"
+    assert lowered.width == 32 and len(lowered.args) == 5
+    assert lowered.args[0].value == 4  # x86 condition Z from the real setz instruction
+
+    unknown = SimpleNamespace(tag="Iex_CCall", callee=SimpleNamespace(name="unknown_helper"), args=ccall.args)
+    refused = straightline_ssa._lower_expr(
+        unknown, temp_defs=inputs, temp_failures={}, reg_versions={}, tyenv=irsb.tyenv,
+        memory=straightline_ssa.SsaExpr("mem_input", 0, name="memory"),
+    )
+    assert isinstance(refused, straightline_ssa.LowerFailure)
+
+    carry_irsb = pyvex.IRSB(bytes.fromhex("11d8c3"), 0x1000, archinfo.ArchX86(), opt_level=0)
+    carry_call = next(
+        stmt.data for stmt in carry_irsb.statements
+        if getattr(getattr(stmt, "data", None), "tag", None) == "Iex_CCall"
+    )
+    carry_inputs = {
+        arg.tmp: straightline_ssa.SsaExpr("input", 32, name=f"carry_{index}")
+        for index, arg in enumerate(carry_call.args)
+        if arg.tag == "Iex_RdTmp"
+    }
+    carry = straightline_ssa._lower_expr(
+        carry_call, temp_defs=carry_inputs, temp_failures={}, reg_versions={}, tyenv=carry_irsb.tyenv,
+        memory=straightline_ssa.SsaExpr("mem_input", 0, name="memory"),
+    )
+    assert isinstance(carry, straightline_ssa.SsaExpr)
+    assert carry.op == "summary_x86g_calculate_eflags_c" and len(carry.args) == 4
+
+    flag_args = [z3.BitVec(f"f{i}", 32) for i in range(4)]
+    lhs = straightline_ssa._z3_apply(lowered.op, 32, [z3.BitVecVal(4, 32), *flag_args], z3)
+    rhs = straightline_ssa._z3_apply(lowered.op, 32, [z3.BitVecVal(4, 32), *flag_args], z3)
+    solver = z3.Solver()
+    solver.add(lhs != rhs)
+    assert solver.check() == z3.unsat
+    changed_condition = straightline_ssa._z3_apply(lowered.op, 32, [z3.BitVecVal(5, 32), *flag_args], z3)
+    solver = z3.Solver()
+    solver.add(lhs != changed_condition)
+    assert solver.check() == z3.sat
+
+
+def test_dosunit_straightline_ssa_preserves_32_bit_register_halves(monkeypatch: pytest.MonkeyPatch):
+    """A 16-bit or byte write to a PE32 register preserves untouched bits."""
+    import z3
+
+    monkeypatch.setattr(straightline_ssa, "REG_BY_OFFSET", {8: ("eax", 32)})
+    monkeypatch.setattr(straightline_ssa, "REG32_BY_OFFSET", {})
+    monkeypatch.setattr(straightline_ssa, "REG32_HI16_BY_OFFSET", {})
+    monkeypatch.setattr(straightline_ssa, "BYTE_REGISTER_ACCESS", {8: ("eax", False), 9: ("eax", True)})
+    state = {"eax": straightline_ssa.SsaExpr("const", 32, value=0x12345678)}
+    assert straightline_ssa._write_register(state, 8, straightline_ssa.SsaExpr("const", 16, value=0xABCD)) is None
+    assert straightline_ssa._write_register(state, 9, straightline_ssa.SsaExpr("const", 8, value=0xEF)) is None
+
+    def evaluate(expr: straightline_ssa.SsaExpr) -> object:
+        if expr.op == "const":
+            return z3.BitVecVal(expr.value, expr.width)
+        return straightline_ssa._z3_apply(expr.op, expr.width, [evaluate(arg) for arg in expr.args], z3)
+
+    full = z3.simplify(evaluate(state["eax"]))
+    low = straightline_ssa._read_register(state, 8, 16, source="VEX")
+    high_byte = straightline_ssa._read_register(state, 9, 8, source="VEX")
+    assert isinstance(low, straightline_ssa.SsaExpr)
+    assert isinstance(high_byte, straightline_ssa.SsaExpr)
+    assert full.as_long() == 0x1234EFCD
+    assert z3.simplify(evaluate(low)).as_long() == 0xEFCD
+    assert z3.simplify(evaluate(high_byte)).as_long() == 0xEF
+
+
+def test_dosunit_straightline_ssa_uses_32_bit_control_successor_registers(monkeypatch: pytest.MonkeyPatch):
+    """A PE32 branch carries available register state without 16-bit names."""
+    import archinfo
+    import pyvex
+
+    registers = {
+        8: ("eax", 32), 12: ("ecx", 32), 16: ("edx", 32), 20: ("ebx", 32),
+        24: ("esp", 32), 28: ("ebp", 32), 32: ("esi", 32), 36: ("edi", 32),
+        40: ("cc_op", 32), 44: ("cc_dep1", 32), 48: ("cc_dep2", 32),
+        52: ("cc_ndep", 32), 68: ("eip", 32),
+    }
+    monkeypatch.setattr(straightline_ssa, "REG_BY_OFFSET", registers)
+    monkeypatch.setattr(straightline_ssa, "REG32_BY_OFFSET", {})
+    monkeypatch.setattr(straightline_ssa, "REG32_HI16_BY_OFFSET", {})
+    monkeypatch.setattr(straightline_ssa, "BYTE_REGISTER_ACCESS", {8: ("eax", False), 9: ("eax", True)})
+    outputs = straightline_ssa._with_control_output_regs(
+        ("eax", "edx", "esp"), {"kind": "direct_successors"}
+    )
+    assert "ax" not in outputs
+    assert {"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "ip"} <= set(outputs)
+
+    irsb = pyvex.IRSB(bytes.fromhex("85c0740290c3"), 0x1000, archinfo.ArchX86(), opt_level=0)
+    lowered = straightline_ssa._lower_irsb(irsb, output_regs=outputs, max_assignments_per_function=512)
+    assert isinstance(lowered, dict)
+    assert "ax" not in lowered["outputs"]
+    indirect = pyvex.IRSB(bytes.fromhex("ffe0"), 0x1000, archinfo.ArchX86(), opt_level=0)
+    indirect_lowered = straightline_ssa._lower_irsb(
+        indirect, output_regs=("eax", "ip"), max_assignments_per_function=512
+    )
+    assert isinstance(indirect_lowered, dict)
+    assert indirect_lowered["outputs"]["ip"] == {"op": "input", "name": "eax", "width": 32}
+    assert straightline_ssa._lower_repeat_string_summary(
+        [{"mnemonic": "rep movsd", "disassembly": "rep movsd"}],
+        output_regs=outputs,
+        max_assignments_per_function=512,
+    ) is None
+    successor = {
+        "source": {"transfer": {"kind": "direct_successors"}},
+        "assignments": [],
+        "outputs": {"eax": {"op": "input", "name": "eax", "width": 32}},
+    }
+    assert straightline_ssa._successor_required_inputs(None, successor) == set()
+    successor["outputs"]["eax"] = {
+        "op": "add", "width": 32,
+        "args": [
+            {"op": "input", "name": "eax", "width": 32},
+            {"op": "const", "value": "0x00000001", "width": 32},
+        ],
+    }
+    assert straightline_ssa._successor_required_inputs(None, successor) == {"eax"}
+
+
+def test_dosunit_x86_flag_summary_cannot_turn_a_model_difference_into_a_bug_verdict():
+    """A counterexample using an uninterpreted flag helper is inconclusive."""
+    flag_call = {
+        "id": "flag_call",
+        "op": "summary_x86g_calculate_eflags_c",
+        "width": 32,
+        "args": [{"op": "const", "width": 32, "value": "0x00000000"}] * 4,
+    }
+    oracle = {"inputs": [], "assignments": [flag_call], "outputs": {"eax": {"ref": "flag_call"}}}
+    candidate = {"inputs": [], "assignments": [], "outputs": {"eax": {"op": "const", "width": 32, "value": "0x00000000"}}}
+    inconclusive = straightline_ssa._compare_functions(oracle, candidate, timeout_ms=1000)
+    assert inconclusive["status"] == "refused"
+    assert inconclusive["reason"] == "uninterpreted_x86_flags"
+
+    concrete = {"inputs": [], "assignments": [], "outputs": {"eax": {"op": "const", "width": 32, "value": "0x00000001"}}}
+    changed = straightline_ssa._compare_functions(concrete, candidate, timeout_ms=1000)
+    assert changed["status"] == "failed"
+
+
 def test_dosunit_straightline_ssa_follows_short_boring_vex_fallthrough(tmp_path: Path):
     image = bytearray(0x240)
     image[0x200:0x205] = b"\x55\x8b\xec\x5d\xc3"  # push bp; mov bp, sp; pop bp; ret
@@ -1162,8 +1320,18 @@ def test_dosunit_compare_ssa_proves_equivalent_and_finds_counterexample(tmp_path
         exe_path=changed, functions_catalog=original_catalog, output_regs=("ax", "bx")
     )
 
-    passed = compare_ssa_documents(oracle=oracle, candidate=equivalent_ssa)
-    failed = compare_ssa_documents(oracle=oracle, candidate=changed_ssa)
+    mapping = {
+        "schema": "dosunit.mapping.v1",
+        "functions": [{
+            "oracle_id": "demo.exe:leaf_math",
+            "oracle_name": "leaf_math",
+            "candidate_id": "demo.exe:leaf_math",
+            "candidate_name": "leaf_math",
+            "candidate_entry": {"cs": "0x0000", "ip": "0x0200", "kind": "near"},
+        }],
+    }
+    passed = compare_ssa_documents(oracle=oracle, candidate=equivalent_ssa, mapping_document=mapping)
+    failed = compare_ssa_documents(oracle=oracle, candidate=changed_ssa, mapping_document=mapping)
 
     assert passed["summary"]["passed"] == 1
     assert failed["summary"]["failed"] == 1
@@ -4113,6 +4281,36 @@ def test_dosunit_compare_ssa_normalizes_layout_memory_operands():
     ]
 
 
+def test_dosunit_compare_ssa_preserves_explicit_pe32_global_address_mapping():
+    """A symbol-backed full VA survives inferred low-word layout normalization."""
+    memory = {"kind": "memory", "name": "mem", "addr_width": 32, "value_width": 8}
+
+    def function(address: int) -> dict:
+        return _manual_ssa_function(
+            "global_load32",
+            [f"mov eax, dword ptr [0x{address:x}]"],
+            inputs=[memory],
+            assignments=[{
+                "id": "v0", "op": "loadle", "width": 32,
+                "args": [
+                    {"op": "mem_input", "name": "mem", "addr_width": 32, "value_width": 8},
+                    {"op": "const", "value": f"0x{address:08x}", "width": 32},
+                ],
+            }],
+            outputs={"eax": {"ref": "v0"}},
+        )
+
+    oracle_function = function(0x8AC68)
+    candidate_function = function(0xA57E8)
+    candidate_function["_constant_normalization"] = {0xA57E8: 0x8AC68}
+    candidate_function["_constant_normalization_reasons"] = {0xA57E8: "matched_data_symbol"}
+
+    compared = compare_ssa_documents(oracle=_ssa_doc(oracle_function), candidate=_ssa_doc(candidate_function))
+
+    assert compared["summary"]["passed"] == 1
+    assert compared["results"][0]["layout_normalization"]["kind"] == "layout_constants"
+
+
 def test_dosunit_compare_ssa_normalizes_absolute_layout_memory_operands():
     oracle_function = _manual_ssa_function(
         "global_store",
@@ -5524,6 +5722,69 @@ def test_dosunit_compare_ssa_resolves_exact_linear_same_entry_call_target_aliase
     assert [alias["name"] for alias in caller["call_compare"]["candidate"]["aliases"]] == ["target_a", "target_b"]
 
 
+def _near_call_stub(function_id: str, name: str, *, ip: str, linear: str, target: str) -> dict[str, object]:
+    stub = _ssa_stub(function_id, name, ip=ip, linear=linear, jumpkind="Ijk_Call", call_raw=target)
+    source = stub["source"]
+    assert isinstance(source, dict)
+    source["instructions"] = [
+        {
+            "address": {"ip": ip, "linear": linear},
+            "disassembly": f"call {target}",
+            "mnemonic": "call",
+            "op_str": target,
+            "size": 3,
+        }
+    ]
+    return stub
+
+
+def test_dosunit_ssa_near_call_ignores_cross_segment_low16_collision():
+    # Oracle __vprinter calls an unlowered tail block at linear 0x215c; a
+    # different segment coincidentally holds a part whose linear low-16 bits are
+    # also 0x215c (0x1215c).  Near calls cannot cross segments, so the collision
+    # must not be claimed.
+    caller = _near_call_stub(
+        "oracle.exe:caller", "caller", ip="0x15a5", linear="0x25a5", target="0x215c"
+    )
+    index = straightline_ssa._ssa_function_index(
+        [_ssa_stub("oracle.exe:other_seg", "other_seg", ip="0x007c", linear="0x1215c")]
+    )
+    detail = straightline_ssa._resolve_call_target(caller, index, allow_aliased_call_targets=True)
+    assert detail["resolved"] is None
+
+    # When the real same-segment target is lowered, it wins directly.
+    index = straightline_ssa._ssa_function_index(
+        [
+            _ssa_stub("oracle.exe:tail", "tail", ip="0x115c", linear="0x215c"),
+            _ssa_stub("oracle.exe:other_seg", "other_seg", ip="0x007c", linear="0x1215c"),
+        ]
+    )
+    detail = straightline_ssa._resolve_call_target(caller, index, allow_aliased_call_targets=True)
+    assert detail["resolved"]["entry"]["linear"] == "0x215c"
+
+
+def test_dosunit_ssa_far_call_keeps_low16_resolution():
+    caller = _ssa_stub(
+        "oracle.exe:caller", "caller", ip="0x15a5", linear="0x25a5", jumpkind="Ijk_Call", call_raw="0x215c"
+    )
+    source = caller["source"]
+    assert isinstance(source, dict)
+    source["instructions"] = [
+        {
+            "address": {"ip": "0x15a5", "linear": "0x25a5"},
+            "disassembly": "lcall 0x110e, 0x7c",
+            "mnemonic": "lcall",
+            "op_str": "0x110e, 0x7c",
+            "size": 5,
+        }
+    ]
+    index = straightline_ssa._ssa_function_index(
+        [_ssa_stub("oracle.exe:far_callee", "far_callee", ip="0x007c", linear="0x1215c")]
+    )
+    detail = straightline_ssa._resolve_call_target(caller, index, allow_aliased_call_targets=True)
+    assert detail["resolved"]["entry"]["linear"] == "0x1215c"
+
+
 def test_dosunit_compare_ssa_resolves_unlowered_library_call_by_binary_signature(tmp_path: Path):
     signature = bytes.fromhex("55 8b ec 56 57 b8 34 12 03 c2 5f 5e 5d c3 90 90") * 2
     original_image = bytearray(0x11000)
@@ -6508,6 +6769,66 @@ def test_dosunit_cli_compare_ssa_batched_runs_sequential_child_processes(tmp_pat
     assert "Connectivity:" in report
     assert "Loop SCCs:" in report
     assert "Call SCCs:" in report
+
+
+def test_dosunit_cli_compare_ssa_batched_resume_reuses_completed_batches(tmp_path: Path):
+    oracle = {
+        "schema": "dosunit.ssa.v1",
+        "exe": "oracle.exe",
+        "functions": [
+            _ssa_stub("demo.exe:first", "first", ip="0x0200", linear="0x1200"),
+            _ssa_stub("demo.exe:second", "second", ip="0x0300", linear="0x1300"),
+        ],
+    }
+    candidate = {
+        "schema": "dosunit.ssa.v1",
+        "exe": "candidate.exe",
+        "functions": [
+            _ssa_stub("demo.exe:first", "first", ip="0x0200", linear="0x1200"),
+            _ssa_stub("demo.exe:second", "second", ip="0x0300", linear="0x1300"),
+        ],
+    }
+    oracle_path = tmp_path / "oracle.ssa.json"
+    candidate_path = tmp_path / "candidate.ssa.json"
+    out_dir = tmp_path / "batches"
+    aggregate_path = tmp_path / "batched.compare.json"
+    oracle_path.write_text(json.dumps(oracle))
+    candidate_path.write_text(json.dumps(candidate))
+    command = [
+        "compare-ssa-batched",
+        "--oracle-ssa",
+        str(oracle_path),
+        "--candidate-ssa",
+        str(candidate_path),
+        "--batch-size",
+        "1",
+        "--max-rss-mb",
+        "0",
+        "--out-dir",
+        str(out_dir),
+        "--out",
+        str(aggregate_path),
+    ]
+
+    assert dosunit_main(command) == 0
+    assert (out_dir / "progress.json").exists()
+
+    resumed_rc = dosunit_main([*command, "--resume"])
+    assert resumed_rc == 0
+    aggregate = json.loads(aggregate_path.read_text())
+    assert aggregate["summary"]["main_passed"] == 2
+    assert [row.get("resumed") for row in aggregate["batches"]] == [True, True]
+    progress = json.loads((out_dir / "progress.json").read_text())
+    assert progress["schema"] == "dosunit.ssa_batched_progress.v1"
+    assert progress["batches_completed"] == 2
+
+    # A compare output that does not cover the batch is not reused.
+    (out_dir / "compare.batch002.json").write_text(
+        json.dumps({"summary": {"total": 999, "failed": 0, "refused": 0}})
+    )
+    assert dosunit_main([*command, "--resume"]) == 0
+    aggregate = json.loads(aggregate_path.read_text())
+    assert [row.get("resumed") for row in aggregate["batches"]] == [True, None]
 
 
 def test_dosunit_compare_ssa_reports_candidate_only_parts():
@@ -8050,9 +8371,10 @@ def test_kvikdos_harness_builds_for_near_mz_function(tmp_path: Path):
     assert harness.observation_linear > 0
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
-    not os.access("/dev/kvm", os.R_OK | os.W_OK) or not Path("/home/xor/kvikdos/kvikdos.c").exists(),
-    reason="real libkvikdos smoke requires writable /dev/kvm and /home/xor/kvikdos/kvikdos.c",
+    not Path("/home/xor/kvikdos/kvikdos.c").exists(),
+    reason="real libkvikdos smoke requires /home/xor/kvikdos/kvikdos.c",
 )
 def test_libkvikdos_backend_records_real_near_function_oracle(tmp_path: Path):
     image = bytearray(0x300)
@@ -8073,9 +8395,10 @@ def test_libkvikdos_backend_records_real_near_function_oracle(tmp_path: Path):
     assert recorded["vectors"][0]["expected"]["regs"]["sp"] == "0xff02"
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
-    not os.access("/dev/kvm", os.R_OK | os.W_OK) or not Path("/home/xor/kvikdos/kvikdos.c").exists(),
-    reason="real libkvikdos smoke requires writable /dev/kvm and /home/xor/kvikdos/kvikdos.c",
+    not Path("/home/xor/kvikdos/kvikdos.c").exists(),
+    reason="real libkvikdos smoke requires /home/xor/kvikdos/kvikdos.c",
 )
 def test_libkvikdos_session_snapshot_restore_roundtrip(tmp_path: Path):
     image = bytearray(0x300)
@@ -8097,9 +8420,10 @@ def test_libkvikdos_session_snapshot_restore_roundtrip(tmp_path: Path):
             session.snapshot_destroy(snapshot)
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
-    not os.access("/dev/kvm", os.R_OK | os.W_OK) or not Path("/home/xor/kvikdos/kvikdos.c").exists(),
-    reason="real libkvikdos smoke requires writable /dev/kvm and /home/xor/kvikdos/kvikdos.c",
+    not Path("/home/xor/kvikdos/kvikdos.c").exists(),
+    reason="real libkvikdos smoke requires /home/xor/kvikdos/kvikdos.c",
 )
 def test_libkvikdos_backend_observes_segmented_ds_memory(tmp_path: Path):
     image = bytearray(0x500)
@@ -8120,9 +8444,10 @@ def test_libkvikdos_backend_observes_segmented_ds_memory(tmp_path: Path):
     assert recorded["vectors"][0]["expected"]["memory"][0]["bytes"] == "3412"
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
-    not os.access("/dev/kvm", os.R_OK | os.W_OK) or not Path("/home/xor/kvikdos/kvikdos.c").exists(),
-    reason="real libkvikdos smoke requires writable /dev/kvm and /home/xor/kvikdos/kvikdos.c",
+    not Path("/home/xor/kvikdos/kvikdos.c").exists(),
+    reason="real libkvikdos smoke requires /home/xor/kvikdos/kvikdos.c",
 )
 def test_libkvikdos_compare_uses_candidate_mapping(tmp_path: Path):
     original_image = bytearray(0x300)
@@ -8152,9 +8477,10 @@ def test_libkvikdos_compare_uses_candidate_mapping(tmp_path: Path):
     assert result["results"][0]["status"] == "passed"
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
-    not os.access("/dev/kvm", os.R_OK | os.W_OK) or not Path("/home/xor/kvikdos/kvikdos.c").exists(),
-    reason="real libkvikdos smoke requires writable /dev/kvm and /home/xor/kvikdos/kvikdos.c",
+    not Path("/home/xor/kvikdos/kvikdos.c").exists(),
+    reason="real libkvikdos smoke requires /home/xor/kvikdos/kvikdos.c",
 )
 def test_branch_generated_vector_replays_on_rebuilt_function_boundary(tmp_path: Path):
     branch_code = b"\x3d\x01\x00\x74\x04\xb8\x22\x22\xc3\xb8\x11\x11\xc3"  # cmp ax, 1; je taken; mov ax, 0x2222; ret; taken: mov ax, 0x1111; ret
