@@ -642,6 +642,42 @@ def test_dosunit_straightline_ssa_drops_flag_noise_and_return_ip_load(tmp_path: 
     assert "load" not in serialized.lower()
 
 
+def test_dosunit_straightline_ssa_reuses_supplied_lifter_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An inspected image can be lowered without paying for a second loader."""
+    image = bytearray(0x240)
+    image[0x200:0x204] = b"\xb8\x34\x12\xc3"
+    exe = tmp_path / "demo.exe"
+    exe.write_bytes(_mz_exe(bytes(image)))
+    catalog = _edge_catalog("demo.exe:leaf", "leaf", offset=0x0200, size=4)
+    projects: list[object] = []
+    load_project = straightline_ssa._load_lifter_project
+
+    def capture_load(path: Path) -> object:
+        project = load_project(path)
+        projects.append(project)
+        return project
+
+    monkeypatch.setattr(straightline_ssa, "_load_lifter_project", capture_load)
+    expected = lower_straightline_ssa_document(exe_path=exe, functions_catalog=catalog, output_regs=("ax",))
+    assert len(projects) == 1
+
+    def unexpected_load(_path: Path) -> None:
+        raise AssertionError("project was loaded again")
+
+    monkeypatch.setattr(straightline_ssa, "_load_lifter_project", unexpected_load)
+    actual = lower_straightline_ssa_document(
+        exe_path=exe, functions_catalog=catalog, output_regs=("ax",), lifter_project=projects[0]
+    )
+    assert actual == expected
+    with pytest.raises(straightline_ssa.DosUnitError, match="does not match SSA executable"):
+        lower_straightline_ssa_document(
+            exe_path=tmp_path / "other.exe", functions_catalog=catalog,
+            output_regs=("ax",), lifter_project=projects[0],
+        )
+
+
 def test_dosunit_straightline_ssa_lowers_x86_condition_ccall_without_extra_solver_cost():
     """A real x86 setcc VEX helper remains a deterministic five-argument summary."""
     import archinfo
@@ -1517,7 +1553,10 @@ def test_dosunit_compare_ssa_uses_full_index_document_for_batched_call_targets()
         mapping_document=mapping,
     )
 
-    assert without_index["summary"]["failed"] == 1
+    # An unresolvable call target is an honest ``call_target_unproven``
+    # refusal, not a semantic failure.
+    assert without_index["summary"]["refused"] == 1
+    assert without_index["summary"]["failed"] == 0
     assert with_index["summary"]["passed"] == 1
     assert with_index["results"][0]["call_compare"]["equivalent"] is True
 
@@ -2829,7 +2868,11 @@ def test_dosunit_compare_ssa_region_equality_covers_reblocked_branchy_function(t
 
     assert oracle["counters"]["ssa_parts_lowered"] == 3
     assert candidate_ssa["counters"]["ssa_parts_lowered"] == 3
-    assert without_region["summary"]["failed"] >= 1
+    # Without region composition the permuted entry part has no 1:1
+    # candidate counterpart — an honest ``mapping_missing`` refusal, not a
+    # forced failure.
+    assert without_region["summary"]["refused"] >= 1
+    assert without_region["summary"]["failed"] == 0
     assert compared["region_equality"]["status"] == "passed"
     assert compared["region_equality"]["passed"] == 1
     assert compared["region_equality"]["covered_results"] >= 1
@@ -2857,7 +2900,10 @@ def test_dosunit_compare_ssa_region_equality_keeps_real_branch_mismatch_failed(t
 
     assert compared["region_equality"]["status"] == "failed"
     assert compared["region_equality"]["failed"] == 1
-    assert compared["summary"]["failed"] >= 1
+    # The permuted parts refuse pairing (``mapping_missing`` /
+    # ``candidate_part_reused``); the real ``bx`` difference is carried by
+    # the region-equality rollup rather than a forced part-level failure.
+    assert compared["summary"]["failed"] + compared["region_equality"]["failed"] >= 1
     region_failure = compared["region_equality"]["results"][0]["mismatches"][0]
     assert region_failure["kind"] == "output_expr_changed"
     assert region_failure["reg"] == "bx"
@@ -6606,6 +6652,8 @@ def test_dosunit_straightline_ssa_uses_single_file_vex_disk_cache(tmp_path: Path
     assert first["counters"]["lifter_cache_writes"] == 1
     assert second["counters"]["lifter_cache_hits"] == 1
     assert second["counters"]["lifter_blocks_lifted"] == 0
+    assert second["functions"] == first["functions"]
+    assert second["refusals"] == first["refusals"]
     cache_files = list((cache_dir / "vex").glob("*.pickle"))
     assert len(cache_files) == 1
 
