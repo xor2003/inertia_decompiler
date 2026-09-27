@@ -1093,6 +1093,56 @@ def _candidate_parts_by_function(tables: _SsaCandidateTables) -> dict[str, list[
     return grouped
 
 
+def _ambiguous_call_sibling_part(
+    candidate_function: dict[str, Any],
+    candidate_parts_by_function: dict[str, list[dict[str, Any]]],
+    candidate_index: dict[str, dict[Any, dict[str, Any]]],
+    mapping_document: dict[str, Any] | None,
+    call_compare: Any,  # noqa: ANN401
+    *,
+    allow_aliased_call_targets: bool,
+) -> dict[str, Any] | None:
+    """Return a same-function candidate part that calls the oracle part's callee.
+
+    A call-boundary pair whose targets resolve to different mapped functions can
+    be a pairing artifact: adjacent call sites share masked signatures, so the
+    oracle part may be paired off-by-one.  When another part of the same
+    candidate function resolves to the oracle callee's mapped counterpart, the
+    1:1 pairing is unproven and the pair must refuse rather than fail.
+    """
+    if not isinstance(call_compare, dict):
+        return None
+    if str(call_compare.get("reason") or "") != "direct call targets resolve to different mapped functions":
+        return None
+    oracle_resolved = (call_compare.get("oracle") or {}).get("resolved")
+    oracle_callee_id = str((oracle_resolved or {}).get("id") or "")
+    if not oracle_callee_id:
+        return None
+    expected_candidate_id = ""
+    for row in (mapping_document or {}).get("functions", []) or []:
+        if isinstance(row, dict) and str(row.get("oracle_id") or "") == oracle_callee_id:
+            expected_candidate_id = str(row.get("candidate_id") or "")
+            break
+    if not expected_candidate_id:
+        return None
+    info = candidate_function.get("function", {}) if isinstance(candidate_function, dict) else {}
+    candidate_part_id = str(candidate_function.get("id") or "")
+    siblings = [
+        *candidate_parts_by_function.get(str(info.get("id", "")), []),
+        *candidate_parts_by_function.get(str(info.get("name", "")), []),
+    ]
+    for sibling in siblings:
+        if not isinstance(sibling, dict) or str(sibling.get("id") or "") == candidate_part_id:
+            continue
+        sibling_call = _resolve_call_target(
+            sibling, candidate_index, allow_aliased_call_targets=allow_aliased_call_targets
+        )
+        sibling_resolved = (sibling_call or {}).get("resolved")
+        if str((sibling_resolved or {}).get("id") or "") == expected_candidate_id:
+            return sibling
+    return None
+
+
 def _ambiguous_candidate_failure_result(
     result: dict[str, Any], sibling: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1278,6 +1328,15 @@ def _compare_single_oracle_part(
         sibling_part = _ambiguous_sibling_part(
             oracle_function, candidate_function, candidate_parts_by_function, image_context
         )
+        if sibling_part is None:
+            sibling_part = _ambiguous_call_sibling_part(
+                candidate_function,
+                candidate_parts_by_function,
+                candidate_index,
+                mapping_document,
+                result.get("call_compare"),
+                allow_aliased_call_targets=allow_aliased_call_targets,
+            )
         if sibling_part is not None:
             result = _ambiguous_candidate_failure_result(result, sibling_part)
     if result.get("reason") == "callee_not_proven":
@@ -11699,8 +11758,12 @@ def _extend_normalization_with_residual_constants(
     A relocated constant can appear inside an expression (e.g. a byte field of a
     relocated datum) without ever being an instruction immediate, so positional
     pairing misses it. When at least two pairs share one 16-bit delta, an unmapped
-    candidate leaf `c` is adopted when `c - delta` is itself an oracle term leaf and
-    `c` sits within +-8 of an already-mapped candidate constant (same datum).
+    candidate leaf `c` is adopted when `c - delta` is itself an oracle term leaf,
+    `c` sits within +-8 of an already-mapped candidate constant, and the implied
+    oracle value likewise sits within +-8 of an already-mapped oracle constant.
+    Both sides must be >= 0x100: smaller literals are structural immediates
+    (frame offsets, small ints), never relocated data, and adopting them
+    rewrites unrelated addressing terms into false mismatches.
     """
     delta_support: dict[int, int] = {}
     for candidate_value, oracle_value in candidate_map.items():
@@ -11712,12 +11775,21 @@ def _extend_normalization_with_residual_constants(
     oracle_leaves = _term_constant_leaves(oracle_function)
     candidate_leaves = _term_constant_leaves(candidate_function)
     mapped_candidates = set(candidate_map)
+    mapped_oracles = {int(candidate_map[key]) for key in mapped_candidates}
     for candidate_value in sorted(candidate_leaves - mapped_candidates):
+        if candidate_value < 0x100:
+            # Small literals (0, 1, frame offsets like 0xfffe) are almost never
+            # relocated data; adopting them rewrites unrelated addressing terms.
+            continue
         for delta in sorted(established):
             oracle_value = (candidate_value - delta) & 0xFFFF
+            if oracle_value < 0x100:
+                continue
             if oracle_value not in oracle_leaves:
                 continue
             if not any(abs(candidate_value - mapped) <= 8 for mapped in mapped_candidates):
+                continue
+            if not any(abs(oracle_value - mapped) <= 8 for mapped in mapped_oracles):
                 continue
             candidate_map[candidate_value] = oracle_value
             candidate_reasons[candidate_value] = "residual_same_delta"
@@ -11841,6 +11913,19 @@ def _accumulate_string_witnesses(
         )
 
 
+def _global_layout_pair_is_relocatable(candidate_value: int, oracle_value: int) -> bool:
+    """Whether a candidate→oracle constant pair can be corpus-wide relocation.
+
+    Values below 0x100 are structural literals, and pairs where both sides are
+    negative-as-i16 (>= 0xff00) are frame/stack offsets like ``bp-2`` vs
+    ``bp-4`` — layout drift, not relocated data.  Globally rewriting either
+    class corrupts unrelated addressing terms in every part.
+    """
+    if oracle_value < 0x100 or candidate_value < 0x100:
+        return False
+    return not (oracle_value >= 0xFF00 and candidate_value >= 0xFF00)
+
+
 def _collect_global_layout_normalization(
     oracle_functions: list[dict[str, Any]],
     *,
@@ -11875,7 +11960,7 @@ def _collect_global_layout_normalization(
         if candidate_function is None:
             continue
         for candidate_value, oracle_value in _aligned_immediate_pairs(oracle_function, candidate_function):
-            if oracle_value < 0x100 or candidate_value < 0x100:
+            if not _global_layout_pair_is_relocatable(candidate_value, oracle_value):
                 continue
             support[(candidate_value, oracle_value)].add(function_id or function_name)
         _accumulate_string_witnesses(
