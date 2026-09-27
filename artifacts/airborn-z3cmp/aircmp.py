@@ -633,24 +633,35 @@ class LowerCtx:
                                (self.arrays[space], trunc(zext(idx, 32) if idx.width < 32 else idx, 32), data))
 
 
-def _expr_key(e: S.SsaExpr, memo: dict[int, tuple], budget: list[int]) -> tuple:
-    """Structural key with an id-keyed DAG cache (nodes stay alive via caller's chain).
+_KEY_CACHE: dict[int, tuple[tuple, S.SsaExpr]] = {}
 
-    ``budget`` caps total nodes visited per top-level call; once exhausted the
-    key degenerates to a per-node unique token, so structurally equal exprs
-    still compare equal (same id) but distinct deep exprs never collide.
+
+def _expr_key(e: S.SsaExpr, memo: dict[int, tuple], budget: list[int]) -> tuple:
+    """Structural key with a persistent id-keyed DAG cache.
+
+    ``_KEY_CACHE`` maps ``id(node) -> (key, node)`` holding a strong ref so
+    ids cannot be recycled while cached — cached keys stay sound.  ``budget``
+    caps nodes visited per top-level call; once exhausted the key degenerates
+    to a per-node unique token (equal exprs keep equal keys by identity,
+    distinct deep exprs never falsely collide).
     """
+    ghit = _KEY_CACHE.get(id(e))
+    if ghit is not None and ghit[1] is e:
+        return ghit[0]
     hit = memo.get(id(e))
     if hit is not None:
+        _KEY_CACHE[id(e)] = (hit, e)
         return hit
     if budget[0] <= 0:
         k = (e.op, e.width, "__deep__", id(e))
         memo[id(e)] = k
+        _KEY_CACHE[id(e)] = (k, e)
         return k
     budget[0] -= 1
     k = (e.op, e.width, e.value, e.name,
          tuple(_expr_key(a, memo, budget) for a in e.args))
     memo[id(e)] = k
+    _KEY_CACHE[id(e)] = (k, e)
     return k
 
 
@@ -1763,6 +1774,15 @@ def _port_helper_kind(name: str) -> str:
         return "gamecall"
     if re.search(r"stack_chk_fail|__assert_fail|^abort$|^exit$", name):
         return "abort"
+    # Host-side helpers: return an opaque host value and never touch guest
+    # canonical state.  ``func_at`` maps a far ptr to a host fn ptr (the
+    # caller tests it for NULL and maybe calls through); stdio prints only
+    # observe.  Memory-mutating calls (memset/memcpy/fread) are excluded —
+    # they can write guest-visible buffers.
+    if re.search(r"(?:^|@)(func_at|rt_far|rt_flat|fprintf|vfprintf|printf|"
+                 r"snprintf|vsnprintf|puts|putchar|fputs|fflush|perror|"
+                 r"malloc|calloc|realloc|free|SDL_\w+)(?:@|$)", name):
+        return "hostret"
     return "uf"
 
 
@@ -1831,8 +1851,12 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
 
         # visits key includes the inline-frame chain so re-entering a shared
         # helper (e.g. get_pc_thunk per call) isn't mistaken for a loop.
+        # m2c dispatch hops re-traverse the same case-compare blocks on every
+        # guest call/ret — a call sequence burns several revisits without any
+        # data loop, so the effective cap is scaled for m2c.
         vkey = addr if not frames else (addr, frames)
-        if visits.get(vkey, 0) >= unroll:
+        limit = unroll * 4 if cfg.m2c else unroll
+        if visits.get(vkey, 0) >= limit:
             incomplete += 1
             continue
         visits = dict(visits)
@@ -1882,6 +1906,21 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 continue
             if kind == "nop":
                 work.append((resume, ctx, cond, visits, frames))
+                continue
+            if kind == "hostret":
+                # Host helper: opaque return value, no guest-state effect.
+                retreg = "eax" if cfg.arch == "i386" else "rax"
+                ctx.reg_versions[retreg] = inp(
+                    f"hostret_{tname}", ctx.reg_versions[retreg].width)
+                work.append((resume, ctx, cond, visits, frames))
+                continue
+            if tconst is None:
+                # Indirect call to an unknown target (e.g. the port's
+                # ``f_()`` far-vector dispatch): the callee and its return
+                # are unmodeled — end the path honestly rather than
+                # UF-clobbering canon and continuing.
+                terminals.append(TermPath("indirect_call", cond,
+                                          dict(ctx.canon), dict(ctx.arrays)))
                 continue
             if (kind in ("inline", "gamecall") and tconst is not None
                     and len(frames) < max_inline):
@@ -2001,9 +2040,12 @@ def merge_outputs(paths: list[TermPath]) -> dict[str, S.SsaExpr]:
     merged: dict[str, S.SsaExpr] = {}
     keys = CANON_OUTPUTS
     # Only normal-return paths contribute outputs: abort (stack-check,
-    # assert) and indirect terminals are exceptional exits whose canon does
+    # assert), indirect, indirect_call, and tail (edge to an out-of-text
+    # PLT/runtime target) terminals are exceptional exits whose canon does
     # not describe a function result.
-    rets = [p for p in paths if p.kind in ("ret", "tail")]
+    rets = [p for p in paths if p.kind == "ret"]
+    if not rets:
+        return {}
     for key in keys:
         term = None
         for p in rets:
@@ -2016,7 +2058,8 @@ def merge_outputs(paths: list[TermPath]) -> dict[str, S.SsaExpr]:
                 # same object — keeps unchanged outputs as plain inputs.
                 if src is not term and term.width == w:
                     term = E("ite", w, (p.cond, src, term))
-        merged[key] = fold(term) if term is not None else term
+        if term is not None:
+            merged[key] = fold(term)
     return merged
 
 

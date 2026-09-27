@@ -4402,6 +4402,12 @@ def _lower_unop(
         return SsaExpr("zext", width, (arg,))
     if "Sto" in op:
         return SsaExpr("sext", width, (arg,))
+    if "HIto" in op:
+        # NwHItoMw extracts the high ``width`` bits of the source (e.g.
+        # 64HIto32 = arg[63:32]); it must not fall through to the generic
+        # low-half ``to`` trunc below.
+        sh = SsaExpr("lshr", arg.width, (arg, SsaExpr("const", arg.width, value=width)))
+        return SsaExpr("trunc", width, (sh,))
     if "to" in op:
         return SsaExpr("trunc", width, (arg,))
     return LowerFailure("unsupported_ir", f"unsupported VEX unop: {op}")
