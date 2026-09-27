@@ -14,6 +14,7 @@ import os
 import pickle
 import re
 import signal
+import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -2411,8 +2412,11 @@ def _record_lowered_part(
         and getattr(ctx.project, "_dosunit_lifter_mode", None) not in {"dos_mz", "blob"}
     )
     offset_width = 8 if flat_module else 4
-    entry_delta = at - ctx.start if flat_module else (at - ctx.start) & 0xFFFF
-    block_ip = at - ctx.function_base if flat_module else (at - ctx.function_base) & 0xFFFF
+    # Flat32 blocks may sit below the declared entry (backward jumps into a
+    # shared head); mask to keep deltas in two's-complement form that parses
+    # back through _optional_int and composes with the & 0xFFFF delta keys.
+    entry_delta = (at - ctx.start) & (0xFFFFFFFF if flat_module else 0xFFFF)
+    block_ip = (at - ctx.function_base) & (0xFFFFFFFF if flat_module else 0xFFFF)
     body_without_id = {
         "function": {"id": ctx.function_id, "name": ctx.function_name},
         "part": {
@@ -4449,9 +4453,6 @@ def _lower_binop(
 ) -> SsaExpr | LowerFailure:
     op = _strip_iop(str(expr.op))
     base = _normalize_binop(op)
-    lowered_op = SUPPORTED_BINOPS.get(base)
-    if lowered_op is None:
-        return LowerFailure("unsupported_ir", f"unsupported VEX binop: {op}")
     args: list[SsaExpr] = []
     for arg in expr.args:
         lowered = _lower_expr(
@@ -4460,6 +4461,26 @@ def _lower_binop(
         if isinstance(lowered, LowerFailure):
             return lowered
         args.append(lowered)
+    if base.endswith("HLto"):
+        # Iop_NwHLtoMw(hi, lo) concatenates two half-width lanes; the width
+        # suffixes are normalized away by _strip_width_suffix.
+        width = int(expr.result_size(tyenv))
+        return SsaExpr("concat", width, tuple(args))
+    if base in {"DivModU64to", "DivModS64to"}:
+        # Iop_DivMod{U,S}64to32(dividend:I64, divisor:I32) -> I64 packs the x86
+        # DIV/IDIV idiom as (remainder << 32) | quotient.  (_normalize_binop
+        # strips the trailing width digits.)
+        dividend = _coerce_width(args[0], 64)
+        divisor = _coerce_width(args[1], 64)
+        div_op, rem_op = ("udiv", "urem") if base.startswith("DivModU") else ("sdiv", "srem")
+        quotient = SsaExpr(div_op, 64, (dividend, divisor))
+        remainder = SsaExpr(rem_op, 64, (dividend, divisor))
+        return SsaExpr(
+            "concat", 64, (SsaExpr("trunc", 32, (remainder,)), SsaExpr("trunc", 32, (quotient,)))
+        )
+    lowered_op = SUPPORTED_BINOPS.get(base)
+    if lowered_op is None:
+        return LowerFailure("unsupported_ir", f"unsupported VEX binop: {op}")
     width = int(expr.result_size(tyenv))
     if lowered_op in {"eq", "ne", "ult", "ule", "ugt", "uge", "slt", "sle", "sgt", "sge"}:
         return SsaExpr(lowered_op, 1, (_coerce_width(args[0], args[1].width), args[1]))
@@ -6279,6 +6300,17 @@ def _region_precompose_metrics(group: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _first_unclaimed(
+    candidates: list[dict[str, Any]], claimed: set[int]
+) -> dict[str, Any] | None:
+    """Return the first candidate not yet claimed by an earlier pairing."""
+    for candidate in candidates:
+        if id(candidate) not in claimed:
+            claimed.add(id(candidate))
+            return candidate
+    return None
+
+
 def _prepare_region_call_normalized_groups(
     oracle_group: list[dict[str, Any]],
     candidate_group: list[dict[str, Any]],
@@ -6310,11 +6342,7 @@ def _prepare_region_call_normalized_groups(
         if hit is not None and _ssa_source_jumpkind(hit) == "Ijk_Call":
             claimed.add(id(hit))
             return hit
-        for fallback in candidate_call_parts:
-            if id(fallback) not in claimed:
-                claimed.add(id(fallback))
-                return fallback
-        return None
+        return _first_unclaimed(candidate_call_parts, claimed)
 
     for oracle_part in oracle_group:
         delta = _ssa_detail_entry_delta(oracle_part)
@@ -6338,7 +6366,12 @@ def _prepare_region_call_normalized_groups(
             call_compare=call_compare,
         )
         normalized_oracle.append(oracle_normalized)
-        normalized_candidate_by_delta[delta] = candidate_normalized
+        # The candidate part keeps its own delta: under boundary-shifted pairing
+        # the oracle delta may collide with a different candidate block, and
+        # keying by it would clobber that block and duplicate the call part.
+        candidate_delta = _ssa_detail_entry_delta(candidate_part)
+        if candidate_delta is not None:
+            normalized_candidate_by_delta[candidate_delta] = candidate_normalized
         if isinstance(normalized_compare, dict) and normalized_compare.get("normalizations"):
             normalizations.append(
                 {
@@ -8655,7 +8688,13 @@ def _summarize_abi_function(
         key=lambda item: int((item.get("part", {}) if isinstance(item.get("part"), dict) else {}).get("index", 0)),
     )
     state = _initial_abi_state(abi_function, observables=observables, data_segment_para=data_segment_para)
-    compose_stats = {"blocks_composed": 0, "branch_merges": 0, "branch_prunes": 0, "loop_cuts": 0}
+    compose_stats = {
+        "blocks_composed": 0,
+        "branch_merges": 0,
+        "branch_prunes": 0,
+        "loop_cuts": 0,
+        "deadline": time.monotonic() + _COMPOSE_MAX_SECONDS,
+    }
     try:
         final_state, terminal_count = _compose_abi_state(
             start,
@@ -8821,15 +8860,16 @@ def _stack_address_term(ss_term: dict[str, Any], sp_term: dict[str, Any], offset
     }
 
 
-_COMPOSE_MAX_BLOCKS = 65536
-_COMPOSE_MAX_PATH_DEPTH = 2048
-_COMPOSE_MAX_TERMINALS = 16384
+_COMPOSE_MAX_BLOCKS = 8192
+_COMPOSE_MAX_PATH_DEPTH = 512
+_COMPOSE_MAX_TERMINALS = 2048
+_COMPOSE_MAX_SECONDS = 90.0
 
 
 def _compose_budget_check(
     *,
     path: list[int],
-    compose_stats: dict[str, int] | None,
+    compose_stats: dict[str, Any] | None,
 ) -> None:
     """Bound ABI composition work; raises LowerFailure when a budget is blown.
 
@@ -8844,10 +8884,28 @@ def _compose_budget_check(
                 "compose_budget_exceeded",
                 f"ABI compose exceeded {_COMPOSE_MAX_BLOCKS} block visits",
             )
+        _compose_deadline_check(compose_stats)
     if len(path) >= _COMPOSE_MAX_PATH_DEPTH:
         raise LowerFailure(
             "compose_budget_exceeded",
             f"ABI compose exceeded path depth {_COMPOSE_MAX_PATH_DEPTH}",
+        )
+
+
+def _compose_deadline_check(compose_stats: dict[str, Any] | None) -> None:
+    """Raise ``compose_budget_exceeded`` once the wall-clock deadline passes.
+
+    Inner loops (block output substitution, branch-arm state merges) can spend
+    minutes between block-entry budget checks on multi-million-node terms, so
+    the deadline is also enforced inside those loops via this lighter check.
+    """
+    if compose_stats is None:
+        return
+    deadline = compose_stats.get("deadline")
+    if isinstance(deadline, float) and time.monotonic() > deadline:
+        raise LowerFailure(
+            "compose_budget_exceeded",
+            f"ABI compose exceeded {_COMPOSE_MAX_SECONDS:.0f}s wall-clock budget",
         )
 
 
@@ -8861,7 +8919,7 @@ def _compose_abi_state(
     max_loop_unroll: int = 0,
     data_segment_para: int = 0x0100,
     callsite_ordinals: dict[int, dict[str, int]] | None = None,
-    compose_stats: dict[str, int] | None = None,
+    compose_stats: dict[str, Any] | None = None,
     enable_constant_branch_pruning: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], int]:
     entry = block.get("entry", {}) if isinstance(block.get("entry"), dict) else {}
@@ -8871,7 +8929,7 @@ def _compose_abi_state(
         return incoming_state, 0
     source = block.get("source", {}) if isinstance(block.get("source"), dict) else {}
     block_outputs = block.get("outputs", {}) if isinstance(block.get("outputs"), dict) else {}
-    state = _compose_block_outputs(block, block_outputs, incoming_state)
+    state = _compose_block_outputs(block, block_outputs, incoming_state, compose_stats=compose_stats)
     if source.get("jumpkind") == "Ijk_Call":
         state = _compose_abi_call(
             block,
@@ -8928,7 +8986,7 @@ def _compose_loop_cut(
     block_key: int,
     path: list[int],
     max_loop_unroll: int,
-    compose_stats: dict[str, int] | None,
+    compose_stats: dict[str, Any] | None,
 ) -> bool:
     """Enforce the loop visit budget; True when the path is cut at the limit."""
     visits = path.count(block_key)
@@ -8952,6 +9010,8 @@ def _compose_block_outputs(
     block: dict[str, Any],
     block_outputs: dict[str, Any],
     incoming_state: dict[str, dict[str, Any]],
+    *,
+    compose_stats: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Compose block outputs into the state by inlining assignments and substituting inputs."""
     assignments = {
@@ -8959,11 +9019,15 @@ def _compose_block_outputs(
     }
     state = dict(incoming_state)
     inline_cache: dict[str, dict[str, Any]] = {}
+    substitute_cache: dict[int, dict[str, Any]] = {}
+    inlined_keepalive: list[dict[str, Any]] = []
     for name, term in block_outputs.items():
         if not isinstance(term, dict):
             continue
+        _compose_deadline_check(compose_stats)
         inlined = _inline_ssa_json_term(term, assignments=assignments, cache=inline_cache)
-        state[str(name)] = _substitute_abi_inputs(inlined, incoming_state)
+        inlined_keepalive.append(inlined)
+        state[str(name)] = _substitute_abi_inputs(inlined, incoming_state, cache=substitute_cache)
     return state
 
 
@@ -9036,7 +9100,7 @@ def _compose_branch_step(
             "compose_budget_exceeded",
             f"ABI compose exceeded {_COMPOSE_MAX_TERMINALS} terminal states",
         )
-    return _merge_abi_states(cond, true_state, false_state), merged_terminals
+    return _merge_abi_states(cond, true_state, false_state, compose_stats=compose_stats), merged_terminals
 
 
 def _compose_abi_call(
@@ -9705,7 +9769,7 @@ def _compose_or_terminal(
     max_loop_unroll: int = 0,
     data_segment_para: int = 0x0100,
     callsite_ordinals: dict[int, dict[str, int]] | None = None,
-    compose_stats: dict[str, int] | None = None,
+    compose_stats: dict[str, Any] | None = None,
     enable_constant_branch_pruning: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], int]:
     successor = _successor_for_target(target, block_by_key)
@@ -9760,13 +9824,87 @@ def _target_key(term: dict[str, Any]) -> int | None:
     return value & 0xFFFF
 
 
+def _abi_terms_equal(
+    left: Any,
+    right: Any,
+    eq_cache: dict[tuple[int, int], bool],
+    *,
+    compose_stats: dict[str, Any] | None = None,
+) -> bool:
+    """Structural equality for SSA JSON term DAGs.
+
+    Terms preserve node sharing, so plain ``==`` walks every root-to-leaf path
+    and is exponential on deep ``ite`` DAGs.  Memoizing on ``(id, id)`` pairs
+    makes the comparison proportional to the DAG's node count instead.  The
+    cache is only valid while every compared term stays alive (ids are reused
+    after GC), so it is scoped to one ABI composition.  Pairs marked
+    provisionally are rewound to ``False`` when a descendant proves unequal.
+    """
+    stack: list[tuple[Any, Any]] = [(left, right)]
+    pending: list[tuple[int, int]] = []
+    equal = True
+    visited = 0
+    try:
+        while stack and equal:
+            visited += 1
+            if visited & 0xFFFF == 0:
+                _compose_deadline_check(compose_stats)
+            l_item, r_item = stack.pop()
+            if l_item is r_item:
+                continue
+            if type(l_item) is not type(r_item):
+                equal = False
+                break
+            if isinstance(l_item, dict):
+                pair = (id(l_item), id(r_item))
+                cached = eq_cache.get(pair)
+                if cached is not None:
+                    if not cached:
+                        equal = False
+                    continue
+                eq_cache[pair] = True
+                pending.append(pair)
+                if l_item.keys() != r_item.keys():
+                    equal = False
+                    break
+                stack.extend((l_item[key], r_item[key]) for key in l_item)
+            elif isinstance(l_item, list):
+                pair = (id(l_item), id(r_item))
+                cached = eq_cache.get(pair)
+                if cached is not None:
+                    if not cached:
+                        equal = False
+                    continue
+                eq_cache[pair] = True
+                pending.append(pair)
+                if len(l_item) != len(r_item):
+                    equal = False
+                    break
+                stack.extend(zip(l_item, r_item))
+            elif l_item != r_item:
+                equal = False
+    finally:
+        if not equal:
+            for pair in pending:
+                eq_cache[pair] = False
+    return equal
+
+
 def _merge_abi_states(
     condition: dict[str, Any],
     true_state: dict[str, dict[str, Any]],
     false_state: dict[str, dict[str, Any]],
+    *,
+    compose_stats: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    eq_cache: dict[tuple[int, int], bool] | None = None
+    eq_keepalive: list[tuple[Any, Any]] | None = None
+    if compose_stats is not None:
+        eq_cache = compose_stats.setdefault("eq_cache", {})
+        eq_keepalive = compose_stats.setdefault("eq_keepalive", [])
     merged: dict[str, dict[str, Any]] = {}
     for key in sorted(set(true_state) | set(false_state)):
+        _compose_deadline_check(compose_stats)
         left = true_state.get(key)
         right = false_state.get(key)
         if left is None:
@@ -9775,7 +9913,18 @@ def _merge_abi_states(
         if right is None:
             merged[key] = left
             continue
-        if left is right or left == right:
+        if left is right:
+            merged[key] = left
+            continue
+        if eq_cache is None:
+            equal = left == right
+        else:
+            equal = _abi_terms_equal(left, right, eq_cache, compose_stats=compose_stats)
+            if eq_keepalive is not None:
+                # Pin compared roots so id() values backing eq_cache entries
+                # cannot be recycled by GC while the cache remains in use.
+                eq_keepalive.append((left, right))
+        if equal:
             merged[key] = left
             continue
         merged[key] = {"op": "ite", "width": _term_width(left), "args": [condition, left, right]}
