@@ -2680,10 +2680,31 @@ def compare_function(name: str, oracle_cfg: SideConfig, cand_cfg: SideConfig,
         rec["status"] = "refused"
         rec["reason"] = "extraction_failed"
         return rec
+    om, cm = merged_sides[0], merged_sides[1]
+    # Flags the port never materializes (demand-driven flag model: e.g. `while
+    # (al==0)` consumes `al` without storing ZF) stay `input[f_*]` on the
+    # candidate side — they are unverifiable, not wrong.  Report them as
+    # unmodeled rather than feeding the solver an unsatisfiable diff.
+    # (Must run before neq0 normalization, which wraps `input` ops.)
+    unmodeled = []
+    for k in list(cm):
+        if k.startswith("f_") and (cm[k].op == "input" and cm[k].name == k
+                                   or om[k].op == "input" and om[k].name == k):
+            unmodeled.append(k)
+            del om[k]
+            del cm[k]
+    if unmodeled:
+        rec["unmodeled_flag_outputs"] = sorted(unmodeled)
+    # Flags are canonical booleans: a side that stores a truthy byte (0xff)
+    # and a side that stores 1 mean the same thing.  Normalize both sides'
+    # flag cells through !=0 before presolve/compare.
+    for m in (om, cm):
+        for k in list(m):
+            if k.startswith("f_"):
+                m[k] = fold(neq0(m[k]))
     # Pre-solve cheap equality: outputs whose SsaExpr is structurally identical
     # on both sides cannot contribute a counterexample — drop them so the
     # solver only sees genuinely different expressions.
-    om, cm = merged_sides[0], merged_sides[1]
     kmo: dict[int, tuple] = {}
     kmc: dict[int, tuple] = {}
     identical = []
@@ -2697,19 +2718,6 @@ def compare_function(name: str, oracle_cfg: SideConfig, cand_cfg: SideConfig,
         del cm[k]
     if identical:
         rec["identical_outputs"] = sorted(identical)
-    # Flags the port never materializes (demand-driven flag model: e.g. `while
-    # (al==0)` consumes `al` without storing ZF) stay `input[f_*]` on the
-    # candidate side — they are unverifiable, not wrong.  Report them as
-    # unmodeled rather than feeding the solver an unsatisfiable diff.
-    unmodeled = []
-    for k in list(cm):
-        if k.startswith("f_") and (cm[k].op == "input" and cm[k].name == k
-                                   or om[k].op == "input" and om[k].name == k):
-            unmodeled.append(k)
-            del om[k]
-            del cm[k]
-    if unmodeled:
-        rec["unmodeled_flag_outputs"] = sorted(unmodeled)
     odiag = rec["oracle"].get("diagnostics", [])
     cdiag = rec["candidate"].get("diagnostics", [])
     paths_incomplete = any(d.startswith(("incomplete_paths", "step_budget", "path_budget"))
