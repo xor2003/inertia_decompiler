@@ -1,4 +1,10 @@
-from __future__ import annotations  # noqa: D100
+"""Lower bounded function IR to SSA and compare its observable effects.
+
+Layer: dosunit semantic comparison.
+Responsibility: preserve explicit IR effects and refuse unsupported proofs.
+"""
+
+from __future__ import annotations
 
 import contextlib
 import copy
@@ -470,10 +476,9 @@ def _override_delta_candidate(
     own shape differs — delta ties alone pair boundary-shifted variants
     wrongly (the fused-with-predecessor part vs the bare one). When the
     signature itself is ambiguous, a neighbour-arbitrated winner still beats
-    the coincidental delta hit. And when only the delta hit remains while
-    its instruction shape differs, the bodies split blocks differently and
-    no equivalent candidate part exists — report ``None`` (honest refusal)
-    instead of a guaranteed-bad pairing.
+    the coincidental delta hit. A mapped terminal entry block can still be
+    paired by its mapped identity: Z3 decides whether its different instruction
+    shape has the same observable effects. Other shape changes remain refused.
     """
     if delta_hit is None:
         return None
@@ -494,8 +499,23 @@ def _override_delta_candidate(
             oracle_parts=oracle_parts,
             candidate_parts=candidate_entry,
         )
-        return arbitrated
+        if arbitrated is not None:
+            return arbitrated
+        if _is_terminal_entry_pair(oracle_function, delta_hit):
+            return delta_hit
+        return None
     return delta_hit
+
+
+def _is_terminal_entry_pair(oracle: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    """Permit Z3 to compare mapped single-entry return blocks of different shape."""
+    return all(
+        (part.get("part") or {}).get("index") == 0
+        and (part.get("part") or {}).get("entry_delta") == "0x0000"
+        and (part.get("source") or {}).get("jumpkind") == "Ijk_Ret"
+        and (part.get("source") or {}).get("transfer") is None
+        for part in (oracle, candidate)
+    )
 
 
 def _resolve_candidate_via_tables(
@@ -3540,6 +3560,14 @@ BYTE_REGISTER_ACCESS = {
     12: ("bx", False),
     13: ("bx", True),
 }
+LOW_HALF_32_REGISTERS = frozenset({"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"})
+X86_PURE_CCALL_ARITIES: dict[str, int] = {"x86g_calculate_condition": 5, "x86g_calculate_eflags_c": 4}
+X86_LAZY_FLAG_SUMMARY_OPS = frozenset(f"summary_{name}" for name in X86_PURE_CCALL_ARITIES)
+
+
+def _register_width(name: str) -> int:
+    """Return the configured full width for a guest register name."""
+    return next((width for reg_name, width in REG_BY_OFFSET.values() if reg_name == name), 16)
 
 
 def _vex_irsb_to_ail_block(*, project: Any, irsb: Any) -> Any:  # noqa: ANN401
@@ -4121,12 +4149,16 @@ def _read_register(reg_versions: dict[str, SsaExpr], offset: int, width: int, *,
         if reg[0] == "flags":
             return SsaExpr("input", width, name="flags")
         return reg_versions.get(reg[0], SsaExpr("input", width, name=reg[0]))
+    if reg is not None and reg[1] == 32 and width == 16 and reg[0] in LOW_HALF_32_REGISTERS:
+        full = reg_versions.get(reg[0], SsaExpr("input", 32, name=reg[0]))
+        return _coerce_width(full, 16)
     byte_access = BYTE_REGISTER_ACCESS.get(offset)
     if byte_access is not None and width == 8:
         base_name, high = byte_access
-        full = reg_versions.get(base_name, SsaExpr("input", 16, name=base_name))
+        full_width = _register_width(base_name)
+        full = reg_versions.get(base_name, SsaExpr("input", full_width, name=base_name))
         if high:
-            shifted = SsaExpr("lshr", 16, (_coerce_width(full, 16), SsaExpr("const", 8, value=8)))
+            shifted = SsaExpr("lshr", full_width, (_coerce_width(full, full_width), SsaExpr("const", 8, value=8)))
             return _coerce_width(shifted, 8)
         return _coerce_width(full, 8)
     reg32 = REG32_BY_OFFSET.get(offset)
@@ -4152,9 +4184,11 @@ def _register_write_target(offset: int, width: int | None) -> tuple[str, int] | 
     reg = REG_BY_OFFSET.get(offset)
     if reg is not None and (width is None or width == reg[1]):
         return reg
+    if reg is not None and reg[1] == 32 and width == 16 and reg[0] in LOW_HALF_32_REGISTERS:
+        return reg
     byte_access = BYTE_REGISTER_ACCESS.get(offset)
     if byte_access is not None and (width is None or width == 8):
-        return byte_access[0], 16
+        return byte_access[0], _register_width(byte_access[0])
     reg32 = REG32_BY_OFFSET.get(offset)
     if reg32 is not None and (width is None or width == 32):
         return reg32[0].removesuffix("_hi"), 32
@@ -4169,19 +4203,24 @@ def _write_register(reg_versions: dict[str, SsaExpr], offset: int, expr: SsaExpr
     if reg is not None and expr.width == reg[1]:
         reg_versions[reg[0]] = _coerce_width(expr, reg[1])
         return None
+    if reg is not None and reg[1] == 32 and expr.width == 16 and reg[0] in LOW_HALF_32_REGISTERS:
+        full = reg_versions.get(reg[0], SsaExpr("input", 32, name=reg[0]))
+        upper = SsaExpr("and", 32, (full, SsaExpr("const", 32, value=0xFFFF0000)))
+        reg_versions[reg[0]] = SsaExpr("or", 32, (upper, _coerce_width(expr, 32)))
+        return None
     byte_access = BYTE_REGISTER_ACCESS.get(offset)
     if byte_access is not None and expr.width == 8:
         base_name, high = byte_access
-        full = reg_versions.get(base_name, SsaExpr("input", 16, name=base_name))
+        full_width = _register_width(base_name)
+        full = reg_versions.get(base_name, SsaExpr("input", full_width, name=base_name))
         data = _coerce_width(expr, 8)
         if high:
-            cleared = SsaExpr("and", 16, (_coerce_width(full, 16), SsaExpr("const", 16, value=0x00FF)))
-            shifted = SsaExpr("shl", 16, (_coerce_width(data, 16), SsaExpr("const", 8, value=8)))
-            masked = SsaExpr("and", 16, (shifted, SsaExpr("const", 16, value=0xFF00)))
-            reg_versions[base_name] = SsaExpr("or", 16, (cleared, masked))
+            cleared = SsaExpr("and", full_width, (full, SsaExpr("const", full_width, value=_mask(full_width) ^ 0xFF00)))
+            shifted = SsaExpr("shl", full_width, (_coerce_width(data, full_width), SsaExpr("const", 8, value=8)))
+            reg_versions[base_name] = SsaExpr("or", full_width, (cleared, shifted))
             return None
-        cleared = SsaExpr("and", 16, (_coerce_width(full, 16), SsaExpr("const", 16, value=0xFF00)))
-        reg_versions[base_name] = SsaExpr("or", 16, (cleared, _coerce_width(data, 16)))
+        cleared = SsaExpr("and", full_width, (full, SsaExpr("const", full_width, value=_mask(full_width) ^ 0xFF)))
+        reg_versions[base_name] = SsaExpr("or", full_width, (cleared, _coerce_width(data, full_width)))
         return None
     reg32 = REG32_BY_OFFSET.get(offset)
     if reg32 is not None and expr.width == 32:
@@ -4246,7 +4285,35 @@ def _lower_expr(
         return _lower_vex_ite(expr, **kwargs)
     if tag == "Iex_Load":
         return _lower_vex_load(expr, **kwargs)
+    if tag == "Iex_CCall":
+        return _lower_vex_ccall(expr, **kwargs)
     return LowerFailure("unsupported_ir", f"unsupported VEX expression: {tag}")
+
+
+def _lower_vex_ccall(
+    expr: Any,  # noqa: ANN401
+    *,
+    temp_defs: dict[int, SsaExpr],
+    temp_failures: dict[int, LowerFailure],
+    reg_versions: dict[str, SsaExpr],
+    tyenv: Any,  # noqa: ANN401
+    memory: SsaExpr,
+) -> SsaExpr | LowerFailure:
+    """Preserve known pure x86 lazy-flag helpers as bounded Z3 summaries."""
+    helper_name = str(expr.callee.name)
+    helper_arity = X86_PURE_CCALL_ARITIES.get(helper_name)
+    if helper_arity is None or len(expr.args) != helper_arity:
+        return LowerFailure("unsupported_ir", f"unsupported VEX CCall: {helper_name}")
+    args: list[SsaExpr] = []
+    for arg in expr.args:
+        lowered = _lower_expr(
+            arg, temp_defs=temp_defs, temp_failures=temp_failures,
+            reg_versions=reg_versions, tyenv=tyenv, memory=memory,
+        )
+        if isinstance(lowered, LowerFailure):
+            return lowered
+        args.append(lowered)
+    return SsaExpr(f"summary_{helper_name}", int(expr.result_size(tyenv)), tuple(args))
 
 
 def _vex_const_leaf(expr: Any) -> SsaExpr | None:  # noqa: ANN401
@@ -8109,6 +8176,22 @@ def _compare_functions(
         if width > 0
     }
     mismatches = _z3_mismatch_list(pairs, model=model, counterexample=counterexample, z3=z3)
+    if mismatches and all(
+        mismatch.get("kind") == "output_expr_changed"
+        and isinstance(mismatch.get("reg"), str)
+        and (
+            _output_uses_x86_lazy_flags(oracle, mismatch["reg"])
+            or _output_uses_x86_lazy_flags(candidate, mismatch["reg"])
+        )
+        for mismatch in mismatches
+    ):
+        return {
+            "status": "refused",
+            "reason": "uninterpreted_x86_flags",
+            "mismatches": mismatches,
+            "solver_time_ms": elapsed,
+            "skipped_layout_outputs": skipped_layout_outputs,
+        }
     return {
         "status": "failed",
         "reason": "observable_mismatch",
@@ -8116,6 +8199,31 @@ def _compare_functions(
         "solver_time_ms": elapsed,
         "skipped_layout_outputs": skipped_layout_outputs,
     }
+
+
+def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> bool:
+    """Find a modeled x86 flag helper in one output's bounded SSA expression."""
+    outputs = function.get("outputs") if isinstance(function.get("outputs"), dict) else {}
+    assignments = {
+        item["id"]: item for item in function.get("assignments", ()) or ()
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    stack = [outputs.get(reg)]
+    visited: set[str] = set()
+    steps = 0
+    while stack and steps < 1024:
+        term = stack.pop()
+        steps += 1
+        if not isinstance(term, dict):
+            continue
+        if term.get("op") in X86_LAZY_FLAG_SUMMARY_OPS:
+            return True
+        ref = term.get("ref")
+        if isinstance(ref, str) and ref not in visited:
+            visited.add(ref)
+            stack.append(assignments.get(ref))
+        stack.extend(term.get("args", ()) or ())
+    return bool(stack)
 
 
 def _ip_term_is_layout(
@@ -11124,10 +11232,21 @@ def _prepare_layout_normalized_functions(
     image_context: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
     pairs = _layout_constant_pairs(oracle_function, candidate_function, image_context=image_context)
+    explicit_map = candidate_function.get("_constant_normalization")
+    if not isinstance(explicit_map, dict):
+        explicit_map = {}
     if not pairs and not global_map:
         return oracle_function, candidate_function, None
-    candidate_map: dict[int, int] = dict(global_map or {})
-    candidate_reasons: dict[int, str] = dict.fromkeys(candidate_map, "global_reloc")
+    candidate_map: dict[int, int] = dict(explicit_map)
+    explicit_reasons = candidate_function.get("_constant_normalization_reasons")
+    candidate_reasons: dict[int, str] = (
+        dict(explicit_reasons) if isinstance(explicit_reasons, dict) else {}
+    )
+    for candidate_key, oracle_replacement in (global_map or {}).items():
+        if candidate_key in candidate_map and candidate_map[candidate_key] != oracle_replacement:
+            continue
+        candidate_map[candidate_key] = oracle_replacement
+        candidate_reasons.setdefault(candidate_key, "global_reloc")
     notes: list[dict[str, Any]] = []
     for pair in pairs:
         oracle_value = int(pair["oracle"])
@@ -12977,7 +13096,15 @@ def _call_return_store_byte_value(
     entry = function.get("entry") if isinstance(function.get("entry"), dict) else {}
     cs_value = _optional_int(entry.get("cs"))
     constants = {"ip": ip_value, "cs": cs_value}
-    return _eval_call_return_term(term, assignments=assignments, input_constants=constants)
+    return _eval_call_return_term(term, assignments=assignments, input_constants=constants, memo={})
+
+
+def _eval_term_memo_key(term: dict[str, Any] | None) -> int | str | None:
+    """Memo key for one term node: assignment ref id, else object identity."""
+    if not isinstance(term, dict):
+        return None
+    ref = term.get("ref")
+    return "ref:" + ref if isinstance(ref, str) else id(term)
 
 
 def _eval_call_return_term(
@@ -12985,15 +13112,88 @@ def _eval_call_return_term(
     *,
     assignments: dict[str, dict[str, Any]],
     input_constants: dict[str, int | None],
+    memo: dict[int | str, int | None],
 ) -> int | None:
+    """Evaluate one call-return store term to a concrete byte value.
+
+    Assignment ``ref`` terms resolve through the function's assignment map.
+    Evaluation is iterative post-order with a shared memo because deeply
+    shared SSA sub-DAGs otherwise explode exponentially in naive recursion
+    (observed: multi-minute hangs inside ``_normalize_call_return_store``).
+    Ref cycles evaluate to None.
+    """
     if not isinstance(term, dict):
         return None
+    inflight: set[int | str] = set()
+    stack: list[tuple[dict[str, Any], bool]] = [(term, False)]
+    while stack:
+        node, ready = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        key = _eval_term_memo_key(node)
+        if key is None or key in memo:
+            continue
+        if ready:
+            _eval_call_return_term_finalize(node, key=key, assignments=assignments, input_constants=input_constants, memo=memo, inflight=inflight)
+        else:
+            _eval_call_return_term_expand(node, key=key, assignments=assignments, memo=memo, inflight=inflight, stack=stack)
+    return memo.get(_eval_term_memo_key(term))
+
+
+def _eval_call_return_term_expand(
+    node: dict[str, Any],
+    *,
+    key: int | str,
+    assignments: dict[str, dict[str, Any]],
+    memo: dict[int | str, int | None],
+    inflight: set[int | str],
+    stack: list[tuple[dict[str, Any], bool]],
+) -> None:
+    """First visit of one node: schedule its ref target / args then revisit."""
+    if key in inflight:
+        memo[key] = None
+        return
+    inflight.add(key)
+    stack.append((node, True))
+    if isinstance(node.get("ref"), str):
+        target = assignments.get(str(node["ref"]))
+        if isinstance(target, dict):
+            stack.append((target, False))
+        else:
+            inflight.discard(key)
+            memo[key] = None
+        return
+    for arg in node.get("args") or []:
+        if isinstance(arg, dict):
+            stack.append((arg, False))
+
+
+def _eval_call_return_term_finalize(
+    node: dict[str, Any],
+    *,
+    key: int | str,
+    assignments: dict[str, dict[str, Any]],
+    input_constants: dict[str, int | None],
+    memo: dict[int | str, int | None],
+    inflight: set[int | str],
+) -> None:
+    """Second visit of one node: its children are memoized; store its value."""
+    inflight.discard(key)
+    if isinstance(node.get("ref"), str):
+        memo[key] = memo.get(_eval_term_memo_key(assignments.get(str(node["ref"]))))
+        return
+    memo[key] = _eval_call_return_term_node(node, input_constants=input_constants, memo=memo)
+
+
+def _eval_call_return_term_node(
+    term: dict[str, Any],
+    *,
+    input_constants: dict[str, int | None],
+    memo: dict[int | str, int | None],
+) -> int | None:
+    """Evaluate one non-ref term node whose argument values are already memoized."""
     width = max(1, _term_width(term))
     mask = _mask(width)
-    if "ref" in term:
-        return _eval_call_return_term(
-            assignments.get(str(term.get("ref"))), assignments=assignments, input_constants=input_constants
-        )
     op = str(term.get("op") or "")
     if op == "const":
         value = _optional_int(term.get("value"))
@@ -13002,7 +13202,7 @@ def _eval_call_return_term(
         value = input_constants.get(str(term.get("name") or "").lower())
         return None if value is None else value & mask
     args = [arg for arg in term.get("args", []) or [] if isinstance(arg, dict)]
-    values = [_eval_call_return_term(arg, assignments=assignments, input_constants=input_constants) for arg in args]
+    values = [memo.get(_eval_term_memo_key(arg)) for arg in args]
     if any(value is None for value in values):
         return None
     concrete = [int(value) for value in values if value is not None]
