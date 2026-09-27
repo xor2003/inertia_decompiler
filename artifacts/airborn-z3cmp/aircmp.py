@@ -2409,8 +2409,15 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                         # compare chain folds to a linear walk to default:.
                         if disp_op.op in ("loadle", "loadbe") and len(disp_op.args) >= 2:
                             ctx.store(ctx.arrays["stk"], disp_op.args[1], dd)
-                    else:
+                    elif ctx.retn_popped:
+                        # Symbolic token popped by RETN_/RETF_: a return to
+                        # an unknown caller — terminal `ret`, never a jump
+                        # into a case body.
                         terminals.append(TermPath("ret", cond, dict(ctx.canon), dict(ctx.arrays)))
+                        continue
+                    else:
+                        diagnostics.append(f"disp_sym:{addr:x}")
+                        terminals.append(TermPath("indirect_call", cond, dict(ctx.canon), dict(ctx.arrays)))
                         continue
         edges: list[tuple[int, S.SsaExpr]] = []
         exit_guards: list[S.SsaExpr] = []
@@ -2478,6 +2485,14 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 terminals.append(TermPath("indirect", cond, dict(ctx.canon),
                                           dict(ctx.arrays)))
                 continue
+            # A symbolic jump target on a path that popped its return token
+            # (m2c `switch(__disp)` over a popped retaddr) is a return to an
+            # unknown caller — not a fan-in to arbitrary case bodies.
+            if cfg.m2c and ctx.retn_popped:
+                diagnostics.append(f"jpt_popped:{addr:x}")
+                terminals.append(TermPath("ret", cond, dict(ctx.canon),
+                                          dict(ctx.arrays)))
+                continue
             # PIC jump table with symbolic index (`jmp *tbl[idx]`):
             # enumerate known-extent table entries — one edge per host
             # target under guard tbl[idx]==addr.
@@ -2532,6 +2547,9 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 diagnostics.append(f"tailcall:{addr:x}:{tn_}")
                 _boundary_call(nctx, tn_)
                 if cfg.m2c:
+                    # Guest tail `jmp` — the callee's retn consumes the
+                    # caller-pushed frame (same pop as a direct tramp call).
+                    _do_pop(nctx)
                     terminals.append(TermPath("ret", ng, dict(nctx.canon),
                                               dict(nctx.arrays)))
                 else:
