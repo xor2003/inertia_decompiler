@@ -205,8 +205,16 @@ def cmd_compare_ssa(args: argparse.Namespace) -> int:  # noqa: D103
     _start_rss_watchdog(args.max_rss_mb, "compare-ssa")
     oracle = load_json(Path(args.oracle_ssa))
     candidate = load_json(Path(args.candidate_ssa))
-    oracle_index = load_json(Path(args.oracle_index_ssa)) if args.oracle_index_ssa else None
-    candidate_index = load_json(Path(args.candidate_index_ssa)) if args.candidate_index_ssa else None
+    oracle_index = (
+        oracle
+        if args.oracle_index_ssa == args.oracle_ssa
+        else (load_json(Path(args.oracle_index_ssa)) if args.oracle_index_ssa else None)
+    )
+    candidate_index = (
+        candidate
+        if args.candidate_index_ssa == args.candidate_ssa
+        else (load_json(Path(args.candidate_index_ssa)) if args.candidate_index_ssa else None)
+    )
     mapping = load_json(Path(args.mapping)) if args.mapping else None
     document = compare_ssa_documents(
         oracle=oracle,
