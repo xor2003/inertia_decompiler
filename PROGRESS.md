@@ -1966,6 +1966,36 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   to `recon.ssa.v6.json`; shard rerun launched via `run_shards_v6.sh`
   (batches_v6_s*, --resume + progress.json checkpoints for reboot safety).
 
+## Riptide corpus: v6 compare complete + proof artifacts regenerated
+
+- v6 corpus: `recon.ssa.v6.json` = 12147 parts / 890 functions, 3 honest
+  refusals (`unsupported_ir` in Abs FIDRQQ/FIWRQQ helpers). The main pass
+  truncated `x_explode_map` at a 30 s lifter-block cap (524/644 parts);
+  re-lowered that single function with a 240 s block budget and merged —
+  no coverage loss vs v5.
+- v6 shard compare (all 12 batches, run_shards_v6.sh, --resume):
+  **6825 passed / 14 failed / 2872 refused** (v5: 6709/23/2751). All nine
+  cleared fails were the fixed string-content bugs (`cb_about_de`x4,
+  `init_game`, `show_stats`, `end_game` cheat text, `check_user`,
+  `cb_debug_shot_size`).
+- Remaining 14 fails are all classified artifacts, no source bugs:
+  - `check_new_pos`x2 — branch-polarity arm cross-pairing (oracle
+    `jnl`->0x20 vs cand `jl`->0x80; semantics verified identical)
+  - `pull_down`/`text_pager`/`show_pcx`x2/`explode_pcx`/`dump_pcx`x3 —
+    frame-slot allocation divergence (bp-4 vs bp-2 class; conflicting
+    slot deltas show genuinely different local layouts)
+  - `do_probe` — unwitnessed DS para pair; 'prober.l' byte-identical in
+    both binaries under 0x2708/0x22bc but no strong witness establishes
+    the pair
+  - `end_game` — residual `ds:0xf29` empty-string push / extent edge
+  - `terminate` — relocated far-call return shape; `___fpreset` —
+    relocated seg:off store via lds+int21 (IVT install)
+- Regenerated proof artifacts from `batches_v6_s*`:
+  `tools/z3cmp/proven_equal.json` + `PROVEN.md` — **365 functions fully
+  proven** (all mapped SSA parts pass; 2973 parts), 344 functions
+  partial/refused (mostly `successor_state_unobserved`/`mapping_missing`
+  coverage refusals, not mismatches).
+
 ## BC5 z3cmp32: full-corpus paired-calls measurement + wider callee map
 
 - Full `--all-mapped` rerun (2228 fns, `--mode auto --normalize-globals
