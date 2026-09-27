@@ -9824,9 +9824,31 @@ def _target_key(term: dict[str, Any]) -> int | None:
     return value & 0xFFFF
 
 
+def _term_children(
+    left: Any,  # noqa: ANN401
+    right: Any,  # noqa: ANN401
+) -> list[tuple[Any, Any]] | None:
+    """Expand a JSON term pair into child pairs, or ``None`` on shape divergence."""
+    if left is right:
+        return []
+    if type(left) is not type(right):
+        return None
+    if isinstance(left, dict):
+        if left.keys() != right.keys():
+            return None
+        return [(left[key], right[key]) for key in left]
+    if isinstance(left, list):
+        if len(left) != len(right):
+            return None
+        return list(zip(left, right, strict=True))
+    if left != right:
+        return None
+    return []
+
+
 def _abi_terms_equal(
-    left: Any,
-    right: Any,
+    left: Any,  # noqa: ANN401
+    right: Any,  # noqa: ANN401
     eq_cache: dict[tuple[int, int], bool],
     *,
     compose_stats: dict[str, Any] | None = None,
@@ -9852,37 +9874,21 @@ def _abi_terms_equal(
             l_item, r_item = stack.pop()
             if l_item is r_item:
                 continue
-            if type(l_item) is not type(r_item):
+            children = _term_children(l_item, r_item)
+            if children is None:
                 equal = False
                 break
-            if isinstance(l_item, dict):
-                pair = (id(l_item), id(r_item))
-                cached = eq_cache.get(pair)
-                if cached is not None:
-                    if not cached:
-                        equal = False
-                    continue
-                eq_cache[pair] = True
-                pending.append(pair)
-                if l_item.keys() != r_item.keys():
+            if not children:
+                continue
+            pair = (id(l_item), id(r_item))
+            cached = eq_cache.get(pair)
+            if cached is not None:
+                if not cached:
                     equal = False
-                    break
-                stack.extend((l_item[key], r_item[key]) for key in l_item)
-            elif isinstance(l_item, list):
-                pair = (id(l_item), id(r_item))
-                cached = eq_cache.get(pair)
-                if cached is not None:
-                    if not cached:
-                        equal = False
-                    continue
-                eq_cache[pair] = True
-                pending.append(pair)
-                if len(l_item) != len(r_item):
-                    equal = False
-                    break
-                stack.extend(zip(l_item, r_item))
-            elif l_item != r_item:
-                equal = False
+                continue
+            eq_cache[pair] = True
+            pending.append(pair)
+            stack.extend(children)
     finally:
         if not equal:
             for pair in pending:

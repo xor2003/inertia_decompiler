@@ -1,3 +1,5 @@
+- dosunit ABI-compose exponential fix (ongoing): `_merge_abi_states` used plain `==` on shared SSA term DAGs — O(root-to-leaf paths), the true cause of the multi-hour s0–s2 batch stalls (MemoryError was a symptom). New `_abi_terms_equal` memoizes on (id,id) pairs (O(DAG nodes)); compared roots pinned for cache validity; provisional entries rewind on mismatch/deadline. Deadline checks now inside `_compose_block_outputs`/`_merge_abi_states`/`_abi_terms_equal` loops (was per-block only → minutes of overshoot). Verified: stalled s0/s1/s2 batch-1 docs compose in 4s/28s/101s; `de_doit`/`check_user` refuse `compose_budget_exceeded` at 90s. Committed 204cdb1fb. 205 tests pass, 4 pre-existing fails. Full-corpus shards relaunched with `--resume` (run_shards.sh reboot-safe); s3 backfilled `oracle_ssa` tags so its 3 completed batches resume-skip; s0–s2 re-running timed-out batches.
+
 - decompiler_postprocess_calls.py flatten+split (ongoing): mega `_materialize_callsite_stack_arguments_8616` dissolved into `_CallsiteStackArgsMaterializer8616` class via scope-aware AST transform; all nested `_impl` wrappers flattened to module fns (closure vars as kw-only params, binding-site dominance safety); manual phase splits for prune_consumed_segmented_stack_byte_arg_stores (94->0), ordered_callsite_pairs (79->0), attach_callsite_summaries (31->0), refresh_callsite_summary_node_ids (33->0), apply_callsite_summary_to_node (27->0), callsite seed/prototype paths; promoted findings 153->98; owning tests 178+2 pre-existing verified per batch.
 
 # Progress
@@ -49,6 +51,32 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   bound (242.45s including cleanup), before entering the profiled worker.
   No profile/parity evidence; next diagnostic must sample startup, not just
   the analysis worker. Ordinary deadlines remain unchanged.
+
+- DOSUnit comparator hardening round (Riptide v5 corpus): ptr16:16 lcall
+  immediates are now masked in normalized binary signatures (capstone
+  imm_size=0 gap) so shared prologue/thunk blocks match across layouts;
+  near/far call-target enumeration tries the lifter-resolved raw target
+  before low16 guessing; SSA-document linked_base is coverage-validated
+  (oracle segment-base vs image-base confusion fixed); region-level call
+  pairing gained a positional fallback and return-address-store
+  normalization no longer requires callee equivalence (self-proving);
+  claimed candidate parts refuse on reuse (`candidate_part_reused` /
+  `ambiguous_candidate`) instead of emitting false semantic failures;
+  failed pairs probe same-function candidate siblings and refuse
+  ambiguously when a boundary-split sibling matches oracle operands;
+  short string-table heads (e.g. `"?"`) prove via corpus-wide DGROUP
+  paragraph witnesses and identical printable string-blob matching;
+  batched compare children dedupe identical index/pairing doc loads.
+  Targeted 13-function compare: 134 passed / 0 failed / 103 refused
+  (refusals are honest artifact classes). Source fixes landed: strcmp
+  argument order in gamemgr.cpp (remove_sound) and scores.cpp
+  (cb_password), tab-vs-space in menu.cpp calibration-abort string.
+  Known limitation: Borland FP-emulator sequences (`int 34h-3Dh` +
+  inline operand bytes) terminate VEX blocks with no fallthrough, so
+  code after them (e.g. cb_run_benchmark's show/inform tail) is a
+  coverage gap that correctly refuses rather than failing. Full-corpus
+  shard compare (709 fns / 10,046 parts, 4 shards vs recon.ssa.v5) in
+  flight; 11 pre-existing test failures unchanged (verified vs parent).
 
 - DOSUnit part-pairing + argument normalization hardening (Riptide batch
   triage): normalized block signatures no longer mask 8-bit literals
@@ -1779,3 +1807,86 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   parallel session's semantic work). straightline_ssa.py committed;
   omf_pat.py, signature_catalog.py, build_msc6_examples.py left
   uncommitted because they carry interleaved user WIP.
+
+
+## Riptide corpus session (continued)
+
+- `straightline_ssa.py` candidate pairing hardened against delta/shape
+  collisions: masked-signature multi-maps now retain collisions, a coarse
+  tier masks all call/jmp operands to form the ambiguity set, and
+  `_arbitrate_signature_collision` picks the candidate whose *fallthrough*
+  successor signature matches the oracle's (control-flow order — part
+  index follows lifter discovery order, not addresses). A delta hit whose
+  shape differs from the oracle and has no stronger evidence now yields
+  no candidate (honest `candidate_ssa_missing`/`part_boundary_mismatch`
+  refusal) instead of a guaranteed-bad pairing; all three resolvers share
+  `_resolve_candidate_via_tables`. Committed 0e32fa30a.
+- Riptide: `show_prelude` `var_4` was `long` not `int` in the original
+  (dword mov/sub/cmp); fixed in decomp/game.cpp, committed 9487a9e.
+  Rebuilt EXE + re-lowered SSA: all dword parts `block_binary_equal`.
+- Shard batch results with the fix: batch002 46->63 clean passes and the
+  call-target mispairing cleared; batch004 mv_pace boundary artifacts now
+  refuse/region-prove (2 covered_by_region_equal) with zero failures.
+
+## BC5 z3cmp32 region/auto mode (session checkpoint)
+
+- Ported the msc8 flat32 region composer to `artifacts/bc5-z3cmp32/`
+  (`flat32_region.py`): bounded acyclic CFG composition over full-width
+  linear successor keys via `_compose_block_outputs`/`_merge_abi_states`;
+  calls, loops, indirect/unmodeled branches, and partial scans refuse.
+  `--mode region` composes; `--mode auto` retries loop refusals through
+  `flat32_cfg.compare_cfg` (8 blocks, 250 ms cap). Relocation-only output
+  diffs map to `conditional` via the `--normalize-globals` map.
+- flat32_adapter region seams now mirror the msc8 contract: native
+  multi-block scan lowering, `_finish_irsb_lowering` native (full-width
+  `ip`), `_can_add_dynamic_successor_range=declared_bounds_only` (strict
+  `.lst` extents — out-of-extent successors refuse instead of scanning
+  into neighbours).
+- Engine fixes in `tools/dosunit/straightline_ssa.py`:
+  - `_lower_binop`: Iop_DivMod{U,S}64to32 lowered as
+    concat(trunc(rem,32), trunc(quot,32)) (x86 DIV/IDIV packing, verified
+    on concrete z3 values); Iop_NwHLtoMw concat family lowered.
+  - `_prepare_region_call_normalized_groups` boundary-shift fix: the
+    normalized candidate call part is stored under its own delta, not the
+    paired oracle part's delta — the old keying clobbered an unrelated
+    candidate block and dropped the normalization (phantom
+    `candidate_ssa_missing`/`missing_successor` rows).
+  - `_record_lowered_part`: flat32 `entry_delta`/`block_ip` mask to
+    32-bit two's complement so below-entry blocks keep parseable deltas.
+- Refusal anatomy measured: most leaf-mode "CFG" refusals are actually
+  call-bearing bodies (`call_or_exception_boundary` dominates); loops
+  are the next-largest honest refusal class; jump tables refuse
+  `indirect_or_unmodeled_branch`. Callee summaries remain the blocker
+  for the 635 call-boundary functions — the honest frontier.
+
+## BC5 z3cmp32: full-corpus region/auto measurement + normalization fix
+
+- Full `--all-mapped` run (2228 functions, `--mode auto --normalize-globals`,
+  6 shards): **83 conditional / 132 failed / 2013 refused**.
+- Transition vs leaf baseline: zero conditional lost; 20 previously-refused
+  functions now prove `region_equal` modulo relocation; 91 previously-refused
+  now surface honest `observable_mismatch`/`matched_cfg_induction` failures —
+  the per-function triage queue (real term diffs, not comparator artifacts).
+- Fix: relocation normalization now happens *inside* solving, matching leaf
+  semantics — `flat32_region.compare_region` attaches
+  `_constant_normalization`/`_reasons` to the composed candidate summary so
+  `_normalized_constant_value` rewrites candidate consts during `_z3_term`.
+  Before this, region verdicts post-mapped only witness-value pairs, so any
+  relocation const embedded in a store/load chain (e.g. a global store feeding
+  the `eip` ret-target load) failed `observable_mismatch` — 43 formerly
+  conditional leaf functions regressed; all recovered plus 20 more.
+- `flat32_cfg.compare_cfg` gained the same `normalization` param (cssa docs +
+  `checked_results(relocation=...)`); threaded from `--mode matched-cfg` and
+  the auto-mode loop retry.
+- Lint hygiene: extracted `_term_children` out of `_abi_terms_equal` (complexity
+  16→under limit), `ANN401` noques, `zip(strict=)` — ruff clean.
+- Refusal frontier is now explicit and honest:
+  `call_or_exception_boundary` 1639 (needs proven flat32 callee summaries),
+  `region_lowering_incomplete` 130, `loop_requires_inductive_proof` 124,
+  `region_expression_limit` 37, `successor_outside_complete_region` 36,
+  `indirect_or_unmodeled_branch` 35, `uninterpreted_x86_flags` 7.
+- Gates: ruff clean on touched files; `test_dosunit_tool.py` 205/209 pass —
+  the 4 failures are the documented pre-existing `compare_ssa_documents`
+  expectations (reproduce on bare HEAD). Repo-wide mypy debt in unrelated
+  modules still fails `quality-fast` globally (pre-existing, none in touched
+  files).
