@@ -1,0 +1,142 @@
+{
+ "sub_100ea": {
+  "status": "timeout"
+ },
+ "sub_101d9": {
+  "status": "timeout"
+ },
+ "sub_10616": {
+  "status": "timeout"
+ },
+ "sub_10740": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_of",
+    "0x0",
+    "0x80"
+   ],
+   [
+    "g_esp",
+    "0xfff8",
+    "0xc000"
+   ]
+  ],
+  "orc_terms": 6,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 5,
+  "cnd_kinds": [
+   "indirect_call",
+   "ret"
+  ],
+  "secs": 3.2
+ },
+ "sub_10884": {
+  "status": "refused",
+  "reason": "uninterpreted_x86_flags",
+  "mismatches": [
+   [
+    "f_cf",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "g_esp",
+    "0xffd8",
+    "0xfe00"
+   ]
+  ],
+  "orc_terms": 6,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 4,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 7.8
+ },
+ "sub_109a4": {
+  "status": "timeout"
+ },
+ "sub_10a6c": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 1,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "indirect",
+   "tail"
+  ],
+  "secs": 0.6
+ },
+ "sub_10bbf": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_edx",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "g_esp",
+    "0xfffc",
+    "0xfffd"
+   ]
+  ],
+  "orc_terms": 16,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 9.5
+ },
+ "sub_10d6e": {
+  "status": "timeout"
+ },
+ "sub_11091": {
+  "status": "timeout"
+ },
+ "sub_1130a": {
+  "status": "timeout"
+ },
+ "sub_114b7": {
+  "status": "timeout"
+ },
+ "sub_116e0": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 1,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "indirect",
+   "tail"
+  ],
+  "secs": 1.2
+ }
+}

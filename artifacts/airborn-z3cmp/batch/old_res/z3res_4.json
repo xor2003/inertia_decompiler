@@ -1,0 +1,89 @@
+{
+ "sub_1012f": {
+  "status": "timeout"
+ },
+ "sub_1034f": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 6,
+  "cnd_kinds": [
+   "indirect",
+   "tail"
+  ],
+  "secs": 8.5
+ },
+ "sub_106c0": {
+  "status": "timeout"
+ },
+ "sub_10797": {
+  "status": "timeout"
+ },
+ "sub_10920": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_eax",
+    "0x40000000",
+    "0x0"
+   ],
+   [
+    "g_ebx",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "g_esp",
+    "0xc00c",
+    "0xfffd"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 55.2
+ },
+ "sub_10a04": {
+  "status": "timeout"
+ },
+ "sub_10b43": {
+  "status": "timeout"
+ },
+ "sub_10c7c": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "g_esp",
+    "0xfffffffa",
+    "0xfffffffe"
+   ]
+  ],
+  "orc_terms": 4,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "indirect",
+   "ret",
+   "tail"
+  ],
+  "secs": 0.7
+ }
+}

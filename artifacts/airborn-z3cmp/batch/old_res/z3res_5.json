@@ -1,0 +1,136 @@
+{
+ "sub_10171": {
+  "status": "timeout"
+ },
+ "sub_1036f": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "indirect",
+   "tail"
+  ],
+  "secs": 7.1
+ },
+ "sub_106ee": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_af",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_pf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 6.8
+ },
+ "sub_107c3": {
+  "status": "timeout"
+ },
+ "sub_10954": {
+  "status": "timeout"
+ },
+ "sub_10a19": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_cf",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "g_esp",
+    "0xfffe",
+    "0x2"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 18,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 13.3
+ },
+ "sub_10b89": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_esp",
+    "0xfffe",
+    "0x2"
+   ]
+  ],
+  "orc_terms": 7,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 1.2
+ },
+ "sub_10ccb": {
+  "status": "timeout"
+ },
+ "sub_10ff3": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 6,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 1.4
+ },
+ "sub_1126f": {
+  "status": "timeout"
+ }
+}

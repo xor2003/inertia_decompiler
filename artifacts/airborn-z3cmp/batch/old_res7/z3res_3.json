@@ -1,0 +1,196 @@
+{
+ "sub_10116": {
+  "status": "timeout"
+ },
+ "sub_10282": {
+  "status": "timeout"
+ },
+ "sub_106a7": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_eax",
+    "0x0",
+    "0x40"
+   ],
+   [
+    "g_edi",
+    "0x0",
+    "0x10"
+   ],
+   [
+    "s_es",
+    "0x0",
+    "0x40"
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 25.8
+ },
+ "sub_10774": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_af",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_of",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_sf",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 6,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.7
+ },
+ "sub_108d4": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "g_eax",
+    "0x0",
+    "0x6"
+   ]
+  ],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.4
+ },
+ "sub_109fa": {
+  "status": "refused",
+  "reason": "timeout",
+  "mismatches": [
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret",
+   "tail"
+  ],
+  "cnd_terms": 1,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 36.1
+ },
+ "sub_10b20": {
+  "status": "timeout"
+ },
+ "sub_10c36": {
+  "status": "incomplete",
+  "reason": "outputs_equal_on_explored_paths",
+  "mismatches": [],
+  "orc_terms": 47,
+  "orc_kinds": [
+   "indirect_call",
+   "ret"
+  ],
+  "cnd_terms": 7,
+  "cnd_kinds": [
+   "ret",
+   "tail"
+  ],
+  "secs": 80.3
+ },
+ "sub_10f40": {
+  "status": "timeout"
+ },
+ "sub_111f7": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 10,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 5.7
+ },
+ "sub_11397": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_eax",
+    "0x38",
+    "0x40"
+   ],
+   [
+    "g_edi",
+    "0x0",
+    "0x10"
+   ],
+   [
+    "io",
+    null,
+    null
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 25.0
+ },
+ "sub_11549": {
+  "status": "timeout"
+ },
+ "sub_11782": {
+  "status": "timeout"
+ }
+}

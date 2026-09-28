@@ -1,0 +1,164 @@
+{
+ "sub_10171": {
+  "status": "timeout"
+ },
+ "sub_1036f": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "indirect",
+   "tail"
+  ],
+  "secs": 13.7
+ },
+ "sub_106ee": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_pf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "s_es",
+    "0xf5f5",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 25.1
+ },
+ "sub_107c3": {
+  "status": "timeout"
+ },
+ "sub_10954": {
+  "status": "timeout"
+ },
+ "sub_10a19": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_cf",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_pf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "g_esp",
+    "0x12",
+    "0x2"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 18,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 31.0
+ },
+ "sub_10b89": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_esp",
+    "0xc",
+    "0x2"
+   ]
+  ],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 3.0
+ },
+ "sub_10ccb": {
+  "status": "timeout"
+ },
+ "sub_10ff3": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 6,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.7
+ },
+ "sub_1126f": {
+  "status": "timeout"
+ },
+ "sub_1146a": {
+  "status": "timeout"
+ },
+ "sub_115ec": {
+  "status": "timeout"
+ },
+ "sub_11842": {
+  "status": "timeout"
+ },
+ "sub_11b81": {
+  "status": "incomplete",
+  "reason": "outputs_equal_on_explored_paths",
+  "mismatches": [],
+  "orc_terms": 16,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 6.2
+ }
+}

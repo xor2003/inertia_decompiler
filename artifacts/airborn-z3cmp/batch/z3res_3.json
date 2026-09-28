@@ -1,0 +1,756 @@
+{
+ "sub_10116": {
+  "status": "timeout"
+ },
+ "sub_10282": {
+  "status": "timeout"
+ },
+ "sub_106a7": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_eax",
+    "0x0",
+    "0x40"
+   ],
+   [
+    "g_edi",
+    "0x0",
+    "0x10"
+   ],
+   [
+    "s_es",
+    "0x0",
+    "0x40"
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 27.5
+ },
+ "sub_10774": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_af",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_of",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_sf",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 6,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 1.1
+ },
+ "sub_108d4": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "g_eax",
+    "0x0",
+    "0x6"
+   ]
+  ],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.7
+ },
+ "sub_109fa": {
+  "status": "refused",
+  "reason": "timeout",
+  "mismatches": [
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret",
+   "tail"
+  ],
+  "cnd_terms": 1,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 38.6
+ },
+ "sub_10b20": {
+  "status": "timeout"
+ },
+ "sub_10c36": {
+  "status": "timeout"
+ },
+ "sub_10f40": {
+  "status": "timeout"
+ },
+ "sub_111f7": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 10,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 7.8
+ },
+ "sub_11397": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_eax",
+    "0x38",
+    "0x40"
+   ],
+   [
+    "g_edi",
+    "0x0",
+    "0x10"
+   ],
+   [
+    "io",
+    null,
+    null
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 24.4
+ },
+ "sub_11549": {
+  "status": "timeout"
+ },
+ "sub_11782": {
+  "status": "timeout"
+ },
+ "sub_1197d": {
+  "status": "timeout"
+ },
+ "sub_11c6a": {
+  "status": "timeout"
+ },
+ "sub_11f09": {
+  "status": "timeout"
+ },
+ "sub_120d7": {
+  "status": "timeout"
+ },
+ "sub_122ac": {
+  "status": "timeout"
+ },
+ "sub_1245a": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_sf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_zf",
+    "0x0",
+    "0x1"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 20,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 31.6
+ },
+ "sub_125fe": {
+  "status": "timeout"
+ },
+ "sub_12854": {
+  "status": "timeout"
+ },
+ "sub_13242": {
+  "status": "timeout"
+ },
+ "sub_13998": {
+  "status": "timeout"
+ },
+ "sub_13c62": {
+  "status": "incomplete",
+  "reason": "outputs_equal_on_explored_paths",
+  "mismatches": [],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 36,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 82.1
+ },
+ "sub_13d5a": {
+  "status": "timeout"
+ },
+ "sub_13e42": {
+  "status": "refused",
+  "reason": "uninterpreted_x86_flags",
+  "mismatches": [
+   [
+    "g_ecx",
+    "0x1f3f",
+    "0xffff"
+   ],
+   [
+    "g_edi",
+    "0x8000",
+    "0xbe7e"
+   ],
+   [
+    "g_esi",
+    "0x8002",
+    "0xbe80"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 9,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 80.2
+ },
+ "sub_13f59": {
+  "status": "timeout"
+ },
+ "sub_14061": {
+  "status": "timeout"
+ },
+ "sub_14167": {
+  "status": "timeout"
+ },
+ "sub_1425d": {
+  "status": "timeout"
+ },
+ "sub_14433": {
+  "status": "timeout"
+ },
+ "sub_1472e": {
+  "status": "incomplete",
+  "reason": "all_outputs_identical (paths truncated)",
+  "mismatches": [],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 49,
+  "cnd_kinds": [
+   "ret",
+   "tail"
+  ],
+  "secs": 3.3
+ },
+ "sub_14add": {
+  "status": "incomplete",
+  "reason": "all_outputs_identical (paths truncated)",
+  "mismatches": [],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 49,
+  "cnd_kinds": [
+   "ret",
+   "tail"
+  ],
+  "secs": 17.0
+ },
+ "sub_14bc2": {
+  "status": "timeout"
+ },
+ "sub_14dc1": {
+  "status": "timeout"
+ },
+ "sub_152aa": {
+  "status": "timeout"
+ },
+ "sub_154e2": {
+  "status": "timeout"
+ },
+ "sub_157d1": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 32,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 0,
+  "cnd_kinds": [],
+  "secs": 10.5
+ },
+ "sub_15a57": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_af",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_cf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_df",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_if_",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 1,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 1,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.3
+ },
+ "sub_15c66": {
+  "status": "timeout"
+ },
+ "sub_15dee": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 4,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.5
+ },
+ "sub_161c8": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_of",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_pf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 16,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 4.9
+ },
+ "sub_16404": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 1,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.5
+ },
+ "sub_165f0": {
+  "status": "timeout"
+ },
+ "sub_167a7": {
+  "status": "timeout"
+ },
+ "sub_16974": {
+  "status": "timeout"
+ },
+ "sub_16ad1": {
+  "status": "timeout"
+ },
+ "sub_16b72": {
+  "status": "timeout"
+ },
+ "sub_16d73": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 4,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.9
+ },
+ "sub_16f2d": {
+  "status": "timeout"
+ },
+ "sub_17342": {
+  "status": "timeout"
+ },
+ "sub_1786e": {
+  "status": "timeout"
+ },
+ "sub_17a2c": {
+  "status": "timeout"
+ },
+ "sub_17c11": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret",
+   "tail"
+  ],
+  "cnd_terms": 1,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 45.0
+ },
+ "sub_18248": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_af",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_cf",
+    "0x0",
+    "0x1"
+   ],
+   [
+    "f_of",
+    "0x0",
+    "0x1"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret",
+   "tail"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 57.6
+ },
+ "sub_18388": {
+  "status": "passed",
+  "reason": null,
+  "mismatches": [],
+  "orc_terms": 4,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 1,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.6
+ },
+ "sub_18691": {
+  "status": "timeout"
+ },
+ "sub_1891a": {
+  "status": "timeout"
+ },
+ "sub_1906b": {
+  "status": "timeout"
+ },
+ "sub_1927a": {
+  "status": "timeout"
+ },
+ "sub_195e0": {
+  "status": "timeout"
+ },
+ "sub_19950": {
+  "status": "timeout"
+ },
+ "sub_19d45": {
+  "status": "timeout"
+ },
+ "sub_1a145": {
+  "status": "timeout"
+ },
+ "sub_1a61a": {
+  "status": "timeout"
+ },
+ "sub_1a8ec": {
+  "status": "timeout"
+ },
+ "sub_1aa18": {
+  "status": "timeout"
+ },
+ "sub_1ac54": {
+  "status": "timeout"
+ },
+ "sub_1aec8": {
+  "status": "timeout"
+ },
+ "sub_1b090": {
+  "status": "refused",
+  "reason": "extraction_failed",
+  "mismatches": [],
+  "orc_terms": 1,
+  "orc_kinds": [
+   "indirect_call"
+  ],
+  "cnd_terms": 9,
+  "cnd_kinds": [
+   "ret",
+   "tail"
+  ],
+  "secs": 31.6
+ },
+ "sub_1b2e7": {
+  "status": "timeout"
+ },
+ "sub_1b47a": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_af",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_cf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_df",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_if_",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 1,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 6,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 1.4
+ },
+ "sub_1b64d": {
+  "status": "timeout"
+ },
+ "sub_1b846": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_af",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_cf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_df",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_if_",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 4.6
+ },
+ "sub_1b993": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "f_cf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "g_eax",
+    "0x0",
+    "0x9905"
+   ],
+   [
+    "g_ebp",
+    "0x0",
+    "0x9936"
+   ]
+  ],
+  "orc_terms": 49,
+  "orc_kinds": [
+   "ret",
+   "tail"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 75.0
+ },
+ "sub_1bbb9": {
+  "status": "timeout"
+ },
+ "sub_1bd0a": {
+  "status": "timeout"
+ },
+ "sub_1c1da": {
+  "status": "incomplete",
+  "reason": "outputs_equal_on_explored_paths",
+  "mismatches": [],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 6,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 10.9
+ },
+ "sub_1ca01": {
+  "status": "timeout"
+ },
+ "sub_1e829": {
+  "status": "timeout"
+ }
+}

@@ -1,0 +1,98 @@
+{
+ "sub_10116": {
+  "status": "timeout"
+ },
+ "sub_10282": {
+  "status": "timeout"
+ },
+ "sub_106a7": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "data",
+    null,
+    null
+   ],
+   [
+    "g_eax",
+    "0x0",
+    "0x40"
+   ],
+   [
+    "g_edi",
+    "0x0",
+    "0x10"
+   ],
+   [
+    "s_es",
+    "0x0",
+    "0x40"
+   ]
+  ],
+  "orc_terms": 48,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 2,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 20.8
+ },
+ "sub_10774": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "f_pf",
+    "0x1",
+    "0x0"
+   ],
+   [
+    "f_zf",
+    "0x1",
+    "0x0"
+   ]
+  ],
+  "orc_terms": 7,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 5,
+  "cnd_kinds": [
+   "indirect_call",
+   "ret"
+  ],
+  "secs": 0.6
+ },
+ "sub_108d4": {
+  "status": "failed",
+  "reason": "observable_mismatch",
+  "mismatches": [
+   [
+    "g_eax",
+    "0x0",
+    "0x6"
+   ]
+  ],
+  "orc_terms": 2,
+  "orc_kinds": [
+   "ret"
+  ],
+  "cnd_terms": 3,
+  "cnd_kinds": [
+   "ret"
+  ],
+  "secs": 0.3
+ },
+ "sub_109fa": {
+  "status": "timeout"
+ },
+ "sub_10b20": {
+  "status": "timeout"
+ },
+ "sub_10c36": {
+  "status": "timeout"
+ }
+}
