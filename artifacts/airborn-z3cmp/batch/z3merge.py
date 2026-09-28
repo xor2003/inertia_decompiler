@@ -40,9 +40,35 @@ print(f"failed {len(rows)} (coverage-gap suspect: {cg}): {dict(kc)}")
 for r in rows:
     print(f"  {r[0]} [{r[1]}]{' GAP' if r[2] else ''} orc={r[4]} cnd={r[5]} {str(r[3])[:120]}")
 
+# refused breakdown by reason prefix
+rr = collections.Counter()
+for k, v in sorted(res.items()):
+    if v["status"] == "refused":
+        rr[(v.get("reason") or "?").split(":")[0]] += 1
+print(f"refused reasons: {dict(rr)}")
+inc = [k for k, v in res.items() if v["status"] == "incomplete"]
+if inc:
+    print(f"incomplete ({len(inc)}): {sorted(inc)[:20]}")
+
+# expected total from worker logs ("worker N: X fns")
+import re
+exp = 0
+for lf in glob.glob("/home/xor/vextest/artifacts/airborn-z3cmp/batch/z3w*.log"):
+    try:
+        mm = re.search(r"worker \d+: (\d+) fns", open(lf).read())
+        if mm:
+            exp += int(mm.group(1))
+    except OSError:
+        pass
+if exp:
+    print(f"coverage: {len(res)}/{exp} functions processed"
+          + ("" if len(res) >= exp else f"  MISSING {exp-len(res)}"))
+
 summary = {"total": len(res), "status_counts": dict(stat),
+           "refused_reasons": dict(rr),
            "failed_detail": [{"name": r[0], "class": r[1], "coverage_gap": r[2],
                               "mismatches": r[3]} for r in rows],
+           "incomplete": sorted(inc),
            "results": res}
 json.dump(summary, open(OUT, "w"), indent=1, default=str)
 print(f"wrote {OUT}")

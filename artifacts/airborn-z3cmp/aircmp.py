@@ -434,7 +434,12 @@ class LowerCtx:
         self.call_target: S.SsaExpr | None = None
         self.next_expr: S.SsaExpr | None = None
         self.inline_depth = 0
-        self.last_disp: S.SsaExpr | None = None   # last stk-space store (`__disp =` token)
+        self.last_disp: S.SsaExpr | None = None   # last value stored to a `__disp` slot
+        # Host-stack slot offsets that have held a dispatch token — the
+        # m2c `__disp` local.  Once a slot is known, later non-token stores
+        # (e.g. `__disp = jpt[di]`) still update ``last_disp`` so dispatch
+        # reads the live value, not a stale token.
+        self.disp_offs: set[int] = set()
         # True once this path executed a guest RETN_/RETF_ pop — a following
         # unresolved `__dispatch_call` is then a return to an unknown caller.
         self.retn_popped = False
@@ -556,6 +561,16 @@ class LowerCtx:
         if name == "eip":
             self.canon[name] = zext(v, 32) if v.width < 32 else v
             return
+        if name == "esp":
+            # Guest sp is the low 16 bits; the high half is host
+            # bookkeeping.  m2c PUSH_/POP_/RETN_ do 32-bit `esp ±= k`
+            # stores while the port writes the 16-bit `sp` view —
+            # canonicalize every write to low-16 semantics so both sides
+            # compare on the guest-visible register.
+            self.canon[name] = E("or", 32, (
+                E("and", 32, (cell, _c(0xFFFF0000, 32))),
+                zext(trunc(v, 16), 32)))
+            return
         if byteoff == 0 and width == cell.width:
             self.canon[name] = v
             return
@@ -650,10 +665,20 @@ class LowerCtx:
             # `__disp = <token>` writes are the only stores whose value is a
             # dispatch token const — recording them tracks the dispatch
             # variable even when the store chain can't forward later loads
-            # (symbolic-alias gaps in the host frame).
+            # (symbolic-alias gaps in the host frame).  `__disp` is a
+            # frame-base local: restrict tracking to the ebp slot band so
+            # esp-relative call-arg pushes (`push kloc_X`) don't masquerade
+            # as the dispatch variable.  Once a slot is known, non-token
+            # stores (`__disp = jpt[di]`) still update it — the token is
+            # replaced, not stale.
+            k = constval(fold(idx))
+            is_frame_slot = k is not None and abs(k - FRAME_BIAS) <= 0x800
             dv = constval(fold(data))
-            if (dv is not None and self.cfg.ksub_map
+            if (is_frame_slot and dv is not None and self.cfg.ksub_map
                     and dv in self.cfg.ksub_map):
+                self.disp_offs.add(k)
+                self.last_disp = fold(data)
+            elif k is not None and k in self.disp_offs:
                 self.last_disp = fold(data)
         self.arrays[space] = E("storele", 0,
                                (self.arrays[space], trunc(zext(idx, 32) if idx.width < 32 else idx, 32), data))
@@ -1776,6 +1801,7 @@ def _clone_ctx(ctx: LowerCtx) -> LowerCtx:
     n.next_expr = None
     n.inline_depth = ctx.inline_depth
     n.last_disp = ctx.last_disp
+    n.disp_offs = set(ctx.disp_offs)
     n.retn_popped = ctx.retn_popped
     n.bind_args = ctx.bind_args
     n.disp_seen = ctx.disp_seen
@@ -2152,13 +2178,23 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                 if rtgt is not None:
                     work.append((rtgt, ctx, cond, visits, frames))
                     continue
-                if dname is None and darg is not None:
+                if dname is None and (darg is not None
+                                      or ctx.last_disp is not None):
                     # Sym-indexed guest jump table (jpt_*): enumerate the
                     # known-extent table — one path per entry under guard
-                    # tbl[idx]==entry; token = (0x1a2<<16)|entry.
+                    # tbl[idx]==entry; token = (0x1a2<<16)|entry.  The
+                    # pushed arg may be an opaque stack load when store
+                    # forwarding misses — last_disp tracks the live
+                    # `__disp` value as the fallback enumeration source.
                     enum = _enum_jpt(
                         cfg, darg,
-                        valid=lambda ev: (0x1A20000 | ev) in cfg.ksub_map)
+                        valid=lambda ev: (0x1A20000 | ev) in cfg.ksub_map) \
+                        if darg is not None else None
+                    if (enum is None and ctx.last_disp is not None
+                            and ctx.last_disp is not darg):
+                        enum = _enum_jpt(
+                            cfg, ctx.last_disp,
+                            valid=lambda ev: (0x1A20000 | ev) in cfg.ksub_map)
                     if enum is not None:
                         lnode, entries = enum
                         diagnostics.append(
@@ -2319,6 +2355,28 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                                           dict(ctx.canon), dict(ctx.arrays)))
                 continue
             if kind == "gamecall":
+                # `sub_X(kloc_Y, _state)` re-enters the callee mid-proc at
+                # a label: its interior pushes/pops (e.g. a shared
+                # continuation's `pop es`) balance against the caller's
+                # frame asymmetrically, so run the label body concretely
+                # (`goto loc_Y`) rather than boundary-abstracting the proc.
+                # Boundary-abstracting is only sound for `_i = 0` entries.
+                if (cfg.m2c and tconst is not None
+                        and len(frames) < max_inline):
+                    a0 = _host_arg(ctx, 0)
+                    a0 = ctx._concretize(a0) if a0 is not None else None
+                    a0v = constval(fold(a0)) if a0 is not None else None
+                    lnm = cfg.ksub_map.get(a0v) if a0v is not None else None
+                    ltgt = (cfg.label_addr.get(lnm)
+                            or cfg.proc_syms.get(lnm)) if lnm else None
+                    if ltgt is not None:
+                        diagnostics.append(f"label_call:{addr:x}:{lnm}")
+                        nctx = _clone_ctx(ctx)
+                        nctx.bind_args = False  # args forward via cur_stk
+                        nctx.retn_popped = False  # fresh logical frame
+                        work.append((ltgt, nctx, cond, visits,
+                                     frames + (resume,)))
+                        continue
                 # Compositional boundary: callee verified by its own entry.
                 _boundary_call(ctx, tname)
                 if cfg.m2c and tname and tname.startswith("sub_"):
@@ -2348,7 +2406,7 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
         # token (popped retaddr) is a return to an unknown caller.
         if cfg.m2c and cfg.ksub_map:
             disp_op = None
-            for guard, _d in ctx.exits:
+            for guard, _d, _jk in ctx.exits:
                 # Match the *unfolded* guard: folding `sub(Ktok, Ktok)` to 0
                 # would erase the token the match needs to recognize.
                 t = _disp_case_operand(guard, cfg.ksub_map)
@@ -2421,7 +2479,7 @@ def execute(cfg: SideConfig, entry: int, bound: tuple[int, int],
                         continue
         edges: list[tuple[int, S.SsaExpr]] = []
         exit_guards: list[S.SsaExpr] = []
-        for guard, dst in ctx.exits:
+        for guard, dst, _jk in ctx.exits:
             d, g = fold(dst), fold(guard)
             if g.op == "const" and g.value == 0:
                 continue
