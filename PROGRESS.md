@@ -1996,6 +1996,55 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   partial/refused (mostly `successor_state_unobserved`/`mapping_missing`
   coverage refusals, not mismatches).
 
+## Riptide corpus: v7 cycle — codegen fixes + comparator lane + region axis
+
+- Post-v6 source codegen fixes (decomp commit `af81822`, verified via
+  `.gen.asm` against RIPTIDE.lst):
+  - `do_probe` ternary -> `if (a->facing == 0) probel else prober`:
+    oracle has two `push ds;push off` sites, arm order `jnz`->prober /
+    fallthrough probel (ternary emitted a DX:AX pointer select).
+  - `check_new_pos`: `a->x < act->x` (0x80 then-arm) reproduces oracle
+    `jnl`->0x20 / fallthrough 0x80.
+  - `pull_down::activate`: `uchar save_bg, save_fg` declared before ints
+    reproduces oracle frame (bytes bp-1/-2, ints bp-4..-10).
+- Comparator: `_local_far_pointer_offset_pairs` lane — `mov [bp-N],segr`
+  + `mov [bp-M],imm` far-pointer construction gets the same
+  string-content proof as `push segr`+`push off`, plus lone-NUL (`""`)
+  acceptance under witnessed paragraph pairs.
+- Region-equality axis audited (was untriaged): v6 batches carry
+  `region_failed` = 37 functions. Classes: sp residuals across
+  jmp-linked shared epilogues (12), dead high-byte/dead-reg returns (9),
+  relocated pointer/cell values in composed memory (10), RTL-extract
+  `ftol@`, `abs` branchless-vs-branch codegen variant (pre-3.1 vs 3.1).
+- REBUILD PITFALL: the function catalog (`recon_funcs.*.json`) embeds
+  module-relative entry addresses — **it must be regenerated via
+  `dosunit discover` after every link**, else a shifted exe lowers at
+  stale mid-instruction offsets (v7a lost `kill_ego` 54->2 parts etc.).
+- v7: exe 193985 B, `recon_funcs.v7.json` regenerated, lowered to
+  `recon.ssa.v7.json` = 12144 parts / 890 functions / 3 unsupported_ir
+  refusals; shards launched via `run_shards_v7.sh` (batches_v7_s*,
+  --resume + progress.json).
+- v7 shard compare COMPLETE (all 12 batches): **6840 pass / 7 fail /
+  2864 refused** main + region_equality 37 failed (same classified
+  artifact set as the v6 audit: sp-composition, dead-ah, relocated
+  cells, ftol, abs codegen).
+- v7 cleared vs v6: `check_new_pos`x2 (arm order), `pull_down`
+  (frame), `do_probe` (two push sites), `end_game` (local far-ptr
+  lane), `text_pager`, `explode_pcx`, `terminate`.
+- v7 remaining main fails: `___fpreset` (IVT far-ptr store artifact),
+  `@game_manager@$bctr` (vtable push: all consts layout-paired,
+  residual store-shape), `show_pcx`x2 + `dump_pcx`x3 (frame order).
+- Frame-order rule confirmed: BCC allocates locals in declaration
+  order, shallowest first, with a 1-byte pad when a word follows an
+  odd-depth byte run. `show_pcx`/`dump_pcx` declarations reordered
+  (decomp `84aa8c2`) to byte-first + split far-ptrs; VGADISP.ASM
+  output now reproduces oracle frames exactly (`var_1` -1, `src` -6,
+  ints -8..-0x12, `dest` -0x16, `var_1A` -0x1a / `var_1` -1,
+  `handle` -4, uints -6..-0x10, `block` -0x14). Rebuilt exe (same
+  193985 B, addresses unchanged), re-lowered the two functions into
+  `recon.ssa.v8frag.json` + spliced `recon.ssa.v8.json`; fragment
+  compare `batches_v8/compare.batch001.json` verifies the fix.
+
 ## BC5 z3cmp32: full-corpus paired-calls measurement + wider callee map
 
 - Full `--all-mapped` rerun (2228 fns, `--mode auto --normalize-globals
