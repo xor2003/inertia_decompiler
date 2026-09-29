@@ -348,8 +348,9 @@ LINTERS_DEV_MYPY_FILES += \
 	angr_platforms/angr_platforms/X86_16/synthetic_call_stub_evidence.py
 
 LINTERS_DEV_LIZARD_PATHS ?= inertia_decompiler/decompile_file_summary.py
+BASTA ?= npx --yes basta@0.3.0
 
-.PHONY: quality quality-dev quality-fast quality-hard decompiler-check decompiler-check-fast decompiler-check-expanded architecture-check architecture-check-fast agent-context-check test-ownership-check linters linters-hard linters-dev linters-dev-locked linters-files check-files check-all pytest pytest-profile pytest-inventory pytest-inventory-check pytest-files pytest-all ruff ruff-files ruff-all pyright pyright-files pyright-all mypy mypy-dev mypy-files mypy-all mypyc mypyc-smoke type-ratchet-files type-ratchet-changed vulture lizard lizard-dev test-pipeline test-pipeline-fast test-pipeline-expanded test-layer test-agent-confidence msc6-examples sortdemo-selftest monkeytype-trace monkeytype-stubs monkeytype-apply decomp-opt-regression decomp-opt-regression-inputs decomp-opt-regression-suite decomp-opt-regression-thread types
+.PHONY: quality quality-dev quality-fast quality-hard decompiler-check decompiler-check-fast decompiler-check-expanded architecture-check architecture-check-fast agent-context-check test-ownership-check linters linters-hard linters-dev linters-dev linters-dev-locked linters-files check-files check-all pytest pytest-profile pytest-inventory pytest-inventory-check pytest-files pytest-all ruff ruff-files ruff-all pyright pyright-files pyright-all mypy mypy-dev mypy-files mypy-all mypyc mypyc-smoke type-ratchet-files type-ratchet-changed vulture unused-python-files lizard lizard-dev test-pipeline test-pipeline-fast test-pipeline-expanded test-layer test-agent-confidence msc6-examples sortdemo-selftest monkeytype-trace monkeytype-stubs monkeytype-apply decomp-opt-regression decomp-opt-regression-inputs decomp-opt-regression-suite decomp-opt-regression-thread types
 
 quality: linters type-ratchet-changed decompiler-check decomp-opt-regression-suite
 
@@ -368,15 +369,15 @@ decompiler-check-expanded: architecture-check agent-context-check test-ownership
 
 linters:
 	# Keep one bounded job per independent linter.
-	$(MAKE) -j$(LINT_JOBS) ruff mypy mypyc lizard PYTHON="$(PYTHON)"
+	$(MAKE) -j$(LINT_JOBS) ruff mypy mypyc vulture unused-python-files lizard PYTHON="$(PYTHON)"
 
 linters-dev:
 	# Hard local gate: practical and reproducible per file-level mypyc scope.
-	$(MAKE) -j$(LINT_JOBS) ruff mypy-dev mypyc lizard-dev PYTHON="$(PYTHON)"
+	$(MAKE) -j$(LINT_JOBS) ruff mypy-dev mypyc vulture unused-python-files lizard-dev PYTHON="$(PYTHON)"
 
 linters-dev-locked:
 	# Serial for deterministic CI-noise-free smoke checks.
-	$(MAKE) ruff mypy-dev mypyc lizard-dev PYTHON="$(PYTHON)"
+	$(MAKE) ruff mypy-dev mypyc vulture unused-python-files lizard-dev PYTHON="$(PYTHON)"
 
 linters-hard:
 	# Mandatory development hard gate.
@@ -4125,6 +4126,9 @@ mypyc-smoke:
 
 vulture:
 	$(Q)$(PYTHON) -m vulture $(QA_TYPED_FILES)
+
+unused-python-files:
+	$(Q)npm_config_cache="$(CURDIR)/.cache/npm-cache" $(BASTA) --categories unused-file --workers 3 --no-colors scripts inertia_decompiler angr_platforms/angr_platforms angr_platforms/tests
 
 lizard:
 	$(Q)$(PYTHON) -m lizard $(LIZARD_OUTPUT_FLAGS) -l python -C 10 -i -1 scripts inertia_decompiler
