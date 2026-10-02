@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -818,16 +819,24 @@ def test_dosunit_straightline_ssa_uses_32_bit_control_successor_registers(monkey
     assert straightline_ssa._successor_required_inputs(None, successor) == {"eax"}
 
 
-def test_dosunit_x86_flag_summary_cannot_turn_a_model_difference_into_a_bug_verdict():
+def test_dosunit_x86_flag_summary_cannot_turn_a_model_difference_into_a_bug_verdict() -> None:
     """A counterexample using an uninterpreted flag helper is inconclusive."""
     flag_call = {
         "id": "flag_call",
         "op": "summary_x86g_calculate_eflags_c",
         "width": 32,
-        "args": [{"op": "const", "width": 32, "value": "0x00000000"}] * 4,
+        "args": [
+            {"op": "const", "width": 32, "value": "0xffffffff"},
+            *[{"op": "const", "width": 32, "value": "0x00000000"}] * 3,
+        ],
     }
     oracle = {"inputs": [], "assignments": [flag_call], "outputs": {"eax": {"ref": "flag_call"}}}
     candidate = {"inputs": [], "assignments": [], "outputs": {"eax": {"op": "const", "width": 32, "value": "0x00000000"}}}
+    # COPY (CC_OP=0) has exact carry semantics; use an unsupported operation
+    # above to exercise the uninterpreted boundary rather than reject COPY.
+    copy_call = {**flag_call, "args": [{"op": "const", "width": 32, "value": "0x00000000"}] * 4}
+    copy_oracle = {"inputs": [], "assignments": [copy_call], "outputs": {"eax": {"ref": "flag_call"}}}
+    assert straightline_ssa._compare_functions(copy_oracle, candidate, timeout_ms=1000)["status"] == "passed"
     inconclusive = straightline_ssa._compare_functions(oracle, candidate, timeout_ms=1000)
     assert inconclusive["status"] == "refused"
     assert inconclusive["reason"] == "uninterpreted_x86_flags"
@@ -1557,8 +1566,18 @@ def test_dosunit_compare_ssa_uses_full_index_document_for_batched_call_targets()
     # refusal, not a semantic failure.
     assert without_index["summary"]["refused"] == 1
     assert without_index["summary"]["failed"] == 0
-    assert with_index["summary"]["passed"] == 1
-    assert with_index["results"][0]["call_compare"]["equivalent"] is True
+    # The index resolves both callees but mapping and normalized CALL bytes
+    # cannot discharge their different, uncatalogued nested targets.
+    indexed_call = with_index["results"][0]["call_compare"]
+    assert indexed_call["oracle"]["resolved"]["id"] == "demo.exe:helper"
+    assert indexed_call["candidate"]["resolved"]["id"] == "demo.exe:helper_rebuilt"
+    assert indexed_call["reason"] == "callee_not_proven"
+    assert indexed_call["proof_fact"] is None
+    assert with_index["summary"]["pending_callee_proofs"] == 1
+    assert with_index["summary"]["refused"] == 1
+    assert with_index["summary"]["passed"] == 0
+    assert with_index["summary"]["failed"] == 0
+    assert with_index["results"][0]["call_compare"]["equivalent"] is False
 
 
 def test_dosunit_compare_ssa_checks_all_same_entry_call_aliases_before_rejecting():
@@ -1629,11 +1648,34 @@ def test_dosunit_compare_ssa_checks_all_same_entry_call_aliases_before_rejecting
         mapping_document=mapping,
     )
 
-    assert compared["summary"]["passed"] == 1
-    assert compared["results"][0]["call_compare"]["reason"] in {
-        "direct call targets are equivalent through function mapping",
-        "direct call target entry blocks have identical layout-normalized block signatures",
-    }
+    result = compared["results"][0]
+    call_compare = result["call_compare"]
+    oracle_call = call_compare["oracle"]
+    # Resolution still walks every same-entry alias before rejecting: both
+    # aliases are recorded and the mapping-selected alias resolves the pair.
+    assert oracle_call["resolution_note"] == "resolved through same-entry aliases by by_linear_all"
+    assert [alias["id"] for alias in oracle_call["aliases"]] == [
+        "demo.exe:closeFile",
+        "demo.exe:openBlitClosePic",
+    ]
+    assert oracle_call["resolved"]["id"] == "demo.exe:closeFile"
+    assert call_compare["candidate"]["resolved"]["id"] == "demo.exe:openBlitClosePic"
+    # Alias identity and function mapping select a correspondence only; the
+    # callees' nested call targets (call 0x1515 vs call 0x3737) resolve to no
+    # SSA function, so no callee equality fact exists and the caller refuses
+    # rather than passing on correspondence evidence alone.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets are equivalent through function mapping"
+    assert call_compare["proof_fact"] is None
+    assert result["status"] == "refused"
+    assert result["reason"] == "callee_not_proven"
+    assert result["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
 def test_dosunit_compare_ssa_normalizes_explicit_cs_relative_memory_operands():
@@ -1891,6 +1933,7 @@ def test_dosunit_compare_ssa_region_equality_proves_cyclic_block_graph_with_layo
         _ssa_block_stub("demo.exe:loop", "loop", base=0x101C0, delta=0x0008, index=2),
     ]
     for block in [*oracle_blocks, *candidate_blocks]:
+        block["outputs"]["cx"] = {"op": "input", "name": "cx", "width": 16}
         block["source"]["machine_code_size"] = 1
         block["source"]["machine_code_sha256"] = "0" * 64
     oracle_blocks[1]["inputs"] = [{"name": "cx", "width": 16}]
@@ -1945,6 +1988,46 @@ def test_dosunit_compare_ssa_region_equality_proves_cyclic_block_graph_with_layo
     assert compared["region_equality"]["status"] == "passed"
     assert compared["region_equality"]["results"][0]["reason"] == "transition_system_equal"
     assert compared["summary"]["failed"] == 0
+
+
+def test_dosunit_compare_ssa_region_composes_truncated_const_ip_successor():
+    oracle_blocks = [
+        _ssa_block_stub("demo.exe:trunc_jmp", "trunc_jmp", base=0x1C2C0, delta=0x0000, index=0, successors=[0x000B]),
+        _ssa_block_stub("demo.exe:trunc_jmp", "trunc_jmp", base=0x1C2C0, delta=0x000B, index=1),
+    ]
+    candidate_blocks = [
+        _ssa_block_stub("demo.exe:trunc_jmp", "trunc_jmp", base=0x21000, delta=0x0000, index=0, successors=[0x000B]),
+        _ssa_block_stub("demo.exe:trunc_jmp", "trunc_jmp", base=0x21000, delta=0x000B, index=1),
+    ]
+    # Real-mode oracle SSA publishes a 16-bit ip output truncated from the
+    # successor's 32-bit linear constant; composition must unwrap the trunc.
+    oracle_blocks[0]["outputs"]["ip"] = {"ref": "v0"}
+    candidate_blocks[0]["outputs"]["ip"] = {"ref": "v0"}
+    oracle_blocks[0]["assignments"] = [
+        {"id": "v0", "op": "trunc", "width": 16, "args": [{"op": "const", "value": "0x1c2cb", "width": 32}]}
+    ]
+    candidate_blocks[0]["assignments"] = [
+        {"id": "v0", "op": "trunc", "width": 16, "args": [{"op": "const", "value": "0x2100b", "width": 32}]}
+    ]
+
+    compared = compare_ssa_documents(
+        oracle={"schema": "dosunit.ssa.v1", "exe": "oracle.exe", "functions": oracle_blocks},
+        candidate={"schema": "dosunit.ssa.v1", "exe": "candidate.exe", "functions": candidate_blocks},
+    )
+
+    result = compared["region_equality"]["results"][0]
+    assert result["status"] == "passed"
+    assert result["oracle_summary"]["blocks_composed"] == 2
+    assert result["candidate_summary"]["blocks_composed"] == 2
+
+
+def test_dosunit_target_key_refuses_truncated_nonconst_term():
+    assert (
+        straightline_ssa._target_key(
+            {"op": "trunc", "width": 16, "args": [{"op": "input", "name": "ax", "width": 32}]}
+        )
+        is None
+    )
 
 
 def test_dosunit_connectivity_uses_signature_matched_shifted_successors():
@@ -2056,10 +2139,23 @@ def test_dosunit_compare_ssa_region_normalizes_equivalent_direct_call_return_sto
     result = next(
         item for item in compared["region_equality"]["results"] if item["function"]["id"] == "demo.exe:caller"
     )
-    assert result["status"] == "passed"
-    assert result["reason"] == "region_ssa_equal"
-    assert result["call_normalizations"][0]["call_compare"]["equivalent"] is True
+    # A call part cannot pass region equality on balanced-call omission alone:
+    # the caller's published outputs do not relate callee register/memory state,
+    # so the region refuses pending a complete callee state relation while the
+    # return-store normalization is still recorded.
+    assert result["status"] == "refused"
+    assert result["reason"] == "callee_state_relation_required"
+    assert result["mismatches"][0]["kind"] == "callee_state_relation_required"
+    call_compare = result["call_normalizations"][0]["call_compare"]
+    assert call_compare["equivalent"] is True
+    assert call_compare["proof_fact"] is None
+    applied = [item["reason"] for item in call_compare["normalizations"] if item["applied"]]
+    assert applied == [
+        "normalized layout-dependent call return address store",
+        "normalized layout-dependent call return address store",
+    ]
     assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
 
 
 def test_dosunit_compare_ssa_region_normalizes_equivalent_far_call_return_bytes():
@@ -2076,9 +2172,18 @@ def test_dosunit_compare_ssa_region_normalizes_equivalent_far_call_return_bytes(
     result = next(
         item for item in compared["region_equality"]["results"] if item["function"]["id"] == "demo.exe:far_caller"
     )
-    assert result["status"] == "passed"
-    normalizations = result["call_normalizations"][0]["call_compare"]["normalizations"]
+    # Same admission gate as the near-call region: a region containing a call
+    # refuses pending a complete callee state relation.  The far-call target is
+    # unresolved here, so callee equivalence is not claimed; the recorded
+    # normalization fact (return-address byte stores) is still exercised.
+    assert result["status"] == "refused"
+    assert result["reason"] == "callee_state_relation_required"
+    assert result["mismatches"][0]["kind"] == "callee_state_relation_required"
+    call_compare = result["call_normalizations"][0]["call_compare"]
+    assert call_compare["equivalent"] is False
+    normalizations = call_compare["normalizations"]
     assert normalizations[0]["reason"] == "normalized layout-dependent far-call return address byte stores"
+    assert normalizations[0]["applied"] is True
     assert normalizations[0]["store_count"] == 2
     assert compared["summary"]["failed"] == 0
 
@@ -2355,7 +2460,9 @@ def test_dosunit_control_blocks_request_raw_state_outputs():
         {"kind": "direct_successors", "targets": ["0x0004"]},
     )
 
-    assert outputs == ("ax", "dx", "sp", "bx", "cx", "si", "di", "bp", "ip")
+    assert outputs[:3] == ("ax", "dx", "sp")
+    assert set(outputs) == set(straightline_ssa.INTERNAL_STATE_REGS)
+    assert {"flags", "cs", "ds", "es", "ss", "dflag", "eax_hi", "esp_hi"}.issubset(outputs)
 
 
 def test_dosunit_project_ssa_outputs_preserves_input_identity():
@@ -2712,7 +2819,8 @@ def test_dosunit_compare_ssa_reports_passed_loop_scc():
     assert "Loop SCCs: `passed` total `1` passed `1`" in report
 
 
-def test_dosunit_compare_ssa_reports_passed_call_scc():
+def test_dosunit_compare_ssa_refuses_call_scc_without_joint_evidence() -> None:
+    """A cycle of matching call labels cannot bootstrap semantic proof."""
     oracle = {
         "schema": "dosunit.ssa.v1",
         "exe": "oracle.exe",
@@ -2740,12 +2848,17 @@ def test_dosunit_compare_ssa_reports_passed_call_scc():
 
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, enable_region_equality=False)
 
-    assert compared["summary"]["passed"] == 2
-    assert compared["call_scc"]["status"] == "passed"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["refused"] == 2
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert {result["reason"] for result in compared["results"]} == {"callee_not_proven"}
+    assert compared["call_scc"]["status"] == "refused"
     assert compared["call_scc"]["total"] == 1
+    assert compared["call_scc"]["refused"] == 1
+    assert compared["call_scc"]["results"][0]["reason"] == "call_cycle_unproven"
     assert compared["call_scc"]["results"][0]["function_count"] == 2
     report = render_failure_report(compared)
-    assert "Call SCCs: `passed` total `1` passed `1`" in report
+    assert "Call SCCs: `refused` total `1` passed `0`" in report
 
 
 def test_dosunit_compare_ssa_refuses_conditional_connectivity_without_ip_output():
@@ -2946,6 +3059,75 @@ def test_dosunit_compare_ssa_region_equality_refuses_symbolic_loop_cut():
     assert "loop_bound_incomplete" in report
 
 
+def test_dosunit_abi_loop_bound_cannot_hide_late_mutation():
+    oracle = _manual_loop_ssa_doc("oracle.exe", constant_count=False)
+    candidate = deepcopy(oracle)
+    candidate["exe"] = "candidate.exe"
+    loop = candidate["functions"][1]
+    loop["assignments"].extend([
+        {"id": "late_guard", "op": "eq", "width": 1, "args": [
+            {"op": "input", "name": "ax", "width": 16},
+            {"op": "const", "value": "0x0006", "width": 16},
+        ]},
+        {"id": "late_mutation", "op": "ite", "width": 16, "args": [
+            {"ref": "late_guard"},
+            {"op": "const", "value": "0x0009", "width": 16},
+            {"ref": "v1"},
+        ]},
+    ])
+    loop["outputs"]["ax"] = {"ref": "late_mutation"}
+    manifest = {"schema": "test.abi.v1", "functions": [{
+        "name": "manual_loop", "kind": "near", "returns": ["ax"],
+        "inputs": [{"location": "cx", "name": "count", "width": 16}],
+    }]}
+    compared = compare_ssa_abi_documents(
+        oracle=oracle, candidate=candidate, abi_manifest=manifest, max_loop_unroll=2,
+    )
+    # For count=7 the original returns 7 and the candidate returns 9.
+    # Equality of the first three iterations cannot establish equivalence.
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["results"][0]["reason"] == "loop_bound_incomplete"
+
+
+def test_dosunit_abi_complete_constant_loop_still_proves():
+    oracle = _manual_loop_ssa_doc("oracle.exe", constant_count=True)
+    candidate = _manual_loop_ssa_doc("candidate.exe", constant_count=True)
+    manifest = {"schema": "test.abi.v1", "functions": [{
+        "name": "manual_loop", "kind": "near", "returns": ["ax"],
+    }]}
+    compared = compare_ssa_abi_documents(
+        oracle=oracle, candidate=candidate, abi_manifest=manifest, max_loop_unroll=1,
+    )
+    assert compared["summary"]["passed"] == 1
+    assert compared["results"][0]["oracle_summary"]["loop_cuts"] == 0
+
+
+@pytest.mark.parametrize("candidate_code,expected", [("31c0c3", "failed"), ("8bc3c3", "passed")])
+def test_dosunit_abi_undeclared_entry_register_is_not_assumed_zero(
+    tmp_path: Path, candidate_code: str, expected: str,
+):
+    catalog = _edge_catalog("demo.exe:reads_bx", "reads_bx", offset=0x0200, size=3)
+    documents = []
+    for side, code in (("oracle", "89d8c3"), ("candidate", candidate_code)):
+        image = bytearray(0x240)
+        image[0x200:0x203] = bytes.fromhex(code)
+        executable = tmp_path / f"{side}.exe"
+        executable.write_bytes(_mz_exe(bytes(image)))
+        documents.append(lower_straightline_ssa_document(
+            exe_path=executable, functions_catalog=catalog, output_regs=("ax",),
+        ))
+    manifest = {"schema": "test.abi.v1", "functions": [{
+        "name": "reads_bx", "kind": "near", "returns": ["ax"],
+    }]}
+    compared = compare_ssa_abi_documents(
+        oracle=documents[0], candidate=documents[1], abi_manifest=manifest,
+    )
+    # Omitting BX from the ABI input list does not prove its entry value is
+    # zero or irrelevant: the oracle explicitly returns that register.
+    assert compared["results"][0]["status"] == expected
+
+
 def test_dosunit_compare_ssa_uses_region_proven_callee_for_shifted_call(tmp_path: Path):
     original_image = bytearray(0x280)
     candidate_image = bytearray(0x280)
@@ -3000,16 +3182,17 @@ def test_dosunit_compare_ssa_uses_region_proven_callee_for_shifted_call(tmp_path
     oracle = lower_straightline_ssa_document(
         exe_path=original,
         functions_catalog=original_catalog,
-        output_regs=("bx", "sp"),
+        output_regs=straightline_ssa.INTERNAL_STATE_REGS,
         follow_call_fallthrough=False,
     )
     candidate_ssa = lower_straightline_ssa_document(
         exe_path=candidate,
         functions_catalog=candidate_catalog,
-        output_regs=("bx", "sp"),
+        output_regs=straightline_ssa.INTERNAL_STATE_REGS,
         follow_call_fallthrough=False,
     )
-    compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, mapping_document=mapping)
+    compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, mapping_document=mapping,
+                                     max_solver_inputs=0, max_solver_assignments=0)
 
     assert compared["region_equality"]["status"] == "passed"
     assert compared["summary"]["failed"] == 0
@@ -3792,7 +3975,7 @@ def test_dosunit_compare_ssa_abi_msc_prologue_policy_refuses_non_prologue_calls(
     assert compared["results"][0]["reason"] == "call_boundary"
 
 
-def test_dosunit_compare_ssa_abi_bounded_loop_unroll(tmp_path: Path):
+def test_dosunit_compare_ssa_abi_bounded_loop_unroll_requires_complete_paths(tmp_path: Path):
     image = bytearray(0x240)
     image[0x200:0x214] = bytes.fromhex("558bec31c08b4e0485c97e044049ebf88be55dc3")
     original = tmp_path / "original.exe"
@@ -3834,8 +4017,11 @@ def test_dosunit_compare_ssa_abi_bounded_loop_unroll(tmp_path: Path):
     )
 
     assert refused["summary"]["refused"] == 1
-    assert compared["summary"]["passed"] == 1
-    assert compared["results"][0]["oracle_summary"]["loop_cuts"] > 0
+    # A finite prefix of an unconstrained countdown is not a whole-function
+    # proof. Physical successor routing may refuse even before the loop cap.
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["results"][0]["reason"] in {"control_flow_unproved", "loop_bound_incomplete"}
 
 
 def test_dosunit_compare_ssa_abi_accepts_watcom_register_c_rewrite_with_different_clobbers():
@@ -3989,7 +4175,8 @@ def test_dosunit_compare_ssa_abi_proves_stack_arg_branch_loop_rewrite():
     assert result["function"]["stack_args"] == [{"name": "boost", "width": 16, "entry_sp_offset": "0x0002"}]
     assert result["observables"]["regs"] == ["ax", "bp", "ds", "sp"]
     assert result["observables"]["memory"][0]["name"] == "last_boosted_value"
-    assert result["oracle_summary"]["loop_cuts"] > 0
+    assert result["oracle_summary"]["loop_cuts"] == 0
+    assert result["oracle_summary"]["branch_prunes"] >= 1
     assert result["candidate_summary"]["loop_cuts"] == 0
     assert result["reason"] in {None, "ssa_equal"}
 
@@ -4316,7 +4503,8 @@ def test_dosunit_region_mismatch_with_unproven_callee_is_refusal_evidence():
     )
 
 
-def test_dosunit_compare_ssa_accepts_both_sides_stopping_at_indirect_call():
+def test_dosunit_compare_ssa_refuses_matching_unproved_indirect_calls() -> None:
+    """Equal unresolved transfer shapes do not establish target coverage."""
     oracle_function = _ssa_stub("oracle.exe:dispatch", "dispatch", ip="0x0200", linear="0x1200", jumpkind="Ijk_Call")
     candidate_function = _ssa_stub(
         "candidate.exe:dispatch", "dispatch", ip="0x0300", linear="0x1300", jumpkind="Ijk_Call"
@@ -4327,9 +4515,12 @@ def test_dosunit_compare_ssa_accepts_both_sides_stopping_at_indirect_call():
         candidate={"schema": "dosunit.ssa.v1", "exe": "candidate.exe", "functions": [candidate_function]},
     )
 
-    assert compared["summary"]["passed"] == 1
-    assert compared["results"][0]["call_compare"]["equivalent"] is True
-    assert compared["results"][0]["call_compare"]["reason"] == "both call targets are indirect expressions"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert compared["results"][0]["reason"] == "call_target_unproven"
+    assert compared["results"][0]["call_compare"]["equivalent"] is False
+    assert compared["results"][0]["call_compare"]["proof_fact"] is None
 
 
 def test_dosunit_compare_ssa_reports_output_set_changes():
@@ -5154,7 +5345,12 @@ def test_dosunit_compare_ssa_normalizes_mapped_direct_call_targets(tmp_path: Pat
     candidate_ssa = lower_straightline_ssa_document(
         exe_path=candidate, functions_catalog=candidate_catalog, output_regs=("ax",)
     )
-    compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, mapping_document=mapping)
+    # The lifted call block reads full modeled state (25 inputs); this fixture
+    # exercises mapped-target normalization, not the solver budget, which has
+    # its own gate coverage in refuses_solver_slices_over_gate.
+    compared = compare_ssa_documents(
+        oracle=oracle, candidate=candidate_ssa, mapping_document=mapping, max_solver_inputs=0
+    )
 
     caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
     assert caller["status"] == "passed"
@@ -5162,7 +5358,13 @@ def test_dosunit_compare_ssa_normalizes_mapped_direct_call_targets(tmp_path: Pat
     assert caller["call_compare"]["oracle"]["resolved"]["name"] == "callee"
     assert caller["call_compare"]["candidate"]["resolved"]["name"] == "callee_rebuilt"
     assert caller["call_compare"]["oracle"]["resolved"]["instructions"][0]["disassembly"] == "mov ax, 0x1234"
-    assert all(item["applied"] for item in caller["call_compare"]["normalizations"])
+    stack_normalizations = [
+        item
+        for item in caller["call_compare"]["normalizations"]
+        if item.get("reason") == "normalized call-boundary stack store addresses"
+    ]
+    assert len(stack_normalizations) == 2
+    assert all(item["applied"] for item in stack_normalizations)
     report_document = {
         "schema": "dosunit.ssa_compare.v1",
         "oracle": str(original),
@@ -5183,7 +5385,7 @@ def test_dosunit_compare_ssa_normalizes_mapped_direct_call_targets(tmp_path: Pat
     assert "mov ax, 0x1234" in report
 
 
-def test_dosunit_compare_ssa_uses_z3_proven_callee_lemma_for_shifted_call(tmp_path: Path):
+def test_dosunit_compare_ssa_refuses_narrow_callee_lemma_for_shifted_call(tmp_path: Path):
     original_image = bytearray(0x300)
     candidate_image = bytearray(0x300)
     original_image[0x200:0x204] = b"\xe8\x2d\x00\xc3"  # call 0x1230; ret
@@ -5247,15 +5449,10 @@ def test_dosunit_compare_ssa_uses_z3_proven_callee_lemma_for_shifted_call(tmp_pa
 
     caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
     callee = next(result for result in compared["results"] if result["function"]["name"] == "callee")
-    assert compared["summary"]["passed"] == 2
     assert callee["status"] == "passed"
-    assert callee["reason"] is None
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["reason"] == "direct call targets are equivalent through proven callee equality"
-    assert caller["call_compare"]["proof_fact"]["proof"] == "z3_equal"
-    assert caller["call_compare"]["proof_fact"]["id"].startswith("semantic-equality-fact:")
-    assert caller["call_compare"]["semantic_target"]["source"] == "proof_fact"
-    assert caller["call_compare"]["semantic_target"]["value"].startswith("0x")
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert caller["call_compare"]["proof_fact"] is None
     report_document = {
         "schema": "dosunit.ssa_compare.v1",
         "oracle": str(original),
@@ -5271,12 +5468,19 @@ def test_dosunit_compare_ssa_uses_z3_proven_callee_lemma_for_shifted_call(tmp_pa
             }
         ],
     }
+    # The renderer consumes proof facts only when explicitly supplied as evidence.
+    report_document["results"][0]["call_compare"] = {
+        **caller["call_compare"],
+        "proof_fact": {"proof": "z3_equal", "oracle": {"name": "callee"},
+                       "candidate": {"name": "callee_rebuilt"}},
+        "semantic_target": {"value": "0x1", "source": "proof_fact"},
+    }
     report = render_failure_report(report_document)
     assert "Callee proof: `z3_equal` oracle `callee` -> candidate `callee_rebuilt`" in report
     assert "Semantic call target:" in report
 
 
-def test_dosunit_compare_ssa_ignores_volatile_pre_call_register_outputs():
+def test_dosunit_compare_ssa_retains_pre_call_register_outputs():
     oracle_caller = _ssa_call_boundary_function("demo.exe:caller", "caller", ax="0x1111", sp="0xfff4")
     candidate_caller = _ssa_call_boundary_function("demo.exe:caller", "caller", ax="0x2222", sp="0xfff6")
     oracle_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
@@ -5284,25 +5488,8 @@ def test_dosunit_compare_ssa_ignores_volatile_pre_call_register_outputs():
     for callee in (oracle_callee, candidate_callee):
         callee["source"]["machine_code_sha256"] = "same-callee"
         callee["source"]["machine_code_size"] = 1
-
-    compared = compare_ssa_documents(
-        oracle={"schema": "dosunit.ssa.v1", "exe": "oracle.exe", "functions": [oracle_caller, oracle_callee]},
-        candidate={"schema": "dosunit.ssa.v1", "exe": "candidate.exe", "functions": [candidate_caller, candidate_callee]},
-        skip_binary_equal=False,
-    )
-
-    caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
-    assert caller["status"] == "passed"
-
-
-def test_dosunit_compare_ssa_still_checks_call_boundary_memory_outputs():
-    oracle_caller = _ssa_call_boundary_function("demo.exe:caller", "caller", memory="0x1111")
-    candidate_caller = _ssa_call_boundary_function("demo.exe:caller", "caller", memory="0x2222")
-    oracle_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
-    candidate_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
-    for callee in (oracle_callee, candidate_callee):
-        callee["source"]["machine_code_sha256"] = "same-callee"
-        callee["source"]["machine_code_size"] = 1
+        callee["source"]["function_machine_code_sha256"] = "same-callee"
+        callee["source"]["function_machine_code_size"] = 1
 
     compared = compare_ssa_documents(
         oracle={"schema": "dosunit.ssa.v1", "exe": "oracle.exe", "functions": [oracle_caller, oracle_callee]},
@@ -5312,53 +5499,36 @@ def test_dosunit_compare_ssa_still_checks_call_boundary_memory_outputs():
 
     caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
     assert caller["status"] == "failed"
+    assert caller["reason"] == "observable_mismatch"
+
+
+def test_real16_complete_calls_preserve_memory_outputs(tmp_path: Path):
+    from test_real16_public_calls import _compare_stack_write_call
+
+    caller = _compare_stack_write_call(tmp_path, candidate_value=0x2222)
+    assert caller["status"] == "failed", caller
     assert any(
-        mismatch["kind"] == "output_expr_changed" and mismatch.get("reg") == "memory"
+        mismatch["kind"] == "memory_expr_changed" and mismatch.get("reg") == "memory"
         for mismatch in caller["mismatches"]
-    )
+    ), caller
 
 
-def test_dosunit_compare_ssa_normalizes_equivalent_call_stack_store_addresses():
-    oracle_caller = _ssa_call_boundary_stack_store_function("demo.exe:caller", "caller", frame_delta="0xfffa", value="0x1234")
-    candidate_caller = _ssa_call_boundary_stack_store_function(
-        "demo.exe:caller", "caller", frame_delta="0xfffc", value="0x1234"
-    )
-    oracle_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
-    candidate_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
-    for callee in (oracle_callee, candidate_callee):
-        callee["source"]["machine_code_sha256"] = "same-callee"
-        callee["source"]["machine_code_size"] = 1
+def test_real16_complete_calls_prove_equivalent_stack_addresses(tmp_path: Path):
+    from test_real16_public_calls import _compare_stack_write_call
 
-    compared = compare_ssa_documents(
-        oracle={"schema": "dosunit.ssa.v1", "exe": "oracle.exe", "functions": [oracle_caller, oracle_callee]},
-        candidate={"schema": "dosunit.ssa.v1", "exe": "candidate.exe", "functions": [candidate_caller, candidate_callee]},
-        skip_binary_equal=False,
-    )
-
-    caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
-    assert caller["status"] == "passed"
+    caller = _compare_stack_write_call(tmp_path, candidate_value=0x1234, wide_address=True)
+    assert caller["status"] == "passed", caller
 
 
-def test_dosunit_compare_ssa_keeps_call_stack_store_value_observable():
-    oracle_caller = _ssa_call_boundary_stack_store_function("demo.exe:caller", "caller", frame_delta="0xfffa", value="0x1234")
-    candidate_caller = _ssa_call_boundary_stack_store_function(
-        "demo.exe:caller", "caller", frame_delta="0xfffc", value="0x5678"
-    )
-    oracle_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
-    candidate_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
-    for callee in (oracle_callee, candidate_callee):
-        callee["source"]["machine_code_sha256"] = "same-callee"
-        callee["source"]["machine_code_size"] = 1
+def test_real16_complete_calls_keep_stack_store_value_observable(tmp_path: Path):
+    from test_real16_public_calls import _compare_stack_write_call
 
-    compared = compare_ssa_documents(
-        oracle={"schema": "dosunit.ssa.v1", "exe": "oracle.exe", "functions": [oracle_caller, oracle_callee]},
-        candidate={"schema": "dosunit.ssa.v1", "exe": "candidate.exe", "functions": [candidate_caller, candidate_callee]},
-        skip_binary_equal=False,
-    )
-
-    caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
-    assert caller["status"] == "failed"
-    assert any(mismatch["kind"] in {"memory_expr_changed", "output_expr_changed"} for mismatch in caller["mismatches"])
+    caller = _compare_stack_write_call(tmp_path, candidate_value=0x5678, wide_address=True)
+    assert caller["status"] == "failed", caller
+    assert any(
+        mismatch["kind"] == "memory_expr_changed" and mismatch.get("reg") == "memory"
+        for mismatch in caller["mismatches"]
+    ), caller
 
 
 def test_dosunit_compare_ssa_refuses_caller_when_mapped_callee_not_proven(tmp_path: Path):
@@ -5431,14 +5601,12 @@ def test_dosunit_compare_ssa_refuses_caller_when_mapped_callee_not_proven(tmp_pa
         enable_callee_lemmas=False,
     )
     compatibility_caller = next(result for result in compatibility["results"] if result["function"]["name"] == "caller")
-    assert compatibility_caller["status"] == "passed"
-    assert (
-        compatibility_caller["call_compare"]["reason"] == "direct call targets are equivalent through function mapping"
-    )
-    assert compatibility_caller["call_compare"]["semantic_target"]["source"] == "resolved_target"
+    assert compatibility_caller["status"] == "refused"
+    assert compatibility_caller["reason"] == "callee_not_proven"
+    assert compatibility_caller["call_compare"]["proof_fact"] is None
 
 
-def test_dosunit_compare_ssa_accepts_strict_mapped_callee_with_matching_normalized_signature(tmp_path: Path):
+def test_dosunit_compare_ssa_refuses_strict_mapped_callee_with_only_normalized_signature(tmp_path: Path):
     original_image = bytearray(0x400)
     candidate_image = bytearray(0x400)
     original_image[0x200:0x204] = b"\xe8\x2d\x00\xc3"  # call 0x1230; ret
@@ -5514,13 +5682,9 @@ def test_dosunit_compare_ssa_accepts_strict_mapped_callee_with_matching_normaliz
     )
 
     caller = next(result for result in compared["results"] if result["function"]["name"] == "caller")
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] in {
-        "direct call targets are equivalent through function mapping",
-        "direct call targets have identical layout-normalized binary-local signatures",
-    }
-    assert caller["call_compare"]["semantic_target"]["source"] == "resolved_target"
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert caller["call_compare"]["proof_fact"] is None
 
 
 def test_dosunit_compare_ssa_resolves_near_call_low16_linear_before_ip_collision():
@@ -5579,9 +5743,25 @@ def test_dosunit_compare_ssa_resolves_near_call_low16_linear_before_ip_collision
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, mapping_document=mapping)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["candidate"]["resolved"]["name"] == "itoa"
+    call_compare = caller["call_compare"]
+    # The low16-linear index still resolves the near call to itoa before the
+    # ip collision with clipComputeOutcode (candidate ip 0x0390) can claim it.
+    assert call_compare["candidate"]["resolved"]["name"] == "itoa"
+    # Mapping proves callee correspondence only: the AX-only callee stubs carry
+    # no complete-body identity, so no callee equality fact discharges the
+    # caller and it must refuse instead of passing on mapped names alone.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets are equivalent through function mapping"
+    assert call_compare["proof_fact"] is None
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert caller["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 1
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 1
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
 def test_dosunit_compare_ssa_resolves_linear_low16_aliases_before_ip_collision():
@@ -5636,13 +5816,34 @@ def test_dosunit_compare_ssa_resolves_linear_low16_aliases_before_ip_collision()
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, mapping_document=mapping)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["candidate"]["resolved"]["name"] == "__nmalloc"
-    assert [alias["name"] for alias in caller["call_compare"]["candidate"]["aliases"]] == ["__nmalloc", "malloc"]
+    call_compare = caller["call_compare"]
+    # The low16-linear alias index still resolves to __nmalloc with both
+    # same-entry aliases recorded, before the ip collision with
+    # projectVertexToScreen (candidate ip 0x0096) can claim the target.
+    assert call_compare["candidate"]["resolved"]["name"] == "__nmalloc"
+    assert (
+        call_compare["candidate"]["resolution_note"]
+        == "resolved through same-entry aliases by by_linear_low16_all"
+    )
+    assert [alias["name"] for alias in call_compare["candidate"]["aliases"]] == ["__nmalloc", "malloc"]
+    # Mapping proves callee correspondence only: the AX-only callee stubs carry
+    # no complete-body identity, so no callee equality fact discharges the
+    # caller and it must refuse instead of passing on mapped names alone.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets are equivalent through function mapping"
+    assert call_compare["proof_fact"] is None
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert caller["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 1
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 1
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
-def test_dosunit_compare_ssa_accepts_semantically_identical_renamed_call_targets():
+def test_dosunit_compare_ssa_refuses_renamed_call_targets_without_callee_proof():
     oracle = {
         "schema": "dosunit.ssa.v1",
         "exe": "oracle.exe",
@@ -5680,12 +5881,30 @@ def test_dosunit_compare_ssa_accepts_semantically_identical_renamed_call_targets
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, mapping_document=mapping)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call target entry blocks have identical compact SSA"
+    call_compare = caller["call_compare"]
+    # Both direct call targets still resolve under their different names.
+    assert call_compare["oracle"]["resolved"]["name"] == "unk_libc6"
+    assert call_compare["candidate"]["resolved"]["name"] == "__nmalloc"
+    # The rename is neither mapped nor a name/normalized-name match, and the
+    # AX-only callee stubs carry no complete-body identity, so no evidence
+    # discharges callee equality; the refusal names the exact unproved pair.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "no mapping proves direct call target equivalence"
+    assert call_compare["proof_fact"] is None
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "call_target_unproven"
+    assert caller["mismatches"][0]["kind"] == "call_target_unproven"
+    assert caller["mismatches"][0]["oracle_target"] == "oracle.exe:unk_libc6"
+    assert caller["mismatches"][0]["candidate_target"] == "candidate.exe:__nmalloc"
+    assert caller["mismatches"][0]["call_reason"] == "no mapping proves direct call target equivalence"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 2
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert compared["summary"]["pending_callee_proofs"] == 0
 
 
-def test_dosunit_compare_ssa_accepts_decorated_call_target_symbol_names():
+def test_dosunit_compare_ssa_resolves_decorated_call_names_without_callee_proof():
     oracle = {
         "schema": "dosunit.ssa.v1",
         "exe": "oracle.exe",
@@ -5723,9 +5942,27 @@ def test_dosunit_compare_ssa_accepts_decorated_call_target_symbol_names():
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, mapping_document=mapping)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call targets have equivalent normalized symbol names"
+    call_compare = caller["call_compare"]
+    # The decorated candidate symbol still resolves and is selected as the
+    # normalized-name correspondent of the oracle's anuldiv.
+    assert call_compare["oracle"]["resolved"]["name"] == "anuldiv"
+    assert call_compare["candidate"]["resolved"]["name"] == "__aNuldiv"
+    # Decoration equivalence is name evidence only: the AX-only callee stubs
+    # carry no complete-body identity, so no callee equality fact discharges
+    # the caller and it must refuse with the normalized-name match recorded
+    # as the unproven obligation.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets have equivalent normalized symbol names"
+    assert call_compare["proof_fact"] is None
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert caller["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 2
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
 def test_dosunit_compare_ssa_resolves_same_entry_call_target_aliases_by_default():
@@ -5772,13 +6009,30 @@ def test_dosunit_compare_ssa_resolves_same_entry_call_target_aliases_by_default(
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, mapping_document=mapping)
 
     rand = compared["results"][0]
-    assert rand["status"] == "passed"
-    assert rand["call_compare"]["equivalent"] is True
+    call_compare = rand["call_compare"]
+    # Same-entry aliased call targets still resolve through the low16-linear
+    # all-index by default, with both aliases recorded.
+    assert call_compare["candidate"]["resolved"]["name"] == "__aNlmul"
     assert (
-        rand["call_compare"]["candidate"]["resolution_note"]
+        call_compare["candidate"]["resolution_note"]
         == "resolved through same-entry aliases by by_linear_low16_all"
     )
-    assert [alias["name"] for alias in rand["call_compare"]["candidate"]["aliases"]] == ["__aNlmul", "__aNulmul"]
+    assert [alias["name"] for alias in call_compare["candidate"]["aliases"]] == ["__aNlmul", "__aNulmul"]
+    # Alias resolution and mapping prove callee correspondence only: the
+    # AX-only callee stubs carry no complete-body identity, so no callee
+    # equality fact discharges the caller and it must refuse.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets are equivalent through function mapping"
+    assert call_compare["proof_fact"] is None
+    assert rand["status"] == "refused"
+    assert rand["reason"] == "callee_not_proven"
+    assert rand["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 1
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 1
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
 def test_dosunit_compare_ssa_resolves_exact_linear_same_entry_call_target_aliases():
@@ -5827,12 +6081,29 @@ def test_dosunit_compare_ssa_resolves_exact_linear_same_entry_call_target_aliase
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate, mapping_document=mapping)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
+    call_compare = caller["call_compare"]
+    # Exact-linear same-entry aliases still resolve deterministically through
+    # the all-index, with both aliases recorded; target_a sorts first.
+    assert call_compare["candidate"]["resolved"]["name"] == "target_a"
     assert (
-        caller["call_compare"]["candidate"]["resolution_note"] == "resolved through same-entry aliases by by_linear_all"
+        call_compare["candidate"]["resolution_note"] == "resolved through same-entry aliases by by_linear_all"
     )
-    assert [alias["name"] for alias in caller["call_compare"]["candidate"]["aliases"]] == ["target_a", "target_b"]
+    assert [alias["name"] for alias in call_compare["candidate"]["aliases"]] == ["target_a", "target_b"]
+    # Alias resolution and mapping prove callee correspondence only: the
+    # AX-only callee stubs carry no complete-body identity, so no callee
+    # equality fact discharges the caller and it must refuse.
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets are equivalent through function mapping"
+    assert call_compare["proof_fact"] is None
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert caller["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 1
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 1
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
 def _near_call_stub(function_id: str, name: str, *, ip: str, linear: str, target: str) -> dict[str, object]:
@@ -5935,11 +6206,32 @@ def test_dosunit_compare_ssa_resolves_unlowered_library_call_by_binary_signature
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, skip_binary_equal=False)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call targets have identical binary-local signatures"
-    assert caller["call_compare"]["oracle"]["resolved"]["id"].startswith("library-signature:")
-    assert caller["call_compare"]["candidate"]["resolved"]["entry"]["image_offset"] == "0x0000f34a"
+    call_compare = caller["call_compare"]
+    oracle_resolved = call_compare["oracle"]["resolved"]
+    candidate_resolved = call_compare["candidate"]["resolved"]
+    # Both targets still resolve through identical binary-local signatures at
+    # their shifted image offsets — discovery coverage is retained.
+    assert oracle_resolved["id"].startswith("library-signature:")
+    assert oracle_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["id"] == oracle_resolved["id"]
+    assert candidate_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["signature_sha256"] == oracle_resolved["signature_sha256"]
+    assert candidate_resolved["entry"]["image_offset"] == "0x0000f34a"
+    # An identical signature prefix is discovery evidence only: the trimmed
+    # bytes are not a closed whole-body proof (masked immediates and any
+    # environment effects stay unproved), so the caller must refuse.
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets have the same function id"
+    assert call_compare["proof_fact"] is None
+    assert caller["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
 def test_dosunit_compare_ssa_rejects_unlowered_library_call_when_binary_signature_differs(tmp_path: Path):
@@ -5980,7 +6272,8 @@ def test_dosunit_compare_ssa_rejects_unlowered_library_call_when_binary_signatur
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, skip_binary_equal=False)
 
     caller = compared["results"][0]
-    assert caller["status"] == "failed"
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "call_target_unproven"
     assert caller["call_compare"]["equivalent"] is False
     assert caller["call_compare"]["reason"] == "no mapping proves direct call target equivalence"
 
@@ -6023,10 +6316,31 @@ def test_dosunit_compare_ssa_matches_signature_only_target_to_lowered_function_s
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, skip_binary_equal=False)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call targets have identical binary-local signatures"
-    assert caller["call_compare"]["candidate"]["resolved"]["name"] == "__bios_keybrd"
+    call_compare = caller["call_compare"]
+    oracle_resolved = call_compare["oracle"]["resolved"]
+    candidate_resolved = call_compare["candidate"]["resolved"]
+    # Signature discovery still matches the oracle's signature-only target to
+    # the candidate's lowered __bios_keybrd by identical binary-local bytes.
+    assert oracle_resolved["id"].startswith("library-signature:")
+    assert oracle_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["name"] == "__bios_keybrd"
+    assert candidate_resolved["signature_kind"] == "binary_local"
+    for field in ("signature_sha256", "normalized_signature_sha256", "layout_signature_sha256"):
+        assert oracle_resolved[field] == candidate_resolved[field]
+    # Identical bytes are discovery evidence only; no complete callee equality
+    # fact exists. The body also contains INT 16h, which would separately need
+    # an environment contract before any semantic proof could be admitted.
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "call_target_unproven"
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "no mapping proves direct call target equivalence"
+    assert call_compare["proof_fact"] is None
+    assert caller["mismatches"][0]["kind"] == "call_target_unproven"
+    assert caller["mismatches"][0]["candidate_target"] == "candidate.exe:__bios_keybrd"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
 
 
 def test_dosunit_compare_ssa_prefers_wrapped_signature_over_ip_collision(tmp_path: Path):
@@ -6074,13 +6388,34 @@ def test_dosunit_compare_ssa_prefers_wrapped_signature_over_ip_collision(tmp_pat
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, skip_binary_equal=False)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call targets have identical binary-local signatures"
-    assert caller["call_compare"]["candidate"]["resolved"]["name"].startswith("library_signature_")
+    call_compare = caller["call_compare"]
+    oracle_resolved = call_compare["oracle"]["resolved"]
+    candidate_resolved = call_compare["candidate"]["resolved"]
+    # Both targets still resolve through the wrapped binary-local signature;
+    # the lowered ``wrong_ip_collision`` stub at the same target IP does not
+    # displace it — signature discovery coverage is retained.
+    assert oracle_resolved["id"].startswith("library-signature:")
+    assert oracle_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["id"] == oracle_resolved["id"]
+    assert candidate_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["signature_sha256"] == oracle_resolved["signature_sha256"]
+    # An identical signature prefix is discovery evidence only, not a closed
+    # whole-body proof, so the caller must refuse rather than pass on it.
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "callee_not_proven"
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "callee_not_proven"
+    assert call_compare["unproven_reason"] == "direct call targets have the same function id"
+    assert call_compare["proof_fact"] is None
+    assert caller["mismatches"][0]["kind"] == "callee_not_proven"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
+    assert compared["summary"]["pending_callee_proofs"] == 1
 
 
-def test_dosunit_compare_ssa_accepts_mapped_callee_to_signature_only_target(tmp_path: Path):
+def test_dosunit_compare_ssa_refuses_mapped_callee_to_signature_only_target(tmp_path: Path):
     oracle_signature = bytes.fromhex("55 8b ec ff 76 08 e8 a7 ff 83 c4 02 ff 76 06 ff") * 2
     candidate_signature = bytes.fromhex("55 8b ec ff 76 08 e8 85 ff 83 c4 02 ff 76 06 ff") * 2
     original_image = bytearray(0x11000)
@@ -6138,9 +6473,9 @@ def test_dosunit_compare_ssa_accepts_mapped_callee_to_signature_only_target(tmp_
     )
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call targets have identical normalized binary-local signatures"
+    assert caller["status"] == "failed"
+    assert caller["call_compare"]["equivalent"] is False
+    assert caller["call_compare"]["proof_fact"] is None
 
 
 def test_dosunit_compare_ssa_trims_binary_signature_at_terminal_jump(tmp_path: Path):
@@ -6181,11 +6516,38 @@ def test_dosunit_compare_ssa_trims_binary_signature_at_terminal_jump(tmp_path: P
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, skip_binary_equal=False)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["reason"] == "direct call targets have identical normalized binary-local signatures"
+    call_compare = caller["call_compare"]
+    oracle_resolved = call_compare["oracle"]["resolved"]
+    candidate_resolved = call_compare["candidate"]["resolved"]
+    # Both targets resolve through binary-local signatures trimmed at the
+    # terminal ``jmp cx`` (17 bytes); the trailing reachable tail is excluded.
+    assert oracle_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["signature_kind"] == "binary_local"
+    assert oracle_resolved["id"].startswith("library-signature:")
+    assert candidate_resolved["id"].startswith("library-signature:")
+    assert oracle_resolved["signature_size"] == 17
+    assert oracle_resolved["signature_size"] == candidate_resolved["signature_size"]
+    # The raw prefixes differ on absolute memory operands and the trailing
+    # jump displacement, but the trimmed normalized/layout patterns coincide.
+    assert oracle_resolved["signature_sha256"] != candidate_resolved["signature_sha256"]
+    assert oracle_resolved["normalized_signature_sha256"] == candidate_resolved["normalized_signature_sha256"]
+    assert oracle_resolved["layout_signature_sha256"] == candidate_resolved["layout_signature_sha256"]
+    # Trimming at the terminal jump leaves the indirect target domain and the
+    # masked absolute memory operands unproved, so a matching normalized
+    # prefix still refuses rather than passing.
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "call_target_unproven"
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "no mapping proves direct call target equivalence"
+    assert call_compare["proof_fact"] is None
+    assert caller["mismatches"][0]["kind"] == "call_target_unproven"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
 
 
-def test_dosunit_compare_ssa_accepts_normalized_binary_signature_immediate_differences(tmp_path: Path):
+def test_dosunit_compare_ssa_refuses_normalized_binary_signature_immediate_differences(tmp_path: Path):
     original_signature = bytes.fromhex("55 8b ec b8 34 12 e9 03 00 90 90 5d c3 90 90 90") * 2
     candidate_signature = bytes.fromhex("55 8b ec b8 78 56 e9 08 00 90 90 5d c3 90 90 90") * 2
     original_image = bytearray(0x11000)
@@ -6223,9 +6585,35 @@ def test_dosunit_compare_ssa_accepts_normalized_binary_signature_immediate_diffe
     compared = compare_ssa_documents(oracle=oracle, candidate=candidate_ssa, skip_binary_equal=False)
 
     caller = compared["results"][0]
-    assert caller["status"] == "passed"
-    assert caller["call_compare"]["equivalent"] is True
-    assert caller["call_compare"]["reason"] == "direct call targets have identical normalized binary-local signatures"
+    call_compare = caller["call_compare"]
+    oracle_resolved = call_compare["oracle"]["resolved"]
+    candidate_resolved = call_compare["candidate"]["resolved"]
+    # Both targets resolve through binary-local signatures; normalization
+    # masks the MOV AX immediate and the jump displacement, so the corrupted
+    # control still produces identical normalized patterns.
+    assert oracle_resolved["signature_kind"] == "binary_local"
+    assert candidate_resolved["signature_kind"] == "binary_local"
+    assert oracle_resolved["id"].startswith("library-signature:")
+    assert candidate_resolved["id"].startswith("library-signature:")
+    assert oracle_resolved["normalized_signature_sha256"] == candidate_resolved["normalized_signature_sha256"]
+    assert oracle_resolved["normalized_signature_masked_bytes"] == (
+        candidate_resolved["normalized_signature_masked_bytes"]
+    )
+    # Masking the immediate conceals a changed AX (0x1234 vs 0x5678): the raw
+    # and layout signatures still differ, and a normalized-prefix match is
+    # discovery evidence only, never a semantic equivalence proof.
+    assert oracle_resolved["signature_sha256"] != candidate_resolved["signature_sha256"]
+    assert oracle_resolved["layout_signature_sha256"] != candidate_resolved["layout_signature_sha256"]
+    assert caller["status"] == "refused"
+    assert caller["reason"] == "call_target_unproven"
+    assert call_compare["equivalent"] is False
+    assert call_compare["reason"] == "no mapping proves direct call target equivalence"
+    assert call_compare["proof_fact"] is None
+    assert caller["mismatches"][0]["kind"] == "call_target_unproven"
+    assert compared["summary"]["passed"] == 0
+    assert compared["summary"]["failed"] == 0
+    assert compared["summary"]["refused"] == 1
+    assert compared["summary"]["semantic_proof_facts"] == 0
 
 
 def test_dosunit_report_shows_unresolved_call_targets_by_default(tmp_path: Path):
@@ -7959,6 +8347,7 @@ def _manual_loop_ssa_doc(exe: str, *, constant_count: bool) -> dict[str, object]
         "ax": {"op": "const", "value": "0x0000", "width": 16},
         "ip": {"op": "const", "value": "0x1004", "width": 16},
     }
+    entry_outputs["cx"] = {"op": "input", "name": "cx", "width": 16}
     if constant_count:
         entry_outputs["cx"] = {"op": "const", "value": "0x0002", "width": 16}
 

@@ -25,9 +25,31 @@ if TYPE_CHECKING:
     import angr
     import capstone
 
+    from tools.dosunit.real16_control_boundary import BoundaryProof, ControlProofLedger
+    from tools.dosunit.ssa_output_lemmas import ScalarPreprocessing
+
+from tools.dosunit.callee_proof_scope import CalleeIdentity, callee_identity, leaf_proof_covers_callee_state
 from tools.dosunit.data_compare import load_mz_image
 from tools.dosunit.ir_edges import _load_lifter_project
 from tools.dosunit.model import DosUnitError, canonical_json_bytes, normalize_hex, parse_int, stable_id
+from tools.dosunit.proof_contracts import ProofStatus, legacy_status_for, proof_status_from_legacy
+from tools.dosunit.proof_serialization import _counters_document
+from tools.dosunit.repeat_string_contracts import (
+    RepeatArchitecture,
+    decode_repeat_summary,
+    is_repeat_string_instruction,
+)
+from tools.dosunit.scc_proof_admission import admit_scc_statuses, scc_status_counters
+from tools.dosunit.ssa_constant_terms import constant_bitvector
+from tools.dosunit.ssa_control_flow import ControlIndexRefusal, closed_block_index
+from tools.dosunit.ssa_lowering_scope import ScopeBoundaryReason, SuccessorRangePolicy
+from tools.dosunit.x86_lazy_conditions import (
+    X86ConditionContract,
+    carry_contract,
+    condition_contract,
+    exact_carry,
+    exact_condition,
+)
 
 REG_BY_OFFSET = {
     0: ("ax", 16),
@@ -68,6 +90,53 @@ REG32_HI16_BY_OFFSET = {
     26: "esi_hi",
     30: "edi_hi",
 }
+def _high_half_regs() -> tuple[str, ...]:
+    """Return the high-half register names of the active register table."""
+    return tuple(hi for hi, _low in REG32_BY_OFFSET.values())
+
+
+def _internal_state_regs() -> tuple[str, ...]:
+    """Return the complete modeled register state of the active table.
+
+    Every register component a successor block may consume as an input — the
+    primary registers, control/flag/segment names, and the high halves of any
+    wider register storage.  Derived at call time so non-default guest tables
+    (e.g. a patched flat32 register map) describe their own state.
+    """
+    names = [name for name, _width in REG_BY_OFFSET.values()] + list(_high_half_regs())
+    if REG_BY_OFFSET.get(32) == ("ip", 16):
+        names.append("control_ip")
+    return tuple(dict.fromkeys(names))
+
+
+def _ssa_register_widths() -> dict[str, int]:
+    """Return the width map for every modeled register of the active table.
+
+    Includes the high halves of wider register storage (16 bits each); used
+    when declaring SSA input items.
+    """
+    widths = dict(REG_BY_OFFSET.values())
+    widths.update((name, 16) for name in _high_half_regs())
+    if REG_BY_OFFSET.get(32) == ("ip", 16):
+        widths["control_ip"] = 32
+    return widths
+
+
+# Names modeling the upper 16 bits of each 386 32-bit register (EAX..EDI) for
+# the default x86_16 table.  They only carry state when a 32-bit access
+# writes them, but they are part of the modeled machine state that an
+# intra-function cutpoint must publish.
+HIGH_HALF_REGS: tuple[str, ...] = _high_half_regs()
+# The complete modeled register state for the default x86_16 table:
+# every component a successor block may consume as an input — the 16-bit
+# registers, ip, flags, the segment registers, dflag, and the 386 high
+# halves.  Nonterminal blocks publish all of it; materializing only
+# ABI-selected outputs lets a changed loop-carried register escape the
+# transition-system and compose proofs.
+INTERNAL_STATE_REGS: tuple[str, ...] = _internal_state_regs()
+# Width table for every modeled register name of the default x86_16 table,
+# including the 386 high halves (16 bits each).
+SSA_REGISTER_WIDTHS: dict[str, int] = _ssa_register_widths()
 RAW_OUTPUT_REGS = ("ax", "bx", "cx", "dx", "si", "di", "bp", "sp")
 X86_32_RAW_OUTPUT_REGS = ("eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp")
 ALL_X86_RAW_OUTPUT_REGS = (*RAW_OUTPUT_REGS, *X86_32_RAW_OUTPUT_REGS)
@@ -78,7 +147,8 @@ ABI_OUTPUT_REGS = {
 DEFAULT_ABI = "msc16-near"
 DEFAULT_OUTPUT_REGS = ABI_OUTPUT_REGS[DEFAULT_ABI]
 SUPPORTED_SOURCE_IRS = {"vex", "ail"}
-LIFTER_CACHE_SCHEMA = "dosunit.lifter_cache.v4"
+# Earlier lifts could suppress live FLAGS across a decoded control transfer.
+LIFTER_CACHE_SCHEMA: str = "dosunit.lifter_cache.v6"
 CALL_TARGET_PREVIEW_INSTRUCTION_LIMIT = 4
 BINARY_CALL_TARGET_SIGNATURE_BYTES = 32
 CONTROL_MNEMONICS = {
@@ -204,7 +274,7 @@ class LiftedBlock:  # noqa: D101
     lifted: bool
 
 
-def lower_straightline_ssa_document(  # noqa: D103
+def lower_straightline_ssa_document(
     *,
     exe_path: Path,
     functions_catalog: dict[str, Any],
@@ -219,7 +289,16 @@ def lower_straightline_ssa_document(  # noqa: D103
     max_lift_block_ms: int = 10000,
     max_function_ms: int = 60000,
     lifter_project: angr.Project | None = None,
+    successor_range_policy: SuccessorRangePolicy = SuccessorRangePolicy.DISCOVER,
 ) -> dict[str, Any]:
+    """Lower complete source blocks while preserving the declared range policy.
+
+    Open discovery may extend proposal ranges using decoded successors. A
+    declared-only candidate never extends; external edges retain their full
+    transfer and a lowering refusal rather than disappearing as complete code.
+    """
+    if not isinstance(successor_range_policy, SuccessorRangePolicy):
+        raise ValueError("successor_range_policy must be a typed policy")
     if source_ir not in SUPPORTED_SOURCE_IRS:
         raise DosUnitError(f"unsupported SSA source IR: {source_ir}")
     functions = list(functions_catalog.get("functions", []) or [])
@@ -268,6 +347,7 @@ def lower_straightline_ssa_document(  # noqa: D103
                     scan_limit=scan_limit,
                     follow_call_fallthrough=follow_call_fallthrough,
                     max_lift_block_ms=max_lift_block_ms,
+                    successor_range_policy=successor_range_policy,
                 )
         except TimeoutError as ex:
             results = []
@@ -314,6 +394,7 @@ def lower_straightline_ssa_document(  # noqa: D103
             "scan_limit": scan_limit,
             "cache_dir": None if cache_dir is None else str(cache_dir),
             "follow_call_fallthrough": follow_call_fallthrough,
+            "successor_range_policy": successor_range_policy.value,
         },
         "functions": lowered,
         "refusals": refusals,
@@ -1941,7 +2022,7 @@ def _memory_limited_external_parts_report(aborted: dict[str, Any] | None) -> dic
     }
 
 
-def compare_ssa_abi_documents(  # noqa: D103
+def compare_ssa_abi_documents(
     *,
     oracle: dict[str, Any],
     candidate: dict[str, Any],
@@ -1953,6 +2034,12 @@ def compare_ssa_abi_documents(  # noqa: D103
     max_solver_memory_stores: int = 32,
     max_loop_unroll: int = 0,
 ) -> dict[str, Any]:
+    """Compare complete ABI behaviors; a loop budget never licenses path loss.
+
+    Constant branches may be pruned when their composed predicate is proved
+    literal. Any path still live at the unroll limit refuses comparison rather
+    than allowing equality of a bounded prefix to stand for function equality.
+    """
     oracle_groups = _ssa_function_groups(list(oracle.get("functions", []) or []))
     candidate_groups = _ssa_function_groups(list(candidate.get("functions", []) or []))
     mapped_candidates = _ssa_candidate_mapping(mapping_document) if mapping_document is not None else {}
@@ -2015,6 +2102,8 @@ def compare_ssa_abi_documents(  # noqa: D103
             observables=observables,
             data_segment_para=data_segment_para,
             max_loop_unroll=max_loop_unroll,
+            require_complete_paths=True,
+            enable_constant_branch_pruning=True,
         )
         candidate_summary = _summarize_abi_function(
             candidate_group,
@@ -2022,6 +2111,8 @@ def compare_ssa_abi_documents(  # noqa: D103
             observables=observables,
             data_segment_para=data_segment_para,
             max_loop_unroll=max_loop_unroll,
+            require_complete_paths=True,
+            enable_constant_branch_pruning=True,
         )
         if oracle_summary.get("status") != "passed" or candidate_summary.get("status") != "passed":
             side = "oracle" if oracle_summary.get("status") != "passed" else "candidate"
@@ -2191,7 +2282,10 @@ def _lower_function(
     scan_limit: int,
     follow_call_fallthrough: bool,
     max_lift_block_ms: int,
+    successor_range_policy: SuccessorRangePolicy = SuccessorRangePolicy.DISCOVER,
+    declared_linear_ranges: tuple[tuple[int, int], ...] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Lower one source function under an explicit successor expansion policy."""
     function_id = str(function.get("id", "<unknown>"))
     names = function.get("names", []) if isinstance(function.get("names"), list) else []
     function_name = str(names[0]) if names else function_id
@@ -2206,8 +2300,10 @@ def _lower_function(
     function_base = linked_base + (segment_para << 4)
     start = function_base + entry_ip
     size = function.get("size")
+    if successor_range_policy is SuccessorRangePolicy.DECLARED_ONLY and (type(size) is not int or size <= 0):
+        return [], [_refusal(function, ScopeBoundaryReason.DECLARED_RANGE_MISSING.value,
+                             "declared-only lowering requires an exact positive candidate size")], 0
     limit = int(size) if isinstance(size, int) and size > 0 else scan_limit
-    allow_dynamic_successor_ranges = True
     limit = max(1, min(limit, scan_limit))
     end = start + limit
     allowed_ranges = _function_linear_ranges(
@@ -2217,6 +2313,18 @@ def _lower_function(
         end=end,
         scan_limit=scan_limit,
     )
+    if declared_linear_ranges is not None:
+        if successor_range_policy is not SuccessorRangePolicy.DECLARED_ONLY:
+            raise ValueError("exact candidate ranges require declared-only lowering")
+        if not declared_linear_ranges or any(
+            type(left) is not int or type(right) is not int
+            or left < start or right <= left or right > end
+            for left, right in declared_linear_ranges
+        ):
+            raise ValueError("exact candidate ranges must lie inside the source extent")
+        allowed_ranges = _merge_linear_ranges(list(declared_linear_ranges))
+        if _linear_range_end(allowed_ranges, start) is None:
+            raise ValueError("exact candidate ranges must include the function entry")
     function_machine_code = _loader_bytes(project, start, limit)
     ctx = _LowerScanCtx(
         project=project,
@@ -2239,7 +2347,7 @@ def _lower_function(
         scan_limit=scan_limit,
         follow_call_fallthrough=follow_call_fallthrough,
         max_lift_block_ms=max_lift_block_ms,
-        allow_dynamic_successor_ranges=allow_dynamic_successor_ranges,
+        range_policy=successor_range_policy,
     )
     state = _LowerScanState(
         pending=[start],
@@ -2277,7 +2385,12 @@ class _LowerScanCtx:
     scan_limit: int
     follow_call_fallthrough: bool
     max_lift_block_ms: int
-    allow_dynamic_successor_ranges: bool
+    range_policy: SuccessorRangePolicy
+
+    @property
+    def allow_dynamic_successor_ranges(self) -> bool:
+        """Derive extension permission from the authoritative typed policy."""
+        return self.range_policy is SuccessorRangePolicy.DISCOVER
 
 
 @dataclass
@@ -2463,6 +2576,29 @@ def _scan_block_retried_or_refused(
     return False
 
 
+def _real16_control_domain_field(
+    ctx: _LowerScanCtx,
+    *,
+    at: int,
+    instructions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Producer fetch-domain marker field for real16 loader-linear blocks.
+
+    Returns ``{"control_domain": fact}`` only when the genuine lifter arch
+    contract admits the real16 fetch-window domain (verified ``Arch86_16``
+    with ``loader_linear`` control addressing).  Every other contract —
+    flat32 included — emits ``{}`` so no key is produced at all.  Coordinates
+    come from the block's own head and terminal instruction, never a cs
+    field.
+    """
+    from tools.dosunit.real16_control_boundary import fetch_domain_marker
+
+    last = instructions[-1].get("address") if instructions else None
+    terminal = _optional_int(last.get("linear")) if isinstance(last, dict) else None
+    fact = fetch_domain_marker(ctx.project.arch, head_linear=at, terminal_linear=terminal)
+    return {"control_domain": fact} if fact is not None else {}
+
+
 def _record_lowered_part(
     ctx: _LowerScanCtx,
     state: _LowerScanState,
@@ -2510,11 +2646,13 @@ def _record_lowered_part(
             "jumpkind": str(irsb.jumpkind),
             "instruction_count": len(instructions),
             "instructions": instructions,
+            "successor_range_policy": ctx.range_policy.value,
             "function_machine_code_sha256": _bytes_sha256(ctx.function_machine_code),
             "function_machine_code_size": len(ctx.function_machine_code) if ctx.function_machine_code is not None else None,
             "machine_code_sha256": _machine_code_sha256(instructions),
             "machine_code_size": _machine_code_size(instructions),
             "transfer": transfer,
+            **_real16_control_domain_field(ctx, at=at, instructions=instructions),
         },
         **lowered,
     }
@@ -2534,6 +2672,15 @@ def _record_lowered_part(
     )
     for successor in successors:
         if _linear_range_end(state.allowed_ranges, successor) is None:
+            if ctx.range_policy is SuccessorRangePolicy.DECLARED_ONLY:
+                state.refusals.append(_refusal(
+                    ctx.function, ScopeBoundaryReason.EXTERNAL_SUCCESSOR.value,
+                    "source successor is outside the declared candidate region",
+                    extra={"address": {"linear": normalize_hex(at)},
+                           "successor": {"linear": normalize_hex(successor)},
+                           "successor_range_policy": ctx.range_policy.value},
+                ))
+                continue
             if not ctx.allow_dynamic_successor_ranges or not _can_add_dynamic_successor_range(
                 project=ctx.project,
                 function_base=ctx.function_base,
@@ -2617,6 +2764,7 @@ def _lower_block_ir_source(
             return None
         return _lower_ail_block(
             ail_block,
+            irsb=irsb,
             output_regs=block_output_regs,
             max_assignments_per_function=ctx.max_assignments_per_function,
         )
@@ -2625,12 +2773,39 @@ def _lower_block_ir_source(
 
 
 def _with_control_output_regs(output_regs: tuple[str, ...], transfer: dict[str, Any] | None) -> tuple[str, ...]:
-    """Carry available register state across a direct successor on either x86 width."""
-    if not isinstance(transfer, dict) or transfer.get("kind") != "direct_successors":
+    """Expand a nonterminal block's outputs to the complete internal state.
+
+    A ``direct_successors`` block's published outputs define the cutpoint
+    state its in-function successors consume as inputs.  Materializing only
+    the caller's ABI selection is unsound: a written register dropped by
+    output-driven liveness (``bx``/``cx``, a segment register, ``flags``, a
+    386 high half) is invisible to block-equality proofs while a successor
+    still depends on it, so induction would silently assume equality for
+    changed state. Calls likewise expose complete pre-call state to callees.
+    Terminal blocks keep the caller-provided ABI outputs.
+    """
+    if not isinstance(transfer, dict) or transfer.get("kind") not in {"direct_successors", "direct_call"}:
         return output_regs
-    available = {name for name, _width in REG_BY_OFFSET.values()}
-    raw_regs = tuple(name for name in ALL_X86_RAW_OUTPUT_REGS if name in available)
-    return tuple(dict.fromkeys((*output_regs, *raw_regs, "ip")))
+    # Derived at call time so non-default guest tables (e.g. a patched flat32
+    # register map) publish their own complete internal state instead of the
+    # x86_16 names.  The trailing "ip" keeps the historical control output
+    # for layouts whose table names it differently (eip).
+    return tuple(dict.fromkeys((*output_regs, *_internal_state_regs(), "ip")))
+
+
+def _initial_reg_versions() -> dict[str, SsaExpr]:
+    """Seed the SSA version map with input symbols for every modeled register.
+
+    Includes the 386 high halves so a ``0x66``-prefixed access to non-output
+    state still composes and so nonterminal blocks can publish the complete
+    ``INTERNAL_STATE_REGS`` cutpoint without hitting an unseeded name.
+    """
+    versions = {
+        name: SsaExpr("input", width, name=name) for name, width in REG_BY_OFFSET.values()
+    }
+    for name in _high_half_regs():
+        versions.setdefault(name, SsaExpr("input", 16, name=name))
+    return versions
 
 
 def _catalog_segment_paragraphs(functions_catalog: dict[str, Any]) -> dict[str, int]:
@@ -2709,29 +2884,12 @@ def _transfer_successor_linears(transfer: dict[str, Any] | None) -> list[int]:
 
 
 def _repeat_string_info(instructions: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if not _last_instruction_is_repeat_string(instructions):
+    """Consume the typed binary contract; display text cannot admit a summary."""
+    names = _repeat_string_state()
+    if names is None:
         return None
-    instruction = instructions[-1]
-    text = str(instruction.get("disassembly") or instruction.get("mnemonic") or "").lower()
-    tokens = text.replace(",", " ").split()
-    if len(tokens) < 2 or tokens[0] not in {"rep", "repe", "repz", "repne", "repnz"}:
-        return None
-    base = tokens[1]
-    if base.startswith("movs"):
-        family = "movs"
-    elif base.startswith("stos"):
-        family = "stos"
-    elif base.startswith("scas"):
-        family = "scas"
-    elif base.startswith("cmps"):
-        family = "cmps"
-    else:
-        return None
-    suffix = base[-1:]
-    width = 1 if suffix == "b" else 2 if suffix == "w" else 4 if suffix == "d" else None
-    if width is None:
-        return None
-    return {"repeat": tokens[0], "family": family, "width": width, "mnemonic": base}
+    spec = decode_repeat_summary(instructions, architecture=names["architecture"])
+    return spec.to_document() if spec is not None else None
 
 
 def _repeat_string_state() -> dict[str, Any] | None:
@@ -2739,11 +2897,13 @@ def _repeat_string_state() -> dict[str, Any] | None:
 
     Under the 16-bit offsets the counter/index regs are cx/si/di with a single
     `flags` carrier; under flat32 they are ecx/esi/edi with the lazy-flag
-    quartet (cc_op/cc_dep1/cc_dep2/cc_ndep) carrying DF and friends.
+    quartet (cc_op/cc_dep1/cc_dep2/cc_ndep). Direction remains a separate
+    preserved carrier and a dependency of every summary primitive.
     """
     available = {name for name, _width in REG_BY_OFFSET.values()}
     if {"ax", "cx", "si", "di", "flags", "ds", "es", "ip"} <= available:
-        return {"ax": "ax", "cx": "cx", "si": "si", "di": "di", "ip": "ip", "flags": ("flags",)}
+        return {"ax": "ax", "cx": "cx", "si": "si", "di": "di", "ip": "ip", "flags": ("flags",),
+                "architecture": RepeatArchitecture.REAL16}
     if {"eax", "ecx", "esi", "edi", "ds", "es", "eip", "cc_op", "cc_dep1", "cc_dep2", "cc_ndep"} <= available:
         return {
             "ax": "eax",
@@ -2752,6 +2912,7 @@ def _repeat_string_state() -> dict[str, Any] | None:
             "di": "edi",
             "ip": "eip",
             "flags": ("cc_op", "cc_dep1", "cc_dep2", "cc_ndep"),
+            "architecture": RepeatArchitecture.FLAT32,
         }
     return None
 
@@ -2773,6 +2934,11 @@ def _repeat_string_family_versions(
     ds = reg_versions["ds"]
     es = reg_versions["es"]
     flag_args = tuple(reg_versions[flag_name] for flag_name in names["flags"])
+    # Keep every modeled direction carrier in the primitive's dependency
+    # relation; it is preserved state, not a newly computed status flag.
+    for direction in ("dflag", "d"):
+        if direction in reg_versions:
+            flag_args = (*flag_args, reg_versions[direction])
     cx_width = reg_widths[names["cx"]]
     si_width = reg_widths[names["si"]]
     di_width = reg_widths[names["di"]]
@@ -2811,6 +2977,7 @@ def _lower_repeat_string_summary(
     output_regs: tuple[str, ...],
     max_assignments_per_function: int,
 ) -> dict[str, Any] | None:
+    """Publish complete state for an admitted isolated repeat instruction."""
     info = _repeat_string_info(instructions)
     names = _repeat_string_state()
     if info is None or names is None:
@@ -2819,9 +2986,7 @@ def _lower_repeat_string_summary(
     width = int(info["width"])
     repeat = str(info["repeat"])
     tag = f"summary_{repeat}_{family}{width * 8}"
-    reg_versions: dict[str, SsaExpr] = {
-        name: SsaExpr("input", reg_width, name=name) for name, reg_width in REG_BY_OFFSET.values()
-    }
+    reg_versions: dict[str, SsaExpr] = _initial_reg_versions()
     reg_widths = dict(REG_BY_OFFSET.values())
     mem_input = SsaExpr("mem_input", 0, name="mem")
     ax_value = _coerce_width(reg_versions[names["ax"]], width * 8)
@@ -2847,6 +3012,7 @@ def _lower_repeat_string_summary(
         reg_versions[ip_name] = pc_term
         # "ip" is also the compose-facing control alias consumers request.
         reg_versions["ip"] = pc_term
+        reg_versions["control_ip"] = SsaExpr("const", 32, value=fallthrough)
     if family in {"scas", "cmps"}:
         output_regs = tuple(dict.fromkeys((*output_regs, *names["flags"])))
 
@@ -3177,11 +3343,10 @@ def _lower_irsb_put(
     state: _IrsbLowerState,
     *,
     tyenv: Any,  # noqa: ANN401
-    output_regs: tuple[str, ...],
 ) -> LowerFailure | None:
     """Lower Ist_Put into reg_versions; return a failure when unsupported."""
-    if _is_unobserved_flags_write(int(statement.offset), output_regs):
-        return None
+    # Backward liveness already selected this write. Flags can feed a later
+    # branch or data expression even when they are absent from final outputs.
     expr = _lower_expr(
         statement.data,
         temp_defs=state.temp_defs,
@@ -3317,7 +3482,7 @@ def _lower_irsb_statement(
         _lower_irsb_wrtmp(statement, state, tyenv=tyenv)
         return None
     if tag == "Ist_Put":
-        return _lower_irsb_put(statement, state, tyenv=tyenv, output_regs=output_regs)
+        return _lower_irsb_put(statement, state, tyenv=tyenv)
     if tag == "Ist_Store":
         return _lower_irsb_store(statement, state, tyenv=tyenv)
     if tag == "Ist_Exit":
@@ -3334,9 +3499,7 @@ def _lower_irsb(
 ) -> dict[str, Any] | LowerFailure:
     live_statements = _vex_live_statement_indices(irsb, output_regs)
     state = _IrsbLowerState(
-        reg_versions={
-            name: SsaExpr("input", width, name=name) for name, width in REG_BY_OFFSET.values()
-        },
+        reg_versions=_initial_reg_versions(),
         mem_version=SsaExpr("mem_input", 0, name="mem"),
         io_version=SsaExpr("mem_input", 0, name="io"),
     )
@@ -3399,8 +3562,12 @@ def _finish_irsb_lowering(
     )
     if isinstance(next_expr, LowerFailure):
         return next_expr
-    ip_expr = _coerce_width(next_expr, control_width)
-    trap_exits = _fold_exits_into_ip(state, ip_expr, control_width)
+    # Preserve the actual loaded control destination before projecting the
+    # legacy word IP view. A RET32 upper half must survive into call/loop proof.
+    ip_expr = _coerce_width(next_expr, 32)
+    trap_exits = _fold_exits_into_ip(state, ip_expr, 32)
+    state.reg_versions["control_ip"] = state.reg_versions["ip"]
+    state.reg_versions["ip"] = _coerce_width(state.reg_versions["control_ip"], control_width)
 
     requested: dict[str, SsaExpr] = {}
     for reg in output_regs:
@@ -3731,12 +3898,12 @@ def _vex_irsb_to_ail_block(*, project: Any, irsb: Any) -> Any:  # noqa: ANN401
 
 
 def _lower_ail_block(
-    block: Any, *, output_regs: tuple[str, ...], max_assignments_per_function: int  # noqa: ANN401
+    block: Any, *, output_regs: tuple[str, ...], max_assignments_per_function: int,  # noqa: ANN401
+    irsb: Any | None = None,  # noqa: ANN401
 ) -> dict[str, Any] | LowerFailure:
+    """Lower AIL effects while retaining full physical control destinations."""
     state = _IrsbLowerState(
-        reg_versions={
-            name: SsaExpr("input", width, name=name) for name, width in REG_BY_OFFSET.values()
-        },
+        reg_versions=_initial_reg_versions(),
         mem_version=SsaExpr("mem_input", 0, name="mem"),
         io_version=SsaExpr("mem_input", 0, name="io"),
     )
@@ -3746,10 +3913,30 @@ def _lower_ail_block(
         if failure is not None:
             return failure
 
-    if state.ip_expr is not None:
-        _fold_exits_into_ip(state, state.ip_expr, 16)
+    if irsb is not None:
+        # Conversion omits RET destinations and narrows CALL constants to the
+        # architectural word width. The originating binary IR owns control;
+        # its temporaries resolve through the converted AIL effect state.
+        return _finish_irsb_lowering(
+            state, irsb=irsb, output_regs=output_regs,
+            max_assignments_per_function=max_assignments_per_function,
+        )
 
-    return _finish_ail_lowering(state, output_regs, max_assignments_per_function=max_assignments_per_function)
+    trap_exits: list[int] = []
+    if state.ip_expr is not None:
+        trap_exits = _fold_exits_into_ip(state, state.ip_expr, 32)
+        state.reg_versions["control_ip"] = state.reg_versions["ip"]
+        control_width = next(
+            (width for name, width in REG_BY_OFFSET.values() if name in {"ip", "eip"}), 16,
+        )
+        state.reg_versions["ip"] = _coerce_width(state.reg_versions["control_ip"], control_width)
+
+    lowered = _finish_ail_lowering(state, output_regs, max_assignments_per_function=max_assignments_per_function)
+    if isinstance(lowered, LowerFailure):
+        return lowered
+    if trap_exits:
+        lowered["trap_exits"] = sorted(set(trap_exits))
+    return lowered
 
 
 def _finish_ail_lowering(
@@ -3794,14 +3981,10 @@ def _finish_ail_lowering(
 def _lower_ail_assignment(
     statement: Any,  # noqa: ANN401
     state: _IrsbLowerState,
-    *,
-    output_regs: tuple[str, ...],
 ) -> LowerFailure | None:
     """Lower an AIL Assignment/WeakAssignment into temp or register versions."""
     dst = statement.dst
     dst_kind = str(getattr(dst, "kind_name", dst.__class__.__name__))
-    if dst_kind == "Register" and _is_unobserved_flags_write(int(dst.reg_offset), output_regs):
-        return None
     src = _lower_ail_expr(
         statement.src,
         temp_defs=state.temp_defs,
@@ -3821,6 +4004,14 @@ def _lower_ail_assignment(
             if access is None:
                 return LowerFailure("unsupported_ir", f"unsupported AIL register offset {dst.reg_offset}")
             state.reg_versions[access[0]] = SsaExpr("unsupported", access[1], name=f"{src.reason}|{src.message}")
+            return None
+        register = REG_BY_OFFSET.get(int(dst.reg_offset))
+        if register == ("ip", 16) and src.width == 32:
+            # Operand32 control writes must retain their upper bits until the
+            # originating IRSB publishes the physical destination. The legacy
+            # architectural IP projection remains a word.
+            state.ip_expr = src
+            state.reg_versions["ip"] = _coerce_width(src, 16)
             return None
         return _write_register(state.reg_versions, int(dst.reg_offset), src)
     return LowerFailure("unsupported_ir", f"unsupported AIL assignment destination: {dst_kind}")
@@ -3908,11 +4099,11 @@ def _lower_ail_condjump(
         )
         if isinstance(false_expr, LowerFailure):
             return false_expr
-        state.ip_expr = _coerce_width(false_expr, 16)
+        state.ip_expr = _coerce_width(false_expr, 32)
     state.exits.append(
         (
             _coerce_width(guard, 1),
-            _coerce_width(dst, 16 if dst.width <= 16 else dst.width),
+            _coerce_width(dst, 32),
             str(getattr(statement, "jk", "") or ""),
         )
     )
@@ -3923,7 +4114,7 @@ def _lower_ail_jump(
     statement: Any,  # noqa: ANN401
     state: _IrsbLowerState,
 ) -> LowerFailure | None:
-    """Lower an AIL Jump into the ip version."""
+    """Lower an AIL Jump without truncating its physical destination."""
     target = _lower_ail_expr(
         statement.target,
         temp_defs=state.temp_defs,
@@ -3933,7 +4124,7 @@ def _lower_ail_jump(
     )
     if isinstance(target, LowerFailure):
         return target
-    state.ip_expr = _coerce_width(target, 16)
+    state.ip_expr = _coerce_width(target, 32)
     return None
 
 
@@ -3946,7 +4137,7 @@ def _lower_ail_statement(
     """Dispatch one AIL statement to its lowering step; return a failure when unsupported."""
     kind = str(getattr(statement, "kind_name", statement.__class__.__name__))
     if kind in {"Assignment", "WeakAssignment"}:
-        return _lower_ail_assignment(statement, state, output_regs=output_regs)
+        return _lower_ail_assignment(statement, state)
     if kind == "Store":
         return _lower_ail_store(statement, state)
     if kind == "ConditionalJump":
@@ -4300,10 +4491,9 @@ def _lower_ail_insert(
 
 
 def _read_register(reg_versions: dict[str, SsaExpr], offset: int, width: int, *, source: str) -> SsaExpr | LowerFailure:
+    """Read the latest SSA register version, including flags used by branches."""
     reg = REG_BY_OFFSET.get(offset)
     if reg is not None and width == reg[1]:
-        if reg[0] == "flags":
-            return SsaExpr("input", width, name="flags")
         return reg_versions.get(reg[0], SsaExpr("input", width, name=reg[0]))
     if reg is not None and reg[1] == 32 and width == 16 and reg[0] in LOW_HALF_32_REGISTERS:
         full = reg_versions.get(reg[0], SsaExpr("input", 32, name=reg[0]))
@@ -4396,11 +4586,6 @@ def _write_register(reg_versions: dict[str, SsaExpr], offset: int, expr: SsaExpr
 
 def _const_value(expr: SsaExpr) -> int | None:
     return expr.value if expr.op == "const" else None
-
-
-def _is_unobserved_flags_write(offset: int, output_regs: tuple[str, ...]) -> bool:
-    reg = REG_BY_OFFSET.get(offset)
-    return reg is not None and reg[0] == "flags" and "flags" not in output_regs
 
 
 def _lower_expr(
@@ -4866,7 +5051,7 @@ def _compare_ssa_pair(
         candidate_index=candidate_index,
         allow_aliased_call_targets=allow_aliased_call_targets,
         proof_cache=proof_cache,
-        require_proven_call_targets=proof_cache is not None,
+        require_proven_call_targets=True,
     )
     base = {
         "function": {"id": function_id, "name": function_name},
@@ -5021,6 +5206,12 @@ def _solve_normalized_ssa_pair(
         call_compare=call_compare,
     )
     base["call_compare"] = call_compare
+    from tools.dosunit.real16_control_boundary import ControlEvidenceFailure
+
+    if isinstance(call_compare, dict) and isinstance(call_compare.get("control_proof_failure"), ControlEvidenceFailure):
+        failure = call_compare["control_proof_failure"]
+        return {**base, "status": "refused", "reason": failure.value,
+                "mismatches": [{"kind": failure.value}]}, 0
     oracle_for_z3, candidate_for_z3, layout_normalization = _prepare_layout_normalized_functions(
         oracle_for_z3,
         candidate_for_z3,
@@ -5885,6 +6076,7 @@ def _compare_ssa_region_equality(
         candidate_groups=candidate_groups,
         status_by_function=status_by_function,
         document_output_regs=document_output_regs,
+        layout_pairs_by_function=_region_adopted_layout_pairs(current_results),
     )
     for oracle_id, oracle_name, oracle_group in oracle_groups:
         outcome = _region_group_compare(ctx, oracle_id, oracle_name, oracle_group)
@@ -5920,6 +6112,60 @@ def _compare_ssa_region_equality(
 
 
 
+def _region_adopted_layout_pairs(
+    current_results: list[dict[str, Any]],
+) -> dict[str, dict[int, int]]:
+    """Pool layout-constant pairs already proven at the per-part level.
+
+    Composed region functions carry propagated constants (e.g. a relocated
+    pointer folded into a store) that no instruction lane can witness, since
+    the composed function has no `source.instructions`. Each constituent
+    part's compare already adopted evidence-backed pairs; reusing them only
+    normalizes constants inside composed terms that the part-level proof
+    already established as relocations. Conflicting mappings are skipped so a
+    key can never be rewritten to two different oracle values.
+    """
+    pairs_by_function: dict[str, dict[int, int]] = {}
+    conflicts: dict[str, set[int]] = {}
+    for row in current_results or []:
+        if not isinstance(row, dict):
+            continue
+        function = row.get("function") if isinstance(row.get("function"), dict) else {}
+        normalization = row.get("layout_normalization")
+        if not isinstance(normalization, dict):
+            continue
+        pairs = normalization.get("pairs")
+        if not isinstance(pairs, list):
+            continue
+        for key in (function.get("id"), function.get("name")):
+            if not isinstance(key, str) or not key:
+                continue
+            table = pairs_by_function.setdefault(key, {})
+            bad = conflicts.setdefault(key, set())
+            _adopt_region_layout_pairs(pairs, table, bad)
+    return pairs_by_function
+
+
+def _adopt_region_layout_pairs(pairs: list[Any], table: dict[int, int], conflicts: set[int]) -> None:
+    """Consume literal layout pairs while permanently refusing conflicting coordinates."""
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            continue
+        try:
+            candidate_value = int(pair["candidate"], 0) & 0xFFFF
+            oracle_value = int(pair["oracle"], 0) & 0xFFFF
+        except (KeyError, TypeError, ValueError):
+            continue
+        if candidate_value in conflicts:
+            continue
+        existing = table.get(candidate_value)
+        if existing is None:
+            table[candidate_value] = oracle_value
+        elif existing != oracle_value:
+            del table[candidate_value]
+            conflicts.add(candidate_value)
+
+
 @dataclass(frozen=True)
 class _RegionCompareCtx:
     """Immutable environment shared across per-group region comparisons."""
@@ -5942,6 +6188,7 @@ class _RegionCompareCtx:
     candidate_groups: dict[str, list[dict[str, Any]]]
     status_by_function: dict[str, list[str]]
     document_output_regs: tuple[str, ...]
+    layout_pairs_by_function: dict[str, dict[int, int]] = field(default_factory=dict)
 
 
 @dataclass
@@ -5963,6 +6210,7 @@ class _RegionGroupRun:
     candidate_summary: dict[str, Any] = field(default_factory=dict)
     oracle_function: dict[str, Any] = field(default_factory=dict)
     candidate_function: dict[str, Any] = field(default_factory=dict)
+    layout_normalization: dict[str, Any] | None = None
 
 
 @dataclass
@@ -5987,6 +6235,7 @@ def _region_group_compare(
         _region_step_preamble,
         _region_step_prepare,
         _region_step_linear_signature,
+        _region_step_cutpoint_state,
         _region_step_transition,
         _region_step_summaries,
         _region_step_memory_gate,
@@ -6098,6 +6347,15 @@ def _region_step_prepare(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _Regio
     )
     if run.call_normalizations:
         run.base_result["call_normalizations"] = run.call_normalizations
+    from tools.dosunit.real16_control_boundary import ControlEvidenceFailure
+
+    for normalization in run.call_normalizations:
+        failure = normalization["call_compare"].get("control_proof_failure")
+        if isinstance(failure, ControlEvidenceFailure):
+            return _RegionStepOutcome(result={
+                **run.base_result, "status": "refused", "reason": failure.value,
+                "mismatches": [{"kind": failure.value}],
+            })
     incomplete = _region_incomplete_successors(
         run.oracle_group_for_compare,
         run.candidate_group_for_compare,
@@ -6118,7 +6376,12 @@ def _region_step_prepare(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _Regio
 
 def _record_region_proof(ctx: _RegionCompareCtx, run: _RegionGroupRun, proof: str) -> None:
     """Record a function-scope equality proof in the semantic cache when enabled."""
-    if ctx.proof_cache is not None:
+    required = set(_internal_state_regs())
+    groups = (run.oracle_group_for_compare, run.candidate_group_for_compare)
+    complete_projection = all(
+        required.issubset(part.get("outputs", {})) for group in groups for part in group
+    )
+    if ctx.proof_cache is not None and complete_projection and not run.call_normalizations:
         ctx.proof_cache.record(
             run.oracle_group_for_compare[0],
             run.candidate_group_for_compare[0],
@@ -6129,6 +6392,18 @@ def _record_region_proof(ctx: _RegionCompareCtx, run: _RegionGroupRun, proof: st
 
 def _region_step_linear_signature(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _RegionStepOutcome | None:
     """Pass early when the normalized linear instruction signatures match."""
+    if any(
+        part.get("source", {}).get("jumpkind") == "Ijk_Call"
+        for group in (run.oracle_group_for_compare, run.candidate_group_for_compare)
+        for part in group
+    ):
+        return _RegionStepOutcome(result={
+            **run.base_result,
+            "status": "refused",
+            "reason": "callee_state_relation_required",
+            "mismatches": [{"kind": "callee_state_relation_required",
+                            "detail": "balanced-call omission is not a complete callee state relation"}],
+        })
     linear_signature_result = None
     if _linear_region_call_normalizations_are_safe(run.call_normalizations):
         linear_signature_result = _compare_region_linear_instruction_signature(
@@ -6150,6 +6425,43 @@ def _region_step_linear_signature(ctx: _RegionCompareCtx, run: _RegionGroupRun) 
     return _RegionStepOutcome(result=result)
 
 
+def _region_step_cutpoint_state(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _RegionStepOutcome | None:
+    """Refuse when an in-region edge omits state a successor consumes.
+
+    The post-signature proof lanes (synchronized block induction and summary
+    composition) justify a successor's inputs only through its in-region
+    predecessors' published outputs: the transition prover shares input
+    variables across the matched pair, and the composer substitutes published
+    outputs.  A predecessor whose published outputs omit a consumed register
+    (or ``memory``/``io`` after writing that space) would let a changed
+    loop-carried value compare equal, so such docs refuse instead of
+    asserting an unchecked invariant.  Byte-identical regions are unaffected:
+    the linear-signature lane already proved them before this gate runs.
+    """
+    oracle_gaps = _region_cutpoint_state_gaps(run.oracle_group_for_compare)
+    candidate_gaps = _region_cutpoint_state_gaps(run.candidate_group_for_compare)
+    if not oracle_gaps and not candidate_gaps:
+        return None
+    return _RegionStepOutcome(
+        result={
+            **run.base_result,
+            "status": "refused",
+            "reason": "cutpoint_state_incomplete",
+            "mismatches": [
+                {
+                    "kind": "cutpoint_state_incomplete",
+                    "detail": (
+                        "an in-region predecessor's outputs omit state its successor consumes; "
+                        "missing state cannot be assumed unchanged"
+                    ),
+                    "oracle_gaps": oracle_gaps,
+                    "candidate_gaps": candidate_gaps,
+                }
+            ],
+        }
+    )
+
+
 def _region_step_transition(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _RegionStepOutcome | None:
     """Compare cyclic regions via the transition-system prover."""
     if not (
@@ -6166,6 +6478,8 @@ def _region_step_transition(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _Re
         max_solver_memory_stores=ctx.max_solver_memory_stores,
         skip_binary_equal=ctx.skip_binary_equal,
         max_rss_mb=ctx.max_rss_mb,
+        global_map=ctx.layout_pairs_by_function.get(run.oracle_id)
+        or ctx.layout_pairs_by_function.get(run.oracle_name),
     )
     if transition_result is None:
         return None
@@ -6260,6 +6574,21 @@ def _region_step_quick(ctx: _RegionCompareCtx, run: _RegionGroupRun) -> _RegionS
     """Resolve via the cheap structural comparison before invoking the solver."""
     run.oracle_function = run.oracle_summary["function"]
     run.candidate_function = run.candidate_summary["function"]
+    global_map = ctx.layout_pairs_by_function.get(run.oracle_id) or ctx.layout_pairs_by_function.get(
+        run.oracle_name
+    )
+    if global_map:
+        (
+            run.oracle_function,
+            run.candidate_function,
+            run.layout_normalization,
+        ) = _prepare_layout_normalized_functions(
+            run.oracle_function,
+            run.candidate_function,
+            global_map=global_map,
+        )
+        if run.layout_normalization is not None:
+            run.base_result["layout_normalization"] = run.layout_normalization
     quick = _quick_compare_functions(
         run.oracle_function, run.candidate_function, skip_binary_equal=ctx.skip_binary_equal
     )
@@ -6596,7 +6925,19 @@ def _compare_region_transition_system(
     max_solver_memory_stores: int,
     skip_binary_equal: bool,
     max_rss_mb: int = 0,
+    global_map: dict[int, int] | None = None,
 ) -> dict[str, Any] | None:
+    """Attempt synchronized induction over matched block deltas.
+
+    Accepts only when every matched delta pair is provably equal as a block
+    function over shared inputs, which is sound solely because each in-region
+    predecessor publishes the complete cutpoint state its successors consume
+    (the region compare's ``cutpoint_state_incomplete`` gate enforces this
+    before this lane runs).  Declines — returns ``None`` — when either region
+    contains a call-boundary block: a call's post-state comes from callee
+    evidence this lane does not model, so the composition lane (which applies
+    callee summaries or refuses without them) must decide instead.
+    """
     oracle_by_delta = _region_blocks_by_delta(oracle_group)
     candidate_by_delta = _region_blocks_by_delta(candidate_group)
     if not oracle_by_delta or set(oracle_by_delta) != set(candidate_by_delta):
@@ -6605,6 +6946,11 @@ def _compare_region_transition_system(
         return None
 
     deltas = set(oracle_by_delta)
+    if any(
+        _ssa_source_jumpkind(block) == "Ijk_Call" and _direct_successor_delta_set(block) & deltas
+        for block in [*oracle_group, *candidate_group]
+    ):
+        return None
     solver_time_ms = 0
     block_results: list[dict[str, Any]] = []
     for delta in sorted(deltas):
@@ -6619,6 +6965,7 @@ def _compare_region_transition_system(
             max_solver_memory_stores=max_solver_memory_stores,
             skip_binary_equal=skip_binary_equal,
             max_rss_mb=max_rss_mb,
+            global_map=global_map,
         )
         solver_time_ms += step_ms
         if block_result is None:
@@ -6662,6 +7009,7 @@ def _transition_block_compare(
     max_solver_memory_stores: int,
     skip_binary_equal: bool,
     max_rss_mb: int,
+    global_map: dict[int, int] | None = None,
 ) -> tuple[dict[str, Any] | None, int]:
     """Compare one matched delta pair; return (block_result, solver_ms) or (None, 0)."""
     if _compare_memory_limit_status(max_rss_mb) is not None:
@@ -6682,6 +7030,7 @@ def _transition_block_compare(
     oracle_for_z3, candidate_for_z3, layout_normalization = _prepare_layout_normalized_functions(
         oracle_block,
         candidate_block,
+        global_map=global_map,
     )
     quick = _quick_compare_functions(oracle_for_z3, candidate_for_z3, skip_binary_equal=skip_binary_equal)
     if quick is not None:
@@ -6758,6 +7107,117 @@ def _direct_successor_delta_set(function: dict[str, Any]) -> set[int]:
         if linear is not None:
             deltas.add((linear - function_linear) & 0xFFFF)
     return deltas
+
+
+def _ssa_block_term_scan(block: dict[str, Any]) -> tuple[set[str], set[str], bool, bool]:
+    """Walk a block's published output/assignment term graph.
+
+    Returns ``(register_inputs, memory_inputs, writes_memory, writes_io)``:
+    the ``input``/``mem_input`` leaf names the block's terms consume and
+    whether the terms write the memory or I/O state via ``storele``/
+    ``storebe``/``summary_io_*`` operators.
+    """
+    regs: set[str] = set()
+    memories: set[str] = set()
+    writes_memory = False
+    writes_io = False
+    outputs = block.get("outputs") if isinstance(block.get("outputs"), dict) else {}
+    pending: list[dict[str, Any]] = [term for term in outputs.values() if isinstance(term, dict)]
+    pending.extend(
+        assignment["expr"]
+        for assignment in block.get("assignments") or []
+        if isinstance(assignment, dict) and isinstance(assignment.get("expr"), dict)
+    )
+    seen: set[int] = set()
+    while pending:
+        term = pending.pop()
+        if id(term) in seen:
+            continue
+        seen.add(id(term))
+        op = term.get("op")
+        if op in {"input", "mem_input"}:
+            name = str(term.get("name") or "")
+            if name:
+                (regs if op == "input" else memories).add(name)
+            continue
+        if isinstance(op, str):
+            if op in {"storele", "storebe"}:
+                writes_memory = True
+            elif op.startswith("summary_io_"):
+                writes_io = True
+        pending.extend(arg for arg in term.get("args") or [] if isinstance(arg, dict))
+    return regs, memories, writes_memory, writes_io
+
+
+def _ssa_block_consumed_inputs(block: dict[str, Any]) -> tuple[set[str], set[str]]:
+    """Return the (register, memory-space) input names a block consumes.
+
+    Combines the declared ``inputs`` list with the input leaves reachable
+    from the published ``outputs``/``assignments`` terms so a doc that forgot
+    to declare an input is still audited.
+    """
+    regs: set[str] = set()
+    memories: set[str] = set()
+    for item in block.get("inputs") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        if not name:
+            continue
+        if item.get("kind") == "memory" or item.get("op") == "mem_input":
+            memories.add(name)
+        else:
+            regs.add(name)
+    term_regs, term_memories, _writes_memory, _writes_io = _ssa_block_term_scan(block)
+    regs.update(term_regs)
+    memories.update(term_memories)
+    return regs, memories
+
+
+def _region_cutpoint_state_gaps(group: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """List in-region edges whose predecessor omits consumed cutpoint state.
+
+    A successor's inputs are only justified equal across a matched edge when
+    each in-region predecessor publishes them: the transition-system prover
+    shares input variables across the pair and the composer substitutes
+    published outputs, so a register dropped by output-driven liveness would
+    be silently assumed unchanged.  Every non-call predecessor must publish
+    each register the successor consumes — and ``memory``/``io`` whenever its
+    terms write that space — otherwise the gap is reported so the region
+    refuses instead of asserting an unchecked invariant.  Call-boundary
+    predecessors are excluded because their post-call state is produced by
+    callee composition, not by the part's own outputs.
+    """
+    blocks_by_delta = _region_blocks_by_delta(group)
+    deltas = set(blocks_by_delta)
+    gaps: list[dict[str, Any]] = []
+    for pred_delta in sorted(deltas):
+        pred = blocks_by_delta[pred_delta]
+        if _ssa_source_jumpkind(pred) == "Ijk_Call":
+            continue
+        successors = _direct_successor_delta_set(pred) & deltas
+        if not successors:
+            continue
+        published = _ssa_output_names(pred)
+        _pred_regs, _pred_memories, pred_writes_memory, pred_writes_io = _ssa_block_term_scan(pred)
+        for succ_delta in sorted(successors):
+            regs, memories = _ssa_block_consumed_inputs(blocks_by_delta[succ_delta])
+            missing = sorted(name for name in regs if name not in published)
+            if memories - {"io"} and pred_writes_memory and "memory" not in published:
+                missing.append("memory")
+            if "io" in memories and pred_writes_io and "io" not in published:
+                missing.append("io")
+            if not missing:
+                continue
+            gaps.append(
+                {
+                    "kind": "cutpoint_state_gap",
+                    "from_delta": _format_ssa_delta(pred_delta),
+                    "to_delta": _format_ssa_delta(succ_delta),
+                    "missing_outputs": missing,
+                }
+            )
+    return gaps
 
 
 def _attach_region_call_compare(
@@ -7012,7 +7472,7 @@ def _ssa_document_output_regs(document: dict[str, Any]) -> tuple[str, ...]:
     regs = params.get("output_regs", [])
     if not isinstance(regs, (list, tuple)):
         return ()
-    reg_widths = {name for name, _width in REG_BY_OFFSET.values()}
+    reg_widths = set(_ssa_register_widths())
     return tuple(str(name).lower() for name in regs if str(name).lower() in reg_widths)
 
 
@@ -7023,7 +7483,7 @@ def _synthetic_region_contract(
     candidate_group: list[dict[str, Any]],
     default_output_regs: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    reg_widths = dict(REG_BY_OFFSET.values())
+    reg_widths = _ssa_register_widths()
     declared_outputs = {
         str(name).lower()
         for name in (default_output_regs or [])
@@ -8139,30 +8599,28 @@ def _loop_scc_component_result(
 
 
 def _scc_gate_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Summarize SCC gate results into the shared status/counts shape."""
-    status = "not_applicable"
-    if any(result["status"] == "failed" for result in results):
-        status = "failed"
-    elif any(result["status"] == "refused" for result in results):
-        status = "refused"
-    elif results:
-        status = "passed"
+    """Summarize every SCC verdict, refusing conditional or missing evidence."""
+    members = tuple(proof_status_from_legacy(result.get("status")) for result in results)
+    status = legacy_status_for(admit_scc_statuses(members)) if results else "not_applicable"
     return {
         "status": status,
         "total": len(results),
-        "passed": sum(1 for result in results if result.get("status") == "passed"),
-        "failed": sum(1 for result in results if result.get("status") == "failed"),
-        "refused": sum(1 for result in results if result.get("status") == "refused"),
+        "passed": sum(member is ProofStatus.PROVED for member in members),
+        "failed": sum(member is ProofStatus.COUNTEREXAMPLE for member in members),
+        "refused": sum(member not in {ProofStatus.PROVED, ProofStatus.COUNTEREXAMPLE} for member in members),
+        "evidence": _counters_document(scc_status_counters(members)),
         "results": results,
     }
 
 
 def _apply_call_scc_gate(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build binary call-cycle rollups from all recorded member verdicts."""
     graph: dict[str, set[str]] = defaultdict(set)
     statuses_by_function: dict[str, Counter[str]] = defaultdict(Counter)
     names_by_function: dict[str, str] = {}
     for result in results:
-        function = result.get("function") if isinstance(result.get("function"), dict) else {}
+        function_value = result.get("function")
+        function = function_value if isinstance(function_value, dict) else {}
         function_id = str(function.get("id") or function.get("name") or "")
         if not function_id:
             continue
@@ -8191,20 +8649,21 @@ def _call_scc_component_result(
     statuses_by_function: dict[str, Counter[str]],
     names_by_function: dict[str, str],
 ) -> dict[str, Any] | None:
-    """Build one call-SCC result for a non-trivial call-cycle component."""
+    """Roll up unconditional member evidence for a nontrivial call cycle."""
     has_self_call = len(component) == 1 and component[0] in graph.get(component[0], set())
     if len(component) <= 1 and not has_self_call:
         return None
     status_counts: Counter[str] = Counter()
     for function_id in component:
         status_counts.update(statuses_by_function.get(function_id, Counter({"unknown": 1})))
-    status = "passed"
+    admitted = admit_scc_statuses(
+        proof_status_from_legacy(status) for status, count in status_counts.items() if count > 0
+    )
+    status = legacy_status_for(admitted)
     reason = "call_cycle_proven_by_member_results"
-    if status_counts.get("failed"):
-        status = "failed"
+    if admitted is ProofStatus.COUNTEREXAMPLE:
         reason = "call_cycle_member_failed"
-    elif status_counts.get("refused") or status_counts.get("unknown"):
-        status = "refused"
+    elif admitted is not ProofStatus.PROVED:
         reason = "call_cycle_unproven"
     return {
         "status": status,
@@ -8222,10 +8681,13 @@ def _call_scc_component_result(
 
 
 def _call_compare_oracle_target_id(call_compare: Any) -> str | None:  # noqa: ANN401
+    """Read the optional resolved target from the compatibility report boundary."""
     if not isinstance(call_compare, dict):
         return None
-    oracle = call_compare.get("oracle") if isinstance(call_compare.get("oracle"), dict) else {}
-    resolved = oracle.get("resolved") if isinstance(oracle.get("resolved"), dict) else {}
+    oracle_value = call_compare.get("oracle")
+    oracle = oracle_value if isinstance(oracle_value, dict) else {}
+    resolved_value = oracle.get("resolved")
+    resolved = resolved_value if isinstance(resolved_value, dict) else {}
     target_id = str(resolved.get("id") or "")
     return target_id or None
 
@@ -8274,10 +8736,18 @@ def _compare_functions(
     *,
     timeout_ms: int,
     input_constraints: list[dict[str, Any]] | None = None,
+    scalar_preprocessing: ScalarPreprocessing | None = None,
 ) -> dict[str, Any]:
+    """Compare all declared SSA outputs over shared inputs with bounded Z3.
+
+    Conditional control remains observable. SAT over abstract lazy flags is a
+    refusal; exact modeled differences retain their counterexample inputs.
+    Optional scalar preprocessing expands reads over writes exactly; its work
+    consumes the same total deadline and never adds non-aliasing assumptions.
+    """
     try:
-        import z3  # type: ignore
-    except Exception:
+        import z3
+    except ImportError:
         return {
             "status": "refused",
             "reason": "unsupported_ir",
@@ -8286,6 +8756,10 @@ def _compare_functions(
         }
 
     import time
+    from dataclasses import asdict
+
+    from tools.dosunit.proof_contracts import ProofStatus
+    from tools.dosunit.ssa_output_lemmas import ScalarPreprocessing, prove_output_equalities
 
     started = time.monotonic()
     oracle_outputs = oracle.get("outputs", {}) if isinstance(oracle.get("outputs"), dict) else {}
@@ -8326,6 +8800,7 @@ def _compare_functions(
         candidate_outputs=candidate_outputs,
         inputs=inputs,
         z3=z3,
+        simplify_terms=False,
     )
     if not pairs:
         return {
@@ -8335,28 +8810,35 @@ def _compare_functions(
             "solver_time_ms": 0,
             "skipped_layout_outputs": skipped_layout_outputs,
         }
-    solver.add(z3.Or(*[oracle_expr != candidate_expr for _reg, oracle_expr, candidate_expr in pairs]))
-    status = solver.check()
+    checked = prove_output_equalities(
+        pairs, solver, deadline=started + timeout_ms / 1000,
+        scalar_preprocessing=(ScalarPreprocessing.STANDARD if scalar_preprocessing is None else scalar_preprocessing),
+    )
+    lemma_evidence = [asdict(lemma) for lemma in checked.lemmas]
+    status = checked.status
     elapsed = int((time.monotonic() - started) * 1000)
-    if status == z3.unknown:
+    if status is ProofStatus.UNKNOWN:
         return {
             "status": "refused",
             "reason": "timeout",
-            "mismatches": [{"kind": "z3_unknown", "detail": solver.reason_unknown()}],
+            "mismatches": [{"kind": "z3_unknown", "detail": checked.detail}],
             "solver_time_ms": elapsed,
             "skipped_layout_outputs": skipped_layout_outputs,
+            "output_lemmas": lemma_evidence,
         }
-    if status != z3.sat:
+    if status is ProofStatus.PROVED:
         return {
             "status": "passed",
             "reason": None,
             "mismatches": [],
             "solver_time_ms": elapsed,
             "skipped_layout_outputs": skipped_layout_outputs,
+            "output_lemmas": lemma_evidence,
         }
-    model = solver.model()
+    model = checked.model
+    assert model is not None
     counterexample = {
-        name: normalize_hex(model.eval(value, model_completion=True).as_long(), width=width // 4)
+        name: normalize_hex(model.eval(value, model_completion=True).as_long(), width=max(1, (width + 3) // 4))
         for name, (value, width) in inputs.items()
         if width > 0
     }
@@ -8376,6 +8858,7 @@ def _compare_functions(
             "mismatches": mismatches,
             "solver_time_ms": elapsed,
             "skipped_layout_outputs": skipped_layout_outputs,
+            "output_lemmas": lemma_evidence,
         }
     return {
         "status": "failed",
@@ -8383,7 +8866,9 @@ def _compare_functions(
         "mismatches": mismatches,
         "solver_time_ms": elapsed,
         "skipped_layout_outputs": skipped_layout_outputs,
+        "output_lemmas": lemma_evidence,
     }
+
 
 
 def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> bool:
@@ -8411,25 +8896,17 @@ def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> bool:
     return bool(stack)
 
 
-def _x86_exact_condition_kind(condition: int | None, cc_op: int | None) -> tuple[int, int, bool] | None:
-    """Identify the small x86 lazy-flag subset with exact compare semantics."""
-    if condition is None or cc_op is None:
-        return None
-    if cc_op in {4, 5, 6} and condition in {2, 3, 4, 5, 6, 7, 12, 13, 14, 15}:  # SUBB, SUBW, SUBL.
-        return 8 << (cc_op - 4), condition, True
-    if cc_op in {13, 14, 15} and condition in {4, 5}:  # LOGICB, LOGICW, LOGICL.
-        return 8 << (cc_op - 13), condition, False
-    return None
+def _x86_exact_condition_kind(condition: int | None, cc_op: int | None) -> X86ConditionContract | None:
+    """Use the authoritative arithmetic condition admission contract."""
+    return condition_contract(condition, cc_op)
 
 
 def _x86_lazy_flag_summary_is_uninterpreted(
     term: dict[str, Any], assignments: dict[str, dict[str, Any]]
 ) -> bool:
     """Keep SAT inconclusive only when the flag helper remains abstract."""
-    if term.get("op") != "summary_x86g_calculate_condition":
-        return True
     args = term.get("args")
-    if not isinstance(args, list) or len(args) != 5:
+    if not isinstance(args, list):
         return True
 
     def constant(value: Any) -> int | None:  # noqa: ANN401
@@ -8443,17 +8920,22 @@ def _x86_lazy_flag_summary_is_uninterpreted(
             return None
         return _optional_int(value.get("value"))
 
-    return _x86_exact_condition_kind(constant(args[0]), constant(args[1])) is None
+    if term.get("op") == "summary_x86g_calculate_condition" and len(args) == 5:
+        return _x86_exact_condition_kind(constant(args[0]), constant(args[1])) is None
+    if term.get("op") == "summary_x86g_calculate_eflags_c" and len(args) == 4:
+        return carry_contract(constant(args[0])) is None
+    return True
 
 
 def _ip_term_is_layout(
     term: dict[str, Any] | None, assignments: dict[str, dict[str, Any]], depth: int = 0
 ) -> bool:
-    """True when every value leaf of an `ip` output term is a relocated code address.
+    """Identify unconditional constant code destinations eligible for layout handling.
 
-    `ite` condition arguments are not address values; they select between successors
-    and are verified by the connectivity/transition checks, so they are ignored here.
-    Any input/memory/arithmetic leaf means the ip output is genuinely symbolic.
+    Conditional destinations must be compared even when both branches are code
+    addresses: successor connectivity proves the set of destinations, not the
+    condition selecting one. Arithmetic and memory-derived destinations likewise
+    remain semantic outputs unless independently normalized before this boundary.
     """
     if not isinstance(term, dict) or depth > 64:
         return False
@@ -8462,12 +8944,7 @@ def _ip_term_is_layout(
         target = assignments.get(ref)
         return target is not None and _ip_term_is_layout(target, assignments, depth + 1)
     op = str(term.get("op") or "")
-    if op == "const":
-        return True
-    args = term.get("args") or []
-    if op == "ite":
-        return len(args) >= 3 and all(_ip_term_is_layout(arg, assignments, depth + 1) for arg in args[1:3])
-    return bool(args) and all(_ip_term_is_layout(arg, assignments, depth + 1) for arg in args)
+    return op == "const"
 
 
 def _layout_const_hex(
@@ -8494,6 +8971,7 @@ def _z3_output_pairs(
     candidate_outputs: dict[str, Any],
     inputs: dict[str, tuple[Any, int]],
     z3: Any,  # noqa: ANN401
+    simplify_terms: bool = True,
 ) -> tuple[list[tuple[str, Any, Any]], list[dict[str, Any]]]:
     """Build aligned (reg, oracle_expr, candidate_expr) triples for the solver."""
     oracle_assignments = {
@@ -8542,10 +9020,12 @@ def _z3_output_pairs(
         )
         if not (_is_z3_array(oracle_expr, z3) or _is_z3_array(candidate_expr, z3)):
             oracle_expr, candidate_expr = _align_z3_widths(oracle_expr, candidate_expr, z3)
-            oracle_expr = z3.simplify(oracle_expr)
-            candidate_expr = z3.simplify(candidate_expr)
+            if simplify_terms:
+                oracle_expr = z3.simplify(oracle_expr)
+                candidate_expr = z3.simplify(candidate_expr)
         pairs.append((reg, oracle_expr, candidate_expr))
     return pairs, skipped
+
 
 
 def _z3_mismatch_list(
@@ -8690,9 +9170,13 @@ def _ssa_input_names(inputs: list[Any]) -> list[str]:
 
 def _summary_detail(summary: dict[str, Any]) -> dict[str, Any]:
     if summary.get("status") != "passed":
-        return {key: summary.get(key) for key in ("status", "reason", "mismatches") if key in summary}
+        return {
+            key: summary.get(key)
+            for key in ("status", "reason", "mismatches", "control_proofs")
+            if key in summary
+        }
     function = summary.get("function", {}) if isinstance(summary.get("function"), dict) else {}
-    return {
+    detail = {
         "status": summary.get("status"),
         "part_count": summary.get("part_count"),
         "terminal_count": summary.get("terminal_count"),
@@ -8705,6 +9189,9 @@ def _summary_detail(summary: dict[str, Any]) -> dict[str, Any]:
         "input_count": len(function.get("inputs", []) or []),
         "assignment_count": len(function.get("assignments", []) or []),
     }
+    if "control_proofs" in summary:
+        detail["control_proofs"] = summary["control_proofs"]
+    return detail
 
 
 def _abi_functions(abi_manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -8794,14 +9281,14 @@ def _summarize_abi_function(
     require_complete_paths: bool = False,
     enable_constant_branch_pruning: bool = False,
 ) -> dict[str, Any]:
+    """Compose a closed ABI region and refuse any missing control obligation."""
     if not parts:
         return {"status": "refused", "reason": "function_missing", "mismatches": [{"kind": "function_missing"}]}
-    block_by_key: dict[int, dict[str, Any]] = {}
-    for part in parts:
-        entry = part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}
-        for value in (_optional_int(entry.get("linear")), _optional_int(entry.get("ip"))):
-            if value is not None:
-                block_by_key[value & 0xFFFF] = part
+    try:
+        block_by_key = closed_block_index(parts)
+    except ControlIndexRefusal as error:
+        return {"status": "refused", "reason": error.reason.value,
+                "mismatches": [{"kind": error.reason.value}]}
     callsite_ordinals = _abi_callsite_ordinals(parts)
     start = min(
         parts,
@@ -8815,6 +9302,7 @@ def _summarize_abi_function(
         "loop_cuts": 0,
         "deadline": time.monotonic() + _COMPOSE_MAX_SECONDS,
     }
+    result: dict[str, Any]
     try:
         final_state, terminal_count = _compose_abi_state(
             start,
@@ -8841,10 +9329,21 @@ def _summarize_abi_function(
             observables=observables,
             data_segment_para=data_segment_para,
         )
+        result = {
+            "status": "passed",
+            "part_count": len(parts),
+            "terminal_count": terminal_count,
+            "loop_unroll_bound": max_loop_unroll,
+            "blocks_composed": compose_stats["blocks_composed"],
+            "branch_merges": compose_stats["branch_merges"],
+            "branch_prunes": compose_stats["branch_prunes"],
+            "loop_cuts": compose_stats["loop_cuts"],
+            "function": summary_function,
+        }
     except LowerFailure as ex:
-        return {"status": "refused", "reason": ex.reason, "mismatches": [{"kind": ex.reason, "detail": ex.message}]}
+        result = {"status": "refused", "reason": ex.reason, "mismatches": [{"kind": ex.reason, "detail": ex.message}]}
     except RecursionError:
-        return {
+        result = {
             "status": "refused",
             "reason": "loop_bound_incomplete",
             "mismatches": [
@@ -8855,7 +9354,7 @@ def _summarize_abi_function(
             ],
         }
     except MemoryError:
-        return {
+        result = {
             "status": "refused",
             "reason": "compose_budget_exceeded",
             "mismatches": [
@@ -8865,17 +9364,17 @@ def _summarize_abi_function(
                 }
             ],
         }
-    return {
-        "status": "passed",
-        "part_count": len(parts),
-        "terminal_count": terminal_count,
-        "loop_unroll_bound": max_loop_unroll,
-        "blocks_composed": compose_stats["blocks_composed"],
-        "branch_merges": compose_stats["branch_merges"],
-        "branch_prunes": compose_stats["branch_prunes"],
-        "loop_cuts": compose_stats["loop_cuts"],
-        "function": summary_function,
-    }
+    from tools.dosunit.real16_control_boundary import ControlProofLedger
+
+    proof_ledger = compose_stats.get("control_proofs")
+    if isinstance(proof_ledger, ControlProofLedger) and proof_ledger.raw_fact_count:
+        result["control_proofs"] = proof_ledger.document()
+        failure = proof_ledger.accounting_failure()
+        if result["status"] == "passed" and failure is not None:
+            result = {"status": "refused", "reason": failure.value,
+                      "mismatches": [{"kind": failure.value}],
+                      "control_proofs": result["control_proofs"]}
+    return result
 
 
 def _initial_abi_state(
@@ -8884,6 +9383,14 @@ def _initial_abi_state(
     observables: dict[str, Any] | None = None,
     data_segment_para: int = 0x0100,
 ) -> dict[str, dict[str, Any]]:
+    """Build entry values without guessing undeclared registers are zero.
+
+    ABI inputs and preservation describe observation, not a proof that every
+    other entry register is irrelevant. Keep those registers symbolic so a
+    dependency reaching a return value or memory observation stays visible.
+    The existing modeled flags and segment defaults remain fixed unless the
+    manifest explicitly makes them symbolic.
+    """
     if abi_function is None:
         state = {
             name: {"op": "input", "name": name, "width": width} for name, width in REG_BY_OFFSET.values()
@@ -8910,12 +9417,12 @@ def _initial_abi_state(
     }
     state: dict[str, dict[str, Any]] = {}
     for name, width in reg_widths.items():
-        if name in symbolic_regs:
+        if name in symbolic_regs or name not in defaults:
             state[name] = {"op": "input", "name": name, "width": width}
         else:
             state[name] = {
                 "op": "const",
-                "value": normalize_hex(defaults.get(name, 0), width=max(1, width // 4)),
+                "value": normalize_hex(defaults[name], width=max(1, width // 4)),
                 "width": width,
             }
     state["memory"] = _initial_abi_memory(abi_function, state)
@@ -9029,6 +9536,131 @@ def _compose_deadline_check(compose_stats: dict[str, Any] | None) -> None:
         )
 
 
+def _abi_control_term(block: dict[str, Any], state: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Consume full loaded control, including a checked call continuation.
+
+    Legacy IP remains available only to documents without the full control
+    contract. A missing continuing destination cannot establish a return.
+    """
+    source = block.get("source", {})
+    outputs = block.get("outputs", {})
+    physical = "control_ip" in outputs
+    term = state.get("control_ip" if physical else "ip")
+    if source.get("jumpkind") == "Ijk_Call" and physical:
+        linear = _optional_int(source.get("transfer", {}).get("fallthrough", {}).get("linear"))
+        if linear is None:
+            raise LowerFailure("call_boundary", "full-width call continuation requires a physical fallthrough")
+        term = {"op": "const", "value": hex(linear), "width": 32}
+        state["control_ip"] = term
+    if term is None:
+        raise LowerFailure("unsupported_ir", "function-level ABI summary requires observed control")
+    return term
+
+
+def _control_proof_ledger(compose_stats: dict[str, Any] | None) -> ControlProofLedger | None:
+    """Shared real16 control-proof ledger for one ABI composition."""
+    from tools.dosunit.real16_control_boundary import ControlProofLedger
+
+    if not isinstance(compose_stats, dict):
+        return None
+    ledger = compose_stats.get("control_proofs")
+    if not isinstance(ledger, ControlProofLedger):
+        ledger = ControlProofLedger()
+        compose_stats["control_proofs"] = ledger
+    return ledger
+
+
+def _control_proof_alarm(timeout_ms: int) -> _BlockLiftTimeout:
+    """Hard wall-clock cap for one boundary proof attempt."""
+    return _timeout_alarm(timeout_ms, message="real16 control proof exceeded its attempt budget")
+
+
+def _proved_composed_control(
+    block: dict[str, Any],
+    ip_term: dict[str, Any],
+    state: dict[str, dict[str, Any]],
+    *,
+    compose_stats: dict[str, Any] | None,
+) -> BoundaryProof | None:
+    """Attempt the fetch-domain proof for a non-literal composed control term.
+
+    Runs only when the block's producer emitted the verified
+    ``control_domain`` marker; every other block keeps the original refusal
+    path untouched.
+    """
+    from tools.dosunit.real16_control_boundary import Z3TermCallbacks, prove_composed_control_term
+
+    source_raw: Any = block.get("source")
+    source: dict[str, Any] = source_raw if isinstance(source_raw, dict) else {}
+    if not isinstance(source.get("control_domain"), dict):
+        return None
+    return prove_composed_control_term(
+        block,
+        ip_term,
+        current_cs=state.get("cs"),
+        callbacks=Z3TermCallbacks(inputs=_z3_inputs, term=_z3_term, apply=_z3_apply),
+        ledger=_control_proof_ledger(compose_stats),
+        deadline=compose_stats.get("deadline") if isinstance(compose_stats, dict) else None,
+        alarm_ms=_control_proof_alarm,
+    )
+
+
+def _route_proved_control(
+    block: dict[str, Any],
+    ip_term: dict[str, Any],
+    state: dict[str, dict[str, Any]],
+    next_path: list[int],
+    *,
+    abi_function: dict[str, Any],
+    block_by_key: dict[int, dict[str, Any]],
+    max_loop_unroll: int,
+    data_segment_para: int,
+    callsite_ordinals: dict[int, dict[str, int]] | None,
+    compose_stats: dict[str, Any] | None,
+    enable_constant_branch_pruning: bool,
+) -> tuple[dict[str, dict[str, Any]], int] | None:
+    """Route via a fetch-domain-proofed control term, or ``None`` on refusal.
+
+    Re-enters the literal routers only with the normalized term — original
+    predicate retained — and records consumption against the compose ledger.
+    """
+    proved = _proved_composed_control(block, ip_term, state, compose_stats=compose_stats)
+    if proved is None or proved.normalized is None:
+        return None
+    branch = _direct_branch_targets(proved.normalized, block_by_key)
+    if branch is not None:
+        proved.consume()
+        return _compose_branch_step(
+            branch,
+            state,
+            next_path,
+            abi_function=abi_function,
+            block_by_key=block_by_key,
+            max_loop_unroll=max_loop_unroll,
+            data_segment_para=data_segment_para,
+            callsite_ordinals=callsite_ordinals,
+            compose_stats=compose_stats,
+            enable_constant_branch_pruning=enable_constant_branch_pruning,
+        )
+    direct = _direct_successor_target(proved.normalized, block_by_key)
+    if direct is not None:
+        proved.consume()
+        return _compose_abi_state(
+            direct,
+            state,
+            abi_function=abi_function,
+            block_by_key=block_by_key,
+            path=next_path,
+            max_loop_unroll=max_loop_unroll,
+            data_segment_para=data_segment_para,
+            callsite_ordinals=callsite_ordinals,
+            compose_stats=compose_stats,
+            enable_constant_branch_pruning=enable_constant_branch_pruning,
+        )
+    proved.unconsumed()
+    return None
+
+
 def _compose_abi_state(
     block: dict[str, Any],
     incoming_state: dict[str, dict[str, Any]],
@@ -9042,8 +9674,13 @@ def _compose_abi_state(
     compose_stats: dict[str, Any] | None = None,
     enable_constant_branch_pruning: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], int]:
+    """Follow exact loaded successors; only explicit return/fault blocks terminate."""
     entry = block.get("entry", {}) if isinstance(block.get("entry"), dict) else {}
-    key = (_optional_int(entry.get("linear")) or _optional_int(entry.get("ip")) or 0) & 0xFFFF
+    key = _optional_int(entry.get("linear"))
+    if key is None:
+        key = _optional_int(entry.get("ip"))
+    if key is None:
+        raise LowerFailure("control_entry_missing", "function composition requires an exact block entry")
     _compose_budget_check(path=path, compose_stats=compose_stats)
     if _compose_loop_cut(block_key=key, path=path, max_loop_unroll=max_loop_unroll, compose_stats=compose_stats):
         return incoming_state, 0
@@ -9066,9 +9703,7 @@ def _compose_abi_state(
             "branch_predicate_unobserved",
             "direct-successor block requires `ip` in SSA outputs for function-level composition",
         )
-    ip_term = state.get("ip")
-    if ip_term is None:
-        raise LowerFailure("unsupported_ir", "function-level ABI summary requires `ip` in SSA outputs")
+    ip_term = _abi_control_term(block, state)
     branch = _direct_branch_targets(ip_term, block_by_key)
     next_path = [*path, key]
     if branch is not None:
@@ -9098,7 +9733,22 @@ def _compose_abi_state(
             compose_stats=compose_stats,
             enable_constant_branch_pruning=enable_constant_branch_pruning,
         )
-    return state, 1
+    routed = _route_proved_control(
+        block,
+        ip_term,
+        state,
+        next_path,
+        abi_function=abi_function,
+        block_by_key=block_by_key,
+        max_loop_unroll=max_loop_unroll,
+        data_segment_para=data_segment_para,
+        callsite_ordinals=callsite_ordinals,
+        compose_stats=compose_stats,
+        enable_constant_branch_pruning=enable_constant_branch_pruning,
+    )
+    if routed is not None:
+        return routed
+    raise LowerFailure("control_flow_unproved", "nonterminal control has no proved in-function successor")
 
 
 def _compose_loop_cut(
@@ -9739,7 +10389,7 @@ def _abi_call_argument_name(arg: dict[str, Any], index: int) -> str:
 def _apply_abi_call_returns_and_clobbers(
     state: dict[str, dict[str, Any]], summary: dict[str, Any], *, call_key: str
 ) -> None:
-    reg_widths = dict(REG_BY_OFFSET.values())
+    reg_widths = _ssa_register_widths()
     returns = {_abi_location_name(item) for item in summary.get("returns", []) or []}
     returns.discard("")
     preserved = {_abi_location_name(item) for item in summary.get("preserved", []) or []}
@@ -9892,9 +10542,10 @@ def _compose_or_terminal(
     compose_stats: dict[str, Any] | None = None,
     enable_constant_branch_pruning: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], int]:
+    """Compose a declared successor; an unresolved edge is not a function exit."""
     successor = _successor_for_target(target, block_by_key)
     if successor is None:
-        return state, 1
+        raise LowerFailure("successor_outside_region", "branch target has no exact in-function block")
     return _compose_abi_state(
         successor,
         state,
@@ -9936,12 +10587,9 @@ def _successor_for_target(term: dict[str, Any], block_by_key: dict[int, dict[str
 
 
 def _target_key(term: dict[str, Any]) -> int | None:
-    if not isinstance(term, dict) or term.get("op") != "const":
-        return None
-    value = _optional_int(term.get("value"))
-    if value is None:
-        return None
-    return value & 0xFFFF
+    """Resolve a literal target with exact bitvector conversion semantics."""
+    resolved = constant_bitvector(term)
+    return None if resolved is None else resolved[0]
 
 
 def _term_children(
@@ -10246,6 +10894,12 @@ def _substitute_abi_inputs(
     *,
     cache: dict[int, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Substitute exact named scalar/array inputs without merging memory spaces.
+
+    The canonical program array ``mem`` binds the owned ``memory`` state key;
+    other array names bind only their exact state key. An unbound array remains
+    an explicit input. Legacy unnamed program roots retain their ``mem`` default.
+    """
     if cache is None:
         cache = {}
     key = id(term)
@@ -10257,7 +10911,11 @@ def _substitute_abi_inputs(
         cache[key] = result
         return result
     if op == "mem_input":
-        result = state.get("memory", term)
+        name = term.get("name", "mem")
+        if not isinstance(name, str) or not name:
+            raise LowerFailure("unsupported_ir", "array input requires an exact nonempty name")
+        state_key = "memory" if name == "mem" else name
+        result = state.get(state_key, term)
         cache[key] = result
         return result
     copied = dict(term)
@@ -10874,16 +11532,22 @@ def _insn_source_register_names(insn: Any) -> list[str]:  # noqa: ANN401
 
 
 class _SemanticEqualityCache:
+    """Keep diagnostic block facts separate from content-bound whole-callee proofs."""
+
     def __init__(self) -> None:
+        """Create empty scoped proof tables."""
         self._facts: dict[tuple[str, str], dict[str, Any]] = {}
+        self._callee_facts: dict[tuple[CalleeIdentity, CalleeIdentity], dict[str, Any]] = {}
 
     @property
     def count(self) -> int:
+        """Count unique diagnostic facts without conflating cache aliases."""
         return len({id(fact) for fact in self._facts.values()})
 
     def record(
         self, oracle_function: dict[str, Any], candidate_function: dict[str, Any], *, proof: str, scope: str = "block"
     ) -> None:
+        """Record block diagnostics and admit only whole-state callee evidence."""
         fact_without_id = {
             "kind": "semantic_equality_fact",
             "scope": scope,
@@ -10898,17 +11562,26 @@ class _SemanticEqualityCache:
         for oracle_key in oracle_keys:
             for candidate_key in candidate_keys:
                 self._facts[(oracle_key, candidate_key)] = fact
+        if scope == "function" or leaf_proof_covers_callee_state(
+            oracle_function, candidate_function, _internal_state_regs()
+        ):
+            oracle_identity = callee_identity(fact["oracle"])
+            candidate_identity = callee_identity(fact["candidate"])
+            if oracle_identity is not None and candidate_identity is not None:
+                self._callee_facts[(oracle_identity, candidate_identity)] = fact
 
     def lookup_call_targets(
         self, oracle_targets: list[dict[str, Any]], candidate_targets: list[dict[str, Any]]
     ) -> dict[str, Any] | None:
+        """Resolve complete content and state identities without symbol aliases."""
         for oracle_target in oracle_targets:
             for candidate_target in candidate_targets:
-                for oracle_key in _semantic_cache_keys(oracle_target):
-                    for candidate_key in _semantic_cache_keys(candidate_target):
-                        fact = self._facts.get((oracle_key, candidate_key))
-                        if fact is not None:
-                            return fact
+                oracle_identity = callee_identity(oracle_target)
+                candidate_identity = callee_identity(candidate_target)
+                if oracle_identity is not None and candidate_identity is not None:
+                    fact = self._callee_facts.get((oracle_identity, candidate_identity))
+                    if fact is not None:
+                        return fact
         return None
 
 
@@ -11299,6 +11972,8 @@ def _ssa_function_brief(
         "instructions": instructions[:instruction_limit],
         "machine_code_sha256": source.get("machine_code_sha256"),
         "machine_code_size": source.get("machine_code_size"),
+        "function_machine_code_sha256": source.get("function_machine_code_sha256"),
+        "function_machine_code_size": source.get("function_machine_code_size"),
         "exact_block_signature_sha256": _block_signature_digest(exact_block_signature),
         "exact_block_signature_size": None if exact_block_signature is None else len(exact_block_signature),
         "normalized_block_signature_sha256": _block_signature_digest(normalized_block_signature),
@@ -11332,7 +12007,6 @@ def _call_targets_equivalent(
         if fact is not None:
             return True, "direct call targets are equivalent through proven callee equality", fact, None
     semantic_reason = _call_target_semantic_equivalence_reason(oracle_targets, candidate_targets)
-    mapped_signature_reason = _call_target_layout_signature_equivalence_reason(oracle_targets, candidate_targets)
 
     mapped_mismatch_seen = False
     for oracle_target in oracle_targets:
@@ -11342,7 +12016,6 @@ def _call_targets_equivalent(
             candidate_targets=candidate_targets,
             mapping_document=mapping_document,
             semantic_reason=semantic_reason,
-            mapped_signature_reason=mapped_signature_reason,
             require_proven_call_targets=require_proven_call_targets,
         )
         if verdict is not None:
@@ -11355,7 +12028,6 @@ def _call_targets_equivalent(
             oracle_target,
             candidate_targets=candidate_targets,
             semantic_reason=semantic_reason,
-            mapped_signature_reason=mapped_signature_reason,
             require_proven_call_targets=require_proven_call_targets,
         )
         if verdict is not None:
@@ -11382,7 +12054,7 @@ def _call_target_head_verdict(
             and oracle_call.get("reason") == "call target is not a direct constant"
             and candidate_call.get("reason") == "call target is not a direct constant"
         ):
-            return True, "both call targets are indirect expressions", None, None
+            return False, "indirect call target coverage is unproved", None, None
         return False, "one or both direct call targets did not resolve to SSA functions", None, None
     return None
 
@@ -11391,17 +12063,11 @@ def _call_target_verdict(
     unproven_reason: str,
     *,
     semantic_reason: str | None,
-    mapped_signature_reason: str | None,
     require_proven_call_targets: bool,
-    prefer_semantic_reason: bool = False,
 ) -> tuple[bool, str, dict[str, Any] | None, str | None]:
-    """Apply the semantic/mapped-signature/proven requirement chain to a matched target."""
-    if prefer_semantic_reason and semantic_reason is not None:
-        return True, semantic_reason, None, None
+    """Apply the complete-body/proven requirement chain to a matched target."""
     if semantic_reason is not None:
         return True, unproven_reason, None, None
-    if mapped_signature_reason is not None:
-        return True, mapped_signature_reason, None, None
     if require_proven_call_targets:
         return False, "callee_not_proven", None, unproven_reason
     return True, unproven_reason, None, None
@@ -11414,7 +12080,6 @@ def _mapped_call_target_verdict(
     candidate_targets: list[dict[str, Any]],
     mapping_document: dict[str, Any] | None,
     semantic_reason: str | None,
-    mapped_signature_reason: str | None,
     require_proven_call_targets: bool,
 ) -> tuple[tuple[bool, str, dict[str, Any] | None, str | None] | None, bool]:
     """Resolve one oracle target through the function map; (verdict|None, mapped_mismatch)."""
@@ -11431,7 +12096,6 @@ def _mapped_call_target_verdict(
         return _call_target_verdict(
             "direct call targets are equivalent through function mapping",
             semantic_reason=semantic_reason,
-            mapped_signature_reason=mapped_signature_reason,
             require_proven_call_targets=require_proven_call_targets,
         ), False
     if semantic_reason is not None and _has_signature_only_target_pair(oracle_targets, candidate_targets):
@@ -11444,7 +12108,6 @@ def _unmapped_call_target_verdict(
     *,
     candidate_targets: list[dict[str, Any]],
     semantic_reason: str | None,
-    mapped_signature_reason: str | None,
     require_proven_call_targets: bool,
 ) -> tuple[bool, str, dict[str, Any] | None, str | None] | None:
     """Match one oracle target by id/name/normalized-name; verdict or None."""
@@ -11456,9 +12119,7 @@ def _unmapped_call_target_verdict(
         return _call_target_verdict(
             "direct call targets have the same function id",
             semantic_reason=semantic_reason,
-            mapped_signature_reason=mapped_signature_reason,
             require_proven_call_targets=require_proven_call_targets,
-            prefer_semantic_reason=semantic_reason == "direct call targets have identical binary-local signatures",
         )
     if any(
         oracle_name and oracle_name == str(candidate_target.get("name") or "")
@@ -11467,7 +12128,6 @@ def _unmapped_call_target_verdict(
         return _call_target_verdict(
             "direct call targets have the same function name",
             semantic_reason=semantic_reason,
-            mapped_signature_reason=mapped_signature_reason,
             require_proven_call_targets=require_proven_call_targets,
         )
     oracle_normalized_name = _normalized_symbol_name(oracle_name)
@@ -11478,7 +12138,6 @@ def _unmapped_call_target_verdict(
         return _call_target_verdict(
             "direct call targets have equivalent normalized symbol names",
             semantic_reason=semantic_reason,
-            mapped_signature_reason=mapped_signature_reason,
             require_proven_call_targets=require_proven_call_targets,
         )
     return None
@@ -11502,81 +12161,15 @@ def _normalized_symbol_name(name: str) -> str:
 def _call_target_semantic_equivalence_reason(
     oracle_targets: list[dict[str, Any]], candidate_targets: list[dict[str, Any]]
 ) -> str | None:
+    """Admit exact complete body equality; entry signatures are correspondence only."""
     for oracle_target in oracle_targets:
         for candidate_target in candidate_targets:
-            oracle_block_hash = oracle_target.get("machine_code_sha256")
-            candidate_block_hash = candidate_target.get("machine_code_sha256")
-            oracle_block_size = oracle_target.get("machine_code_size")
-            candidate_block_size = candidate_target.get("machine_code_size")
-            if (
-                oracle_block_hash
-                and oracle_block_hash == candidate_block_hash
-                and oracle_block_size == candidate_block_size
-            ):
-                return "direct call target entry blocks have identical machine code"
-            oracle_exact_block = oracle_target.get("exact_block_signature_sha256")
-            candidate_exact_block = candidate_target.get("exact_block_signature_sha256")
-            oracle_exact_block_size = oracle_target.get("exact_block_signature_size")
-            candidate_exact_block_size = candidate_target.get("exact_block_signature_size")
-            if (
-                oracle_exact_block
-                and oracle_exact_block == candidate_exact_block
-                and oracle_exact_block_size == candidate_exact_block_size
-            ):
-                return "direct call target entry blocks have identical exact block signatures"
-            oracle_layout_block = oracle_target.get("layout_block_signature_sha256")
-            candidate_layout_block = candidate_target.get("layout_block_signature_sha256")
-            oracle_layout_block_size = oracle_target.get("layout_block_signature_size")
-            candidate_layout_block_size = candidate_target.get("layout_block_signature_size")
-            if (
-                oracle_layout_block
-                and oracle_layout_block == candidate_layout_block
-                and oracle_layout_block_size == candidate_layout_block_size
-            ):
-                return "direct call target entry blocks have identical layout-normalized block signatures"
-            oracle_signature = oracle_target.get("signature_sha256")
-            candidate_signature = candidate_target.get("signature_sha256")
-            oracle_signature_size = oracle_target.get("signature_size")
-            candidate_signature_size = candidate_target.get("signature_size")
-            if (
-                oracle_signature
-                and oracle_signature == candidate_signature
-                and oracle_signature_size == candidate_signature_size
-            ):
-                return "direct call targets have identical binary-local signatures"
-            oracle_normalized_signature = oracle_target.get("normalized_signature_sha256")
-            candidate_normalized_signature = candidate_target.get("normalized_signature_sha256")
-            oracle_normalized_size = oracle_target.get("normalized_signature_size")
-            candidate_normalized_size = candidate_target.get("normalized_signature_size")
-            if (
-                oracle_normalized_signature
-                and oracle_normalized_signature == candidate_normalized_signature
-                and oracle_normalized_size == candidate_normalized_size
-                and (_is_signature_only_target(oracle_target) or _is_signature_only_target(candidate_target))
-            ):
-                return "direct call targets have identical normalized binary-local signatures"
-            oracle_semantic = oracle_target.get("semantic_ssa_id")
-            candidate_semantic = candidate_target.get("semantic_ssa_id")
-            if oracle_semantic and oracle_semantic == candidate_semantic:
-                return "direct call target entry blocks have identical compact SSA"
-    return None
-
-
-def _call_target_layout_signature_equivalence_reason(
-    oracle_targets: list[dict[str, Any]], candidate_targets: list[dict[str, Any]]
-) -> str | None:
-    for oracle_target in oracle_targets:
-        for candidate_target in candidate_targets:
-            oracle_layout_signature = oracle_target.get("layout_signature_sha256")
-            candidate_layout_signature = candidate_target.get("layout_signature_sha256")
-            oracle_layout_size = oracle_target.get("layout_signature_size")
-            candidate_layout_size = candidate_target.get("layout_signature_size")
-            if (
-                oracle_layout_signature
-                and oracle_layout_signature == candidate_layout_signature
-                and oracle_layout_size == candidate_layout_size
-            ):
-                return "direct call targets have identical layout-normalized binary-local signatures"
+            oracle_identity = callee_identity(oracle_target)
+            candidate_identity = callee_identity(candidate_target)
+            if (oracle_identity is not None and candidate_identity is not None
+                    and oracle_identity.body_hash == candidate_identity.body_hash
+                    and oracle_identity.body_size == candidate_identity.body_size):
+                return "direct call targets have identical complete binary bodies"
     return None
 
 
@@ -11631,6 +12224,12 @@ def _prepare_call_normalized_functions(
     else:
         target_value = None
 
+    from tools.dosunit.real16_control_boundary import ControlProofLedger
+
+    oracle_control: list[str] = []
+    candidate_control: list[str] = []
+    oracle_proofs = ControlProofLedger()
+    candidate_proofs = ControlProofLedger()
     if oracle_raw is not None and candidate_raw is not None:
         oracle_copy = _with_call_target_output(
             oracle_function, target_value if target_value is not None else oracle_raw
@@ -11638,6 +12237,13 @@ def _prepare_call_normalized_functions(
         candidate_copy = _with_call_target_output(
             candidate_function, target_value if target_value is not None else candidate_raw
         )
+        if target_value is not None and oracle_call is not None and candidate_call is not None:
+            oracle_copy, oracle_control = _with_call_bound_control_outputs(
+                oracle_copy, call=oracle_call, target_value=target_value, proof_ledger=oracle_proofs
+            )
+            candidate_copy, candidate_control = _with_call_bound_control_outputs(
+                candidate_copy, call=candidate_call, target_value=target_value, proof_ledger=candidate_proofs
+            )
     else:
         oracle_copy = copy.deepcopy(oracle_function)
         candidate_copy = copy.deepcopy(candidate_function)
@@ -11651,35 +12257,37 @@ def _prepare_call_normalized_functions(
     candidate_copy, candidate_return = _normalize_call_return_store(candidate_copy)
     oracle_copy, oracle_stack = _normalize_call_stack_store_addresses(oracle_copy)
     candidate_copy, candidate_stack = _normalize_call_stack_store_addresses(candidate_copy)
-    if oracle_return.get("applied") or oracle_stack.get("applied") or candidate_return.get(
-        "applied"
-    ) or candidate_stack.get("applied"):
+    control_bound = bool(oracle_control or candidate_control)
+    proof_evidence = {
+        side: ledger.document()
+        for side, ledger in (("oracle", oracle_proofs), ("candidate", candidate_proofs))
+        if ledger.raw_fact_count
+    }
+    proof_failure = oracle_proofs.accounting_failure() or candidate_proofs.accounting_failure()
+    if proof_failure is not None:
+        normalized["control_proof_failure"] = proof_failure
+    normalization_applied = any(
+        item.get("applied")
+        for item in (oracle_return, oracle_stack, candidate_return, candidate_stack)
+    )
+    if normalization_applied or control_bound or proof_evidence:
         normalized["normalizations"] = [
             {"side": "oracle", **oracle_return},
             {"side": "candidate", **candidate_return},
             {"side": "oracle", **oracle_stack},
             {"side": "candidate", **candidate_stack},
         ]
-    oracle_copy = _drop_call_boundary_volatile_outputs(oracle_copy)
-    candidate_copy = _drop_call_boundary_volatile_outputs(candidate_copy)
+        if control_bound or proof_evidence:
+            record: dict[str, Any] = {
+                "kind": "call_bound_control_outputs",
+                "applied": control_bound,
+                "oracle_outputs": oracle_control,
+                "candidate_outputs": candidate_control,
+            }
+            if proof_evidence:
+                record["control_proofs"] = proof_evidence
+            normalized["normalizations"].append(record)
     return oracle_copy, candidate_copy, normalized
-
-
-def _drop_call_boundary_volatile_outputs(function: dict[str, Any]) -> dict[str, Any]:
-    source = function.get("source", {}) if isinstance(function.get("source"), dict) else {}
-    if source.get("jumpkind") != "Ijk_Call":
-        return function
-    outputs = function.get("outputs") if isinstance(function.get("outputs"), dict) else None
-    if not outputs:
-        return function
-    removable = {"ax", "dx", "sp"}
-    if not any(key in outputs for key in removable):
-        return function
-    copied = copy.deepcopy(function)
-    copied_outputs = copied.get("outputs") if isinstance(copied.get("outputs"), dict) else {}
-    for key in removable:
-        copied_outputs.pop(key, None)
-    return copied
 
 
 def _prepare_layout_normalized_functions(
@@ -13426,6 +14034,173 @@ def _with_call_target_output(function: dict[str, Any], target_value: int) -> dic
     return document
 
 
+def _proved_call_bound_output(
+    function: dict[str, Any],
+    resolved_term: dict[str, Any],
+    *,
+    name: str,
+    bound_values: set[int],
+    logical_ip: int | None,
+    current_cs: Any,  # noqa: ANN401
+    ledger: ControlProofLedger | None,
+) -> BoundaryProof | None:
+    """Prove one symbolic call-control output under the fetch domain.
+
+    Runs only when the producing part recorded the verified real16
+    ``control_domain`` marker; refusal leaves the caller's skip untouched and
+    retains the attempt evidence in ``ledger``.
+    """
+    from tools.dosunit.real16_control_boundary import (
+        ControlProofLedger,
+        Z3TermCallbacks,
+        prove_call_bound_output,
+    )
+
+    source_raw: Any = function.get("source")
+    source: dict[str, Any] = source_raw if isinstance(source_raw, dict) else {}
+    if not isinstance(source.get("control_domain"), dict):
+        return None
+    book = ledger if ledger is not None else ControlProofLedger()
+    result = prove_call_bound_output(
+        function,
+        resolved_term,
+        output_name=name,
+        bound_values=bound_values,
+        logical_ip=logical_ip,
+        current_cs=current_cs,
+        callbacks=Z3TermCallbacks(inputs=_z3_inputs, term=_z3_term, apply=_z3_apply),
+        ledger=book,
+        alarm_ms=_control_proof_alarm,
+    )
+    return result if result.value is not None else None
+
+
+def _call_bound_values(call: dict[str, Any]) -> tuple[set[int], int | None]:
+    """Collect the decoded call's physical bound set and logical IP.
+
+    Bound values are the raw loaded target and the resolved linear entry;
+    ``logical_ip`` is the decoded IP when present. Missing or malformed
+    resolved metadata yields whatever the call record still provides.
+    """
+    resolved = call.get("resolved")
+    if not isinstance(resolved, dict):
+        resolved = {}
+    entry = resolved.get("entry")
+    if not isinstance(entry, dict):
+        entry = {}
+    bound = {
+        value
+        for value in (_optional_int(call.get("raw")), _optional_int(entry.get("linear")))
+        if value is not None
+    }
+    return bound, _optional_int(entry.get("ip"))
+
+
+def _with_call_bound_control_outputs(
+    function: dict[str, Any],
+    *,
+    call: dict[str, Any],
+    target_value: int,
+    proof_ledger: ControlProofLedger | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Bind ``ip``/``control_ip`` outputs carrying this call's own target.
+
+    Under a proven-equivalent call, caller-side control outputs record the
+    loaded call target; shifted builds embed different raw addresses for the
+    same proven callee.  Rewriting those outputs to ``target_value`` records
+    "control transfers to the proven callee" instead of a literal address, the
+    same binding already applied to the synthetic ``call_target`` output.
+    DWORD control matches only exact physical destinations; a WORD logical
+    IP may use its architectural projection. Narrow physical control and
+    low-word aliases never acquire a full-target correspondence. Fallthrough
+    continuations and unrelated control values remain observable.
+
+    When a control output stays symbolic under concrete evaluation and the
+    producing block recorded the verified real16 ``control_domain`` marker,
+    the boundary proof tries the decoded native callee instead; a refused
+    attempt leaves the original term and adds proof evidence to the ledger.
+    """
+    outputs = function.get("outputs")
+    if not isinstance(outputs, dict):
+        return function, []
+    bound_values, logical_ip = _call_bound_values(call)
+    if not bound_values:
+        return function, []
+    assignments = [item for item in function.get("assignments", []) or [] if isinstance(item, dict)]
+    by_id = {str(item["id"]): item for item in assignments if "id" in item}
+    applied: list[str] = []
+    for name in ("ip", "control_ip"):
+        term = outputs.get(name)
+        if not isinstance(term, dict):
+            continue
+        ref = term.get("ref")
+        resolved_term = by_id.get(str(ref)) if isinstance(ref, str) else term
+        if not isinstance(resolved_term, dict):
+            continue
+        value = _eval_call_return_term(term, assignments=by_id, input_constants={}, memo={})
+        control_proof: BoundaryProof | None = None
+        if value is None:
+            control_proof = _proved_call_bound_output(
+                function,
+                resolved_term,
+                name=name,
+                bound_values=bound_values,
+                logical_ip=logical_ip,
+                current_cs=outputs.get("cs"),
+                ledger=proof_ledger,
+            )
+            value = control_proof.value if control_proof is not None else None
+        if value is None:
+            continue
+        width = max(1, _term_width(resolved_term))
+        if _apply_call_control_binding(
+            outputs, name=name, width=width, value=value, bound_values=bound_values,
+            logical_ip=logical_ip, target_value=target_value, proof=control_proof,
+        ):
+            applied.append(name)
+    return function, applied
+
+
+
+def _apply_call_control_binding(
+    outputs: dict[str, Any], *, name: str, width: int, value: int,
+    bound_values: set[int], logical_ip: int | None, target_value: int,
+    proof: BoundaryProof | None,
+) -> bool:
+    """Replace a matching target projection and account only the consumed proof.
+
+    A solver product is materialized only after the output has been replaced;
+    a projection that cannot denote this call stays intact and records failure.
+    """
+    if not _call_control_matches_destination(name, width, value, bound_values, logical_ip):
+        if proof is not None:
+            proof.unconsumed()
+        return False
+    outputs[name] = {
+        "op": "const",
+        "value": normalize_hex(target_value & _mask(width), width=max(1, (width + 3) // 4)),
+        "width": width,
+    }
+    if proof is not None:
+        proof.consume()
+    return True
+
+
+def _call_control_matches_destination(
+    name: str, width: int, value: int, physical_values: set[int], logical_ip: int | None,
+) -> bool:
+    """Match a call projection without confusing logical and physical domains.
+
+    A full physical destination is an exact DWORD address, even when the
+    callee also has a WORD logical IP. Only the WORD ``ip`` projection may
+    match the architectural low word; ``control_ip`` must remain full width.
+    """
+    if width == 32:
+        return value in physical_values
+    if name != "ip" or width != 16:
+        return False
+    return value == logical_ip or value in {target & 0xFFFF for target in physical_values}
+
 def _canonical_call_target_value(call_compare: dict[str, Any]) -> int:
     return _semantic_token_value(_canonical_call_target_token(call_compare))
 
@@ -13862,6 +14637,11 @@ def _eval_call_return_op(op: str, concrete: list[int], mask: int) -> int | None:
         return concrete[0] & mask
     if len(concrete) != 2:
         return None
+    if op == "shl":
+        # The native CS base uses a byte-count shift of a DWORD value.
+        # Saturate before shifting to retain bitvector semantics without
+        # allocating an adversarially large intermediate Python integer.
+        return 0 if concrete[1] >= mask.bit_length() else (concrete[0] << concrete[1]) & mask
     if op == "lshr":
         return (concrete[0] >> concrete[1]) & mask
     if op == "add":
@@ -14179,11 +14959,11 @@ _Z3_SIGNED_CMPS: dict[str, Callable[[Any, Any, Any], Any]] = {
 
 
 def _z3_apply(op: str, width: int, args: list[Any], z3: Any) -> Any:  # noqa: ANN401
-    if op == "summary_x86g_calculate_condition":
-        exact = _z3_x86_exact_condition(width, args, z3)
+    """Interpret SSA operators at Z3's dynamic API, retaining abstract summaries."""
+    if op.startswith("summary_"):
+        exact = _z3_exact_x86_flag_summary(op, width, args, z3)
         if exact is not None:
             return exact
-    if op.startswith("summary_"):
         return _z3_uninterpreted_summary(op, width, args, z3)
     if op in _Z3_UNSIGNED_BINOPS:
         return _z3_aligned_binop(_Z3_UNSIGNED_BINOPS[op], width, args, signed=False, z3=z3)
@@ -14200,34 +14980,37 @@ def _z3_apply(op: str, width: int, args: list[Any], z3: Any) -> Any:  # noqa: AN
     return _z3_leaf_op(op, width, args, z3)
 
 
+def _z3_exact_x86_flag_summary(op: str, width: int, args: list[Any], z3: Any) -> Any | None:  # noqa: ANN401
+    """Select admitted flag projections; every other summary remains abstract."""
+    if op == "summary_x86g_calculate_condition":
+        return _z3_x86_exact_condition(width, args, z3)
+    if op == "summary_x86g_calculate_eflags_c":
+        return _z3_x86_exact_carry(width, args, z3)
+    return None
+
+
 def _z3_x86_exact_condition(width: int, args: list[Any], z3: Any) -> Any | None:  # noqa: ANN401
-    """Model VEX x86 SUB/LOGIC conditions at the operation's actual bit width."""
-    if len(args) != 5 or not z3.is_bv_value(args[0]) or not z3.is_bv_value(args[1]):
+    """Bind the dynamic Z3 adapter to the authoritative exact condition owner."""
+    if len(args) != 5 or not all(z3.is_bv(argument) for argument in args):
+        return None
+    if not z3.is_bv_value(args[0]) or not z3.is_bv_value(args[1]):
         return None
     kind = _x86_exact_condition_kind(args[0].as_long(), args[1].as_long())
     if kind is None:
         return None
-    operand_width, condition, subtract = kind
-    left = z3.Extract(operand_width - 1, 0, _resize_z3(args[2], args[2].size(), 32, signed=False, z3=z3))
-    right = z3.Extract(operand_width - 1, 0, _resize_z3(args[3], args[3].size(), 32, signed=False, z3=z3))
-    zero = z3.BitVecVal(0, operand_width)
-    if subtract:
-        conditions = {
-            2: lambda: z3.ULT(left, right),
-            3: lambda: z3.UGE(left, right),
-            4: lambda: left == right,
-            5: lambda: left != right,
-            6: lambda: z3.ULE(left, right),
-            7: lambda: z3.UGT(left, right),
-            12: lambda: left < right,
-            13: lambda: left >= right,
-            14: lambda: left <= right,
-            15: lambda: left > right,
-        }
-        predicate = conditions[condition]()
-    else:
-        predicate = left == zero if condition == 4 else left != zero
-    return z3.If(predicate, z3.BitVecVal(1, width), z3.BitVecVal(0, width))
+    return exact_condition(kind, args[2], args[3], args[4], output_width=width)
+
+
+def _z3_x86_exact_carry(width: int, args: list[Any], z3: Any) -> Any | None:  # noqa: ANN401
+    """Bind exact CF interpretation and refusal to the shared arithmetic owner."""
+    if len(args) != 4 or not all(z3.is_bv(argument) for argument in args):
+        return None
+    if not z3.is_bv_value(args[0]):
+        return None
+    kind = carry_contract(args[0].as_long())
+    if kind is None:
+        return None
+    return exact_carry(kind, args[1], args[2], args[3], output_width=width)
 
 
 def _z3_aligned_binop(
@@ -14434,7 +15217,7 @@ def _collect_inputs(expressions: Any, seen: set[int] | None = None) -> set[str]:
 
 def _input_items(inputs: set[str]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    reg_widths = dict(REG_BY_OFFSET.values())
+    reg_widths = _ssa_register_widths()
     for name in sorted(inputs):
         if name in {"mem", "io"}:
             items.append({"kind": "memory", "name": name, "addr_width": 32, "value_width": 8})
@@ -15081,6 +15864,7 @@ def _instruction_text(insn: Any, *, function_base: int) -> dict[str, Any]:  # no
 
 
 def _transfer_info(irsb: Any, instructions: list[dict[str, Any]]) -> dict[str, Any] | None:  # noqa: ANN401
+    """Serialize binary IR control, retaining unresolved indirect successors."""
     nonreturning = _nonreturning_interrupt_transfer(instructions)
     if nonreturning is not None:
         return nonreturning
@@ -15116,6 +15900,8 @@ def _transfer_info(irsb: Any, instructions: list[dict[str, Any]]) -> dict[str, A
                     for successor in successors
                 ],
             }
+        if _const_expr_value(irsb.next) is None:
+            return {"kind": "indirect_successor", "jumpkind": jumpkind}
     return None
 
 
@@ -15328,13 +16114,8 @@ def _last_instruction_is_control(instructions: list[dict[str, Any]]) -> bool:
 
 
 def _last_instruction_is_repeat_string(instructions: list[dict[str, Any]]) -> bool:
-    if not instructions:
-        return False
-    instruction = instructions[-1]
-    mnemonic = str(instruction.get("mnemonic", "")).lower()
-    disassembly = str(instruction.get("disassembly", "")).lower()
-    text = f"{mnemonic} {disassembly}".strip()
-    return text.startswith(("rep ", "repe ", "repz ", "repne ", "repnz "))
+    """Recognize repeat control from the decoded terminal instruction bytes."""
+    return bool(instructions) and is_repeat_string_instruction(instructions[-1])
 
 
 def _direct_instruction_successors(instructions: list[dict[str, Any]]) -> list[int]:
