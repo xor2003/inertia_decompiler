@@ -66,6 +66,11 @@ class ManifestViolation:
 
 TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
+        owner="compact-diagnostic-paths",
+        paths=("scripts/compact_paths.py",),
+        tests=("angr_platforms/tests/test_compact_paths.py",),
+    ),
+    TestOwnershipRule(
         owner="pytest-directory-collection-cache",
         paths=("scripts/pytest_directory_cache.py",),
         tests=("angr_platforms/tests/test_pytest_directory_cache.py",),
@@ -3309,6 +3314,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_bp_call_preservation.py",
             "angr_platforms/tests/test_x86_16_call_stack_allocation_guard.py",
             "angr_platforms/tests/test_x86_16_call_stack_allocation_proof.py",
+            "angr_platforms/tests/test_x86_16_call_target_ssa_binding.py",
+            "angr_platforms/tests/test_x86_16_call_target_evidence_retention.py",
             "angr_platforms/tests/test_x86_16_call_stack_logical_width.py",
             "angr_platforms/tests/test_x86_16_call_stack_provenance.py",
             "angr_platforms/tests/test_x86_16_partial_register_address_break.py",

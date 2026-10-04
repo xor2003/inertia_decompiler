@@ -7,12 +7,19 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import angr
+from angr_platforms.X86_16.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.caller_return_use_contracts import (
     CallerReturnUseFact8616,
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
+from angr_platforms.X86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    build_boundary_direct_callsite_index_8616,
+)
+from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from angr_platforms.X86_16.ir.function_ir_registry import publish_function_ir_artifact_8616
 from angr_platforms.X86_16.ir.ssa_function import (
     SSAFunctionArtifact,
     build_x86_16_function_ssa,
@@ -56,9 +63,11 @@ def _fact() -> CallerReturnUseFact8616:
 def _lift_ssa(
     code_after_call: str,
     block_addrs: set[int],
-) -> SSAFunctionArtifact:
+) -> tuple[SSAFunctionArtifact, StorageReachingDefinition8616]:
+    """Bind the genuine CALL producer before tests corrupt downstream CFG evidence."""
+    code = CALL_BYTES + bytes.fromhex(code_after_call)
     project = angr.Project(
-        io.BytesIO(CALL_BYTES + bytes.fromhex(code_after_call)),
+        io.BytesIO(code.ljust(CALLEE_ADDR - CALLER_ADDR, b"\x90") + b"\xc3"),
         main_opts={
             "backend": "blob",
             "arch": Arch86_16(),
@@ -74,12 +83,22 @@ def _lift_ssa(
     )
     artifact = build_x86_16_ir_function_artifact(project, function)
     assert not artifact.refusals
-    return build_x86_16_function_ssa(artifact)
+    publish_function_ir_artifact_8616(project, artifact)
+    boundary = exact_function_range_boundary_8616(project, CALLER_ADDR, CALLER_ADDR + len(code))
+    assert boundary is not None
+    index = build_boundary_direct_callsite_index_8616(
+        boundary,
+        direct_target_resolver=lambda instruction: resolve_direct_call_target_from_instruction_8616(project, instruction),
+    )
+    ssa = build_x86_16_function_ssa(artifact)
+    return ssa, _definition(ssa, _fact(), project, index)
 
 
 def _definition(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
+    project: angr.Project,
+    callsite_index: DecodedDirectCallsiteIndex8616,
 ) -> StorageReachingDefinition8616:
     register = StorageIdentity8616(
         kind=StorageIdentityKind8616.REGISTER,
@@ -92,21 +111,26 @@ def _definition(
         CALLEE_ADDR,
         (CALLEE_ADDR,),
         (register,),
+        project=project,
+        callsite_index=callsite_index,
     )
-    assert result.complete
+    assert result.complete, result
     return result.definitions[0]
 
 
-def _classify(artifact: SSAFunctionArtifact) -> ReturnStorageTypeResult8616:
+def _classify(
+    artifact: SSAFunctionArtifact,
+    definition: StorageReachingDefinition8616,
+) -> ReturnStorageTypeResult8616:
     fact = _fact()
     return classify_pointer_return_storage_8616(
         artifact,
         fact,
-        _definition(artifact, fact),
+        definition,
     )
 
 
-def _compatible_phi_artifact() -> SSAFunctionArtifact:
+def _compatible_phi_artifact() -> tuple[SSAFunctionArtifact, StorageReachingDefinition8616]:
     return _lift_ssa(
         "89c683fa00740489f3eb0489f3eb008b0fc3",
         {0x1000, 0x1003, 0x100A, 0x100E, 0x1012},
@@ -114,12 +138,12 @@ def _compatible_phi_artifact() -> SSAFunctionArtifact:
 
 
 def test_direct_cfg_edge_retains_exact_pointer_carrier() -> None:
-    artifact = _lift_ssa(
+    artifact, definition = _lift_ssa(
         "89c3eb01908b0fc3",
         {0x1000, 0x1003, 0x1008},
     )
 
-    result = _classify(artifact)
+    result = _classify(artifact, definition)
 
     assert result.verdict is ReturnStorageTypeVerdict8616.PROVEN
     assert result.complete
@@ -132,7 +156,7 @@ def test_direct_cfg_edge_retains_exact_pointer_carrier() -> None:
 
 
 def test_all_predecessor_phi_retains_exact_inputs() -> None:
-    result = _classify(_compatible_phi_artifact())
+    result = _classify(*_compatible_phi_artifact())
 
     assert result.verdict is ReturnStorageTypeVerdict8616.PROVEN
     assert result.complete
@@ -147,12 +171,12 @@ def test_all_predecessor_phi_retains_exact_inputs() -> None:
 
 
 def test_clobbered_predecessor_refuses_join() -> None:
-    artifact = _lift_ssa(
+    artifact, definition = _lift_ssa(
         "89c383fa00740431dbeb02eb008b0fc3",
         {0x1000, 0x1003, 0x100A, 0x100E, 0x1010},
     )
 
-    result = _classify(artifact)
+    result = _classify(artifact, definition)
 
     assert result.verdict is ReturnStorageTypeVerdict8616.UNKNOWN_REFUSE
     assert result.failure is ReturnStorageTypeFailure8616.POINTER_CFG_JOIN_CONFLICT
@@ -160,7 +184,7 @@ def test_clobbered_predecessor_refuses_join() -> None:
 
 
 def test_mismatched_phi_input_is_a_typed_conflict() -> None:
-    artifact = _compatible_phi_artifact()
+    artifact, definition = _compatible_phi_artifact()
     register_phis = tuple(phi for phi in artifact.phi_nodes if phi.target.name == "bx")
     assert len(register_phis) == 1
     phi = register_phis[0]
@@ -173,7 +197,7 @@ def test_mismatched_phi_input_is_a_typed_conflict() -> None:
     changed_phi = replace(phi, incoming=(changed_first, *phi.incoming[1:]))
     changed_phis = tuple(changed_phi if item == phi else item for item in artifact.phi_nodes)
 
-    result = _classify(replace(artifact, phi_nodes=changed_phis))
+    result = _classify(replace(artifact, phi_nodes=changed_phis), definition)
 
     assert result.verdict is ReturnStorageTypeVerdict8616.CONFLICT
     assert result.failure is ReturnStorageTypeFailure8616.POINTER_PHI_CONFLICT
@@ -181,7 +205,7 @@ def test_mismatched_phi_input_is_a_typed_conflict() -> None:
 
 
 def test_incomplete_predecessor_map_refuses_cfg_flow() -> None:
-    artifact = _lift_ssa(
+    artifact, definition = _lift_ssa(
         "89c3eb01908b0fc3",
         {0x1000, 0x1003, 0x1008},
     )
@@ -190,19 +214,19 @@ def test_incomplete_predecessor_map_refuses_cfg_flow() -> None:
         predecessor_map={0x1000: (), 0x1003: ()},
     )
 
-    result = _classify(incomplete)
+    result = _classify(incomplete, definition)
 
     assert result.verdict is ReturnStorageTypeVerdict8616.UNKNOWN_REFUSE
     assert result.failure is ReturnStorageTypeFailure8616.POINTER_CFG_INCOMPLETE
 
 
 def test_reachable_cfg_cycle_refuses_without_fixed_point_guessing() -> None:
-    artifact = _lift_ssa(
+    artifact, definition = _lift_ssa(
         "89c3ebfe8b0fc3",
         {0x1000, 0x1003, 0x1005},
     )
 
-    result = _classify(artifact)
+    result = _classify(artifact, definition)
 
     assert result.verdict is ReturnStorageTypeVerdict8616.UNKNOWN_REFUSE
     assert result.failure is ReturnStorageTypeFailure8616.POINTER_CFG_CYCLE

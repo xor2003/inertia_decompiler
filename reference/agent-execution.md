@@ -180,6 +180,8 @@ in logs; report scope, exit status, counts and actionable failures only.
 
 ### Token-Efficient Command Output
 
+- View saved logs with `rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python scripts/compact_paths.py --legend < run.log`. One pass abbreviates all supported paths: `X16/`, `TEST/`, `DU/`, `REF/`, `SCRIPTS/`, and repository-root `./`. These are display aliases, not filesystem paths. Keep full raw logs and use canonical paths in commands, links and proof receipts; never feed compact output into machine validation.
+
 - Keep Make's quiet recipe mode enabled; use `make Q=` only when the expanded command itself is needed for diagnosis.
 - Keep `RUFF_OUTPUT_FLAGS`, `MYPY_OUTPUT_FLAGS`, `PYRIGHT_OUTPUT_FLAGS`, `PYTEST_OUTPUT_FLAGS`, and `LIZARD_OUTPUT_FLAGS` compact by default; override one explicitly only when deeper diagnostics are needed.
 - Prefer tool-native compact modes that preserve findings: Ruff quiet/concise, MyPy plain/no-color/no-summary, Pyright warning-level, pytest short-traceback/no-header, and Lizard warnings-only. Never use Ruff silent, pytest no-summary/warning suppression, Vulture confidence filtering, or similar flags that hide actionable diagnostics.

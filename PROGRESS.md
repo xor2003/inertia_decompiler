@@ -7631,3 +7631,34 @@ units retain requested6. CLI phase3passed38.20s. Misleading90s deadline text
 removed without changing limits. Scoped lint/type/MyPy/ownership/context pass.
 quality-dev22422 now running, log m7-transitive-refresh/quality-dev.log.
 M5/M7 remain open; no full-suite or algorithm speedup claim.
+
+Checkpoint and gate reconciliation (2026-10-04): checkpoint5a28ef317 retains
+the accumulated implementation as WIP before any path shortening. The full
+architecture guard now requires the already-registered binary-budgeted lane
+before units in every tier and binary-relational in default/expanded; ten
+controls reject missing/reordered coverage. Restored two required call-target
+tests to the call-semantics ownership rule. Scoped lint passed; the three-module
+focused run completed444passed/1failed224.68s. The sole failure is full current
+architecture cleanliness,315findings (previous320); no blanket exclusions added.
+A separate pre-rename storage/import cohort completed393passed/9failed253.52s
+with two workers. Its failures are retained in source-checkpoint/
+rename-baseline-tests.log under .cache/comparator-implementation. No filenames
+have changed. Staged renamer and Make-inventory repairs remain under parent
+review; neither their unit tests nor this checkpoint constitutes M5/M7 acceptance.
+
+Path-display decision and fixture repair (2026-10-04): physical43-module
+shortening would affect112tracked files and invalidate proof receipts, so the
+immediate token-saving change is display-only scripts/compact_paths.py. The
+single streaming pass preserves raw logs and all diagnostic text except known
+path prefixes; canonical commands/source/receipts stay unchanged. AGENTS and
+execution guidance document aliases. Physical renamer remains staged/unapplied.
+Parent reviewed two stale CALL-evidence fixture repairs; unchanged assertions
+now consume registered native IR, a closed decoded callsite index and mapped
+callee bytes. Independent rerun8passed31.66s; no production semantics changed.
+The remaining native pipeline failure and M5/M7 obligations remain open.
+Final display/gate cohort151passed20.69s; scoped lint, MyPy, startup architecture,
+context, ownership and diff checks pass. Basta completed10.04s and reports60
+repository findings; the formatter is not listed. Full architecture cleanliness
+remains unresolved (315findings at its last run), so this is a scoped checkpoint.
+Physical renamer30synthetic tests pass, but its whole-repo scan reached60s and
+five dynamic-import refusals were independently retained; no apply accepted.

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import io
-from types import SimpleNamespace
 
 import angr
+from angr_platforms.X86_16.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.callsite_summary import (
     CallsitePushSourceKind8616,
     CallsiteSummary8616,
 )
+from angr_platforms.X86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
+from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from angr_platforms.X86_16.ir.function_ir_registry import publish_function_ir_artifact_8616
 from angr_platforms.X86_16.ir.ssa_function import (
     build_x86_16_function_ssa,
 )
@@ -28,7 +31,7 @@ from angr_platforms.X86_16.lowering.interprocedural_storage_reaching_defs import
 def _resolve_register_immediate(value: int):
     code = bytes((0xB8, value & 0xFF, value >> 8, 0x50, 0xE8, 0, 0))
     project = angr.Project(
-        io.BytesIO(code),
+        io.BytesIO(code + b"\xc3"),
         main_opts={
             "backend": "blob",
             "arch": Arch86_16(),
@@ -37,9 +40,15 @@ def _resolve_register_immediate(value: int):
         },
         auto_load_libs=False,
     )
-    boundary = SimpleNamespace(addr=0x1000, block_addrs_set={0x1000}, info={})
+    boundary = exact_function_range_boundary_8616(project, 0x1000, 0x1000 + len(code) + 1)
+    assert boundary is not None
     artifact = build_x86_16_ir_function_artifact(project, boundary)
     assert not artifact.refusals
+    publish_function_ir_artifact_8616(project, artifact)
+    index = build_boundary_direct_callsite_index_8616(
+        boundary,
+        direct_target_resolver=lambda instruction: resolve_direct_call_target_from_instruction_8616(project, instruction),
+    )
     summary = CallsiteSummary8616(
         callsite_addr=0x1004,
         target_addr=0x1007,
@@ -57,6 +66,8 @@ def _resolve_register_immediate(value: int):
         build_x86_16_function_ssa(artifact),
         summary,
         0,
+        project=project,
+        callsite_index=index,
     )
 
 

@@ -1,11 +1,70 @@
-"""Tests for the cached startup architecture command path."""
+"""Tests for architecture guard entrypoints and required pipeline lanes."""
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
+
+import pytest
 
 from inertia_decompiler import architecture_runtime_guard
 from scripts import check_decompiler_architecture as architecture_check
+
+
+def _actual_pipeline_lanes() -> dict[str, tuple[str, ...]]:
+    """Read the production lane declarations without importing the runner."""
+    path = Path(__file__).resolve().parents[2] / "scripts/test_pipeline.py"
+    return architecture_check._pipeline_tier_literals(ast.parse(path.read_text()))
+
+
+def _lane_contract_errors(lanes: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    """Select lane-contract diagnostics independently of fixture marker checks."""
+    root = Path(__file__).resolve().parents[2]
+    path = root / "scripts/test_pipeline.py"
+    violations = architecture_check._pipeline_lane_contract_violations_8616(
+        path, path.read_text(), lanes, (), root,
+    )
+    return tuple(item.detail for item in violations if item.rule == "test-pipeline-tier-contract")
+
+
+def test_full_guard_accepts_registered_budgeted_and_relational_lanes() -> None:
+    """The full guard must agree with the independently registered runner lanes."""
+    assert not _lane_contract_errors(_actual_pipeline_lanes())
+
+
+@pytest.mark.parametrize("tier", ["fast", "default", "expanded"])
+def test_full_guard_rejects_missing_budgeted_binary_admission(tier: str) -> None:
+    """Every tier must retain the bounded proof lane before the unit pool."""
+    lanes = _actual_pipeline_lanes()
+    assert lanes[tier][0] == "binary-budgeted"
+    lanes[tier] = lanes[tier][1:]
+    assert any(repr(tier) in detail for detail in _lane_contract_errors(lanes))
+
+
+@pytest.mark.parametrize("tier", ["fast", "default", "expanded"])
+def test_full_guard_rejects_unit_pool_before_binary_admission(tier: str) -> None:
+    """Coverage alone is insufficient: proof admission must run before the pool."""
+    lanes = _actual_pipeline_lanes()
+    first, second, *rest = lanes[tier]
+    assert (first, second) == ("binary-budgeted", "unit-focused")
+    lanes[tier] = (second, first, *rest)
+    assert any(repr(tier) in detail for detail in _lane_contract_errors(lanes))
+
+
+@pytest.mark.parametrize("tier", ["default", "expanded"])
+def test_full_guard_rejects_missing_relational_binary_lane(tier: str) -> None:
+    """Default and expanded validation must retain native relational controls."""
+    lanes = _actual_pipeline_lanes()
+    assert "binary-relational" in lanes[tier]
+    lanes[tier] = tuple(lane for lane in lanes[tier] if lane != "binary-relational")
+    assert any(repr(tier) in detail for detail in _lane_contract_errors(lanes))
+
+
+def test_full_guard_still_rejects_external_compiler_in_fast_lane() -> None:
+    """Updating local proof coverage must not admit slow external compilation."""
+    lanes = _actual_pipeline_lanes()
+    lanes["fast"] += ("msc6-tiny-full-pipeline",)
+    assert any("'fast'" in detail for detail in _lane_contract_errors(lanes))
 
 
 def test_startup_checker_consumes_prechecked_import_violations(

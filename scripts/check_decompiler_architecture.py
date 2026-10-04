@@ -1324,11 +1324,16 @@ _MAKEFILE_FORBIDDEN_MARKERS = (
     "type-ratchet-files: skipped explicit legacy debt:",
 )
 
-_PIPELINE_TIER_CONTRACT = {
-    "fast": ("unit-focused",),
-    "default": ("unit-focused", "ultra-quickc-fixtures", "msc6-tiny-full-pipeline"),
+_PIPELINE_TIER_CONTRACT: dict[str, tuple[str, ...]] = {
+    "fast": ("binary-budgeted", "unit-focused"),
+    "default": (
+        "binary-budgeted", "unit-focused", "binary-relational",
+        "ultra-quickc-fixtures", "msc6-tiny-full-pipeline",
+    ),
     "expanded": (
+        "binary-budgeted",
         "unit-focused",
+        "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
         "sortd-sidecar-free",

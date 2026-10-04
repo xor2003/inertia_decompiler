@@ -5180,6 +5180,9 @@ QA_RUFF_TARGETS += tools/dosunit/kvikdos_vm_worker.py tools/dosunit/kvikdos_back
 QA_PYTEST_TARGETS += $(KVIKDOS_WORKER_TESTS)
 
 QA_TYPED_FILES += scripts/pytest_directory_cache.py
+QA_TYPED_FILES += scripts/compact_paths.py
+QA_RUFF_TARGETS += scripts/compact_paths.py angr_platforms/tests/test_compact_paths.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_compact_paths.py
 QA_RUFF_TARGETS += scripts/pytest_directory_cache.py angr_platforms/tests/test_pytest_directory_cache.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_pytest_directory_cache.py
 QA_TYPED_FILES += scripts/pytest_live_failures.py

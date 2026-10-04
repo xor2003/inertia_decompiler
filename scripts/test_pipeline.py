@@ -33,6 +33,7 @@ BUDGETED_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
 )
 
 FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
+    "angr_platforms/tests/test_compact_paths.py",
     "angr_platforms/tests/test_ordered_io_environment.py",
     "angr_platforms/tests/test_x86_16_immediate_port.py",
     "angr_platforms/tests/test_flat32_indirect_callbacks.py",

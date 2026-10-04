@@ -259,6 +259,10 @@ call-semantics check, output-shape comparison, and applicable round trip.
 
 ## Context / compaction
 
+For shorter displayed paths, use `scripts/compact_paths.py` on saved logs;
+`--legend` explains the aliases. Keep canonical paths in commands, source,
+raw logs and proof receipts. Do not rename modules just to shorten a report.
+
 Context / compaction
 
 Before compaction, create a minimal handoff for the next agent.
