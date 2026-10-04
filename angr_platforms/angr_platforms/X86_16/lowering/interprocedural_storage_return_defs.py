@@ -19,8 +19,15 @@ from ..caller_return_use_contracts import (
     CallerReturnUseFact8616,
     CallerReturnUseVerdict8616,
 )
+from ..frontend_direct_callsite_index import DecodedDirectCallsiteIndex8616
 from ..ir import IRInstr, IRValue, MemSpace
 from ..ir.ssa_function import SSAFunctionArtifact
+from ..semantics.call_stack_effect_pipeline import CallSemanticProjection8616
+from .call_target_ssa_binder import (
+    CallTargetBindResult8616,
+    CallTargetBindStage8616,
+    bind_ssa_call_target_8616,
+)
 from .interprocedural_storage_contracts import (
     StorageDefinitionKind8616,
     StorageIdentity8616,
@@ -149,6 +156,8 @@ def resolve_call_output_definitions_8616(
     output_storages: tuple[StorageIdentity8616, ...],
     *,
     project: object | None = None,
+    callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
+    projection: CallSemanticProjection8616 | None = None,
 ) -> CallOutputDefinitionResult8616:
     """Bind exact return carriers to one observed typed CALL producer."""
     raw_count = len(output_storages)
@@ -178,6 +187,8 @@ def resolve_call_output_definitions_8616(
         accepted_target_addrs,
         output_storages,
         project=project,
+        callsite_index=callsite_index,
+        projection=projection,
     )
 
 
@@ -245,6 +256,112 @@ def _call_target_match_8616(
     )
 
 
+_BOUND_CONFLICT_FAILURES_8616: dict[
+    CallTargetBindStage8616, CallOutputDefinitionFailure8616
+] = {
+    CallTargetBindStage8616.SSA_CALLER_MISMATCH: CallOutputDefinitionFailure8616.CALLER_IDENTITY_CONFLICT,
+    CallTargetBindStage8616.SSA_CALL_AMBIGUOUS: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_ARTIFACT_STALE: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SEMANTIC_PROJECTION_INCOMPLETE: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SEMANTIC_PROJECTION_SSA_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SEMANTIC_SSA_CONFLICT: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SOURCE_IR_CONFLICT: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SOURCE_IR_BLOCK_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.EFFECTS_BLOCK_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.EFFECTS_FACT_MISSING: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.EFFECTS_FACT_AMBIGUOUS: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.OUTPUTS_PREFIX_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.OUTPUTS_SUFFIX_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_ENRICHED_INDEX_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_ENRICHED_ORIGIN_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_ENRICHED_CALL_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.RAW_IR_CONFLICT: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_RAW_BLOCK_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_RAW_INDEX_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_RAW_CALL_AMBIGUOUS: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_RAW_ORIGIN_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.SSA_RAW_OPERAND_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.PRODUCER_PROJECTION_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.PRODUCER_AMBIGUOUS: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.PRODUCER_MISMATCH: CallOutputDefinitionFailure8616.CALLSITE_CONFLICT,
+    CallTargetBindStage8616.DECODED_TARGET_AMBIGUOUS: CallOutputDefinitionFailure8616.CALL_TARGET_CONFLICT,
+    CallTargetBindStage8616.RETAINED_BINDING_CONFLICT: CallOutputDefinitionFailure8616.CALL_TARGET_CONFLICT,
+    CallTargetBindStage8616.TARGET_NOT_ADMITTED: CallOutputDefinitionFailure8616.CALL_TARGET_CONFLICT,
+}
+
+_BOUND_UNKNOWN_FAILURES_8616: dict[
+    CallTargetBindStage8616, CallOutputDefinitionFailure8616
+] = {
+    CallTargetBindStage8616.SSA_CALL_NOT_FOUND: CallOutputDefinitionFailure8616.CALLSITE_NOT_FOUND,
+    CallTargetBindStage8616.SSA_CALL_MALFORMED: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.PROJECT_MISSING: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.SEMANTIC_PROJECTION_MISSING: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.SEMANTIC_SSA_NOT_REGISTERED: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.SOURCE_IR_NOT_REGISTERED: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.RAW_IR_NOT_REGISTERED: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.SSA_ORIGIN_MISSING: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.PRODUCER_UNBOUND: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.DECODED_INDEX_MISSING: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.DECODED_ENTRY_MISSING: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+    CallTargetBindStage8616.NATIVE_BINDING_REFUSED: CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+}
+
+
+def _bound_target_refusal_8616(
+    binding: CallTargetBindResult8616,
+    raw_count: int,
+) -> CallOutputDefinitionResult8616:
+    """Translate a shared-binder refusal without leaking partial definitions."""
+    conflict = _BOUND_CONFLICT_FAILURES_8616.get(binding.stage)
+    if conflict is not None:
+        return _refused_result_8616(
+            CallOutputDefinitionVerdict8616.CONFLICT,
+            conflict,
+            raw_count,
+            raw_count,
+        )
+    unknown = _BOUND_UNKNOWN_FAILURES_8616.get(binding.stage)
+    return _refused_result_8616(
+        CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE,
+        unknown or CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+        raw_count,
+        raw_count,
+    )
+
+
+def _proven_call_target_const_8616(
+    artifact: SSAFunctionArtifact,
+    caller_addr: int,
+    callsite_addr: int,
+    target: IRValue,
+    accepted_target_addrs: tuple[int, ...],
+    raw_count: int,
+    project: object | None,
+    callsite_index: DecodedDirectCallsiteIndex8616 | None,
+    projection: CallSemanticProjection8616 | None,
+) -> int | CallOutputDefinitionResult8616:
+    """Return the admitted full-width callee coordinate or a typed refusal.
+
+    A ``CONST`` operand keeps the existing equivalence path verbatim; a
+    symbolic operand must close the shared SSA/native binder before its
+    proven coordinate re-enters the same admitted-relation check.
+    """
+    if target.space is MemSpace.CONST and isinstance(target.const, int):
+        return target.const
+    binding = bind_ssa_call_target_8616(
+        artifact,
+        caller_addr,
+        callsite_addr,
+        accepted_target_addrs,
+        project=project,
+        callsite_index=callsite_index,
+        projection=projection,
+    )
+    if not binding.complete or binding.target_addr is None:
+        return _bound_target_refusal_8616(binding, raw_count)
+    return binding.target_addr
+
+
 def resolve_storage_call_output_definitions_8616(
     artifact: SSAFunctionArtifact,
     caller_addr: int,
@@ -254,6 +371,8 @@ def resolve_storage_call_output_definitions_8616(
     output_storages: tuple[StorageIdentity8616, ...],
     *,
     project: object | None = None,
+    callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
+    projection: CallSemanticProjection8616 | None = None,
 ) -> CallOutputDefinitionResult8616:
     """Bind exact register or addressed storage outputs to one typed CALL."""
     raw_count = len(output_storages)
@@ -262,15 +381,26 @@ def resolve_storage_call_output_definitions_8616(
         return gate
     block_addr, instr_index, instruction = gate
     target = instruction.args[0]
-    if not isinstance(target, IRValue) or target.space is not MemSpace.CONST or not isinstance(
-        target.const, int
-    ):
+    if not isinstance(target, IRValue):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE,
             CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
             raw_count,
         )
-    if not _call_target_match_8616(target.const, accepted_target_addrs, project):
+    target_const = _proven_call_target_const_8616(
+        artifact,
+        caller_addr,
+        callsite_addr,
+        target,
+        accepted_target_addrs,
+        raw_count,
+        project,
+        callsite_index,
+        projection,
+    )
+    if isinstance(target_const, CallOutputDefinitionResult8616):
+        return target_const
+    if not _call_target_match_8616(target_const, accepted_target_addrs, project):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.CONFLICT,
             CallOutputDefinitionFailure8616.CALL_TARGET_CONFLICT,

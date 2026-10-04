@@ -51,5 +51,5 @@ def test_tidshowrange_oracle_accepts_source_behavior(tmp_path):
 )
 def test_tidshowrange_oracle_rejects_compile_valid_corruption(tmp_path, original, replacement):
     assert original in _REFERENCE
-    with pytest.raises(AssertionError, match="TIDShowRange behavior failed"):
+    with pytest.raises(AssertionError, match="TIDShowRange behavior failed: Tscale="):
         assert_tidshowrange_behavior(_REFERENCE.replace(original, replacement), tmp_path)

@@ -18,7 +18,6 @@ def test_isolated_project_recovery_target_uses_original_addr_for_rebased_slice()
     candidate_addr, image_end = cli_core._isolated_project_recovery_target_8616(
         function,
         isolated_project,
-        fallback_linked_base=0x1000,
         fallback_max_addr=0x104D,
     )
 
@@ -26,16 +25,15 @@ def test_isolated_project_recovery_target_uses_original_addr_for_rebased_slice()
     assert image_end == 0x14000
 
 
-def test_isolated_project_recovery_target_handles_relative_image_size():
+def test_isolated_project_recovery_target_uses_absolute_inclusive_max_addr():
     function = SimpleNamespace(addr=0x1000, info={"inertia_original_addr": 0x10010})
     isolated_project = SimpleNamespace(
-        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x4000))
+        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x14000))
     )
 
     candidate_addr, image_end = cli_core._isolated_project_recovery_target_8616(
         function,
         isolated_project,
-        fallback_linked_base=0x1000,
         fallback_max_addr=0x104D,
     )
 

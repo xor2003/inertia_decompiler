@@ -1,5 +1,6 @@
 """Accepted storage contracts must survive authoritative prototype replay."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -27,10 +28,12 @@ def test_storage_prototype_application_refreshes_replay_snapshot(already_applied
     scalar = SimTypeFunction([], SimTypeShort(False)).with_arch(arch)
     function = SimpleNamespace(addr=0x2000, prototype=scalar, is_prototype_guessed=False)
     project = SimpleNamespace(arch=arch, kb=SimpleNamespace(functions=SimpleNamespace(function=lambda **kwargs: function)))
-    _publish(project, _contract(outputs=(
+    pointer_output = replace(
         _slot(StorageTrialRole8616.RETURN, 0, 2, StorageTrialSignedness8616.NOT_APPLICABLE,
               StorageTrialValueClass8616.POINTER, register="ax"),
-    )))
+        pointee_width_bytes=2,
+    )
+    _publish(project, _contract(outputs=(pointer_output,)))
     codegen = _Codegen(project)
     codegen.cfunc = SimpleNamespace(addr=0x2000, arg_list=[], functy=scalar)
     if already_applied:
@@ -42,6 +45,7 @@ def test_storage_prototype_application_refreshes_replay_snapshot(already_applied
     apply_accepted_function_storage_prototype_8616(project, codegen)
 
     assert isinstance(codegen.cfunc.functy.returnty, SimTypePointer)
+    assert codegen.cfunc.functy.returnty.pts_to.size == 16
     snapshot = authoritative_function_prototype_8616(project, function, argument_count=0)
     assert snapshot is not None
     assert isinstance(snapshot.returnty, SimTypePointer)

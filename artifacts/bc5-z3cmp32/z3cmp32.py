@@ -14,13 +14,26 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import angr
-from flat32_adapter import OUTPUT_REGS, S, installed, load32
-from flat32_catalog import Symbol, catalog, global_map, lst_data_symbols, lst_functions, mapping, nm_symbols
+from flat32_adapter import OUTPUT_REGS, REG_NAMES, S, installed
+from flat32_catalog import (
+    Symbol,
+    cached_lst_data_symbols,
+    cached_lst_functions,
+    catalog,
+    global_map,
+    mapping,
+    nm_symbols,
+)
+from flat32_fast_pe import load32_verified
 from flat32_region import RegionLimits
 from flat32_verdict import REPORT_SCHEMA, Status, checked_results, exit_code, summarize
+
+if TYPE_CHECKING:
+    from tools.dosunit.flat32_proof_domain import Flat32ProofDomain
+    from tools.dosunit.ordered_io_environment import OrderedIoContract
 
 REGION_DEFAULT_BLOCK_CAP: Final = 128
 REGION_MAX_BLOCK_CAP: Final = 256
@@ -45,6 +58,8 @@ def mapped_call_entries(
     ambiguous_oracle: set[int] = set()
     ambiguous_candidate: set[int] = set()
     for name in sorted(boundaries.keys() & symbols.keys()):
+        if symbols[name].kind.lower() != "t":
+            continue
         oracle_address = boundaries[name][0]
         candidate_address = symbols[name].address + candidate_delta
         if oracle_address in oracle and oracle[oracle_address] != name:
@@ -63,6 +78,10 @@ def mapped_call_entries(
 def preflight(project: angr.Project, address: int, size: int, scan_limit: int) -> str | None:
     """Require a whole near-return block, with no hidden exceptional/branch exits."""
     block = project.factory.block(address, size=min(size or scan_limit, scan_limit), opt_level=0)
+    from tools.dosunit.binary_environment import requires_environment_contract
+
+    if requires_environment_contract(block.vex):
+        return "external_environment_contract_required"
     if block.vex.jumpkind == "Ijk_Call":
         return "call_boundary"
     if block.vex.jumpkind != "Ijk_Ret" or any(stmt.tag == "Ist_Exit" for stmt in block.vex.statements):
@@ -107,6 +126,81 @@ def select_functions(
 def write_json(directory: Path, name: str, document: object) -> None:
     """Persist a reproducible artifact with readable JSON and a final newline."""
     (directory / name).write_text(json.dumps(document, indent=2) + "\n")
+
+
+def _component_functions(
+    args: argparse.Namespace,
+    oracle: angr.Project,
+    candidate: angr.Project,
+    boundaries: dict[str, tuple[int, int]],
+    symbols: dict[str, Symbol],
+    names: list[str],
+) -> tuple[dict[str, tuple[int, int]], dict[str, tuple[int, int]], list[str]]:
+    """Resolve selected names into declared ranges independent of mode admission.
+
+    The recursive component has its own same-coordinate admission rules; a
+    function refused by mode preflight can still be a declared member. Each
+    side contributes only the names it can actually resolve, so one-sided and
+    unresolved selections reach the adapter as refused attempts rather than
+    disappearing from the accounting.
+    """
+    delta = candidate.loader.main_object.mapped_base - candidate.loader.main_object.linked_base
+    oracle_functions: dict[str, tuple[int, int]] = {}
+    candidate_functions: dict[str, tuple[int, int]] = {}
+    unresolved: list[str] = []
+    for name in names:
+        resolved = False
+        if name in boundaries:
+            start, last = boundaries[name]
+            size = last - start + oracle.factory.block(last, num_inst=1).vex.size
+            oracle_functions[name] = start, size
+            resolved = True
+        if name in symbols:
+            symbol = symbols[name]
+            candidate_functions[name] = symbol.address + delta, symbol.size or args.scan_limit
+            resolved = True
+        if not resolved:
+            unresolved.append(name)
+    return oracle_functions, candidate_functions, unresolved
+
+
+def _recursive_joint_document(
+    args: argparse.Namespace,
+    oracle: angr.Project,
+    candidate: angr.Project,
+    boundaries: dict[str, tuple[int, int]],
+    symbols: dict[str, Symbol],
+    names: list[str],
+) -> dict[str, Any] | None:
+    """Attempt the declared opt-in component proof; absent request means no field.
+
+    The image-bound PE32 recursive proof lifts its own same-coordinate member
+    closure and needs the unmodified block finisher, so it always re-enters
+    this driver's seam with ``region=True`` regardless of the enclosing mode.
+    Ordinary rows, statuses and dependencies are never touched; the retained
+    outcome is a separate initialized-entry result, never member discharge.
+    """
+    from tools.dosunit.pe32_recursive_compare import (
+        prove_pe32_recursive_compare,
+        recursive_request_from_args,
+    )
+
+    request = recursive_request_from_args(args)
+    if request is None:
+        return None
+    oracle_functions, candidate_functions, unresolved = _component_functions(
+        args, oracle, candidate, boundaries, symbols, names)
+    with installed(region=True):
+        outcome = prove_pe32_recursive_compare(
+            oracle_exe=args.oracle_exe,
+            candidate_exe=args.candidate_exe,
+            oracle_functions=oracle_functions,
+            candidate_functions=candidate_functions,
+            request=request,
+            unresolved_names=unresolved,
+        )
+    document: dict[str, Any] = outcome.to_document()
+    return document
 
 
 def _mismatch_is_relocation(item: dict[str, Any], relocation: dict[int, int]) -> bool:
@@ -173,8 +267,20 @@ def compare_region_mode(
     relocation: dict[int, int],
     loop_context: tuple[angr.Project, angr.Project, dict[str, tuple[int, int]], dict[str, tuple[int, int]]] | None = None,
     call_entries: tuple[dict[int, str], dict[int, str]] | None = None,
+    entry_domain: Flat32ProofDomain | None = None,
+    io_model: OrderedIoContract | None = None,
 ) -> dict[str, Any]:
-    """Account for each bounded region; optionally retry loops with CFG induction."""
+    """Account for each bounded region; optionally retry loops with CFG induction.
+
+    ``entry_domain`` is the caller-declared top-level entry-esp premise; it is
+    forwarded to the checked call-composition retry only. A verdict that needed
+    the premise stays conditional with its serialized assumptions.
+
+    ``io_model`` is the declared ordered-I/O environment contract; it is
+    forwarded to the composition retry and the checked environment gate, which
+    republishes any discharged verdict covering port events as conditional on
+    the recorded premise.
+    """
     from flat32_region import compare_region
 
     grouped: list[dict[str, list[dict[str, Any]]]] = []
@@ -188,7 +294,7 @@ def compare_region_mode(
     limits = region_limits(args.region_max_blocks)
     results = list(existing_results)
     selected = {item["function"]["name"] for item in existing_results}
-    return_outputs = tuple(dict.fromkeys((*args.output_regs.split(","), *OUTPUT_REGS[3:])))
+    return_outputs = tuple(dict.fromkeys((*args.output_regs.split(","), *OUTPUT_REGS[2:])))
     for name in names:
         if name in selected:
             continue
@@ -241,6 +347,13 @@ def compare_region_mode(
                     "reason": verdict.get("reason") if verdict.get("status") == Status.CONDITIONAL else "relocation_assumptions",
                     "assumptions": assumptions,
                 }
+        from tools.dosunit.flat32_proof_retry import checked_environment_verdict, retry_function_proof
+
+        verdict = retry_function_proof(name, verdict, loop_context, return_outputs, args.timeout_ms,
+                                       entry_domain=entry_domain, io_model=io_model)
+        verdict = checked_environment_verdict(verdict, loop_context,
+                                               grouped[0].get(name, []), grouped[1].get(name, []),
+                                               io_model=io_model)
         results.append({"function": {"id": f"oracle:{name}", "name": name}, **verdict})
     results.sort(key=lambda item: item["function"]["name"])
     summary = summarize(results)
@@ -279,6 +392,12 @@ def compare_region_mode(
             "outputs": return_outputs,
             "memory": "entire unconstrained flat byte array",
             "global_normalization": "conditional value relocation" if relocation else None,
+            "entry_esp_premise": (
+                entry_domain.assumption_document() if entry_domain is not None else None
+            ),
+            "ordered_io_premise": (
+                io_model.premise_document() if io_model is not None else None
+            ),
         },
         "inputs": {
             side: {"path": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -288,14 +407,25 @@ def compare_region_mode(
     }
 
 
-def compare(args: argparse.Namespace) -> dict[str, Any]:
+def _compare(args: argparse.Namespace) -> dict[str, Any]:
     """Lower accepted complete bodies and retain every missing/refused obligation."""
-    oracle, candidate = load32(args.oracle_exe), load32(args.candidate_exe)
-    boundaries = lst_functions(args.oracle_lst)
+    from tools.dosunit.flat32_proof_domain_cli import (
+        require_supported_entry_domain,
+        require_supported_io_domain,
+    )
+
+    entry_domain = require_supported_entry_domain(args)
+    io_model = require_supported_io_domain(args)
+    oracle = load32_verified(args.oracle_exe, args.cache_dir)
+    candidate = load32_verified(args.candidate_exe, args.cache_dir)
+    from tools.dosunit.flat32_proof_report import loaded_image_identity
+
+    images = {"oracle": loaded_image_identity(oracle), "candidate": loaded_image_identity(candidate)}
+    boundaries = cached_lst_functions(args.oracle_lst, args.cache_dir)
     if args.candidate_lst:
         symbols = {
             name: Symbol(start, last - start + candidate.factory.block(last, num_inst=1).vex.size, "T")
-            for name, (start, last) in lst_functions(args.candidate_lst).items()
+            for name, (start, last) in cached_lst_functions(args.candidate_lst, args.cache_dir).items()
         }
     else:
         symbols = nm_symbols(args.candidate_exe)
@@ -305,19 +435,25 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
     names = (
         sorted({name.strip() for name in args.functions.split(",") if name.strip()})
         if args.functions
-        else sorted(name for name in boundaries.keys() & symbols.keys() if name.startswith("sub_"))
+        else sorted(name for name in boundaries if name.startswith("sub_"))
     )
     ofuncs, cfuncs, results = select_functions(args, oracle, candidate, boundaries, symbols, names)
+    recursive_joint = _recursive_joint_document(args, oracle, candidate, boundaries, symbols, names)
+    from tools.dosunit.flat32_proof_retry import build_proof_context
+
+    proof_context = build_proof_context(args.mode, oracle, candidate, lambda: select_functions(
+        args, oracle, candidate, boundaries, symbols, sorted(boundaries.keys() | symbols.keys()),
+    ))
     omod, cmod = "oracle", "candidate"
     ocat = catalog(omod, ofuncs, oracle.loader.main_object.linked_base)
     ccat = catalog(cmod, cfuncs, candidate.loader.main_object.linked_base)
     pairs = mapping(omod, cmod, list(ofuncs))
-    output_regs = tuple(dict.fromkeys((*args.output_regs.split(","), *OUTPUT_REGS[3:])))
+    output_regs = tuple(dict.fromkeys((*args.output_regs.split(","), *OUTPUT_REGS[2:])))
     if args.mode == "matched-cfg":
         from flat32_cfg import compare_cfg
 
         normalization = (
-            global_map(symbols, candidate, oracle, lst_data_symbols(args.oracle_lst))
+            global_map(symbols, candidate, oracle, cached_lst_data_symbols(args.oracle_lst, args.cache_dir))
             if args.normalize_globals
             else {}
         )
@@ -332,6 +468,12 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
                 timeout_ms=args.timeout_ms,
                 normalization=normalization,
             )
+            from tools.dosunit.flat32_proof_retry import checked_cfg_environment_verdict, retry_function_proof
+
+            retried = retry_function_proof(name, result, proof_context, output_regs, args.timeout_ms,
+                                           entry_domain=entry_domain, io_model=io_model)
+            retried = checked_cfg_environment_verdict(retried, result, proof_context, io_model=io_model)
+            result = {**retried, "function": {"id": f"oracle:{name}", "name": name}}
             write_json(args.out_dir, f"{name}.cfg.json", result)
             results.append(
                 {
@@ -343,6 +485,7 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         summary = summarize(results)
         report = {
             "schema": REPORT_SCHEMA,
+            "requested_functions": names,
             "summary": summary,
             "results": results,
             "proof_contract": {
@@ -354,10 +497,15 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
             },
         }
         write_json(args.out_dir, "compare.json", report)
+        report["loaded_images"] = images
+        report["function_ranges"] = {"oracle": ofuncs, "candidate": cfuncs}
+        report["recursive_joint"] = recursive_joint
         return report
     if args.mode in {"region", "auto"}:
         kwargs = {
-            "output_regs": (*output_regs, "ip"),
+            # Intermediate flags, segments and scratch registers feed successors;
+            # the selected return ABI applies only after full region composition.
+            "output_regs": (*REG_NAMES, "ip"),
             "scan_limit": max(args.scan_limit, 0x10000),
             "max_blocks_per_function": args.region_max_blocks,
             "max_insns_per_function": 512,
@@ -367,25 +515,30 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
             "cache_dir": args.cache_dir,
         }
         ossa = S.lower_straightline_ssa_document(
-            exe_path=args.oracle_exe, functions_catalog=ocat, **kwargs
+            exe_path=args.oracle_exe, functions_catalog=ocat, lifter_project=oracle, **kwargs
         )
         cssa = S.lower_straightline_ssa_document(
-            exe_path=args.candidate_exe, functions_catalog=ccat, **kwargs
+            exe_path=args.candidate_exe, functions_catalog=ccat, lifter_project=candidate, **kwargs
         )
         normalization = (
-            global_map(symbols, candidate, oracle, lst_data_symbols(args.oracle_lst)) if args.normalize_globals else {}
+            global_map(symbols, candidate, oracle, cached_lst_data_symbols(args.oracle_lst, args.cache_dir))
+            if args.normalize_globals else {}
         )
-        loop_context = (oracle, candidate, ofuncs, cfuncs) if args.mode == "auto" else None
+        loop_context = proof_context
         delta = candidate.loader.main_object.mapped_base - candidate.loader.main_object.linked_base
         call_entries = mapped_call_entries(boundaries, symbols, delta) if args.assume_paired_calls else None
         report = compare_region_mode(
             args, ossa, cssa, names,
             existing_results=results, relocation=normalization, loop_context=loop_context,
-            call_entries=call_entries,
+            call_entries=call_entries, entry_domain=entry_domain, io_model=io_model,
         )
+        report["requested_functions"] = names
         write_json(args.out_dir, "compare.json", report)
         write_json(args.out_dir, "oracle.ssa.json", ossa)
         write_json(args.out_dir, "candidate.ssa.json", cssa)
+        report["loaded_images"] = images
+        report["function_ranges"] = {"oracle": ofuncs, "candidate": cfuncs}
+        report["recursive_joint"] = recursive_joint
         return report
     kwargs = {
         "output_regs": output_regs,
@@ -396,10 +549,15 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         "follow_call_fallthrough": False,
         "max_function_ms": args.timeout_ms,
     }
-    ossa = S.lower_straightline_ssa_document(exe_path=args.oracle_exe, functions_catalog=ocat, **kwargs)
-    cssa = S.lower_straightline_ssa_document(exe_path=args.candidate_exe, functions_catalog=ccat, **kwargs)
+    ossa = S.lower_straightline_ssa_document(
+        exe_path=args.oracle_exe, functions_catalog=ocat, lifter_project=oracle, **kwargs
+    )
+    cssa = S.lower_straightline_ssa_document(
+        exe_path=args.candidate_exe, functions_catalog=ccat, lifter_project=candidate, **kwargs
+    )
     normalization = (
-        global_map(symbols, candidate, oracle, lst_data_symbols(args.oracle_lst)) if args.normalize_globals else {}
+        global_map(symbols, candidate, oracle, cached_lst_data_symbols(args.oracle_lst, args.cache_dir))
+        if args.normalize_globals else {}
     )
     for function in cssa["functions"]:
         function["_constant_normalization"] = normalization
@@ -426,6 +584,7 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("proof obligation accounting mismatch")
     report = {
         "schema": REPORT_SCHEMA,
+        "requested_functions": names,
         "summary": summary,
         "results": results,
         "evidence": {
@@ -442,7 +601,7 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
             "output_regs": output_regs,
             "memory": "entire byte array including stack writes",
             "control_flow": "complete single-block near return; 32-bit return target observed",
-            "flags": "pure uninterpreted x86g_calculate_condition; SAT can be spurious",
+            "flags": "lazy-flag summaries: supported thunks evaluated exactly; unsupported flag-dependent counterexamples refuse",
             "global_normalization": "conditional value relocation; not a pointer-alias or data-initialization proof"
             if normalization
             else None,
@@ -464,7 +623,17 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         ("globals.json", {hex(k): hex(v) for k, v in normalization.items()}),
     ]:
         write_json(args.out_dir, filename, document)
+    report["loaded_images"] = images
+    report["function_ranges"] = {"oracle": ofuncs, "candidate": cfuncs}
+    report["recursive_joint"] = recursive_joint
     return report
+
+
+def compare(args: argparse.Namespace) -> dict[str, Any]:
+    """Bind complete backend evidence to current binaries and proof contracts."""
+    from tools.dosunit.flat32_proof_report import run_bound_comparison
+
+    return run_bound_comparison(_compare, args, Path(__file__))
 
 
 def main() -> int:
@@ -499,8 +668,22 @@ def main() -> int:
         "--cache-dir", type=Path, default=Path("/tmp/z3bcc-vexcache"),
         help="shared VEX lift cache; persists across sharded runs",
     )
+    from tools.dosunit.flat32_proof_domain_cli import (
+        add_entry_esp_range_argument,
+        add_ordered_io_argument,
+        check_entry_domain_mode,
+        check_ordered_io_mode,
+    )
+    from tools.dosunit.pe32_recursive_compare import add_recursive_arguments, check_recursive_request
+
+    add_entry_esp_range_argument(parser)
+    add_ordered_io_argument(parser)
+    add_recursive_arguments(parser)
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args()
+    check_entry_domain_mode(parser, args)
+    check_ordered_io_mode(parser, args)
+    check_recursive_request(parser, args)
     if not 1 <= args.region_max_blocks <= REGION_MAX_BLOCK_CAP:
         parser.error("region-max-blocks must be between 1 and 256")
     if args.assume_paired_calls and args.mode not in {"region", "auto"}:

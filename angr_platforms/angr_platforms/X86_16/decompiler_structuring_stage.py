@@ -1831,6 +1831,7 @@ def _replay_structuring_callsite_arguments_after_regeneration_8616(
 ) -> bool:
     """Reconsume typed callsite facts after core replaces the structured AST."""
     from . import decompiler_postprocess_calls as _calls
+    from .lowering.far_callback_call_materialization import materialize_binary_far_callback_calls_8616
 
     _bind_structuring_callsite_consumers_8616(codegen)
     controls = _calls._ensure_callsite_materialization_controls_8616(codegen)
@@ -1846,6 +1847,8 @@ def _replay_structuring_callsite_arguments_after_regeneration_8616(
                 codegen,
             )
         )
+        far_callback_result = materialize_binary_far_callback_calls_8616(project, codegen)
+        changed = far_callback_result.changed or changed
         return finalize_shared_call_occurrences_8616(project, codegen) or changed
     finally:
         controls._inertia_callsite_disable_consumed_arg_store_prune_8616 = previous_consumed_prune
@@ -1863,6 +1866,7 @@ def _materialize_structuring_callsite_stack_arguments_8616(project: AngrProjectS
     a separate compatibility proof.
     """
     from . import decompiler_postprocess_calls as _calls
+    from .lowering.far_callback_call_materialization import materialize_binary_far_callback_calls_8616
 
     _bind_structuring_callsite_consumers_8616(codegen)
     controls = _calls._ensure_callsite_materialization_controls_8616(codegen)
@@ -1877,7 +1881,9 @@ def _materialize_structuring_callsite_stack_arguments_8616(project: AngrProjectS
         )
         argument_join_changed = materialize_call_argument_joins_8616(project, codegen)
         changed = argument_join_changed or changed
-        if argument_join_changed:
+        far_callback_result = materialize_binary_far_callback_calls_8616(project, codegen)
+        changed = far_callback_result.changed or changed
+        if argument_join_changed or far_callback_result.changed:
             changed = bool(
                 prune_materialized_call_push_stack_assignments_8616(
                     project,

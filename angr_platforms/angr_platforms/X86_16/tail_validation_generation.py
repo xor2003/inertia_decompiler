@@ -22,6 +22,7 @@ from .lowering.return_type_evidence import proven_function_return_class_8616
 from .tail_validation_generation_atoms import (
     ValidationGenerationAtom8616,
     ValidationGenerationAtomBuilder8616,
+    validation_generation_atoms_equal_8616,
 )
 from .validation.status_flag_preservation import (
     packed_status_flag_preservation_evidence_8616,
@@ -87,13 +88,52 @@ class _ProjectSurface8616(Protocol):
     kb: _KnowledgeBaseSurface8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class TailValidationSummaryInputGeneration8616:
-    """In-process identity of all non-observable final-validator inputs."""
+    """In-process identity of all non-observable final-validator inputs.
+
+    Equality preserves native dataclass self identity and field comparison
+    order, delegating each atom field to the exact request-local DAG comparator.
+    Shared substructure is walked once per unique tuple pair within each field
+    instead of once per root path. Hashing stays the frozen-dataclass
+    field-tuple hash so separately built equal generations keep coherent
+    dictionary keys instead of falling back to object-identity hashing.
+    """
 
     function_surface: ValidationGenerationAtom8616
     codegen_evidence: tuple[tuple[str, ValidationGenerationAtom8616], ...]
     project_evidence: ValidationGenerationAtom8616
+
+    def __eq__(self, other: object) -> bool:
+        """Compare same-class generations by exact atom equality per field."""
+        if self is other:
+            return True
+        if (
+            not isinstance(other, TailValidationSummaryInputGeneration8616)
+            or other.__class__ is not self.__class__
+        ):
+            return NotImplemented
+        return (
+            validation_generation_atoms_equal_8616(
+                self.function_surface, other.function_surface
+            )
+            and validation_generation_atoms_equal_8616(
+                self.codegen_evidence, other.codegen_evidence
+            )
+            and validation_generation_atoms_equal_8616(
+                self.project_evidence, other.project_evidence
+            )
+        )
+
+    def __hash__(self) -> int:
+        """Hash the field tuple exactly as frozen-dataclass generation did."""
+        return hash(
+            (
+                self.function_surface,
+                self.codegen_evidence,
+                self.project_evidence,
+            )
+        )
 
 
 def _function_surface_generation_8616(

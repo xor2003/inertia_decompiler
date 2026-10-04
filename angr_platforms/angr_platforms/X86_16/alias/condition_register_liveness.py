@@ -113,6 +113,7 @@ def _condition_by_block_8616(
                 condition.taken_target,
                 condition.fallthrough_target,
                 condition.operand_bind_insn,
+                condition.relative_edge,
             )
             for condition in candidates
         }

@@ -323,6 +323,7 @@ def resolve_physical_store_definitions_8616(
             instr_index=site.instr_index,
             instr_addr=piece.push_addr,
             source_storage=source_storage,
+            logical_push=logical,
         )
         for item, source_storage in zip(
             logical.slices,

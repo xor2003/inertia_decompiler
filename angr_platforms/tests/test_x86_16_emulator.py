@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
 from angr_platforms.X86_16.emulator import Emulator
 from angr_platforms.X86_16.processor import Processor
 
@@ -15,6 +16,7 @@ class _Register:
 @dataclass(frozen=True)
 class _Arch:
     register_list: tuple[_Register, ...]
+    control_address_domain: ControlAddressDomain = ControlAddressDomain.LOADER_LINEAR
 
 
 class _MemoryEmulator(Emulator):

@@ -20,6 +20,7 @@ class _Instruction:
     op_str = "ax, bx"
     groups: tuple[int, ...] = ()
     operands: tuple[str, ...] = ("ax", "bx")
+    bytes: bytes = b"\x39\xd8"
 
     def reg_name(self, register_id: int) -> str:
         return f"reg_{register_id}"
@@ -39,6 +40,8 @@ def test_direct_instruction_preserves_capstone_detail_contract() -> None:
     assert artifact.block is not None
     instruction = artifact.block.instructions[0]
     assert isinstance(instruction, DirectCapstoneInstruction8616)
+    assert instruction.bytes == b"\x39\xd8"
+    assert type(instruction.bytes) is bytes
     assert instruction.operands == ("ax", "bx")
     assert instruction.reg_name(7) == "reg_7"
 @pytest.mark.parametrize("num_inst,opt_level", [(None, 0), (1, 0), (None, 1)])

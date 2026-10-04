@@ -81,6 +81,7 @@ def test_bios_behavior_oracle_rejects_corruption(tmp_path: Path, body: str) -> N
     assert _execute_bios_c(tmp_path, generated_c).returncode != 0
 
 
+@pytest.mark.requires_kvm
 def test_binary_bios_store_compiles_without_unused_stack_carriers(tmp_path: Path) -> None:
     """Preserve the ES/BDA write without leaving compile-invalid local setup."""
     binary = tmp_path / "bios.exe"

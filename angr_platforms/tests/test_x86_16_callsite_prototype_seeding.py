@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import UserDict
 from types import SimpleNamespace
 
 from angr.sim_type import SimTypeFunction, SimTypeShort
@@ -8,6 +9,7 @@ from angr_platforms.X86_16.callsite_summary import CallsiteSummary8616
 from angr_platforms.X86_16.lowering.callsite_prototype_seeding import (
     CallsitePrototypeSeedDecision8616,
     materialize_physical_callsite_prototype_8616,
+    physical_callsite_prototype_seed_8616,
 )
 
 
@@ -27,7 +29,7 @@ def _summary(*, widths: tuple[int, ...] = (2, 2)) -> CallsiteSummary8616:
 
 def test_physical_callsite_prototype_is_seeded_before_structuring() -> None:
     project = SimpleNamespace(arch=Arch86_16())
-    callee = SimpleNamespace(prototype=None, calling_convention=None, is_prototype_guessed=True)
+    callee = SimpleNamespace(prototype=None, calling_convention=None, is_prototype_guessed=True, info=UserDict())
 
     result = materialize_physical_callsite_prototype_8616(project, callee, _summary())
 
@@ -38,6 +40,10 @@ def test_physical_callsite_prototype_is_seeded_before_structuring() -> None:
     assert callee.prototype.returnty.size == 16
     assert callee.calling_convention is not None
     assert callee.is_prototype_guessed is False
+    seed = physical_callsite_prototype_seed_8616(callee)
+    assert seed is not None and seed.matches(_summary(), callee.prototype)
+    assert all(isinstance(value, (str, int, float, bool, list, dict, type(None)))
+               for value in callee.info.values())
 
 
 def test_physical_callsite_prototype_preserves_explicit_interface() -> None:
@@ -47,9 +53,11 @@ def test_physical_callsite_prototype_preserves_explicit_interface() -> None:
         prototype=explicit,
         calling_convention=None,
         is_prototype_guessed=False,
+        info={},
     )
 
     result = materialize_physical_callsite_prototype_8616(project, callee, _summary())
 
     assert result.decision is CallsitePrototypeSeedDecision8616.EXPLICIT_PROTOTYPE
     assert callee.prototype is explicit
+    assert physical_callsite_prototype_seed_8616(callee) is None

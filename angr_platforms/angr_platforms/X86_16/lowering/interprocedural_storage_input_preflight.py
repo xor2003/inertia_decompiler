@@ -31,6 +31,7 @@ from .interprocedural_storage_contracts import (
 from .interprocedural_storage_reaching_contracts import PhysicalCallArgument8616
 from .interprocedural_storage_reaching_defs import physical_call_argument_8616
 from .interprocedural_storage_trial_types import classify_input_argument_8616
+from .modular_argument_type_facts import ModularArgumentTypeFacts8616
 
 __all__ = [
     "CallsiteInputPreflightResult8616",
@@ -122,8 +123,15 @@ def classify_callsite_inputs_before_ssa_8616(
     argument_storage: tuple[IRAddress, ...],
     signedness_facts: ConditionArgumentFactsResult8616,
     pointer_evidence: CalleePointerArgumentEvidence8616 | None,
+    modular_facts: ModularArgumentTypeFacts8616 | None = None,
 ) -> CallsiteInputPreflightResult8616:
-    """Classify all logical inputs and refuse incomplete evidence before SSA."""
+    """Classify all logical inputs and refuse incomplete evidence before SSA.
+
+    Modular facts must name this exact callee in the collection's namespace;
+    a proof for the same BP slot in another function is not input evidence.
+    """
+    if modular_facts is not None and modular_facts.callee_addr != callee_addr:
+        modular_facts = None
     inputs: list[ClassifiedCallsiteInput8616] = []
     failures: list[StorageTrialCollectionFailure8616] = []
     normalized_count = 0
@@ -148,6 +156,7 @@ def classify_callsite_inputs_before_ssa_8616(
             len(argument_storage),
             signedness_facts,
             pointer_evidence,
+            modular_facts,
         )
         if (
             classification.failure is not None

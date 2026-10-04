@@ -614,6 +614,7 @@ def _parameter_bp_offset_8616(
     variable: object,
     projected_argument: FunctionStackArgumentCoordinate8616 | None,
 ) -> int | None:
+    """Return a proven machine-BP coordinate across the skipped-import boundary."""
     if not isinstance(variable, SimStackVariable):
         return None
     if (
@@ -621,8 +622,12 @@ def _parameter_bp_offset_8616(
         and projected_argument.entry_sp_offset == variable.offset
         and projected_argument.size == variable.size
     ):
-        return cast(int | None, projected_argument.machine_bp_offset)
-    return machine_bp_offset_for_stack_variable_8616(codegen, variable)
+        candidate_offset: object = projected_argument.machine_bp_offset
+    else:
+        candidate_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+    if isinstance(candidate_offset, int) and not isinstance(candidate_offset, bool):
+        return candidate_offset
+    return None
 
 
 def _parameter_entry_refused_8616(

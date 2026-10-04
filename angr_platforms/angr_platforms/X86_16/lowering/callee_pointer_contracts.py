@@ -35,6 +35,7 @@ class CalleePointerArgumentEvidence8616:
     pointer_stack_offsets: tuple[int, ...]
     pointer_argument_indices: tuple[int, ...]
     ambiguous_displaced_stack_offsets: tuple[int, ...]
+    ambiguous_indexed_stack_offsets: tuple[int, ...] = ()
 
     def _validate_counters_8616(self) -> None:
         """Reject negative, non-monotonic, or unclosed collection counters."""
@@ -62,6 +63,7 @@ class CalleePointerArgumentEvidence8616:
         expected_failures = (
             self.normalized_fact_count - self.classified_fact_count
             + len(self.ambiguous_displaced_stack_offsets)
+            + len(self.ambiguous_indexed_stack_offsets)
         )
         if self.failure_count != expected_failures:
             raise ValueError("callee pointer failure count does not close collection")
@@ -78,7 +80,16 @@ class CalleePointerArgumentEvidence8616:
             sorted(set(self.ambiguous_displaced_stack_offsets))
         ):
             raise ValueError("callee pointer ambiguous offsets are not canonical")
-        if any(offset < 4 for offset in self.pointer_stack_offsets):
+        if self.ambiguous_indexed_stack_offsets != tuple(
+            sorted(set(self.ambiguous_indexed_stack_offsets))
+        ):
+            raise ValueError("callee pointer indexed offsets are not canonical")
+        all_offsets = (
+            self.pointer_stack_offsets
+            + self.ambiguous_displaced_stack_offsets
+            + self.ambiguous_indexed_stack_offsets
+        )
+        if any(offset < 4 for offset in all_offsets):
             raise ValueError("callee pointer stack offset precedes the first argument")
         if any(index < 0 for index in self.pointer_argument_indices):
             raise ValueError("callee pointer argument index is negative")
@@ -86,6 +97,12 @@ class CalleePointerArgumentEvidence8616:
             self.ambiguous_displaced_stack_offsets
         ):
             raise ValueError("callee pointer proven and ambiguous offsets overlap")
+        if set(self.pointer_stack_offsets) & set(self.ambiguous_indexed_stack_offsets):
+            raise ValueError("callee pointer proven and indexed offsets overlap")
+        if set(self.ambiguous_displaced_stack_offsets) & set(
+            self.ambiguous_indexed_stack_offsets
+        ):
+            raise ValueError("callee pointer ambiguity classes overlap")
 
     def validate(self) -> None:
         """Reject malformed counters, target identity, or pointer coordinates."""

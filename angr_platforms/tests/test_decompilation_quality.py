@@ -24,7 +24,8 @@ from scripts.benchmark_optimization_quality_guard import (
 def test_makefile_serializes_mypyc_artifact_mutators() -> None:
     makefile = (Path(__file__).parents[2] / "Makefile").read_text(encoding="utf-8")
 
-    assert "MYPYC_ARTIFACT_LOCK ?= /tmp/vextest-mypyc-artifacts.lock" in makefile
+    assert "MYPYC_ARTIFACT_LOCK ?= $(CURDIR)/.cache/locks/mypyc-artifacts.lock" in makefile
+    assert makefile.count('\tmkdir -p "$(dir $(MYPYC_ARTIFACT_LOCK))"') == 5
     assert (
         makefile.count(
             'flock "$(MYPYC_ARTIFACT_LOCK)" $(PYTHON) scripts/build_mypyc.py'

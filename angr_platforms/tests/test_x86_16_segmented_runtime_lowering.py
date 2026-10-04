@@ -11844,7 +11844,9 @@ def test_recompile_check_accepts_simple_portable_flat_c():
     assert result.passed is True, result.stderr
 
 
+@pytest.mark.requires_kvm
 def test_recompile_check_msc51_accepts_portable_signed_fixed_width_aliases():
+    """Compile actual DOS source through the KVM-backed Microsoft toolchain."""
     result = check_c_recompiles_8616(
         "int32_t aNldiv(int32_t dividend, int32_t divisor);\n"
         "int32_t demo(void) { return aNldiv(900L, 30L); }\n",

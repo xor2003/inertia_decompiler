@@ -1,0 +1,1650 @@
+diff --git a/tools/z3cmp32.py b/tools/z3cmp32.py
+--- a/tools/z3cmp32.py
++++ b/tools/z3cmp32.py
+@@ -1,213 +1,245 @@
+ #!/usr/bin/env python3
+-"""Z3 function-equivalence PoC for the MSC v8 rebuild.
+-
+-Compares original PE32 functions (oracle) against our rebuilt ELF32
+-functions (candidate) by lowering both into dosunit's compact SSA and
+-running the Z3 comparator from ~/vextest/tools/dosunit.
+-
+-Reuses everything arch-agnostic in dosunit; patches the two 16-bit-only
+-seams at runtime:
+-  * _load_lifter_project  -> angr CLE (PE/ELF auto-detect) + ArchX86 VEX
+-  * REG_BY_OFFSET         -> x86-32 VEX guest-state offsets
++"""Layer: validation CLI.
++
++Responsibility: compare complete PE32/ELF32 leaf functions through dosunit SSA/Z3.
++Calls and multi-block bodies are explicit refusals until the region engine is
++ported from segmented 16-bit contracts. No refusal is counted as a proof.
+ """
++
+ from __future__ import annotations
+ 
++import argparse
++import hashlib
+ import json
+-import subprocess
+-import sys
+ from pathlib import Path
+-
+-VEXTEST = Path("/home/xor/vextest")
+-sys.path.insert(0, str(VEXTEST))
+-
+-from tools.dosunit import straightline_ssa as S  # noqa: E402
+-import angr  # noqa: E402
+-
+-# ---- 32-bit VEX guest-state offsets (ArchX86, measured via archinfo) ----
+-REG32 = {
+-    8:  ("eax", 32), 12: ("ecx", 32), 16: ("edx", 32), 20: ("ebx", 32),
+-    24: ("esp", 32), 28: ("ebp", 32), 32: ("esi", 32), 36: ("edi", 32),
+-    40: ("cc_op", 32), 44: ("cc_dep1", 32), 48: ("cc_dep2", 32),
+-    52: ("cc_ndep", 32), 56: ("dflag", 32),
+-    68: ("eip", 32),
+-    288: ("cs", 16), 290: ("ds", 16), 292: ("es", 16),
+-    294: ("fs", 16), 296: ("gs", 16), 298: ("ss", 16),
+-}
+-S.REG_BY_OFFSET.clear()
+-S.REG_BY_OFFSET.update(REG32)
+-
+-OUTPUT_REGS = ("eax", "edx", "esp")
+-
+-
+-def load32(exe_path):
+-    try:
+-        p = angr.Project(str(exe_path), auto_load_libs=False)
+-    except Exception:
+-        p = angr.Project(str(exe_path), auto_load_libs=False,
+-                         main_opts={"backend": "pe"})
+-    p._dosunit_lifter_mode = "flat32"
+-    return p
+-
+-
+-S._load_lifter_project = load32  # patch the import binding inside straightline_ssa
+-
+-
+-# ---- catalogs ------------------------------------------------------------
+-
+-def lst_functions(lst_path: str) -> dict[str, tuple[int, int]]:
+-    """name -> (va, size) from IDA .lst 'proc near ... endp' markers."""
+-    import re
+-    funcs: dict[str, tuple[int, int]] = {}
+-    open_va = None
+-    open_name = None
+-    for line in open(lst_path, errors="replace"):
+-        m = re.match(r"\.text:([0-9A-Fa-f]+)\s+(\S+)\s+proc\b", line)
+-        if m:
+-            open_va, open_name = int(m.group(1), 16), m.group(2)
+-            continue
+-        if open_name and re.match(r"\.text:[0-9A-Fa-f]+\s+" + re.escape(open_name) + r"\s+endp", line):
+-            end = int(line.split()[0].split(":")[1], 16)
+-            funcs[open_name] = (open_va, end - open_va)
+-            open_name = None
+-    return funcs
+-
+-
+-def nm_functions(exe: str) -> dict[str, int]:
+-    out = subprocess.run(["nm", exe], capture_output=True, text=True).stdout
+-    syms = {}
+-    for line in out.splitlines():
+-        parts = line.split()
+-        if len(parts) == 3 and parts[1] in "tT":
+-            syms[parts[2]] = int(parts[0], 16)
+-    return syms
+-
+-
+-def catalog(module: str, funcs: dict[str, tuple[int, int]], linked_base: int) -> dict:
+-    return {
+-        "schema": "dosunit.functions.v1",
+-        "module": module,
+-        "functions": [
+-            {
+-                "id": f"{module}:{name}",
+-                "names": [name],
+-                "entry": {
+-                    "kind": "module_relative",
+-                    "linear": hex(va),
+-                    "offset": hex(va - linked_base),
+-                },
+-                "return_kind": "near",
+-                "size": size or 0x400,
+-            }
+-            for name, (va, size) in funcs.items()
+-        ],
++from typing import Any
++
++import angr
++
++from flat32_adapter import OUTPUT_REGS, S, installed, load32
++from flat32_catalog import Symbol, catalog, global_map, lst_data_symbols, lst_functions, mapping, nm_symbols
++from flat32_verdict import REPORT_SCHEMA, Status, checked_results, exit_code, summarize
++
++
++def preflight(project: angr.Project, address: int, size: int, scan_limit: int) -> str | None:
++    """Require a whole near-return block, with no hidden exceptional/branch exits."""
++    block = project.factory.block(address, size=min(size or scan_limit, scan_limit), opt_level=0)
++    if block.vex.jumpkind == "Ijk_Call":
++        return "call_boundary"
++    if block.vex.jumpkind != "Ijk_Ret" or any(stmt.tag == "Ist_Exit" for stmt in block.vex.statements):
++        return "flat32_cfg_or_exception_requires_region_proof"
++    return None
++
++
++def select_functions(
++    args: argparse.Namespace,
++    oracle: angr.Project,
++    candidate: angr.Project,
++    boundaries: dict[str, tuple[int, int]],
++    symbols: dict[str, Symbol],
++    names: list[str],
++) -> tuple[dict[str, tuple[int, int]], dict[str, tuple[int, int]], list[dict[str, Any]]]:
++    """Keep a result for every requested name, including absent and unsupported bodies."""
++    oracle_functions: dict[str, tuple[int, int]] = {}
++    candidate_functions: dict[str, tuple[int, int]] = {}
++    results: list[dict[str, Any]] = []
++    delta = candidate.loader.main_object.mapped_base - candidate.loader.main_object.linked_base
++    for name in names:
++        reason: str | None = None
++        if name not in boundaries or name not in symbols:
++            reason = "mapping_missing"
++        else:
++            start, last = boundaries[name]
++            last_size = oracle.factory.block(last, num_inst=1).vex.size
++            size = last - start + last_size
++            symbol = symbols[name]
++            address = symbol.address + delta
++            if args.mode == "leaf":
++                reason = preflight(oracle, start, size, args.scan_limit)
++                reason = reason or preflight(candidate, address, symbol.size, args.scan_limit)
++            if reason is None:
++                oracle_functions[name] = start, size
++                candidate_functions[name] = address, symbol.size or args.scan_limit
++        if reason is not None:
++            results.append({"function": {"name": name}, "status": Status.REFUSED, "reason": reason})
++    return oracle_functions, candidate_functions, results
++
++
++def write_json(directory: Path, name: str, document: object) -> None:
++    """Persist a reproducible artifact with readable JSON and a final newline."""
++    (directory / name).write_text(json.dumps(document, indent=2) + "\n")
++
++
++def compare(args: argparse.Namespace) -> dict[str, Any]:
++    """Lower accepted complete bodies and retain every missing/refused obligation."""
++    oracle, candidate = load32(args.oracle_exe), load32(args.candidate_exe)
++    boundaries = lst_functions(args.oracle_lst)
++    if args.candidate_lst:
++        symbols = {
++            name: Symbol(start, last - start + candidate.factory.block(last, num_inst=1).vex.size, "T")
++            for name, (start, last) in lst_functions(args.candidate_lst).items()
++        }
++    else:
++        symbols = nm_symbols(args.candidate_exe)
++    names = (
++        sorted({name.strip() for name in args.functions.split(",") if name.strip()})
++        if args.functions
++        else sorted(name for name in boundaries.keys() & symbols.keys() if name.startswith("sub_"))
++    )
++    ofuncs, cfuncs, results = select_functions(args, oracle, candidate, boundaries, symbols, names)
++    omod, cmod = "oracle", "candidate"
++    ocat = catalog(omod, ofuncs, oracle.loader.main_object.linked_base)
++    ccat = catalog(cmod, cfuncs, candidate.loader.main_object.linked_base)
++    pairs = mapping(omod, cmod, list(ofuncs))
++    output_regs = tuple(dict.fromkeys((*args.output_regs.split(","), *OUTPUT_REGS[3:])))
++    if args.mode == "matched-cfg":
++        from flat32_cfg import compare_cfg
++
++        for name in ofuncs:
++            result = compare_cfg(
++                oracle,
++                candidate,
++                name=name,
++                oracle_range=ofuncs[name],
++                candidate_range=cfuncs[name],
++                outputs=output_regs,
++                timeout_ms=args.timeout_ms,
++            )
++            write_json(args.out_dir, f"{name}.cfg.json", result)
++            results.append(
++                {
++                    key: value
++                    for key, value in result.items()
++                    if key not in {"oracle_ssa", "candidate_ssa", "block_compare"}
++                }
++            )
++        summary = summarize(results)
++        report = {
++            "schema": REPORT_SCHEMA,
++            "summary": summary,
++            "results": results,
++            "proof_contract": {
++                "control_flow": "closed bijective CFG induction over full internal state",
++                "outputs": output_regs,
++                "memory": "entire byte array",
++                "calls": "refused",
++                "global_normalization": None,
++            },
++        }
++        write_json(args.out_dir, "compare.json", report)
++        return report
++    kwargs = {
++        "output_regs": output_regs,
++        "scan_limit": args.scan_limit,
++        "max_blocks_per_function": 1,
++        "max_insns_per_function": 1024,
++        "max_assignments_per_function": 4096,
++        "follow_call_fallthrough": False,
++        "max_function_ms": args.timeout_ms,
+     }
+-
+-
+-def mapping(oracle_mod: str, cand_mod: str, names: list[str]) -> dict:
+-    return {
+-        "schema": "dosunit.mapping.v1",
+-        "oracle_module": oracle_mod,
+-        "candidate_module": cand_mod,
+-        "functions": [
+-            {
+-                "oracle_id": f"{oracle_mod}:{n}",
+-                "oracle_name": n,
+-                "candidate_id": f"{cand_mod}:{n}",
+-                "candidate_name": n,
+-                "sources": ["name_match"],
+-            }
+-            for n in names
+-        ],
++    ossa = S.lower_straightline_ssa_document(exe_path=args.oracle_exe, functions_catalog=ocat, **kwargs)
++    cssa = S.lower_straightline_ssa_document(exe_path=args.candidate_exe, functions_catalog=ccat, **kwargs)
++    normalization = (
++        global_map(symbols, candidate, oracle, lst_data_symbols(args.oracle_lst)) if args.normalize_globals else {}
++    )
++    for function in cssa["functions"]:
++        function["_constant_normalization"] = normalization
++        function["_constant_normalization_reasons"] = dict.fromkeys(normalization, "global_reloc")
++    raw = S.compare_ssa_documents(
++        oracle=ossa,
++        candidate=cssa,
++        mapping_document=pairs,
++        timeout_ms=args.timeout_ms,
++        max_solver_assignments=4096,
++        max_solver_inputs=64,
++        max_solver_memory_stores=256,
++        skip_binary_equal=False,
++        allow_aliased_call_targets=False,
++        enable_callee_lemmas=False,
++        enable_region_equality=False,
++        enable_connectivity=False,
++    )
++    expected = {name: f"{omod}:{name}" for name in ofuncs}
++    results.extend(checked_results(expected, raw, relocation=normalization))
++    results.sort(key=lambda item: item["function"]["name"])
++    summary = summarize(results)
++    if summary["total"] != len(names):
++        raise RuntimeError("proof obligation accounting mismatch")
++    report = {
++        "schema": REPORT_SCHEMA,
++        "summary": summary,
++        "results": results,
++        "evidence": {
++            "raw_fact_count": len(names),
++            "normalized_fact_count": len(ofuncs),
++            "classified_fact_count": len(ofuncs),
++            "materialized_count": len(
++                {item["function"]["name"] for item in ossa["functions"]}
++                & {item["function"]["name"] for item in cssa["functions"]}
++            ),
++            "failure_count": summary["refused"] + summary["failed"] + summary["conditional"],
++        },
++        "proof_contract": {
++            "output_regs": output_regs,
++            "memory": "entire byte array including stack writes",
++            "control_flow": "complete single-block near return; 32-bit return target observed",
++            "flags": "pure uninterpreted x86g_calculate_condition; SAT can be spurious",
++            "global_normalization": "conditional value relocation; not a pointer-alias or data-initialization proof"
++            if normalization
++            else None,
++        },
++        "inputs": {
++            side: {"path": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
++            for side, path in [("oracle", args.oracle_exe), ("candidate", args.candidate_exe)]
++        },
++        "lowering_refusals": {"oracle": ossa["refusals"], "candidate": cssa["refusals"]},
+     }
+-
+-
+-# ---- driver ----------------------------------------------------------------
++    for filename, document in [
++        ("oracle.functions.json", ocat),
++        ("candidate.functions.json", ccat),
++        ("mapping.json", pairs),
++        ("oracle.ssa.json", ossa),
++        ("candidate.ssa.json", cssa),
++        ("raw-compare.json", raw),
++        ("compare.json", report),
++        ("globals.json", {hex(k): hex(v) for k, v in normalization.items()}),
++    ]:
++        write_json(args.out_dir, filename, document)
++    return report
++
+ 
+ def main() -> int:
+-    import argparse
+-    ap = argparse.ArgumentParser()
+-    ap.add_argument("--oracle-exe", required=True, help="original PE32 (e.g. ../C23216.EXE)")
+-    ap.add_argument("--oracle-lst", required=True)
+-    ap.add_argument("--candidate-exe", required=True, help="rebuilt ELF32 (e.g. out/C23216.exe)")
+-    ap.add_argument("--functions", required=True, help="comma list: sub_26870,sub_2B0F0")
+-    ap.add_argument("--scan-limit", type=lambda v: int(v, 0), default=0x2000)
+-    ap.add_argument("--timeout-ms", type=int, default=30000)
+-    ap.add_argument("--out-dir", default="/tmp/z3cmp32")
+-    args = ap.parse_args()
+-
+-    out_dir = Path(args.out_dir)
+-    out_dir.mkdir(parents=True, exist_ok=True)
+-
+-    names = [n.strip() for n in args.functions.split(",") if n.strip()]
+-
+-    lst = lst_functions(args.oracle_lst)
+-    nm = nm_functions(args.candidate_exe)
+-
+-    oracle_funcs, cand_funcs = {}, {}
+-    for n in names:
+-        if n not in lst:
+-            print(f"!! {n} not found in .lst", file=sys.stderr)
+-            continue
+-        if n not in nm:
+-            print(f"!! {n} not found in candidate symbols", file=sys.stderr)
+-            continue
+-        va, size = lst[n]
+-        oracle_funcs[n] = (va, size)
+-        cand_funcs[n] = (nm[n], 0)          # size 0 -> scan_limit window
+-
+-    if not oracle_funcs:
+-        print("no mapped functions", file=sys.stderr)
+-        return 2
+-
+-    # linked_base: PE ImageBase (angr picks it up); oracle offset = VA - base.
+-    op = load32(args.oracle_exe)
+-    cp = load32(args.candidate_exe)
+-    obase = int(getattr(op.loader.main_object, "linked_base", 0))
+-    cbase = int(getattr(cp.loader.main_object, "linked_base", 0))
+-    print(f"oracle linked_base=0x{obase:x}  candidate linked_base=0x{cbase:x}", file=sys.stderr)
+-
+-    omod = Path(args.oracle_exe).name
+-    cmod = Path(args.candidate_exe).name
+-    ocat = catalog(omod, oracle_funcs, obase)
+-    ccat = catalog(cmod, cand_funcs, cbase)
+-    mmap = mapping(omod, cmod, list(oracle_funcs))
+-
+-    print(f"lowering oracle ({len(ocat['functions'])} fns)...", file=sys.stderr)
+-    ossa = S.lower_straightline_ssa_document(
+-        exe_path=Path(args.oracle_exe), functions_catalog=ocat,
+-        output_regs=OUTPUT_REGS, source_ir="vex",
+-        scan_limit=args.scan_limit, cache_dir=None,
+-    )
+-    print(f"  lowered={ossa['counters']['functions_lowered']} "
+-          f"refused={ossa['counters']['functions_refused']}", file=sys.stderr)
+-
+-    print(f"lowering candidate ({len(ccat['functions'])} fns)...", file=sys.stderr)
+-    cssa = S.lower_straightline_ssa_document(
+-        exe_path=Path(args.candidate_exe), functions_catalog=ccat,
+-        output_regs=OUTPUT_REGS, source_ir="vex",
+-        scan_limit=args.scan_limit, cache_dir=None,
+-    )
+-    print(f"  lowered={cssa['counters']['functions_lowered']} "
+-          f"refused={cssa['counters']['functions_refused']}", file=sys.stderr)
+-
+-    for f in ossa.get("refusals", []) + cssa.get("refusals", []):
+-        print("  refusal:", json.dumps(f)[:300], file=sys.stderr)
+-
+-    print("comparing...", file=sys.stderr)
+-    result = S.compare_ssa_documents(
+-        oracle=ossa, candidate=cssa, mapping_document=mmap,
+-        timeout_ms=args.timeout_ms,
+-    )
+-    (out_dir / "compare.json").write_text(json.dumps(result, indent=1))
+-    (out_dir / "oracle.ssa.json").write_text(json.dumps(ossa))
+-    (out_dir / "candidate.ssa.json").write_text(json.dumps(cssa))
+-
+-    summ = result.get("summary", {})
+-    print(json.dumps(summ, indent=1))
+-    for r in result.get("results", []) or []:
+-        fn = r.get("function", {})
+-        print(f"  {fn.get('name','?'):<20} {r.get('status','?')}")
+-    return 0 if summ.get("failed", 1) == 0 else 1
++    """Run an explicit selection or enumerate all mapped sub_* obligations."""
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--oracle-exe", required=True, type=Path)
++    parser.add_argument("--oracle-lst", required=True, type=Path)
++    parser.add_argument("--candidate-exe", required=True, type=Path)
++    parser.add_argument("--candidate-lst", type=Path, help="candidate IDA boundaries for a PE32/self-hosted rebuild")
++    group = parser.add_mutually_exclusive_group(required=True)
++    group.add_argument("--functions")
++    group.add_argument("--all-mapped", action="store_true")
++    parser.add_argument("--mode", choices=["leaf", "matched-cfg"], default="leaf")
++    parser.add_argument(
++        "--normalize-globals", action="store_true", help="conditional value relocation; see proof_contract"
++    )
++    parser.add_argument(
++        "--output-regs", default="eax,edx,esp", help="explicit return contract; preserved GPRs and eip always checked"
++    )
++    parser.add_argument("--scan-limit", type=lambda value: int(value, 0), default=0x2000)
++    parser.add_argument("--timeout-ms", type=int, default=30000)
++    parser.add_argument("--out-dir", type=Path, required=True)
++    args = parser.parse_args()
++    if args.scan_limit <= 0 or args.timeout_ms <= 0:
++        parser.error("scan-limit and timeout-ms must be positive")
++    if args.mode == "matched-cfg" and args.normalize_globals:
++        parser.error("matched-cfg currently requires literal data addresses")
++    args.out_dir.mkdir(parents=True, exist_ok=True)
++    with installed():
++        result = compare(args)
++    print(json.dumps(result["summary"]))
++    for item in result["results"]:
++        print(f"{item['function']['name']}: {item['status']} ({item.get('reason')})")
++    return exit_code(result["summary"])
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tools/flat32_adapter.py b/tools/flat32_adapter.py
+new file mode 100644
+--- /dev/null
++++ b/tools/flat32_adapter.py
+@@ -0,0 +1,265 @@
++"""Layer: validation adapter.
++
++Responsibility: scope flat i386 VEX patches to one dosunit comparison process.
++The accepted proof surfaces are complete leaves and closed matched integer CFGs.
++"""
++
++from __future__ import annotations
++
++import sys
++from collections.abc import Iterator
++from contextlib import contextmanager
++from pathlib import Path
++from typing import Any
++
++sys.path.insert(0, str(Path("/home/xor/vextest")))
++import angr
++import archinfo
++import pyvex
++from tools.dosunit import straightline_ssa as S
++
++GPRS: tuple[str, ...] = ("eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi")
++REG_NAMES: tuple[str, ...] = (
++    *GPRS,
++    "cc_op",
++    "cc_dep1",
++    "cc_dep2",
++    "cc_ndep",
++    "d",
++    "eip",
++    "cs",
++    "ds",
++    "es",
++    "fs",
++    "gs",
++    "ss",
++)
++ARCH = archinfo.ArchX86()
++REG32: dict[int, tuple[str, int]] = {ARCH.registers[name][0]: (name, ARCH.registers[name][1] * 8) for name in REG_NAMES}
++# GCC may freely clobber ecx/edx; callers observe the explicitly chosen contract.
++OUTPUT_REGS: tuple[str, ...] = (
++    "eax",
++    "edx",
++    "esp",
++    "ebx",
++    "ebp",
++    "esi",
++    "edi",
++    "eip",
++    "d",
++    "cs",
++    "ds",
++    "es",
++    "fs",
++    "gs",
++    "ss",
++)
++_ORIGINAL_LOWER = S._lower_expr
++_ORIGINAL_FINISH = S._finish_irsb_lowering
++_ORIGINAL_QUICK = S._quick_compare_functions
++CONTROL_TARGETS: dict[int, int] | None = None
++
++
++def load32(exe_path: Path) -> angr.Project:
++    """Force PE for MZ images, retaining CLE's actual linked and mapped bases."""
++    with Path(exe_path).open("rb") as stream:
++        magic = stream.read(4)
++    backend = "pe" if magic[:2] == b"MZ" else "elf"
++    project = angr.Project(str(exe_path), auto_load_libs=False, main_opts={"backend": backend})
++    if project.arch.name != "X86":
++        raise ValueError(f"expected i386, found {project.arch.name}: {exe_path}")
++    return project
++
++
++def register_access(offset: int, width: int | None) -> tuple[str, int, int] | None:
++    """Resolve full, low-word, low-byte and legacy high-byte guest registers."""
++    for base, (name, bits) in REG32.items():
++        if offset == base and (width is None or width == bits):
++            return name, bits, 0
++        if name in GPRS and offset == base and width in (8, 16):
++            return name, bits, 0
++        if name in GPRS[:4] and offset == base + 1 and width in (None, 8):
++            return name, bits, 8
++    return None
++
++
++def read_register(
++    versions: dict[str, S.SsaExpr], offset: int, width: int, *, source: str
++) -> S.SsaExpr | S.LowerFailure:
++    """Read a partial register without dropping the enclosing register's width."""
++    access = register_access(offset, width)
++    if access is None:
++        return S.LowerFailure("unsupported_ir", f"{source}: unsupported register {offset}:{width}")
++    name, bits, shift = access
++    value = versions.get(name, S.SsaExpr("input", bits, name=name))
++    if shift:
++        value = S.SsaExpr("lshr", bits, (value, S.SsaExpr("const", bits, value=shift)))
++    return S._coerce_width(value, width)
++
++
++def write_target(offset: int, width: int | None) -> tuple[str, int] | None:
++    """Make partial writes depend on their full enclosing register for liveness."""
++    access = register_access(offset, width)
++    return None if access is None else access[:2]
++
++
++def write_register(versions: dict[str, S.SsaExpr], offset: int, value: S.SsaExpr) -> S.LowerFailure | None:
++    """Preserve upper bits for i386 byte/word writes, including AH/CH/DH/BH."""
++    access = register_access(offset, value.width)
++    if access is None:
++        return S.LowerFailure("unsupported_ir", f"unsupported register write {offset}:{value.width}")
++    name, bits, shift = access
++    if value.width == bits:
++        versions[name] = value
++        return None
++    previous = versions.get(name, S.SsaExpr("input", bits, name=name))
++    mask = ((1 << bits) - 1) ^ (((1 << value.width) - 1) << shift)
++    kept = S.SsaExpr("and", bits, (previous, S.SsaExpr("const", bits, value=mask)))
++    inserted = S._coerce_width(value, bits)
++    if shift:
++        inserted = S.SsaExpr("shl", bits, (inserted, S.SsaExpr("const", bits, value=shift)))
++    versions[name] = S.SsaExpr("or", bits, (kept, inserted))
++    return None
++
++
++def lower_expr(expr: pyvex.expr.IRExpr, **kwargs: Any) -> S.SsaExpr | S.LowerFailure:  # noqa: ANN401
++    # kwargs crosses the private VEX lowering API; all values are forwarded unchanged.
++    """Abstract the known pure lazy-flag helpers; refuse all other CCalls."""
++    if isinstance(expr, pyvex.expr.Const) and not isinstance(expr.con.value, int):
++        return S.LowerFailure("unsupported_ir", "floating-point constants are outside the integer proof model")
++    if not isinstance(expr, pyvex.expr.CCall):
++        return _ORIGINAL_LOWER(expr, **kwargs)
++    arities = {"x86g_calculate_condition": 5, "x86g_calculate_eflags_c": 4, "x86g_calculate_eflags_all": 4}
++    if len(expr.args) != arities.get(expr.cee.name):
++        return S.LowerFailure("unsupported_ir", f"unsupported CCall: {expr.cee.name}")
++    args: list[S.SsaExpr] = []
++    for argument in expr.args:
++        lowered = lower_expr(argument, **kwargs)
++        if isinstance(lowered, S.LowerFailure):
++            return lowered
++        args.append(lowered)
++    return S.SsaExpr(f"summary_{expr.cee.name}", expr.result_size(kwargs["tyenv"]), tuple(args))
++
++
++def finish_lowering(
++    state: S._IrsbLowerState, *, irsb: pyvex.IRSB, output_regs: tuple[str, ...], max_assignments_per_function: int
++) -> dict[str, Any] | S.LowerFailure:
++    """Expose all 32 bits of the return address; never accept a branch prefix."""
++    if CONTROL_TARGETS is None and (irsb.jumpkind != "Ijk_Ret" or state.exits):
++        return S.LowerFailure(
++            "flat32_control_flow",
++            "requires a complete single-block near return; calls/CFG/loops need a 32-bit region owner",
++        )
++    address = lower_expr(
++        irsb.next,
++        temp_defs=state.temp_defs,
++        temp_failures=state.temp_failures,
++        reg_versions=state.reg_versions,
++        tyenv=irsb.tyenv,
++        memory=state.mem_version,
++    )
++    if isinstance(address, S.LowerFailure):
++        return address
++    if CONTROL_TARGETS is not None:
++        if irsb.jumpkind == "Ijk_Boring":
++            if address.op != "const" or address.value not in CONTROL_TARGETS:
++                return S.LowerFailure("flat32_indirect_control", "unmapped direct successor")
++            address = S.SsaExpr("const", 32, value=CONTROL_TARGETS[address.value])
++        elif irsb.jumpkind != "Ijk_Ret":
++            return S.LowerFailure("call_boundary", "only direct CFG edges and near returns are admitted")
++        for guard, destination in reversed(state.exits):
++            if destination.op != "const" or destination.value not in CONTROL_TARGETS:
++                return S.LowerFailure("flat32_indirect_control", "unmapped conditional successor")
++            address = S.SsaExpr(
++                "ite", 32, (guard, S.SsaExpr("const", 32, value=CONTROL_TARGETS[destination.value]), address)
++            )
++        state.memory_touched = True
++    state.reg_versions["eip"] = address
++    return _ORIGINAL_FINISH(
++        state, irsb=irsb, output_regs=output_regs, max_assignments_per_function=max_assignments_per_function
++    )
++
++
++def strict_layout(
++    oracle: dict[str, Any], candidate: dict[str, Any], *, global_map: dict[int, int] | None = None
++) -> tuple[dict[str, Any], dict[str, Any], None]:
++    """Keep explicit normalization; disable inferred 16-bit layout heuristics."""
++    return oracle, candidate, None
++
++
++def all_statements(irsb: pyvex.IRSB, output_regs: tuple[str, ...]) -> set[int]:
++    """Retain statements until partial-register liveness has a 32-bit proof owner."""
++    return set(range(len(irsb.statements)))
++
++
++def lower_function(
++    *,
++    project: angr.Project,
++    linked_base: int,
++    function: dict[str, Any],
++    output_regs: tuple[str, ...],
++    scan_limit: int,
++    max_assignments_per_function: int,
++    **_limits: object,
++) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
++    """Own flat addresses and complete-body metadata instead of truncating DOS IPs."""
++    start = linked_base + int(function["entry"]["offset"], 0)
++    size = min(function["size"], scan_limit)
++    block = project.factory.block(start, size=size, opt_level=0)
++    lowered = S._lower_irsb(
++        block.vex, output_regs=output_regs, max_assignments_per_function=max_assignments_per_function
++    )
++    if isinstance(lowered, S.LowerFailure):
++        return [], [S._refusal(function, lowered.reason, lowered.message)], 1
++    entry = {"linear": hex(start)}
++    body = {
++        "function": {"id": function["id"], "name": function["names"][0]},
++        "part": {"kind": "block", "index": 0, "entry_delta": "0x0"},
++        "function_entry": entry,
++        "entry": entry,
++        "source": {"ir": "vex", "jumpkind": block.vex.jumpkind, "machine_code_size": block.size},
++        **lowered,
++    }
++    body["id"] = S.stable_id("ssa-function", body)
++    return [body], [], 1
++
++
++
++def quick_compare(oracle: dict[str, Any], candidate: dict[str, Any], *, skip_binary_equal: bool) -> dict[str, Any] | None:
++    """Raw SSA identity is sufficient only when neither side rewrites constants."""
++    if oracle.get('_constant_normalization') or candidate.get('_constant_normalization'):
++        return None
++    return _ORIGINAL_QUICK(oracle, candidate, skip_binary_equal=skip_binary_equal)
++
++
++@contextmanager
++def installed(control_targets: dict[int, int] | None = None) -> Iterator[None]:
++    """Install and restore every seam, including maps, even on exceptions."""
++    global CONTROL_TARGETS
++    prior_targets = CONTROL_TARGETS
++    CONTROL_TARGETS = control_targets
++    replacements = {
++        "_load_lifter_project": load32,
++        "_lower_function": lower_function,
++        "_vex_live_statement_indices": all_statements,
++        "REG_BY_OFFSET": REG32,
++        "RAW_OUTPUT_REGS": GPRS,
++        "BYTE_REGISTER_ACCESS": {},
++        "_lower_expr": lower_expr,
++        "_read_register": read_register,
++        "_write_register": write_register,
++        "_register_write_target": write_target,
++        "_finish_irsb_lowering": finish_lowering,
++        "_prepare_layout_normalized_functions": strict_layout,
++        "_quick_compare_functions": quick_compare,
++    }
++    # This is the explicitly isolated monkey-patch boundary, not owned data access.
++    previous = {name: getattr(S, name) for name in replacements}
++    try:
++        for name, value in replacements.items():
++            setattr(S, name, value)
++        yield
++    finally:
++        CONTROL_TARGETS = prior_targets
++        for name, value in previous.items():
++            setattr(S, name, value)
+diff --git a/tools/flat32_catalog.py b/tools/flat32_catalog.py
+new file mode 100644
+--- /dev/null
++++ b/tools/flat32_catalog.py
+@@ -0,0 +1,131 @@
++"""Layer: validation input adapters.
++
++Responsibility: turn verified binary/sidecar symbol metadata into flat32 catalogs.
++"""
++from __future__ import annotations
++
++import re
++import subprocess
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++import angr
++
++
++@dataclass(frozen=True)
++class Symbol:
++    """Linked symbol address, byte size, and nm symbol class."""
++
++    address: int
++    size: int
++    kind: str
++
++
++def lst_functions(path: Path) -> dict[str, tuple[int, int]]:
++    """Read only IDA function-boundary metadata; endp denotes the last instruction."""
++    functions: dict[str, tuple[int, int]] = {}
++    opened: tuple[str, int] | None = None
++    with path.open(errors="replace") as stream:
++        for line in stream:
++            match = re.match(r"\.text:([0-9A-Fa-f]+)\s+(\S+)\s+(proc|endp)\b", line)
++            if match is None:
++                continue
++            address, name, marker = match.groups()
++            if marker == "proc":
++                opened = name, int(address, 16)
++            elif opened is not None and opened[0] == name:
++                functions[name] = opened[1], int(address, 16)
++                opened = None
++    return functions
++
++
++def nm_symbols(path: Path) -> dict[str, Symbol]:
++    """Read defined ELF symbols; preserve zero-size assembler aliases."""
++    output = subprocess.run(
++        ["nm", "-S", "--defined-only", str(path)], check=True, capture_output=True, text=True
++    ).stdout
++    symbols: dict[str, Symbol] = {}
++    for line in output.splitlines():
++        parts = line.split()
++        if len(parts) == 4:
++            address, size, kind, name = parts
++        elif len(parts) == 3:
++            address, kind, name = parts
++            size = "0"
++        else:
++            continue
++        symbols[name] = Symbol(int(address, 16), int(size, 16), kind)
++    return symbols
++
++
++def catalog(module: str, functions: dict[str, tuple[int, int]], linked_base: int) -> dict[str, Any]:
++    """Encode offsets against the base dosunit actually adds, using mapped VAs."""
++    return {
++        "schema": "dosunit.functions.v1",
++        "module": module,
++        "functions": [
++            {
++                "id": f"{module}:{name}",
++                "names": [name],
++                "entry": {"kind": "module_relative", "linear": hex(address), "offset": hex(address - linked_base)},
++                "return_kind": "near",
++                "size": size,
++            }
++            for name, (address, size) in sorted(functions.items())
++        ],
++    }
++
++
++def mapping(oracle: str, candidate: str, names: list[str]) -> dict[str, Any]:
++    """Name matches select proof obligations; they never establish callee equality."""
++    return {
++        "schema": "dosunit.mapping.v1",
++        "oracle_module": oracle,
++        "candidate_module": candidate,
++        "functions": [
++            {
++                "oracle_id": f"{oracle}:{name}",
++                "oracle_name": name,
++                "candidate_id": f"{candidate}:{name}",
++                "candidate_name": name,
++                "sources": ["name_match"],
++            }
++            for name in names
++        ],
++    }
++
++
++def lst_data_symbols(path: Path) -> dict[str, int]:
++    """Read exact original data-symbol labels as relocation correspondence evidence."""
++    symbols: dict[str, int] = {}
++    with path.open(errors="replace") as stream:
++        for line in stream:
++            match = re.match(
++                r"\.(?:data|rdata|bss):([0-9A-Fa-f]+)\s+((?:byte|word|dword|qword|off|unk)_[0-9A-Fa-f]+)\s", line
++            )
++            if match:
++                symbols[match[2]] = int(match[1], 16)
++    return symbols
++
++
++def global_map(
++    symbols: dict[str, Symbol], candidate: angr.Project, oracle: angr.Project, oracle_symbols: dict[str, int]
++) -> dict[int, int]:
++    """Match address-encoded data aliases only when both addresses are mapped data."""
++    delta = candidate.loader.main_object.mapped_base - candidate.loader.main_object.linked_base
++    normalization: dict[int, int] = {}
++    for name, symbol in symbols.items():
++        match = re.fullmatch(r"(?:byte|word|dword|qword|off|unk)_([0-9A-Fa-f]+)", name)
++        if match is None or symbol.kind not in "bBdDrRsS":
++            continue
++        original = int(match.group(1), 16)
++        mapped = symbol.address + delta
++        if oracle_symbols.get(name) != original or oracle.loader.find_section_containing(original) is None:
++            continue
++        if mapped in normalization and normalization[mapped] != original:
++            raise ValueError(f"conflicting data aliases at {mapped:#x}")
++        normalization[mapped] = original
++    return normalization
++
++
+diff --git a/tools/flat32_cfg.py b/tools/flat32_cfg.py
+new file mode 100644
+--- /dev/null
++++ b/tools/flat32_cfg.py
+@@ -0,0 +1,209 @@
++"""Layer: validation CFG adapter.
++
++Responsibility: prove closed, bijectively matched i386 CFGs by block induction.
++Every internal edge compares full modeled machine state and the entire memory
++array. Returns compare the chosen ABI observables. Calls, faults, indirect
++jumps and unmatched graphs refuse; loops are not bounded-unrolled into proofs.
++"""
++
++from __future__ import annotations
++
++from collections import deque
++from dataclasses import dataclass
++from typing import Any
++
++import angr
++import pyvex
++
++from flat32_adapter import ARCH, REG32, S, installed
++from flat32_catalog import mapping
++from flat32_verdict import Status, aggregate, checked_results
++
++
++@dataclass(frozen=True)
++class Block:
++    """Byte-backed VEX block and its ordered direct successor addresses."""
++
++    address: int
++    irsb: pyvex.IRSB
++    successors: tuple[int, ...]
++
++
++class CfgRefusal(ValueError):
++    """A named unsupported proof boundary, never interpreted as equality."""
++
++
++def static_next(irsb: pyvex.IRSB) -> int | None:
++    """Resolve only constant copies through VEX temps/registers on fallthrough."""
++    temps: dict[int, int | None] = {}
++    registers: dict[int, int | None] = {}
++
++    def value(expr: pyvex.expr.IRExpr) -> int | None:
++        """Follow typed const/Get/RdTmp copies; arithmetic needs another proof."""
++        if isinstance(expr, pyvex.expr.Const):
++            return int(expr.con.value)
++        if isinstance(expr, pyvex.expr.RdTmp):
++            return temps.get(expr.tmp)
++        if isinstance(expr, pyvex.expr.Get):
++            return registers.get(expr.offset)
++        return None
++
++    for statement in irsb.statements:
++        if isinstance(statement, pyvex.stmt.WrTmp):
++            temps[statement.tmp] = value(statement.data)
++        elif isinstance(statement, pyvex.stmt.Put):
++            registers[statement.offset] = value(statement.data)
++    return value(irsb.next)
++
++
++def direct_successors(irsb: pyvex.IRSB) -> tuple[int, ...]:
++    """Read typed VEX edges, refusing exception exits and indirect transfers."""
++    if irsb.jumpkind not in {"Ijk_Boring", "Ijk_Ret"}:
++        raise CfgRefusal("call_or_exception_boundary")
++    exits = [statement for statement in irsb.statements if isinstance(statement, pyvex.stmt.Exit)]
++    if any(statement.jumpkind != "Ijk_Boring" for statement in exits):
++        raise CfgRefusal("exception_edge")
++    seen_exit = False
++    for statement in irsb.statements:
++        if isinstance(statement, pyvex.stmt.Exit):
++            seen_exit = True
++        elif (
++            seen_exit
++            and statement.tag not in {"Ist_IMark", "Ist_WrTmp", "Ist_NoOp"}
++            and (not isinstance(statement, pyvex.stmt.Put) or statement.offset != ARCH.ip_offset)
++        ):
++            raise CfgRefusal("effect_after_conditional_exit")
++    if irsb.jumpkind == "Ijk_Ret":
++        if exits:
++            raise CfgRefusal("conditional_return_block")
++        return ()
++    fallthrough = static_next(irsb)
++    if fallthrough is None:
++        raise CfgRefusal("indirect_jump")
++    return tuple([int(statement.dst.value) for statement in exits] + [fallthrough])
++
++
++def discover(project: angr.Project, start: int, size: int, max_blocks: int) -> dict[int, Block]:
++    """Close the reachable CFG inside declared bounds without following callees."""
++    pending = deque([start])
++    blocks: dict[int, Block] = {}
++    while pending:
++        address = pending.popleft()
++        if address in blocks:
++            continue
++        if not start <= address < start + size:
++            raise CfgRefusal("edge_outside_declared_function")
++        if len(blocks) >= max_blocks:
++            raise CfgRefusal("block_limit")
++        irsb = project.factory.block(address, size=start + size - address, opt_level=0).vex
++        if not isinstance(irsb, pyvex.IRSB):
++            raise CfgRefusal("non_vex_lifter")
++        successors = direct_successors(irsb)
++        blocks[address] = Block(address, irsb, successors)
++        pending.extend(successors)
++    return blocks
++
++
++def pair_graphs(
++    oracle: dict[int, Block], candidate: dict[int, Block], oracle_start: int, candidate_start: int
++) -> list[tuple[int, int]]:
++    """Construct and validate a successor-order-preserving graph bijection."""
++    pending = deque([(oracle_start, candidate_start)])
++    forward: dict[int, int] = {}
++    backward: dict[int, int] = {}
++    pairs: list[tuple[int, int]] = []
++    while pending:
++        left, right = pending.popleft()
++        if left in forward:
++            if forward[left] != right:
++                raise CfgRefusal("cfg_not_bijective")
++            continue
++        if right in backward:
++            raise CfgRefusal("cfg_not_bijective")
++        oblock, cblock = oracle[left], candidate[right]
++        if oblock.irsb.jumpkind != cblock.irsb.jumpkind or len(oblock.successors) != len(cblock.successors):
++            raise CfgRefusal("cfg_shape_mismatch")
++        forward[left], backward[right] = right, left
++        pairs.append((left, right))
++        pending.extend(zip(oblock.successors, cblock.successors, strict=True))
++    if len(pairs) != len(oracle) or len(pairs) != len(candidate):
++        raise CfgRefusal("cfg_not_closed")
++    return pairs
++
++
++def lower_blocks(
++    blocks: dict[int, Block], addresses: list[int], module: str, outputs: tuple[str, ...]
++) -> dict[str, Any]:
++    """Keep full state on internal edges and stable canonical 32-bit edge tokens."""
++    targets = {address: index for index, address in enumerate(addresses)}
++    functions: list[dict[str, Any]] = []
++    with installed(targets):
++        for index, address in enumerate(addresses):
++            block = blocks[address]
++            observed = outputs if block.irsb.jumpkind == "Ijk_Ret" else tuple(name for name, _ in REG32.values())
++            body = S._lower_irsb(block.irsb, output_regs=observed, max_assignments_per_function=4096)
++            if isinstance(body, S.LowerFailure):
++                raise CfgRefusal(f"{body.reason}: {body.message}")
++            name = f"block_{index}"
++            functions.append(
++                {
++                    "id": f"{module}:{name}",
++                    "function": {"id": f"{module}:{name}", "name": name},
++                    "part": {"kind": "block", "index": 0, "entry_delta": "0x0"},
++                    "entry": {"linear": hex(address)},
++                    "function_entry": {"linear": hex(address)},
++                    "source": {"jumpkind": block.irsb.jumpkind},
++                    **body,
++                }
++            )
++    return {"functions": functions}
++
++
++def compare_cfg(
++    oracle: angr.Project,
++    candidate: angr.Project,
++    *,
++    name: str,
++    oracle_range: tuple[int, int],
++    candidate_range: tuple[int, int],
++    outputs: tuple[str, ...],
++    timeout_ms: int,
++    max_blocks: int = 128,
++) -> dict[str, Any]:
++    """Prove matching CFGs including loops by checking every inductive edge relation."""
++    try:
++        oblocks = discover(oracle, *oracle_range, max_blocks)
++        cblocks = discover(candidate, *candidate_range, max_blocks)
++        pairs = pair_graphs(oblocks, cblocks, oracle_range[0], candidate_range[0])
++        ossa = lower_blocks(oblocks, [left for left, _ in pairs], "oracle", outputs)
++        cssa = lower_blocks(cblocks, [right for _, right in pairs], "candidate", outputs)
++    except CfgRefusal as error:
++        return {"function": {"name": name}, "status": Status.REFUSED, "reason": str(error)}
++    with installed():
++        compared = S.compare_ssa_documents(
++            oracle=ossa,
++            candidate=cssa,
++            mapping_document=mapping("oracle", "candidate", [f"block_{i}" for i in range(len(pairs))]),
++            timeout_ms=timeout_ms,
++            max_solver_assignments=4096,
++            max_solver_inputs=64,
++            max_solver_memory_stores=256,
++            skip_binary_equal=False,
++            allow_aliased_call_targets=False,
++            enable_callee_lemmas=False,
++            enable_region_equality=False,
++            enable_connectivity=False,
++        )
++    expected = {f"block_{i}": f"oracle:block_{i}" for i in range(len(pairs))}
++    verdicts = checked_results(expected, compared)
++    status = aggregate(verdicts)
++    return {
++        "function": {"name": name},
++        "status": status,
++        "reason": "matched_cfg_induction",
++        "block_pairs": [[hex(left), hex(right)] for left, right in pairs],
++        "oracle_ssa": ossa,
++        "candidate_ssa": cssa,
++        "block_compare": compared,
++        "block_verdicts": verdicts,
++    }
+diff --git a/tools/flat32_verdict.py b/tools/flat32_verdict.py
+new file mode 100644
+--- /dev/null
++++ b/tools/flat32_verdict.py
+@@ -0,0 +1,139 @@
++"""Layer: validation proof accounting.
++
++Responsibility: publish PASS only from complete, identified backend evidence;
++keep relocation-dependent equality distinct from unconditional equivalence.
++"""
++from __future__ import annotations
++
++from collections import Counter
++from collections.abc import Mapping, Sequence
++from enum import StrEnum
++from typing import Any
++
++
++class Status(StrEnum):
++    """Public function verdict; CONDITIONAL does not satisfy a proof obligation."""
++
++    PASSED = 'passed'
++    FAILED = 'failed'
++    REFUSED = 'refused'
++    CONDITIONAL = 'conditional'
++
++
++class Reason(StrEnum):
++    """Typed reasons why backend evidence cannot establish an unconditional proof."""
++
++    INVALID_REPORT = 'invalid_backend_report'
++    INCONSISTENT_SUMMARY = 'inconsistent_backend_summary'
++    ABORTED = 'backend_aborted'
++    UNEXPECTED_RESULT = 'unexpected_backend_result'
++    MISSING_RESULT = 'missing_backend_result'
++    DUPLICATE_RESULT = 'duplicate_backend_result'
++    UNKNOWN_STATUS = 'unknown_backend_status'
++    IDENTITY_MISMATCH = 'backend_identity_mismatch'
++    RELOCATION_ASSUMPTIONS = 'relocation_assumptions'
++
++
++BACKEND_STATUSES: frozenset[Status] = frozenset((Status.PASSED, Status.FAILED, Status.REFUSED))
++REPORT_SCHEMA: str = 'msc8.z3cmp32.v2'
++
++
++def refusal(name: str, function_id: str, reason: Reason) -> dict[str, Any]:
++    """Keep the original obligation visible when proof evidence is unusable."""
++    return {'function': {'id': function_id, 'name': name}, 'status': Status.REFUSED, 'reason': reason}
++
++
++def _report_problem(report: dict[str, Any], rows: list[dict[str, Any]]) -> Reason | None:
++    """Cross-check backend counters against records, rejecting aborted comparisons."""
++    summary = report.get('summary')
++    if not isinstance(summary, dict):
++        return Reason.INVALID_REPORT
++    if report.get('aborted') or summary.get('aborted'):
++        return Reason.ABORTED
++    counts = Counter(row.get('status') for row in rows)
++    if any(status not in BACKEND_STATUSES for status in counts):
++        return Reason.UNKNOWN_STATUS
++    expected = {'total': len(rows), **{status.value: counts[status] for status in BACKEND_STATUSES}}
++    for field, value in expected.items():
++        if type(summary.get(field)) is not int or summary[field] != value:
++            return Reason.INCONSISTENT_SUMMARY
++    return None
++
++
++def _identified_rows(report: dict[str, Any]) -> tuple[list[dict[str, Any]], Reason | None]:
++    """Validate the dynamic JSON boundary before typed verdict accounting."""
++    rows = report.get('results')
++    if not isinstance(rows, list):
++        return [], Reason.INVALID_REPORT
++    for row in rows:
++        if not isinstance(row, dict) or not isinstance(row.get('function'), dict):
++            return [], Reason.INVALID_REPORT
++        if not isinstance(row.get('status'), str) or not isinstance(row['function'].get('name'), str):
++            return [], Reason.INVALID_REPORT
++    return rows, _report_problem(report, rows)
++
++
++def checked_results(expected: Mapping[str, str], report: dict[str, Any], *,
++                    relocation: Mapping[int, int] | None = None) -> list[dict[str, Any]]:
++    """Require one identified verdict per obligation and label relocation assumptions."""
++    rows, problem = _identified_rows(report)
++    if problem is None and any(row['function']['name'] not in expected for row in rows):
++        problem = Reason.UNEXPECTED_RESULT
++    if problem is not None:
++        return [refusal(name, identity, problem) for name, identity in expected.items()]
++    grouped: dict[str, list[dict[str, Any]]] = {}
++    for row in rows:
++        grouped.setdefault(row['function']['name'], []).append(row)
++    return [_checked_obligation(name, identity, grouped.get(name, []), relocation)
++            for name, identity in expected.items()]
++
++
++def _checked_obligation(name: str, identity: str, rows: list[dict[str, Any]],
++                        relocation: Mapping[int, int] | None) -> dict[str, Any]:
++    """Reject missing/duplicate identities and retain the raw solver verdict."""
++    if not rows:
++        return refusal(name, identity, Reason.MISSING_RESULT)
++    if len(rows) != 1:
++        return refusal(name, identity, Reason.DUPLICATE_RESULT)
++    row = rows[0]
++    if row['function'].get('id') != identity:
++        return refusal(name, identity, Reason.IDENTITY_MISMATCH)
++    result = dict(row)
++    result['status'] = Status(row['status'])
++    if result['status'] == Status.PASSED and relocation:
++        result.update(status=Status.CONDITIONAL, reason=Reason.RELOCATION_ASSUMPTIONS,
++                      backend_status=Status.PASSED, backend_reason=row.get('reason'),
++                      assumptions={'constant_relocation_count': len(relocation),
++                                   'scope': 'equality of rewritten SSA; original memory/alias relation unproved'})
++    return result
++
++
++def summarize(results: Sequence[dict[str, Any]]) -> dict[str, int]:
++    """Count every public verdict; reject internal unknown states rather than hide them."""
++    counts = Counter(Status(row['status']) for row in results)
++    return {'total': len(results), **{status.value: counts[status] for status in Status}}
++
++
++def aggregate(results: Sequence[dict[str, Any]]) -> Status:
++    """All blocks must pass; any missing proof keeps the whole CFG unproved."""
++    statuses = {Status(row['status']) for row in results}
++    if Status.FAILED in statuses:
++        return Status.FAILED
++    if not statuses or Status.REFUSED in statuses:
++        return Status.REFUSED
++    if Status.CONDITIONAL in statuses:
++        return Status.CONDITIONAL
++    return Status.PASSED
++
++
++def exit_code(summary: Mapping[str, int]) -> int:
++    """Return 0 only for consistent nonempty all-PASS counts; conditional is 2."""
++    counts = {status: summary.get(status.value, 0) for status in Status}
++    total = summary.get('total', 0)
++    if any(type(value) is not int or value < 0 for value in (*counts.values(), total)):
++        return 2
++    if counts[Status.FAILED]:
++        return 1
++    if total <= 0 or sum(counts.values()) != total:
++        return 2
++    return 0 if counts[Status.PASSED] == total else 2
+diff --git a/tools/test_z3cmp32.py b/tools/test_z3cmp32.py
+new file mode 100644
+--- /dev/null
++++ b/tools/test_z3cmp32.py
+@@ -0,0 +1,159 @@
++"""Regression evidence for the isolated flat32 proof adapter."""
++
++import sys
++from pathlib import Path
++from typing import Any
++
++import archinfo
++import pytest
++import pyvex
++
++sys.path.insert(0, str(Path(__file__).parent))
++from flat32_adapter import OUTPUT_REGS, S, installed
++from z3cmp32 import catalog, exit_code, mapping
++
++
++def lower(code: str) -> dict[str, Any] | S.LowerFailure:
++    """Lower actual i386 bytes with all configured observables."""
++    block = pyvex.IRSB(bytes.fromhex(code), 0x12345000, archinfo.ArchX86(), opt_level=0)
++    return S._lower_irsb(block, output_regs=OUTPUT_REGS, max_assignments_per_function=512)
++
++
++def document(body: dict[str, Any], module: str) -> dict[str, Any]:
++    """Wrap a complete function body in the dosunit comparison schema."""
++    return {
++        "functions": [
++            {
++                "id": module,
++                "function": {"id": f"{module}:f", "name": "f"},
++                "part": {"kind": "block", "index": 0, "entry_delta": "0x0"},
++                "entry": {"linear": "0x12345000"},
++                "function_entry": {"linear": "0x12345000"},
++                "source": {"jumpkind": "Ijk_Ret"},
++                **body,
++            }
++        ]
++    }
++
++
++def compare(left: dict[str, Any] | S.LowerFailure, right: dict[str, Any] | S.LowerFailure) -> dict[str, Any]:
++    """Use the public comparator, with actual Z3 and no binary-equality shortcut."""
++    assert not isinstance(left, S.LowerFailure), left
++    assert not isinstance(right, S.LowerFailure), right
++    result = S.compare_ssa_documents(
++        oracle=document(left, "o"),
++        candidate=document(right, "c"),
++        mapping_document=mapping("o", "c", ["f"]),
++        enable_region_equality=False,
++        enable_connectivity=False,
++        enable_callee_lemmas=False,
++        skip_binary_equal=False,
++    )
++    assert result["summary"]["total"] == 1
++    return result["results"][0]
++
++
++def test_partial_word_hash_and_corrupted_control() -> None:
++    """Partial word hash and corrupted control."""
++    with installed():
++        oracle = lower("8b442404 6625fc0f 66c1e802 25ffff0000 c3")
++        candidate = lower("0fb7442404 c1f802 25ff030000 c3")
++        corrupt = lower("0fb7442404 c1f802 25fe030000 c3")
++        assert compare(oracle, candidate)["status"] == "passed"
++        assert compare(oracle, corrupt)["status"] == "failed"
++
++
++def test_high_byte_write_preserves_other_bits() -> None:
++    """High byte write preserves other bits."""
++    with installed():
++        oracle = lower("b878563412 b49a c3")
++        candidate = lower("b8789a3412 c3")
++        assert compare(oracle, candidate)["status"] == "passed"
++
++
++def test_ccall_condition_is_pure_and_changed_operand_is_detected() -> None:
++    """Ccall condition is pure and changed operand is detected."""
++    with installed():
++        first = lower("83f801 0f94c0 c3")
++        second = lower("83f802 0f94c0 c3")
++        assert not isinstance(first, S.LowerFailure), first
++        assert any(item["op"] == "summary_x86g_calculate_condition" for item in first["assignments"])
++        assert compare(first, first)["status"] == "passed"
++        assert compare(first, second)["status"] == "failed"
++
++
++@pytest.mark.parametrize("code", ["e800000000", "85c0 7401 c3 c3", "ebfe", "cc"])
++def test_incomplete_or_exceptional_control_flow_refuses(code: str) -> None:
++    """A partial prefix must never become a function proof."""
++    with installed():
++        assert isinstance(lower(code), S.LowerFailure)
++
++
++def test_return_full_width_and_stack_delta_are_observed() -> None:
++    """Return full width and stack delta are observed."""
++    with installed():
++        ordinary = lower("c3")
++        ref = ordinary["outputs"]["eip"]["ref"]
++        assert next(item for item in ordinary["assignments"] if item["id"] == ref)["width"] == 32
++        assert compare(ordinary, lower("c20400"))["status"] == "failed"
++
++
++def test_scoped_patches_restore_on_error() -> None:
++    """Scoped patches restore on error."""
++    original = S.REG_BY_OFFSET
++    with pytest.raises(RuntimeError), installed():
++        assert S.REG_BY_OFFSET is not original
++        raise RuntimeError("test")
++    assert S.REG_BY_OFFSET is original
++
++
++def test_rebase_and_exit_accounting() -> None:
++    """Rebase and exit accounting."""
++    result = catalog("c", {"f": (0x40787B, 14)}, 0)
++    assert result["functions"][0]["entry"]["offset"] == "0x40787b"
++    assert exit_code({"total": 0, "passed": 0, "failed": 0}) == 2
++    assert exit_code({"total": 2, "passed": 1, "failed": 0}) == 2
++    assert exit_code({"total": 1, "passed": 1, "failed": 0}) == 0
++    assert exit_code({"total": 1, "passed": 0, "failed": 1}) == 1
++
++
++def test_closed_loop_induction_and_corrupt_control() -> None:
++    """Closed loop induction and corrupt control."""
++    import angr
++
++    from flat32_cfg import compare_cfg
++
++    code = bytes.fromhex("8b442404 85c0 7403 48 75fd c3")
++    changed = bytes.fromhex("8b442404 85c0 7403 40 75fd c3")
++    oracle = angr.load_shellcode(code, arch="x86", load_address=0x12345000)
++    candidate = angr.load_shellcode(code, arch="x86", load_address=0x23456000)
++    corrupt = angr.load_shellcode(changed, arch="x86", load_address=0x23456000)
++    kwargs = {
++        "name": "loop",
++        "oracle_range": (0x12345000, len(code)),
++        "candidate_range": (0x23456000, len(code)),
++        "outputs": OUTPUT_REGS,
++        "timeout_ms": 10000,
++    }
++    assert compare_cfg(oracle, candidate, **kwargs)["status"] == "passed"
++    assert compare_cfg(oracle, corrupt, **kwargs)["status"] == "failed"
++
++
++def test_floating_point_body_is_a_refusal_not_an_exception() -> None:
++    """A real x87 body must not crash integer-SSA batch processing."""
++    with installed():
++        assert isinstance(lower("d9ee c3"), S.LowerFailure)
++
++
++def test_normalization_cannot_use_raw_ssa_identity_shortcut() -> None:
++    """A changed normalization must be applied even when raw SSA bodies match."""
++    with installed():
++        body = lower('b834120000 c3')
++        assert not isinstance(body, S.LowerFailure)
++        oracle = document(body, 'o')
++        candidate = document(body, 'c')
++        candidate['functions'][0]['_constant_normalization'] = {0x1234: 0x4321}
++        result = S.compare_ssa_documents(oracle=oracle, candidate=candidate,
++            mapping_document=mapping('o', 'c', ['f']), enable_region_equality=False,
++            enable_connectivity=False, enable_callee_lemmas=False, skip_binary_equal=False)
++        assert result['summary']['failed'] == 1
+diff --git a/tools/test_proof_verdicts.py b/tools/test_proof_verdicts.py
+new file mode 100644
+--- /dev/null
++++ b/tools/test_proof_verdicts.py
+@@ -0,0 +1,117 @@
++"""Regressions for complete and honestly scoped flat32 proof verdicts."""
++from __future__ import annotations
++
++import argparse
++import sys
++from pathlib import Path
++from typing import Any
++
++import angr
++import pytest
++
++sys.path.insert(0, str(Path(__file__).parent))
++import flat32_cfg
++import z3cmp32
++from flat32_adapter import OUTPUT_REGS, S, installed
++from flat32_catalog import Symbol
++
++
++def test_cfg_cannot_pass_without_passing_block_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Zero failures in a summary must not stand in for an actual block proof."""
++    project = angr.load_shellcode(b'\xc3', arch='x86', load_address=0x100000)
++    raw = {'summary': {'total': 1, 'passed': 0, 'failed': 0, 'refused': 0}, 'results': []}
++    monkeypatch.setattr(S, 'compare_ssa_documents', lambda **kwargs: raw)
++    result = flat32_cfg.compare_cfg(project, project, name='f', oracle_range=(0x100000, 1),
++        candidate_range=(0x100000, 1), outputs=OUTPUT_REGS, timeout_ms=1000)
++    assert result['status'] == 'refused'
++
++
++def scalar_comparison(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, normalize: bool) -> dict[str, Any]:
++    """Compare two unequal scalar returns whose constants match a relocation map."""
++    original = tmp_path / 'oracle.bin'
++    candidate = tmp_path / 'candidate.bin'
++    original.write_bytes(bytes.fromhex('b834120000 c3'))
++    candidate.write_bytes(bytes.fromhex('b878560000 c3'))
++    projects = {path: angr.load_shellcode(path.read_bytes(), arch='x86', load_address=0x100000)
++                for path in (original, candidate)}
++    monkeypatch.setattr(z3cmp32, 'load32', projects.__getitem__)
++    monkeypatch.setattr(S, '_load_lifter_project', projects.__getitem__)
++    monkeypatch.setattr(z3cmp32, 'lst_functions', lambda path: {'sub_test': (0x100000, 0x100005)})
++    monkeypatch.setattr(z3cmp32, 'nm_symbols', lambda path: {'sub_test': Symbol(0x100000, 6, 'T')})
++    monkeypatch.setattr(z3cmp32, 'global_map', lambda *args: {0x5678: 0x1234})
++    monkeypatch.setattr(z3cmp32, 'lst_data_symbols', lambda path: {})
++    args = argparse.Namespace(oracle_exe=original, candidate_exe=candidate, oracle_lst=original,
++        candidate_lst=None, functions='sub_test', mode='leaf', scan_limit=8192,
++        output_regs='eax,edx,esp', timeout_ms=1000, normalize_globals=normalize, out_dir=tmp_path)
++    return z3cmp32.compare(args)
++
++
++def test_relocated_scalar_equality_is_not_an_unconditional_proof(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    """Relocation can hide scalar changes: expose the assumption and return incomplete."""
++    with installed():
++        raw = scalar_comparison(tmp_path, monkeypatch, False)
++        relocated = scalar_comparison(tmp_path, monkeypatch, True)
++    assert raw['summary']['failed'] == 1
++    assert relocated['results'][0]['status'] == 'conditional'
++    assert relocated['summary']['passed'] == 0
++    assert z3cmp32.exit_code(relocated['summary']) == 2
++
++
++def backend_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
++    """Build realistic counters independently from each backend result record."""
++    return {'results': rows, 'summary': {'total': len(rows), **{
++        status: sum(row['status'] == status for row in rows) for status in ('passed', 'failed', 'refused')}}}
++
++
++def backend_row(name: str = 'f', status: str = 'passed') -> dict[str, Any]:
++    """Associate solver evidence with its exact oracle function identity."""
++    return {'function': {'id': f'oracle:{name}', 'name': name}, 'status': status}
++
++
++@pytest.mark.parametrize('corruption', ['missing', 'duplicate', 'unknown_status', 'wrong_id', 'wrong_counter',
++                                       'unexpected', 'aborted', 'malformed'])
++def test_incomplete_or_inconsistent_evidence_never_passes(corruption: str) -> None:
++    """Reject realistic backend boundary failures instead of trusting zero failed counts."""
++    from flat32_verdict import aggregate, checked_results
++
++    rows = [backend_row()]
++    if corruption == 'missing':
++        rows = []
++    elif corruption == 'duplicate':
++        rows.append(backend_row())
++    elif corruption == 'unknown_status':
++        rows[0]['status'] = 'timeout'
++    elif corruption == 'wrong_id':
++        rows[0]['function']['id'] = 'oracle:other'
++    elif corruption == 'unexpected':
++        rows.append(backend_row('extra'))
++    report = backend_report(rows)
++    if corruption == 'wrong_counter':
++        report['summary']['passed'] = 0
++    elif corruption == 'aborted':
++        report['summary']['aborted'] = {'phase': 'ssa_pair', 'reason': 'memory_limit'}
++    elif corruption == 'malformed':
++        report['results'] = None
++    verdicts = checked_results({'f': 'oracle:f'}, report)
++    assert len(verdicts) == 1
++    assert aggregate(verdicts) == 'refused'
++
++
++def test_partial_batch_keeps_independent_proofs_and_missing_obligations() -> None:
++    """A missing function remains visible without discarding a valid independent proof."""
++    from flat32_verdict import aggregate, checked_results, summarize
++
++    verdicts = checked_results({'f': 'oracle:f', 'g': 'oracle:g'}, backend_report([backend_row()]))
++    assert [row['status'] for row in verdicts] == ['passed', 'refused']
++    assert aggregate(verdicts) == 'refused'
++    assert z3cmp32.exit_code(summarize(verdicts)) == 2
++
++
++def test_unmodified_evidence_passes_and_failures_remain_failures() -> None:
++    """The proof guard preserves valid PASS and mismatch outcomes."""
++    from flat32_verdict import aggregate, checked_results, summarize
++
++    for status, expected_exit in [('passed', 0), ('failed', 1)]:
++        verdicts = checked_results({'f': 'oracle:f'}, backend_report([backend_row(status=status)]))
++        assert aggregate(verdicts) == status
++        assert z3cmp32.exit_code(summarize(verdicts)) == expected_exit
+diff --git a/tools/Makefile.z3cmp32 b/tools/Makefile.z3cmp32
+new file mode 100644
+--- /dev/null
++++ b/tools/Makefile.z3cmp32
+@@ -0,0 +1,15 @@
++# Focused gate for the standalone comparator, usable before or after installation.
++VEXTEST ?= /home/xor/vextest
++PYTHON ?= $(VEXTEST)/.venv/bin/python
++CHECK_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
++SOURCES := $(addprefix $(CHECK_DIR),z3cmp32.py flat32_adapter.py flat32_catalog.py flat32_cfg.py flat32_verdict.py)
++TESTS := $(addprefix $(CHECK_DIR),test_z3cmp32.py test_proof_verdicts.py)
++
++.PHONY: check lint typecheck test
++check: lint typecheck test
++lint:
++	PYTHON_JIT=1 $(PYTHON) -m ruff check --config $(VEXTEST)/pyproject.toml --preview --extend-select C901,PLR0916 $(SOURCES) $(TESTS)
++typecheck:
++	PYTHON_JIT=1 $(PYTHON) -m pyright --project $(VEXTEST)/pyproject.toml --pythonpath $(PYTHON) $(SOURCES)
++test:
++	PYTHON_JIT=1 $(PYTHON) -m pytest $(TESTS) -n 7 --tb=short --durations=5 -q
+diff --git a/tools/z3cmp32.md b/tools/z3cmp32.md
+new file mode 100644
+--- /dev/null
++++ b/tools/z3cmp32.md
+@@ -0,0 +1,126 @@
++# MSC v8 flat32 SSA comparison
++
++This is a staged replacement for `rebuild/tools/z3cmp32.py`, with isolated
++adapter modules. It uses the current `/home/xor/vextest/tools/dosunit` SSA/Z3
++implementation without modifying its files. The rebuild directory is read-only
++in this session. Apply the checked patch with the command below, or run this copy directly.
++
++The future MSC-built candidates do not exist yet. Current candidate evidence is
++against the existing GCC-built ELF32 files. Original-versus-original PE checks
++and synthetic fixtures validate the PE candidate / matched-CFG paths; they are
++not evidence about a future self-hosted rebuild.
++
++## Install the staged patch
++
++The actual Git root is `dos_compilers`, so the subdirectory prefix is required:
++
++```sh
++git -C /home/xor/inertia_player/dos_compilers apply \
++  --directory='Microsoft C v8/BIN/rebuild' \
++  /home/xor/vextest/artifacts/msc8-z3cmp32/rebuild.patch
++```
++
++The same command with `--check` was verified against all affected files.
++The patch has not been applied here because that directory is read-only.
++
++## Run
++
++```sh
++PY=/home/xor/vextest/.venv/bin/python
++BIN='/home/xor/inertia_player/dos_compilers/Microsoft C v8/BIN'
++DRIVER=/home/xor/vextest/artifacts/msc8-z3cmp32/z3cmp32.py
++
++PYTHON_JIT=1 "$PY" "$DRIVER" \
++  --oracle-exe "$BIN/C13216.EXE" --oracle-lst "$BIN/C13216.EXE.lst" \
++  --candidate-exe "$BIN/rebuild/out/C13216.exe" \
++  --functions sub_27320 --out-dir /home/xor/vextest/.cache/msc8-hash
++```
++
++For a future PE32 candidate, provide its IDA boundary listing:
++
++```sh
++PYTHON_JIT=1 "$PY" "$DRIVER" \
++  --oracle-exe "$BIN/C13216.EXE" --oracle-lst "$BIN/C13216.EXE.lst" \
++  --candidate-exe /path/to/MSC-built/C13216.EXE \
++  --candidate-lst /path/to/MSC-built/C13216.EXE.lst \
++  --mode matched-cfg --functions sub_27320 \
++  --out-dir /home/xor/vextest/.cache/msc8-selfhost
++```
++
++Function names in the two catalogs must identify corresponding functions.
++A matching compiler can make SSA and CFGs match, but names or compiler identity
++alone never constitute a proof. Use `--all-mapped` instead of `--functions` to
++account for every mapped `sub_*`; unsupported bodies remain explicit refusals.
++Q23's Phar Lap container is outside this PE32/ELF32 loader.
++
++## Proof contracts
++
++* `leaf` accepts only complete single-block near-return functions. It retains
++  all VEX statements, handles partial GPR writes at their actual 32-bit width,
++  and checks all 32 bits of the return target. `.lst` `endp` is inclusive of
++  its last instruction, whose byte length is decoded from the binary.
++* `matched-cfg` builds a closed bijection between reachable blocks. Each internal
++  edge compares every modeled GPR, lazy flag field, segment register, direction
++  flag, and the entire memory array, plus a canonical 32-bit successor token.
++  Every corresponding block must pass. This is induction over matching graphs,
++  including cycles; no loop-unroll bound is treated as a proof. Shape changes,
++  indirect jumps, calls, exception edges, and effects after conditional exits
++  refuse. A mismatched edge or changed loop body fails the regression controls.
++* Returns observe EAX, EDX, ESP, preserved GPRs, segments, direction flag and the
++  full return target by default. `--output-regs eax,esp` can declare a narrower
++  return-value ABI explicitly. Preserved registers and return control remain
++  checked. EDX mismatches under the default contract do not automatically mean
++  a C function returning only EAX is wrong.
++* Memory is the same unconstrained flat byte array on both sides. Stack writes
++  remain observable. Floating point, MMU validity and asynchronous effects are
++  outside this integer functional model. Explicit VEX exception paths refuse.
++* Known pure `x86g_calculate_condition`, `x86g_calculate_eflags_c`, and
++  `x86g_calculate_eflags_all` helpers use uninterpreted functions. Equality is
++  conservative; a SAT mismatch may be an abstraction artifact. Unknown helpers
++  refuse. No broad exception fallback converts errors into proofs.
++* `--normalize-globals` is optional in leaf mode. It records candidate-to-oracle
++  constant relocation using defined candidate data aliases and exact matching
++  original `.lst` labels, with mapped original addresses. This produces a distinct **`conditional` verdict for the relocated SSA**, not a proof of pointer alias correspondence,
++  initialized data, or arbitrary address-valued integers. Review `globals.json`.
++  It is not enabled in the unnormalized batch or matched-CFG mode. Inferred
++  16-bit layout heuristics and binary-equality shortcuts are disabled.
++* Callee lemmas are not enabled: the existing call/region implementation has
++  segmented 16-bit stack and IP assumptions. Calls refuse until a flat32 call
++  relation, return-address handling, and callee proof composition are supplied.
++
++Reports now use `msc8.z3cmp32.v2`. A `passed` verdict requires exactly one
++identified passing record for every obligation, with consistent backend counters.
++Missing, duplicate, unknown, misidentified, unexpected or aborted evidence refuses.
++The raw backend report is retained for diagnosis. A relocation-dependent result
++is `conditional`, is counted separately, and never satisfies a proof obligation.
++
++Exit codes: `0` means a nonempty selection with every requested function proved;
++`1` means at least one mismatch; `2` means incomplete, refused or conditional. Missing names,
++failed lowerings, timeouts and zero comparisons cannot produce exit 0.
++
++Artifacts include input catalogs, mapping, both SSA documents, raw comparator
++results, and one result per requested function. CFG runs retain both SSA graphs
++and every block comparison in `<function>.cfg.json`. When loading a saved leaf
++SSA document directly through dosunit, restore `_constant_normalization` JSON
++keys to integers; the driver builds that private runtime map itself.
++
++## Verification and remaining work
++
++See `RESULTS.md` for the measured batch and corpus results. Run the complete standalone gate with
++`make -C /home/xor/vextest/artifacts/msc8-z3cmp32 check` (after installation:
++`make -f tools/Makefile.z3cmp32 check` from rebuild). It includes Ruff, Pyright,
++and both test modules. The focused pytest
++suite exercises real VEX/Z3 with changed-code controls, partial-register writes,
++CCalls, full-width returns, refusals, and relocated cyclic CFGs:
++
++```sh
++PYTHON_JIT=1 /home/xor/vextest/.venv/bin/python -m pytest \
++  /home/xor/vextest/artifacts/msc8-z3cmp32/test_z3cmp32.py \
++  /home/xor/vextest/artifacts/msc8-z3cmp32/test_proof_verdicts.py \
++  -n 7 --tb=short --durations=5 -q
++```
++
++The function-fix acceptance goal is not complete for `sub_26870`, `sub_2B0F0`,
++or `sub_1D216`: the first two have call paths, and the latter has an explicit
++VEX division-exception edge. No reconstructed C was changed to accommodate the
++comparison. Different CFGs and callee composition remain implementation work.

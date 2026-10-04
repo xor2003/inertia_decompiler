@@ -13,11 +13,13 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 from __future__ import annotations
 
 from ..alias.domains import register_domain_for_name, register_view_for_name
+from ..analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from ..caller_return_use_contracts import (
     AxValueView8616,
     CallerReturnUseFact8616,
     CallsiteReturnUseKind8616,
 )
+from ..frontend_function_boundary import ExactFunctionRangeBoundary8616
 from ..ir import IRValue, MemSpace
 from ..ir.condition_ir import ConditionIR
 from ..ir.function_ssa_registry import (
@@ -27,6 +29,9 @@ from ..ir.ssa_function import SSAFunctionArtifact
 from ..semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
 )
+from ..semantics.call_target_evidence_8616 import (
+    resolve_call_target_evidence_8616,
+)
 from ..semantics.terminal_return_storage import TerminalReturnStorage8616
 from .condition_transfer import collect_typed_condition_artifacts_8616
 from .interprocedural_storage_caller_context import CallerSSAContext8616
@@ -35,6 +40,7 @@ from .interprocedural_storage_contracts import (
     StorageIdentityKind8616,
     StorageTrial8616,
     StorageTrialRole8616,
+    StorageTrialValueClass8616,
     StorageUseEvidence8616,
 )
 from .interprocedural_storage_return_collection_contracts import (
@@ -49,6 +55,7 @@ from .interprocedural_storage_return_defs import (
 )
 from .interprocedural_storage_return_pointer import (
     classify_pointer_return_storage_8616,
+    proven_pointer_return_pointee_width_8616,
 )
 from .interprocedural_storage_return_pointer_witness import (
     pointer_return_witness_use_8616,
@@ -57,6 +64,7 @@ from .interprocedural_storage_return_split import (
     classify_split_return_storage_8616,
 )
 from .interprocedural_storage_return_type_contracts import (
+    ReturnPointerUseEvidence8616,
     ReturnStorageTypeFailure8616,
     ReturnStorageTypeResult8616,
     ReturnStorageTypeVerdict8616,
@@ -64,6 +72,7 @@ from .interprocedural_storage_return_type_contracts import (
 from .interprocedural_storage_return_types import (
     classify_return_storage_type_8616,
 )
+from .return_witness_source import distinct_return_witness_sources_8616
 
 __all__ = [
     "materialize_callsite_return_trials_8616",
@@ -137,16 +146,19 @@ def _witness_use_8616(
 
     pointer_use = classification.pointer_use
     if pointer_use is not None:
-        return pointer_return_witness_use_8616(
+        result: tuple[tuple[StorageUseEvidence8616, ...] | None, bool] = pointer_return_witness_use_8616(
             artifact,
             fact,
             pointer_use,
             output_storages,
         )
+        return result
 
     def _reads_output(value: object) -> bool:
         """Match one IR operand to an exact Alias-owned output view."""
         if not isinstance(value, IRValue) or value.space is not MemSpace.REG:
+            return False
+        if fact.kind is CallsiteReturnUseKind8616.CONDITION and value.expr is not None:
             return False
         return any(
             (
@@ -179,7 +191,28 @@ def _witness_use_8616(
         and any(_reads_output(argument) for argument in instruction.args)
     )
     if len(candidates) != 1:
-        return None, bool(candidates)
+        # A CMP expands into arithmetic and architectural flag operations.
+        # These are one physical condition witness, not distinct caller uses.
+        # Keep all other use kinds strict and refuse multiple blocks or values.
+        sites = {(block_addr, instr_addr) for block_addr, _, instr_addr in candidates}
+        values = tuple(
+            argument
+            for block in artifact.blocks
+            for instruction in block.instrs
+            if instruction.addr == fact.witness_instruction_addr
+            for argument in instruction.args
+            if isinstance(argument, IRValue) and _reads_output(argument)
+        )
+        same_known_value = bool(values) and values[0].version is not None and all(
+            value == values[0] for value in values
+        )
+        if (
+            fact.kind is not CallsiteReturnUseKind8616.CONDITION
+            or len(sites) != 1
+            or not distinct_return_witness_sources_8616(artifact, candidates)
+            or not same_known_value
+        ):
+            return None, bool(candidates)
     block_addr, instr_index, instr_addr = candidates[0]
     return (
         (
@@ -273,6 +306,20 @@ def materialize_callsite_return_trials_8616(
             fact,
             ssa_failure=ssa.failure,
         )
+    evidence = resolve_call_target_evidence_8616(
+        caller_project,
+        fact.caller_addr,
+        boundary=(
+            caller_function
+            if isinstance(caller_function, ExactFunctionRangeBoundary8616)
+            else None
+        ),
+        direct_target_resolver=lambda instruction: (
+            resolve_direct_call_target_from_instruction_8616(
+                caller_project, instruction
+            )
+        ),
+    )
     definitions = resolve_call_output_definitions_8616(
         artifact,
         fact,
@@ -280,6 +327,8 @@ def materialize_callsite_return_trials_8616(
         accepted_target_addrs,
         output_storages,
         project=caller_project,
+        callsite_index=evidence.callsite_index if evidence.complete else None,
+        projection=evidence.projection if evidence.complete else None,
     )
     if not definitions.complete:
         kind = (
@@ -341,6 +390,15 @@ def materialize_callsite_return_trials_8616(
     value_class = classification.value_class
     if provenance is None or signedness is None or value_class is None:
         raise RuntimeError("complete return classification lost typed evidence")
+    pointee_width_bytes: int | None = None
+    pointer_use: ReturnPointerUseEvidence8616 | None = None
+    if value_class is StorageTrialValueClass8616.POINTER:
+        pointer_use = classification.pointer_use
+        if pointer_use is None or not pointer_use.complete:
+            raise RuntimeError("complete pointer return lost exact dereference evidence")
+        pointee_width_bytes = proven_pointer_return_pointee_width_8616(
+            artifact, pointer_use,
+        )
     piece_count = len(output_storages)
     trials = tuple(
         StorageTrial8616(
@@ -357,6 +415,8 @@ def materialize_callsite_return_trials_8616(
             signedness=signedness,
             value_class=value_class,
             provenance=provenance,
+            pointee_width_bytes=pointee_width_bytes,
+            pointer_use=pointer_use,
         )
         for piece_index, (storage, definition, use) in enumerate(
             zip(

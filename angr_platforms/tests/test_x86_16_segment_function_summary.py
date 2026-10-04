@@ -10,7 +10,16 @@ from angr_platforms.X86_16.analysis_helpers import (
     collect_neighbor_call_targets,
     resolve_direct_call_target_from_block,
 )
-from angr_platforms.X86_16.ir.segment_contract import SegmentFactVerdict, SegmentFunctionContract
+from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from angr_platforms.X86_16.ir import build_x86_16_segment_state_artifact
+from angr_platforms.X86_16.ir.function_ir_registry import publish_function_ir_artifact_8616
+from angr_platforms.X86_16.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
+from angr_platforms.X86_16.ir.segment_contract import (
+    SegmentFactVerdict,
+    SegmentFunctionContract,
+    build_x86_16_segment_function_contract,
+)
+from angr_platforms.X86_16.ir.vex_import import build_x86_16_ir_function_artifact
 from angr_platforms.X86_16.segment_function_summary import (
     SegmentControlTransferDistance8616,
     SegmentControlTransferFact8616,
@@ -19,6 +28,7 @@ from angr_platforms.X86_16.segment_function_summary import (
     build_x86_16_segment_control_transfers,
     join_x86_16_segment_function_summaries,
 )
+from test_segment_call_binding_regression import _project
 
 
 def _local_contract(function_addr: int, *clobbers: str) -> SegmentFunctionContract:
@@ -44,6 +54,112 @@ def _transfer(site: int, target: int) -> SegmentControlTransferFact8616:
         return_addr=site + 3,
         verdict=SegmentFactVerdict.PROVEN,
     )
+
+
+def test_empty_local_contract_cannot_authorize_callee_preservation() -> None:
+    """Existence of a callee contract is not complete body/effect evidence."""
+    contracts = {0x1000: _local_contract(0x1000), 0x2000: _local_contract(0x2000)}
+    summaries = join_x86_16_segment_function_summaries(
+        contracts, {0x1000: (_transfer(0x1003, 0x2000),)},
+    )
+    assert summaries[0x1000].callee_effects[0].verdict is SegmentFactVerdict.UNKNOWN_REFUSE
+    assert not summaries[0x2000].local_effects_complete
+    assert summaries[0x2000].summary["failure_count"] == 1
+
+
+def _closed_function_code_8616(
+    function_addr: int,
+    calls: tuple[int, ...],
+    call_target: int,
+) -> tuple[bytes, int]:
+    """Encode contiguous native NOP/direct-CALL/RET bytes for one leaf shape.
+
+    Every call site carries a real ``call rel16`` aimed at ``call_target`` and
+    the region ends one byte past the final ``ret``, so the decoded census,
+    lifted IR, and call sites all come from bytes a project actually owns.
+    """
+    end = max((function_addr, *calls)) + 3
+    code = bytearray(b"\x90" * (end + 1 - function_addr))
+    code[-1] = 0xC3
+    previous_end = function_addr
+    for site in sorted(calls):
+        if site < previous_end or site + 3 > end:
+            raise ValueError("call site has no room for its three-byte encoding")
+        relative = (call_target - (site + 3)) & 0xFFFF
+        code[site - function_addr: site + 3 - function_addr] = (
+            b"\xe8" + relative.to_bytes(2, "little")
+        )
+        previous_end = site + 3
+    return bytes(code), end + 1
+
+
+def _closed_contract(
+    function_addr: int,
+    calls: tuple[int, ...] = (),
+    *,
+    project: object | None = None,
+    call_target: int | None = None,
+) -> SegmentFunctionContract:
+    """Construct actual registered raw IR and solved state, not a proof flag."""
+    end = max((function_addr, *calls)) + 3
+    code, region_end = _closed_function_code_8616(
+        function_addr, calls, end if call_target is None else call_target,
+    )
+    if project is None:
+        project = _project(code, base=function_addr)
+    boundary = exact_function_range_boundary_8616(project, function_addr, region_end)
+    assert boundary is not None
+    artifact = build_x86_16_ir_function_artifact(project, boundary)
+    publish_function_ir_artifact_8616(project, artifact)
+    coverage = prove_ir_boundary_coverage_8616(project, boundary, artifact)
+    assert coverage.complete
+    return build_x86_16_segment_function_contract(
+        artifact, build_x86_16_segment_state_artifact(artifact), coverage=coverage,
+    )
+
+
+def test_closed_leaf_contract_authorizes_known_callee_effect() -> None:
+    """Closed caller and leaf evidence from one project supplies exact effects."""
+    caller_code, _ = _closed_function_code_8616(0x1000, (0x1003,), 0x2000)
+    callee_code, _ = _closed_function_code_8616(0x2000, (), 0x2000)
+    image = bytearray(0x2000)
+    image[: len(caller_code)] = caller_code
+    image[0x1000 : 0x1000 + len(callee_code)] = callee_code
+    project = _project(bytes(image), base=0x1000, image_size=0x2000)
+    contracts = {
+        0x1000: _closed_contract(0x1000, (0x1003,), project=project, call_target=0x2000),
+        0x2000: _closed_contract(0x2000, project=project),
+    }
+    summaries = join_x86_16_segment_function_summaries(
+        contracts, {0x1000: (_transfer(0x1003, 0x2000),)},
+    )
+    assert summaries[0x1000].callee_effects[0].verdict is SegmentFactVerdict.PROVEN
+    assert summaries[0x1000].callee_effects[0].clobbered_registers == ()
+    assert summaries[0x2000].local_effects_complete
+
+
+def test_closed_body_with_omitted_call_census_refuses_transitively() -> None:
+    """Body completeness cannot hide an unreported local call."""
+    contracts = {0x1000: _local_contract(0x1000), 0x2000: _closed_contract(0x2000, (0x2003,))}
+    summaries = join_x86_16_segment_function_summaries(
+        contracts, {0x1000: (_transfer(0x1003, 0x2000),)},
+    )
+    assert summaries[0x1000].callee_effects[0].verdict is SegmentFactVerdict.UNKNOWN_REFUSE
+    assert not summaries[0x2000].local_effects_complete
+
+
+def test_cross_project_callee_proof_cannot_authorize_effects() -> None:
+    """Equal target addresses cannot transport another project's raw IR proof."""
+    contracts = {
+        0x1000: _closed_contract(0x1000, (0x1003,), call_target=0x2000),
+        0x2000: _closed_contract(0x2000),
+    }
+    summaries = join_x86_16_segment_function_summaries(
+        contracts, {0x1000: (_transfer(0x1003, 0x2000),)},
+    )
+    assert summaries[0x1000].local_effects_complete
+    assert summaries[0x2000].local_effects_complete
+    assert summaries[0x1000].callee_effects[0].verdict is SegmentFactVerdict.UNKNOWN_REFUSE
 
 
 def test_control_transfers_preserve_near_far_and_unresolved_calls(monkeypatch) -> None:
@@ -83,8 +199,8 @@ def test_function_summary_propagates_transitive_callee_clobbers() -> None:
 
     assert summaries[0x100].effective_clobbered_registers == ("es",)
     assert summaries[0x100].callee_effects[0].clobbered_registers == ("es",)
-    assert summaries[0x100].callee_effects[0].verdict is SegmentFactVerdict.PROVEN
-    assert summaries[0x100].unresolved_effect_sites == ()
+    assert summaries[0x100].callee_effects[0].verdict is SegmentFactVerdict.UNKNOWN_REFUSE
+    assert summaries[0x100].unresolved_effect_sites == (0x110,)
 
 
 def test_function_summary_refuses_missing_or_transitively_unknown_callee() -> None:
@@ -99,6 +215,34 @@ def test_function_summary_refuses_missing_or_transitively_unknown_callee() -> No
     assert summaries[0x200].unresolved_effect_sites == (0x210,)
 
 
+def test_function_summary_refuses_unproved_transfer_even_with_known_target() -> None:
+    """A target address alone cannot certify an unclassified CALL effect."""
+    contracts = {
+        0x50: _local_contract(0x50),
+        0x100: _local_contract(0x100),
+        0x200: _local_contract(0x200),
+    }
+    transfer = SegmentControlTransferFact8616(
+        instruction_addr=0x110,
+        kind=SegmentControlTransferKind8616.CALL,
+        distance=SegmentControlTransferDistance8616.UNKNOWN,
+        target_addr=0x200,
+        return_addr=None,
+        verdict=SegmentFactVerdict.UNKNOWN_REFUSE,
+    )
+
+    summaries = join_x86_16_segment_function_summaries(
+        contracts,
+        {0x50: (_transfer(0x60, 0x100),), 0x100: (transfer,)},
+    )
+
+    assert summaries[0x100].callee_effects[0].verdict is SegmentFactVerdict.UNKNOWN_REFUSE
+    assert summaries[0x100].unresolved_effect_sites == (0x110,)
+    assert summaries[0x100].summary["failure_count"] == 3
+    assert summaries[0x50].callee_effects[0].verdict is SegmentFactVerdict.UNKNOWN_REFUSE
+    assert summaries[0x50].unresolved_effect_sites == (0x60,)
+
+
 def test_apply_function_summary_registers_current_project_contract(monkeypatch) -> None:
     function = SimpleNamespace(addr=0x100, get_call_sites=lambda: ())
     project = SimpleNamespace(_inertia_active_structuring_function_8616=function)
@@ -109,7 +253,7 @@ def test_apply_function_summary_registers_current_project_contract(monkeypatch) 
 
     assert changed is False
     assert codegen._inertia_segment_function_summary_8616.function_addr == 0x100
-    assert project._inertia_segment_function_summaries_8616[0x100].summary["failure_count"] == 0
+    assert project._inertia_segment_function_summaries_8616[0x100].summary["failure_count"] == 1
 
 
 def test_apply_function_summary_accepts_slotted_angr_function_surface(monkeypatch) -> None:

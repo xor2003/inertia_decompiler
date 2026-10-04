@@ -785,3 +785,23 @@ def test_direct_bp_call_source_keeps_exact_projected_stack_variable() -> None:
 
     assert _materialize_callsite_stack_arguments_8616(project, codegen) is True
     assert call.args[0].variable is projected_variable
+
+
+def test_scalar_clone_cannot_be_reinterpreted_as_neighboring_array() -> None:
+    """Competing raw-BP storage blocks numeric entry-SP containment recovery."""
+    codegen = SimpleNamespace()
+    scalar = SimStackVariable(-20, 1, base="bp", ident="saved", region=0x1000)
+    buffer = SimStackVariable(-20, 16, base="bp", ident="buffer", region=0x1000)
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=scalar, cvar=object(), bp_offset=-20,
+        entry_sp_offset=-22, size=1,
+    )
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=buffer, cvar=object(), bp_offset=-18,
+        entry_sp_offset=-20, size=16,
+    )
+    clone = SimStackVariable(-20, 1, base="bp", ident="saved", region=0x1000)
+
+    assert machine_bp_offset_for_stack_variable_8616(codegen, scalar) == -20
+    assert machine_bp_offset_for_stack_variable_8616(codegen, buffer) == -18
+    assert machine_bp_offset_for_stack_variable_8616(codegen, clone) in (None, -20)

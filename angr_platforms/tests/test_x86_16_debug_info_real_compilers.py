@@ -40,6 +40,7 @@ def _real_compiler_matrix_available() -> bool:
 
 @pytest.mark.skipif(not _real_compiler_matrix_available(), reason="DOS compiler matrix is not available")
 @pytest.mark.resource_serial
+@pytest.mark.requires_kvm
 def test_real_compiler_debug_info_corpus_representative_formats(tmp_path):
     specs = selected_specs("msc5,msc6,msc8,tc2")
     compiler_output_root = tmp_path / ("partitioned-runner-" + "long-path-" * 12)

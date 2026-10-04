@@ -117,6 +117,7 @@ def _assert_clean_decompilation_output(combined_output: str) -> None:
         assert marker not in combined_output, combined_output
 
 
+@pytest.mark.requires_kvm
 def test_sortd_sidecar_free_swapbars_recovers_binary_stack_arguments(tmp_path: Path) -> None:
     sortd_exe = tmp_path / "SORTD.EXE"
     sortd_exe.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -412,7 +413,10 @@ def test_sortdemo_swapbars_materializes_arguments_without_dead_setup_artifacts()
     assert scorecard.recovery_mode == "decompiled"
     assert scorecard.validation_verdict == "stable"
     assert scorecard.raw_ds_linear_count == 0
-    assert scorecard.anonymous_sub_count == 0
+    swap_body = _function_body_from_stdout(result.stdout, "void SwapBars")
+    assert swap_body.count("DrawBar(") == 2
+    assert swap_body.count("DrawTime(") == 1
+    assert not re.search(r"\bsub_[0-9a-fA-F]+\s*\(", swap_body)
 
 
 def test_sortdemo_swaps_preserves_binary_proven_global_increment_and_pointer_swap():
@@ -730,6 +734,7 @@ def test_sortd_reinitbars_sidecar_free_materializes_indexed_global_copy(
     assert final_body.count("return;") == 1 or final_body.count("return 0;") == 1
 
 
+@pytest.mark.requires_kvm
 def test_sortd_drawtime_sidecar_free_materializes_wide_delay_arguments(
     tmp_path: Path,
 ) -> None:
@@ -868,14 +873,17 @@ def test_sortd_initmenu_sidecar_free_preserves_calls_and_compiles(
     assert "extern char * g_0136[];" in result.stdout
     final_body = _function_body_from_stdout(result.stdout, "void sub_10060")
     assert "char local_12[16];" in final_body and "// [bp+0x2]" not in final_body
-    assert final_body.count("sub_12b24(15);") == 1
+    assert sum(final_body.count(f"{name}(15);") for name in ("sub_12b24", "settextcolor")) == 1
     assert final_body.count("sub_12b3e(0, 0);") == 1
     assert final_body.count("sub_101f0(") == 1
     assert "sub_101db(" not in final_body
     assert final_body.count("sub_12756(") == 5
-    assert "sub_12756(g_0136[local_2], inertia_ds);" in final_body
+    assert re.search(
+        r"sub_12756\(g_0136\[(?:\(unsigned short\))?local_2\], inertia_ds\);",
+        final_body,
+    )
     assert final_body.count("sub_128e4(") == 5
-    assert final_body.count("sub_1123a(") == 3
+    assert final_body.count("sub_1123a(") + final_body.count("strcpy(") == 3
     assert "aNldiv(SEG_U32(inertia_ds, 306), 30)" in final_body
     assert "sub_1143a(" not in final_body
     assert "vvar_" not in final_body

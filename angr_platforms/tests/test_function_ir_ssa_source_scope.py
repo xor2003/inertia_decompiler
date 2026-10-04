@@ -72,6 +72,9 @@ def test_function_ir_ssa_source_scope_has_exact_layer_owners() -> None:
     assert ir_paths <= paths
     assert {
         "pyvex_compat.py",
+        "angr_platforms/__init__.py",
+        "angr_platforms/angr_platforms/__init__.py",
+        "angr_platforms/angr_platforms/import_identity.py",
         "angr_platforms/angr_platforms/X86_16/frontend_block_inventory.py",
         "angr_platforms/angr_platforms/X86_16/frontend_capstone_decode.py",
         "angr_platforms/angr_platforms/X86_16/lift_86_16.py",
@@ -87,7 +90,11 @@ def test_function_ir_ssa_source_scope_has_exact_layer_owners() -> None:
         "angr_platforms/angr_platforms/X86_16/lowering/register_local_declarations.py",
         "angr_platforms/angr_platforms/X86_16/structuring/condition_lowering.py",
     }.isdisjoint(paths)
-    assert len(paths) < 150
+    # IR additions must remain cache dependencies; a fixed file count is not
+    # an architectural boundary. Reject downstream layer ownership directly.
+    downstream_layers = {"alias", "widening", "lowering", "structuring", "postprocess"}
+    for source in paths:
+        assert downstream_layers.isdisjoint(Path(source).parts), source
 
 
 def test_function_ir_ssa_key_uses_versioned_exact_source_scope(

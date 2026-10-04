@@ -88,6 +88,75 @@ def test_constant_zero_retains_exact_write_slices_and_proof_sites() -> None:
     )
 
 
+@pytest.mark.parametrize("encoding,expected", (
+    ("b8 03 00 50 c3", 3),
+    ("b8 00 00 50 c3", 0),
+    ("b8 03 00 b0 07 50 c3", 7),
+    ("b8 03 00 b4 01 50 c3", 0x103),
+))
+def test_interinstruction_constant_write_retains_replay_receipt(
+    encoding: str, expected: int,
+) -> None:
+    """A prior MOV and partial writes need a current-value proof, not stale SSA."""
+    result = trace_logical_word_write_values_8616(_lift(encoding))
+    assert result.closed and not result.refusals
+    fact = result.facts[0]
+    assert fact.complete and fact.constant == expected
+    assert fact.constant_receipt is not None and fact.constant_receipt.complete
+    assert not replace(fact, constant_receipt=None).complete
+    assert not replace(fact, constant=(expected + 1) & 0xFFFF).complete
+
+
+@pytest.mark.parametrize(
+    ("encoding", "expected"),
+    (("c7 07 1a 00 c3", 0x001A), ("c7 07 00 10 c3", 0x1000), ("c7 07 ff ff c3", 0xFFFF)),
+)
+def test_nonzero_immediate_word_retains_one_exact_value(encoding: str, expected: int) -> None:
+    """A paired byte-executed immediate STORE proves its full logical word."""
+    result = trace_logical_word_write_values_8616(_lift(encoding))
+
+    assert result.closed
+    assert result.refusals == ()
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.complete
+    assert fact.kind is LogicalWordWriteValueKind8616.CONSTANT_WORD
+    assert fact.constant == expected
+    assert tuple(lane.execution_slice.source_byte_offset for lane in fact.lanes) == (0, 1)
+
+
+def test_nonzero_immediate_word_refuses_different_high_lane_root() -> None:
+    """Adjacent byte stores are not one immediate when their proven roots differ."""
+    artifact = _lift("c7 07 00 10 c3")
+    write = _word_write(artifact)
+    block = artifact.blocks[0]
+    shift_index = next(
+        index
+        for index, instruction in enumerate(block.instrs)
+        if instruction.op == "Iop_Shr16" and instruction.addr == write.key.insn_addr
+    )
+    shift = block.instrs[shift_index]
+    corrupted = replace(
+        shift,
+        args=(IRValue(MemSpace.CONST, const=0x2000, size=2), shift.args[1]),
+    )
+    instructions = (*block.instrs[:shift_index], corrupted, *block.instrs[shift_index + 1 :])
+
+    _assert_single_refusal(
+        replace(artifact, blocks=(replace(block, instrs=instructions),)),
+        LogicalWordWriteValueFailureKind8616.LANE_CONFLICT,
+    )
+
+
+def test_constant_word_fact_rejects_corrupted_value_and_lane_root() -> None:
+    """The durable fact must not certify a value detached from its lane proof."""
+    fact = trace_logical_word_write_values_8616(_lift("c7 07 00 10 c3")).facts[0]
+
+    assert not replace(fact, constant=0x2000).complete
+    altered_high = replace(fact.lanes[1], source_constant_root=0x2000)
+    assert not replace(fact, lanes=(fact.lanes[0], altered_high)).complete
+
+
 def test_old_logical_word_plus_one_retains_load_and_both_write_paths() -> None:
     artifact = _lift("ff 07 c3")
 

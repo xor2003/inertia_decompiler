@@ -1,6 +1,6 @@
 """Generate reproducible, bounded candidate inputs for compiler coverage.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: retain Csmith source, diagnostics and generator provenance.
 Generation is not compilation, behavioral acceptance or feature coverage.
 """

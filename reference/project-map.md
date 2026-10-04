@@ -11,7 +11,7 @@ This is the fast startup map for agents. Read `AGENTS.md` first, then this file,
   signature naming. `vendor/ada_script/` is the pinned upstream snapshot, not
   the semantic IR owner; see `tools/ada_script/README.md`.
 - `signature_catalog.py`, `omf_pat.py`, `signature_catalogs/`, and `scripts/build_signature_catalog.py` own compiler/library signature catalogs and pattern import/export. They are evidence inputs, not proof of general decompiler semantics.
-- `scripts/test_pipeline.py` owns the curated project pipeline. Its fast tier is unit-focused only; default and expanded tiers own external compiler/decompiler smoke lanes.
+- `scripts/test_pipeline.py` owns the curated project pipeline. Its fast tier runs local budgeted binary controls and focused units; default and expanded tiers add external compiler/decompiler smoke lanes.
 - `scripts/build_msc6_examples.py` owns the MS C example build/decompile/recompile/run lane.
 - `examples/msc6_constructs/` contains source examples for the MS C tiny full pipeline. `examples/build_msc6_tiny/` and `examples/build_msc6/` are generated outputs.
 - `reference/` contains the long-form contracts, plans, diagnostics, and handoff files.
@@ -72,11 +72,15 @@ closed:
 - Full-promotion debt files stay out of `QA_TYPED_FILES` and `QA_RUFF_TARGETS`; only Pyright-only partial promotion debt may appear in `QA_TYPED_FILES`.
 - `make test-ownership-check PYTHON=./.venv/bin/python` validates that changed-file ownership rules point at existing pytest targets.
 - Ownership-manifest tests are fast-only; slower/default/expanded coverage belongs in `scripts/test_pipeline.py` tiers.
+- The `binary-relational` default/expanded lane runs measured actual-MZ/ELF loop,
+  stack-invariant and concrete replay controls. Smaller proof-admission contracts
+  remain in the fast unit lane; the binary lane reports its own runtime budget.
 - `make quality-fast PYTHON=./.venv/bin/python` runs linters, the changed-file module/doc/type/dot-access ratchet, startup architecture/context checks, ownership-manifest validation, and the fast decompiler gate for regular local checks.
 - `make quality-hard PYTHON=./.venv/bin/python` adds the full repository
   architecture scan and remains the mandatory pre-PR/incremental gate.
-- `make test-pipeline-fast PYTHON=./.venv/bin/python` runs the fast curated pipeline tier used by `quality-fast`; it must stay unit-focused so regular local checks do not depend on slow external compiler/decompiler lanes.
+- `make test-pipeline-fast PYTHON=./.venv/bin/python` runs the fast curated pipeline tier used by `quality-fast`. Its `binary-budgeted` phase runs transitive-call controls with at most two workers before `unit-focused` uses the requested pool. Proof budgets stay unchanged; local checks still require no external compiler/decompiler lane.
 - `make test-pipeline PYTHON=./.venv/bin/python` runs the curated pipeline and writes `angr_platforms/.cache/test_pipeline/summary.json`.
+- Pipeline and mypyc quality targets keep their serialization locks in the project-local `.cache/locks/` directory, so workspace-only agents can run the gates without `/tmp` write access.
 - `make test-pipeline-expanded PYTHON=./.venv/bin/python` runs the expanded curated tier, including the executable-only sidecar-free SORTD ratchet and the long SORTDEMO status lane.
 - `make msc6-examples PYTHON=./.venv/bin/python` runs the MS C tiny compile, decompile, recompile, return-code, and exit-code lane.
 

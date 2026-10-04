@@ -24,7 +24,11 @@ _CurrentDefinitions = dict[_VersionKey, IRValue]
 
 @dataclass(frozen=True, slots=True)
 class SSABinding:
-    """Version assigned to one typed IR value definition inside a block."""
+    """Version assigned to one typed IR value definition inside a block.
+
+    Only true definitions bind. A ``CALL`` instruction's ``dst`` is its input
+    target, not an output: reading it never binds or replaces a definition.
+    """
 
     target: IRValue
     version: int
@@ -221,7 +225,12 @@ def _record_temporary_snapshot(
 
 
 def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
-    """Rewrite one typed IR block without consulting the identity cache."""
+    """Rewrite one typed IR block without consulting the identity cache.
+
+    A CALL destination is an input target, rewritten with pre-call definitions.
+    Callee output and preservation evidence is separate; this builder does not
+    infer either by manufacturing a definition of the target.
+    """
     versions: dict[_VersionKey, int] = {}
     snapshots: _TemporarySnapshots = {}
     definitions: _CurrentDefinitions = {}
@@ -232,7 +241,9 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
         for arg in instr.args:
             rewritten_args.append(_rewrite_atom(arg, versions, snapshots, definitions))
         rewritten_dst = instr.dst
-        if rewritten_dst is not None and rewritten_dst.space not in {MemSpace.CONST, MemSpace.UNKNOWN}:
+        if instr.op == "CALL" and rewritten_dst is not None:
+            rewritten_dst = _rewrite_value(rewritten_dst, versions, snapshots, definitions)
+        elif rewritten_dst is not None and rewritten_dst.space not in {MemSpace.CONST, MemSpace.UNKNOWN}:
             key = _version_key(rewritten_dst)
             version = versions.get(key, -1) + 1
             versions[key] = version

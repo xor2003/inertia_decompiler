@@ -13,19 +13,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ..ir import (
-    AddressStatus,
-    IRAddress,
-    IRInstr,
-    IRValue,
-    MemSpace,
-    ScalarAffineExpression8616,
-    SegmentOrigin,
-)
-from ..ir.ssa import SSABlock
+from ..ir import ScalarAffineExpression8616
 from .interprocedural_storage_contracts import (
     StorageReachingDefinition8616,
     StorageUseEvidence8616,
+)
+from .interprocedural_storage_logical_input_contracts import (
+    LogicalPushValue8616,
+    PhysicalPushStoreSlice8616,
+    SSAInstructionSite8616,
 )
 
 __all__ = [
@@ -105,62 +101,6 @@ class CallArgumentDefinitionResolution8616:
     failure: CallArgumentDefinitionFailure8616 | None
     stats: CallArgumentDefinitionStats8616
     affine_expression: ScalarAffineExpression8616 | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class SSAInstructionSite8616:
-    """One typed SSA instruction with stable block/index coordinates."""
-
-    block: SSABlock
-    instr_index: int
-    instr: IRInstr
-
-
-@dataclass(frozen=True, slots=True)
-class PhysicalPushStoreSlice8616:
-    """One exact outgoing stack-store slice of a logical pushed value."""
-
-    site: SSAInstructionSite8616
-    address: IRAddress
-    value: IRValue
-    source_offset: int
-
-    @property
-    def complete(self) -> bool:
-        """Return whether this slice retains exact stack and value identity."""
-        return bool(
-            self.source_offset >= 0
-            and self.address.space is MemSpace.SS
-            and self.address.base == ("sp",)
-            and self.address.size == self.value.size > 0
-            and self.address.status is AddressStatus.STABLE
-            and self.address.segment_origin is SegmentOrigin.PROVEN
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class LogicalPushValue8616:
-    """One reconstructed logical value and all physical outgoing slices."""
-
-    root: IRValue
-    width: int
-    slices: tuple[PhysicalPushStoreSlice8616, ...]
-
-    @property
-    def complete(self) -> bool:
-        """Return whether every byte belongs to one exact logical root."""
-        return bool(
-            self.width > 0
-            and self.root.size == self.width
-            and self.slices
-            and all(item.complete for item in self.slices)
-            and sum(item.address.size for item in self.slices) == self.width
-            and tuple(item.source_offset for item in self.slices)
-            == tuple(
-                sum(previous.address.size for previous in self.slices[:index])
-                for index in range(len(self.slices))
-            )
-        )
 
 
 @dataclass(frozen=True, slots=True)

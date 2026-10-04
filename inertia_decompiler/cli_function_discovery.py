@@ -77,7 +77,10 @@ from inertia_decompiler.discovery_cache_contract import (
     display_catalog_cache_record_8616,
     source_region_catalog_evidence_comment_8616,
 )
-from inertia_decompiler.discovery_candidate_ranges import pre_entry_candidate_ranges
+from inertia_decompiler.discovery_candidate_ranges import (
+    pre_entry_caller_ranges_8616,
+    pre_entry_candidate_ranges,
+)
 from inertia_decompiler.discovery_evidence_project import isolated_discovery_evidence_project_8616
 from inertia_decompiler.function_graph_extent_repair import enforce_covered_transition_sources_8616
 from inertia_decompiler.project_loading import (
@@ -596,6 +599,29 @@ def _merge_scan_windows(windows: list[tuple[int, int]]) -> list[tuple[int, int]]
     return merged
 
 
+def _x86_16_image_end_exclusive_8616(max_addr: int) -> int:
+    """Project an absolute inclusive ``max_addr`` to the exclusive image end.
+
+    ``Backend.max_addr`` is the highest *virtual* (already-rebased) address, and
+    the supported 16-bit ``Blob`` subclasses (DOSMZ/DOSNE) keep the same public
+    contract even though their internal ``_max_addr`` conventions differ. The
+    exclusive image end is therefore ``max_addr + 1``; the linked base must not
+    be added a second time.
+    """
+    return max_addr + 1
+
+
+def _x86_16_image_relative_extent_8616(linked_base: int, max_addr: int) -> int:
+    """Return the object-relative byte extent of the loaded image.
+
+    The main object's Clemory is keyed relative to ``linked_base``, so the
+    backed byte count is ``max_addr - linked_base + 1`` for the absolute
+    inclusive ``max_addr`` contract documented on
+    ``_x86_16_image_end_exclusive_8616``.
+    """
+    return max_addr - linked_base + 1
+
+
 def _seed_scan_windows(project: angr.Project) -> list[tuple[int, int]]:
     main_object = _dynamic_attr(project.loader, "main_object", None)
     if main_object is None:
@@ -605,7 +631,7 @@ def _seed_scan_windows(project: angr.Project) -> list[tuple[int, int]]:
     if not isinstance(linked_base, int) or not isinstance(max_addr, int):
         return []
 
-    image_end = linked_base + max_addr + 1
+    image_end = _x86_16_image_end_exclusive_8616(max_addr)
     windows = _metadata_code_windows(project, linked_base, image_end)
     windows += _mz_segment_windows(main_object, linked_base, image_end)
     if not windows:
@@ -1296,7 +1322,7 @@ def _x86_16_region_image_end_8616(project: angr.Project | None) -> int | None:
     max_addr = _dynamic_attr(main_object, "max_addr", None)
     if not isinstance(max_addr, int):
         return None
-    return max_addr + 1
+    return _x86_16_image_end_exclusive_8616(max_addr)
 
 
 def _extended_terminator_region_8616(
@@ -1356,7 +1382,7 @@ def _x86_16_exact_region_has_terminator(
     max_addr = _dynamic_attr(main_object, "max_addr", None)
     if not isinstance(max_addr, int):
         return False
-    image_end = max_addr + 1
+    image_end = _x86_16_image_end_exclusive_8616(max_addr)
     if start >= image_end:
         return False
     read_size = min(size, image_end - start)
@@ -1746,19 +1772,21 @@ def _repair_x86_16_function_graph_8616(
     if not discovery.blocks:
         return
 
+    _clip_repair_blocks_at_leaders_8616(function, discovery)
+
     BlockNode = cast(
         _AngrObject, _dynamic_attr(importlib.import_module("angr.knowledge_plugins.cfg.cfg_node"), "BlockNode")
     )
     _seed_graph_repair_node_cache_8616(function, BlockNode)
 
     for block_addr in sorted(discovery.blocks):
-        _ensure_repair_block_node_8616(function, BlockNode, discovery.blocks, block_addr, debug_indirect)
+        _ensure_repair_block_node_8616(function, BlockNode, discovery, block_addr, debug_indirect)
 
     _install_repair_edges_8616(function, BlockNode, discovery, debug_indirect)
 
     enforce_covered_transition_sources_8616(project, function, exact_region=exact_region)
 
-    discovered_returns = _install_repair_return_sites_8616(function, discovery.blocks)
+    discovered_returns = _install_repair_return_sites_8616(function, discovery)
     if discovered_returns > 0:
         with contextlib.suppress(Exception):
             typing.cast(typing.Any, function)._inertia_x86_16_return_repair_applied = True
@@ -1799,6 +1827,7 @@ class _GraphRepairDiscovery8616:
     blocks: dict[int, _AngrBlock]
     edges: set[tuple[int, int]]
     indirect_artifact: object | None
+    clip_ends: dict[int, int] = field(default_factory=dict)
 
 
 def _graph_repair_entry_addr_8616(project: angr.Project, function: _AngrFunction) -> int | None:
@@ -1966,10 +1995,83 @@ def _seed_graph_repair_node_cache_8616(function: _AngrFunction, block_node_cls: 
         return
 
 
+def _repair_leader_addrs_8616(
+    function: _AngrFunction, discovered: dict[int, _AngrBlock]
+) -> set[int]:
+    """Collect graph leader addresses that repair blocks must not cross."""
+    leaders: set[int] = set(discovered)
+    transition_graph = _dynamic_attr(function, "transition_graph", None)
+    for node in tuple(_dynamic_attr(transition_graph, "nodes", ()) or ()):
+        addr = _dynamic_attr(node, "addr", None)
+        if isinstance(addr, int):
+            leaders.add(addr)
+    local_blocks = _dynamic_attr(function, "_local_blocks", None)
+    if isinstance(local_blocks, dict):
+        leaders.update(key for key in local_blocks if isinstance(key, int))
+    return leaders
+
+
+def _clip_repair_blocks_at_leaders_8616(
+    function: _AngrFunction, discovery: _GraphRepairDiscovery8616
+) -> None:
+    """Clip each discovered block at the first existing leader inside it.
+
+    A maximal decode can span an address the graph already owns, such as an
+    inbound jump or call target split into its own node. The clipped prefix is
+    straight-line decode, so its only proven successor is that leader; every
+    successor of the wider decode belongs to the leader's own node and is
+    dropped. Leaders inside a decoded instruction are left alone so the
+    coverage gate still refuses them instead of guessing a mid-instruction cut.
+    """
+    leaders = _repair_leader_addrs_8616(function, discovery.blocks)
+    clipped: dict[int, int] = {}
+    for block_addr, block in discovery.blocks.items():
+        block_size = int(_dynamic_attr(block, "size", 0) or 0)
+        decoded_end = block_addr + max(0, block_size)
+        instruction_starts = {
+            insn_addr
+            for insn in tuple(_dynamic_attr(_dynamic_attr(block, "capstone", None), "insns", ()) or ())
+            if isinstance(insn_addr := _dynamic_attr(insn, "address", None), int)
+        }
+        interior = sorted(
+            addr
+            for addr in leaders
+            if block_addr < addr < decoded_end
+        )
+        if interior and interior[0] in instruction_starts:
+            clipped[block_addr] = interior[0]
+    if not clipped:
+        return
+    discovery.clip_ends.update(clipped)
+    kept = {
+        (source_addr, target_addr)
+        for source_addr, target_addr in discovery.edges
+        if source_addr not in clipped
+    }
+    discovery.edges.clear()
+    discovery.edges.update(kept)
+    discovery.edges.update((addr, clip_end) for addr, clip_end in clipped.items())
+
+
+def _repair_node_extent_8616(
+    discovery: _GraphRepairDiscovery8616, block_addr: int, block: _AngrBlock
+) -> tuple[int, object | None]:
+    """Return the leader-clipped size and byte string for a repair node."""
+    block_size = int(_dynamic_attr(block, "size", 0) or 0)
+    block_bytes = _dynamic_attr(block, "bytes", None)
+    clip_end = discovery.clip_ends.get(block_addr)
+    if clip_end is None:
+        return block_size, block_bytes
+    clipped_size = min(block_size, max(0, clip_end - block_addr))
+    if isinstance(block_bytes, (bytes, bytearray)):
+        return clipped_size, bytes(block_bytes[:clipped_size])
+    return clipped_size, block_bytes
+
+
 def _ensure_repair_block_node_8616(
     function: _AngrFunction,
     block_node_cls: _AngrObject,
-    discovered: dict[int, _AngrBlock],
+    discovery: _GraphRepairDiscovery8616,
     block_addr: int,
     debug_indirect: bool,
 ) -> object | None:
@@ -1990,32 +2092,23 @@ def _ensure_repair_block_node_8616(
             resolved_node: object = function.get_node(block_addr) or candidate
             return resolved_node
 
-    discovered_block = discovered.get(block_addr)
+    discovered_block = discovery.blocks.get(block_addr)
     if discovered_block is None:
         return None
 
-    block_size = int(_dynamic_attr(discovered_block, "size", 0))
+    block_size, block_bytes = _repair_node_extent_8616(discovery, block_addr, discovered_block)
     if block_size <= 0:
         return None
 
-    try:
-        new_node = block_node_cls(
-            block_addr,
-            block_size,
-            bytestr=_dynamic_attr(discovered_block, "bytes", None),
-        )
-        function._register_node(True, new_node)
-        function._update_addr_to_block_cache(new_node)
-        new_node_object: object = new_node
-        return new_node_object
-    except Exception as ex:
-        if debug_indirect:
-            logging.getLogger(__name__).warning(
-                "x86-16 graph repair could not register block=%#x: %s",
-                block_addr,
-                ex,
-            )
-        return None
+    new_node = block_node_cls(
+        block_addr,
+        block_size,
+        bytestr=block_bytes,
+    )
+    function._register_node(True, new_node)
+    function._update_addr_to_block_cache(new_node)
+    new_node_object: object = new_node
+    return new_node_object
 
 
 def _install_repair_edges_8616(
@@ -2027,45 +2120,56 @@ def _install_repair_edges_8616(
     """Install discovered edges into the function transition graph."""
     for source_addr, target_addr in sorted(discovery.edges):
         source_node = _ensure_repair_block_node_8616(
-            function, block_node_cls, discovery.blocks, source_addr, debug_indirect
+            function, block_node_cls, discovery, source_addr, debug_indirect
         )
         target_node = _ensure_repair_block_node_8616(
-            function, block_node_cls, discovery.blocks, target_addr, debug_indirect
+            function, block_node_cls, discovery, target_addr, debug_indirect
         )
         if source_node is None:
             continue
         if target_node is None:
             continue
-        try:
-            source_capstone = _dynamic_attr(discovery.blocks[source_addr], "capstone", None)
-            insns = tuple(_dynamic_attr(source_capstone, "insns", ()) or ())
-            ins_addr = int(_dynamic_attr(insns[-1], "address", source_addr))
-        except Exception:
-            ins_addr = source_addr
-        try:
-            function._transit_to(source_node, target_node, ins_addr=ins_addr)
-        except Exception:
-            continue
+        clip_end = discovery.clip_ends.get(source_addr)
+        source_capstone = _dynamic_attr(discovery.blocks[source_addr], "capstone", None)
+        insns = tuple(_dynamic_attr(source_capstone, "insns", ()) or ())
+        if clip_end is not None:
+            insns = tuple(
+                insn
+                for insn in insns
+                if int(_dynamic_attr(insn, "address", source_addr)) < clip_end
+            )
+        if not insns:
+            raise ValueError(f"repair block {source_addr:#x} has no decoded source instruction")
+        ins_addr = int(insns[-1].address)
+        # Retain exact successor evidence for the extent owner: an existing
+        # short node can be repaired there, or explicitly refused there.
+        function._transit_to(source_node, target_node, ins_addr=ins_addr)
 
 
 def _install_repair_return_sites_8616(
-    function: _AngrFunction, discovered: dict[int, _AngrBlock]
+    function: _AngrFunction, discovery: _GraphRepairDiscovery8616
 ) -> int:
     """Mark discovered blocks ending in a return as function return sites."""
     discovered_returns = 0
-    for block_addr in sorted(discovered):
+    for block_addr in sorted(discovery.blocks):
         source_node = function.get_node(block_addr)
         if source_node is None:
             continue
-        block = discovered[block_addr]
+        block = discovery.blocks[block_addr]
         block_insns = tuple(_dynamic_attr(_dynamic_attr(block, "capstone", None), "insns", ()) or ())
+        clip_end = discovery.clip_ends.get(block_addr)
+        if clip_end is not None:
+            block_insns = tuple(
+                insn
+                for insn in block_insns
+                if int(_dynamic_attr(insn, "address", block_addr)) < clip_end
+            )
         if not block_insns:
             continue
         last_mnemonic = str(_dynamic_attr(block_insns[-1], "mnemonic", "")).lower()
         if last_mnemonic in {"ret", "retf", "iret", "retw", "iretq"}:
-            with contextlib.suppress(Exception):
-                function._add_return_site(source_node)
-                discovered_returns += 1
+            function._add_return_site(source_node)
+            discovered_returns += 1
     return discovered_returns
 
 
@@ -2654,9 +2758,8 @@ def _collect_supplement_pairs_8616(
 ) -> list[_FunctionCfgPair]:
     """Collect supplemental pairs via prioritized targets, else prologue scan."""
     main_object = _dynamic_attr(project.loader, "main_object", None)
-    linked_base = _dynamic_attr(main_object, "linked_base", None)
     max_addr = _dynamic_attr(main_object, "max_addr", None)
-    image_end = linked_base + max_addr + 1 if isinstance(linked_base, int) and isinstance(max_addr, int) else None
+    image_end = _x86_16_image_end_exclusive_8616(max_addr) if isinstance(max_addr, int) else None
     supplemental_pairs: list[_FunctionCfgPair] = []
     if image_end is not None:
         prioritized_candidates = _prioritized_pre_entry_follow_on_targets(
@@ -2864,8 +2967,10 @@ def _prologue_scan_context_8616(
     if not isinstance(max_addr, int):
         return None
     try:
-        code = bytes(main_object.memory.load(0, max_addr + 1))
-    except Exception:
+        code = bytes(
+            main_object.memory.load(0, _x86_16_image_relative_extent_8616(linked_base, max_addr))
+        )
+    except KeyError:
         return None
     return _PrologueScanCtx8616(list(ranked_candidates), linked_base, binary_path, code)
 
@@ -3175,8 +3280,10 @@ def _load_main_object_code_8616(project: angr.Project) -> tuple[int, bytes] | No
         return None
 
     try:
-        code = bytes(main_object.memory.load(0, max_addr + 1))
-    except Exception:
+        code = bytes(
+            main_object.memory.load(0, _x86_16_image_relative_extent_8616(linked_base, max_addr))
+        )
+    except KeyError:
         return None
     return linked_base, code
 
@@ -3664,8 +3771,10 @@ def _exe_seed_context_8616(
     cached_addrs = _load_seed_ranking_cache(cache_key)
 
     try:
-        code = bytes(main_object.memory.load(0, max_addr + 1))
-    except Exception:
+        code = bytes(
+            main_object.memory.load(0, _x86_16_image_relative_extent_8616(linked_base, max_addr))
+        )
+    except KeyError:
         return None
     seed_windows = _seed_scan_windows(project)
     entry_window_targets = _entry_window_seed_targets(project, code, linked_base=linked_base)
@@ -3839,8 +3948,10 @@ def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[in
     if not isinstance(linked_base, int) or not isinstance(max_addr, int):
         return []
     try:
-        code = bytes(main_object.memory.load(0, max_addr + 1))
-    except Exception:
+        code = bytes(
+            main_object.memory.load(0, _x86_16_image_relative_extent_8616(linked_base, max_addr))
+        )
+    except KeyError:
         return []
 
     entry_targets = _entry_window_seed_targets(project, code, linked_base=linked_base)
@@ -3872,20 +3983,19 @@ def _pre_entry_source_function_ranges_8616(
 ) -> tuple[tuple[int, int], ...]:
     """Build independently framed caller ranges from the startup-bounded catalog."""
     main_object = _dynamic_attr(project.loader, "main_object", None)
-    linked_base = _dynamic_attr(main_object, "linked_base", None)
     max_addr = _dynamic_attr(main_object, "max_addr", None)
-    if not isinstance(linked_base, int) or not isinstance(max_addr, int):
+    if not isinstance(max_addr, int):
         return ()
     ordered_seeds = tuple(sorted(dict.fromkeys(source_seeds)))
     if not ordered_seeds:
         return ()
-    image_end = linked_base + max_addr + 1
+    image_end = _x86_16_image_end_exclusive_8616(max_addr)
     final_end = min(project.entry, image_end)
     if ordered_seeds[-1] >= final_end:
         return ()
     metadata = cast(LSTMetadata | None, _dynamic_attr(project, "_inertia_lst_metadata", None))
-    candidate_ranges = pre_entry_candidate_ranges(
-        ordered_seeds, _signature_matched_code_addrs(metadata), end=final_end,
+    candidate_ranges = pre_entry_caller_ranges_8616(
+        project, ordered_seeds, _signature_matched_code_addrs(metadata), end=final_end,
     )
     function_ranges = tuple(
         (
@@ -3934,7 +4044,7 @@ def record_direct_target_caller_return_use_evidence_8616(
         ),
         None,
     )
-    function_ranges = _pre_entry_source_function_ranges_8616(evidence_project, source_seeds)
+    function_ranges = _pre_entry_source_function_ranges_8616(project, source_seeds)
     if not function_ranges:
         return None
     target_aliases = (
@@ -4001,6 +4111,12 @@ def attach_direct_target_argument_evidence_context_8616(
     dynamic_target = cast(_AngrObject, target_project)
     dynamic_target._inertia_caller_function_ranges_8616 = function_ranges
     dynamic_target._inertia_caller_target_aliases_8616 = target_aliases
+    if (
+        isinstance(caller_evidence, CallerReturnUseEvidence8616)
+        and caller_evidence.verdict is not CallerReturnUseVerdict8616.UNKNOWN
+        and caller_evidence.fact_census_complete
+    ):
+        _record_caller_return_use_evidence_8616(target_project, target_addr, caller_evidence)
     return True
 
 
@@ -4038,7 +4154,7 @@ def _recover_pre_entry_source_catalog_8616(
         return [], evidence
 
     deadline = time.monotonic() + max(1, timeout)
-    image_end = linked_base + max_addr + 1
+    image_end = _x86_16_image_end_exclusive_8616(max_addr)
     ordered_seeds = tuple(sorted(normalized_seeds))
     metadata = cast(LSTMetadata | None, _dynamic_attr(project, "_inertia_lst_metadata", None))
     exact_region_by_addr = pre_entry_candidate_ranges(
@@ -4091,7 +4207,7 @@ def _recover_source_seed_once_8616(
     region_span: int,
     seed_calling_conventions_enabled: bool,
 ) -> _FunctionCfgPair | None:
-    """Attempt one bounded candidate recovery with exact-region marking."""
+    """Recover one candidate, refusing only timeouts and absent candidate CFGs."""
     try:
         recovered_pair = _recover_candidate_with_timeout(
             project,
@@ -4110,7 +4226,7 @@ def _recover_source_seed_once_8616(
         if exact_region is not None:
             _mark_function_binary_exact_region_8616(recovered_pair[1], exact_region)
         return recovered_pair
-    except (_AnalysisTimeout, Exception):
+    except (_AnalysisTimeout, FuturesTimeoutError, KeyError):
         return None
 
 
@@ -4420,7 +4536,7 @@ def _prepare_ranked_binary_preview_items(
         if not isinstance(linked_base, int) or not isinstance(max_addr, int) or binary_path is None:
             return ()
 
-        image_end = linked_base + max_addr + 1
+        image_end = _x86_16_image_end_exclusive_8616(max_addr)
         metadata = _dynamic_attr(project, "_inertia_lst_metadata", None)
         project_entry = _dynamic_attr(project, "entry", linked_base)
         region_span = max(0x120, int(window or 0x120))
@@ -4536,7 +4652,7 @@ def _recover_cached_function_pairs(
 
         deadline = time.monotonic() + max(1, timeout)
         metadata = _dynamic_attr(project, "_inertia_lst_metadata", None)
-        image_end = linked_base + max_addr + 1
+        image_end = _x86_16_image_end_exclusive_8616(max_addr)
         recovered: list[_FunctionCfgPair] = []
         seen_addrs: set[int] = set()
 
@@ -4593,7 +4709,7 @@ def _recover_cached_pair_once_8616(
     binary_path: _AngrObject,
     linked_base: int,
 ) -> _FunctionCfgPair | None:
-    """Attempt one cached recovery, returning None on failure."""
+    """Recover one cached entry, refusing only timeout or absent-CFG evidence."""
     try:
         return _recover_candidate_with_timeout(
             project,
@@ -4606,7 +4722,7 @@ def _recover_cached_pair_once_8616(
             binary_path=Path(binary_path),
             linked_base=linked_base,
         )
-    except (_AnalysisTimeout, KeyError, Exception):
+    except (_AnalysisTimeout, FuturesTimeoutError, KeyError):
         return None
 
 
@@ -4961,7 +5077,7 @@ def _recover_seeded_exe_functions(
             pending_seed_addrs=list(ranked_seeds),
         )
         metadata = _dynamic_attr(project, "_inertia_lst_metadata", None)
-        image_end = linked_base + max_addr + 1
+        image_end = _x86_16_image_end_exclusive_8616(max_addr)
         cache_key = _recovery_cache_key(
             binary_path=Path(binary_path),
             kind="seeded_function_catalog",
@@ -5841,14 +5957,13 @@ def _escalate_truncated_lst_pair_8616(
     if not _exact_region_recovery_looks_truncated(best_func, exact_region):
         return best_cfg, best_func
     main_object = _dynamic_attr(project.loader, "main_object", None)
-    linked_base = _dynamic_attr(main_object, "linked_base", None)
     max_addr = _dynamic_attr(main_object, "max_addr", None)
-    if isinstance(linked_base, int) and isinstance(max_addr, int):
+    if isinstance(max_addr, int):
         try:
             cand_cfg, cand_func = _recover_candidate_function_pair(
                 project,
                 candidate_addr=addr,
-                image_end=linked_base + max_addr + 1,
+                image_end=_x86_16_image_end_exclusive_8616(max_addr),
                 metadata=lst_metadata,
                 project_entry=project.entry,
                 region_span=max(
@@ -6731,13 +6846,12 @@ def _recover_direct_addr_bounded_8616(
     with _analysis_timeout(timeout):
         if project.arch.name == "86_16":
             main_object = _dynamic_attr(project.loader, "main_object", None)
-            linked_base = _dynamic_attr(main_object, "linked_base", None)
             max_addr = _dynamic_attr(main_object, "max_addr", None)
-            if isinstance(linked_base, int) and isinstance(max_addr, int):
+            if isinstance(max_addr, int):
                 return _function_cfg_pair_object(_recover_candidate_function_pair(
                     project,
                     candidate_addr=candidate_addr,
-                    image_end=linked_base + max_addr + 1,
+                    image_end=_x86_16_image_end_exclusive_8616(max_addr),
                     metadata=lst_metadata if prefer_lst_direct else None,
                     project_entry=project.entry,
                     region_span=max(window, 0x180),

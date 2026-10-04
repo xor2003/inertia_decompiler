@@ -926,6 +926,22 @@ def test_architecture_check_requires_root_compatibility_shim_header(tmp_path):
     assert any(item.rule == "compat-shim-header" for item in violations)
 
 
+def test_architecture_check_admits_cli_lowering_owned_wrapper_identity(tmp_path):
+    """CLI may consume representation identity without owning pointer recovery."""
+    root, cli = _write_minimal_tree(tmp_path)
+    cli.write_text(
+        '"""CLI boundary; must not become the owner of decompiler semantics."""\n'
+        "from __future__ import annotations\n"
+        "from angr_platforms.X86_16.lowering.near_pointer_argument_values import "
+        "is_near_pointer_argument_helper_call_8616\n",
+        encoding="utf-8",
+    )
+
+    violations = arch_check.check_decompiler_architecture(root, cli, tmp_path)
+
+    assert not any(item.rule == "cli-x86-16-import" for item in violations)
+
+
 def test_architecture_check_rejects_unadmitted_cli_x86_16_import(tmp_path):
     root, cli = _write_minimal_tree(tmp_path)
     cli.write_text(

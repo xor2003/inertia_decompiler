@@ -118,8 +118,9 @@ def test_fimemset_behavior_oracle_rejects_corruption(
     assert "backward=1 count=3" in str(caught.value)
 
 
+@pytest.mark.requires_kvm
 def test_monoprin_fimemset_emits_string_intrinsic_fallback_anchor(tmp_path: Path) -> None:
-    """Require successful corpus decompilation before inspecting its private output."""
+    """Require native DOS recompilation validation before inspecting corpus output."""
     shutil.copyfile(MONOPRIN_COD, tmp_path / MONOPRIN_COD.name)
     env = dict(os.environ)
     existing_pythonpath = env.get("PYTHONPATH")

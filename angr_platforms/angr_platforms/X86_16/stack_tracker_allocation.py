@@ -10,7 +10,7 @@ Do not recover storage, guess allocations, mutate C or infer helper names.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import replace
 from typing import Protocol, cast
 
 import pyvex
@@ -22,14 +22,14 @@ from angr.analyses.stack_pointer_tracker import (
     StackPointerTrackerState,
 )
 
-from .ir import IRFunctionArtifact
-from .ir.vex_import import _block_to_ir
+from .ir import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from .semantics.call_stack_allocation import (
     binary_stack_allocation_target_8616,
     collect_call_stack_allocation_proofs_8616,
 )
 from .stack_tracker_return_segment import (
     NativeMachineCallFrameResult8616,
+    _bound_terminal_direct_call_8616,
     apply_native_argument_cleanup_8616,
     apply_native_machine_call_frame_8616,
     apply_native_return_segment_8616,
@@ -45,12 +45,29 @@ class _NativeFrameEvidence8616(Protocol):
     _inertia_machine_call_frames_8616: tuple[NativeMachineCallFrameResult8616, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class _NativeBlock8616:
-    """Existing VEX block surface for the owned IR importer; never relift."""
+def _bind_proven_call_target_8616(
+    block: IRBlock, instruction: IRInstr, target: int,
+) -> IRBlock:
+    """Rebind one proven CALL operand to its evidence-bound constant.
 
-    addr: int
-    vex: pyvex.IRSB
+    The constant is written only after the direct-near binding proof has
+    verified the retained symbolic operand DAG, its block-``next`` origin,
+    the native re-lift and the mapped ``E8`` bytes, so the substitution is
+    the semantic owner's own proven target — never a decoded-address guess
+    or a rewrite of an unbound operand.
+    """
+    return replace(
+        block,
+        instrs=tuple(
+            replace(
+                entry,
+                args=(IRValue(MemSpace.CONST, const=target, size=4),),
+            )
+            if entry is instruction
+            else entry
+            for entry in block.instrs
+        ),
+    )
 
 
 def _apply_allocation(
@@ -63,13 +80,19 @@ def _apply_allocation(
     sp_offset = tracker.project.arch.sp_offset
     if sp_offset not in tracker.reg_offsets:
         return
-    block, _transport = _block_to_ir(_NativeBlock8616(vex.addr, vex))
-    artifact = IRFunctionArtifact(vex.addr, (block,))
+    bound = _bound_terminal_direct_call_8616(tracker.project, vex)
+    if bound is None:
+        return
+    block, instruction, target = bound
+    if instruction.addr != callsite:
+        return
+    bound_block = _bind_proven_call_target_8616(block, instruction, target)
+    artifact = IRFunctionArtifact(vex.addr, (bound_block,))
     proof = collect_call_stack_allocation_proofs_8616(tracker.project, artifact).get(callsite)
     if proof is None:
-        allocating = any(instruction.op == "CALL" and instruction.addr == callsite
-                         and binary_stack_allocation_target_8616(tracker.project, instruction) is not None
-                         for instruction in block.instrs)
+        allocating = any(entry.op == "CALL" and entry.addr == callsite
+                         and binary_stack_allocation_target_8616(tracker.project, entry) is not None
+                         for entry in bound_block.instrs)
         if allocating:
             state.put(sp_offset, None, force=True)
         return

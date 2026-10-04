@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import io
-from types import SimpleNamespace
 
 import angr
+from angr_platforms.X86_16.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.caller_return_use_contracts import (
     CallerReturnUseFact8616,
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
+from angr_platforms.X86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    build_boundary_direct_callsite_index_8616,
+)
+from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from angr_platforms.X86_16.ir.function_ir_registry import publish_function_ir_artifact_8616
 from angr_platforms.X86_16.ir.ssa_function import (
     SSAFunctionArtifact,
     build_x86_16_function_ssa,
@@ -30,11 +36,13 @@ from angr_platforms.X86_16.lowering.interprocedural_storage_return_defs import (
     CallOutputDefinitionVerdict8616,
     resolve_call_output_definitions_8616,
 )
+from archinfo import ArchX86
 
 
-def _lift_ssa(code: bytes) -> SSAFunctionArtifact:
+def _lift_ssa(code: bytes) -> tuple[SSAFunctionArtifact, angr.Project, DecodedDirectCallsiteIndex8616]:
+    """Retain native CALL bytes, complete boundary, raw IR and decoded index."""
     project = angr.Project(
-        io.BytesIO(code),
+        io.BytesIO(code + b"\xc3"),
         main_opts={
             "backend": "blob",
             "arch": Arch86_16(),
@@ -43,10 +51,16 @@ def _lift_ssa(code: bytes) -> SSAFunctionArtifact:
         },
         auto_load_libs=False,
     )
-    function = SimpleNamespace(addr=0x1000, block_addrs_set={0x1000}, info={})
+    function = exact_function_range_boundary_8616(project, 0x1000, 0x1000 + len(code) + 1)
+    assert function is not None
     artifact = build_x86_16_ir_function_artifact(project, function)
     assert not artifact.refusals
-    return build_x86_16_function_ssa(artifact)
+    publish_function_ir_artifact_8616(project, artifact)
+    index = build_boundary_direct_callsite_index_8616(
+        function,
+        direct_target_resolver=lambda instruction: resolve_direct_call_target_from_instruction_8616(project, instruction),
+    )
+    return build_x86_16_function_ssa(artifact), project, index
 
 
 def _fact(
@@ -76,13 +90,13 @@ def _register(name: str, width: int = 2) -> StorageIdentity8616:
 
 
 def test_exact_call_output_is_versionless_and_provenance_bound() -> None:
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(),
         0x1003,
         (0x1003,),
-        (_register("ax"),),
-    )
+        (_register("ax"),), project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.PROVEN
     assert result.complete
@@ -99,13 +113,13 @@ def test_exact_call_output_is_versionless_and_provenance_bound() -> None:
 
 
 def test_split_output_pieces_share_one_call_provenance() -> None:
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(),
         0x1003,
         (0x1003,),
-        (_register("ax"), _register("dx")),
-    )
+        (_register("ax"), _register("dx")), project=project, callsite_index=callsite_index)
 
     assert result.complete
     assert tuple(item.value.name for item in result.definitions) == ("ax", "dx")
@@ -114,13 +128,13 @@ def test_split_output_pieces_share_one_call_provenance() -> None:
 
 
 def test_target_comparison_does_not_flatten_to_low_16_bits() -> None:
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(),
         0x11003,
         (0x11003,),
-        (_register("ax"),),
-    )
+        (_register("ax"),), project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.CONFLICT
     assert result.failure is CallOutputDefinitionFailure8616.CALL_TARGET_CONFLICT
@@ -129,20 +143,24 @@ def test_target_comparison_does_not_flatten_to_low_16_bits() -> None:
 
 
 def test_real_mode_offset_target_matches_linked_target_with_project_evidence() -> None:
-    project = SimpleNamespace(
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(linked_base=0x10000, max_addr=0xFFFF)
-        )
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
+    original = angr.Project(
+        io.BytesIO(bytes.fromhex("e80000c3")),
+        # Full-width original-image coordinates only; the active slice
+        # supplies all 16-bit native decoding and instruction proof.
+        main_opts={"backend": "blob", "arch": ArchX86(), "base_addr": 0x11000, "entry_point": 0x11000},
+        auto_load_libs=False,
     )
+    vars(project)["_inertia_original_project"] = original
+    vars(project)["_inertia_original_linear_delta"] = 0x10000
 
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(),
         0x11003,
         (0x11003,),
         (_register("ax"),),
-        project=project,
-    )
+        project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.PROVEN
     assert result.complete
@@ -157,13 +175,13 @@ def test_unknown_return_use_refuses_before_call_materialization() -> None:
         witness_instruction_addr=None,
     )
 
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         fact,
         0x1003,
         (0x1003,),
-        (_register("ax"),),
-    )
+        (_register("ax"),), project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE
     assert result.failure is CallOutputDefinitionFailure8616.RETURN_USE_UNKNOWN
@@ -171,26 +189,26 @@ def test_unknown_return_use_refuses_before_call_materialization() -> None:
 
 
 def test_unused_return_refuses_output_definition() -> None:
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(CallerReturnUseVerdict8616.UNUSED),
         0x1003,
         (0x1003,),
-        (_register("ax"),),
-    )
+        (_register("ax"),), project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE
     assert result.failure is CallOutputDefinitionFailure8616.RETURN_NOT_OBSERVED
 
 
 def test_missing_callsite_refuses_without_fabricating_definition() -> None:
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(callsite_addr=0x1001),
         0x1003,
         (0x1003,),
-        (_register("ax"),),
-    )
+        (_register("ax"),), project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE
     assert result.failure is CallOutputDefinitionFailure8616.CALLSITE_NOT_FOUND
@@ -198,13 +216,13 @@ def test_missing_callsite_refuses_without_fabricating_definition() -> None:
 
 
 def test_duplicate_output_storage_is_a_typed_conflict() -> None:
+    ssa, project, callsite_index = _lift_ssa(bytes.fromhex("e80000"))
     result = resolve_call_output_definitions_8616(
-        _lift_ssa(bytes.fromhex("e80000")),
+        ssa,
         _fact(),
         0x1003,
         (0x1003,),
-        (_register("ax"), _register("ax")),
-    )
+        (_register("ax"), _register("ax")), project=project, callsite_index=callsite_index)
 
     assert result.verdict is CallOutputDefinitionVerdict8616.CONFLICT
     assert result.failure is CallOutputDefinitionFailure8616.OUTPUT_STORAGE_CONFLICT

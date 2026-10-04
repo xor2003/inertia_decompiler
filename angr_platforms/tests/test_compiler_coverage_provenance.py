@@ -4,7 +4,47 @@ import hashlib
 
 import pytest
 
-from scripts.compiler_coverage_provenance import implementation_fingerprint, input_fingerprint
+from scripts.compiler_coverage_provenance import (
+    KVMAccessStatus,
+    implementation_fingerprint,
+    input_fingerprint,
+    kvm_access_evidence,
+    runtime_environment_snapshot,
+)
+
+
+def test_runtime_environment_records_dependencies_and_kvm_state(tmp_path, monkeypatch):
+    """Replays must retain more than the Python executable hash."""
+    import scripts.compiler_coverage_provenance as provenance
+
+    class Distribution:
+        """Minimal installed-distribution metadata boundary."""
+
+        def __init__(self, name, version):
+            self.metadata = {"Name": name}
+            self.version = version
+
+    monkeypatch.setattr(
+        provenance.metadata,
+        "distributions",
+        lambda: (Distribution("Z3-Solver", "4.12"), Distribution("angr", "9.2")),
+    )
+    device = tmp_path / "kvm"
+    device.write_bytes(b"")
+
+    snapshot = runtime_environment_snapshot(kvm_device=device).to_dict()
+
+    assert snapshot["installed_distributions"] == [["angr", "9.2"], ["z3-solver", "4.12"]]
+    assert snapshot["kvm"]["status"] == KVMAccessStatus.READ_WRITE.value
+    assert snapshot["python_version"]
+    assert snapshot["machine"]
+
+
+def test_kvm_absence_is_a_typed_nonresult(tmp_path):
+    """A missing device must not be recorded as a semantic test failure."""
+    evidence = kvm_access_evidence(tmp_path / "missing")
+    assert evidence.status is KVMAccessStatus.MISSING
+    assert evidence.error_number is not None
 
 
 def test_missing_tool_is_explicit(tmp_path):

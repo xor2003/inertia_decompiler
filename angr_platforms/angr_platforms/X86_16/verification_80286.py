@@ -21,6 +21,7 @@ from angr import options as o
 from capstone.x86_const import X86_OP_MEM, X86_OP_REG
 
 from .arch_86_16 import Arch86_16
+from .control_coordinates import ControlAddressDomain
 
 _AngrState = Any
 
@@ -176,7 +177,7 @@ def _make_project() -> angr.Project:
     """Create a verifier project covering the complete real-mode IP range."""
     return angr.load_shellcode(
         b"\x90" * 0xFE00,
-        arch=Arch86_16(),
+        arch=Arch86_16(control_address_domain=ControlAddressDomain.ARCHITECTURAL_OFFSET),
         start_offset=0,
         load_address=0,
         selfmodifying_code=False,

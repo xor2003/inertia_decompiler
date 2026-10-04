@@ -154,6 +154,7 @@ def test_cfg_context_rejects_nested_different_function() -> None:
 
 
 def test_cfg_context_suppresses_cmp_flags_overwritten_before_use() -> None:
+    """Drop the overwritten CMP write while retaining final cutpoint FLAGS."""
     project, function = _project_function(
         bytes.fromhex("39d8 39ca 7500 c3"),
         function_starts=(0x1000,),
@@ -161,7 +162,7 @@ def test_cfg_context_suppresses_cmp_flags_overwritten_before_use() -> None:
 
     with active_status_flag_lift_context_8616(project, function) as session:
         assert {candidate.instruction_address for candidate in session.candidates} == {0x1000}
-        assert _flags_puts(project, 0x1000) == ()
+        assert len(_flags_puts(project, 0x1000)) == 1
         assert session.materialized_addresses == frozenset({0x1000})
 
     assert session.stats.complete

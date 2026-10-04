@@ -14,6 +14,7 @@ from pyvex.lifting.util.syntax_wrapper import VexValue
 from pyvex.lifting.util.vex_helper import IRSBCustomizer, Type
 from pyvex.stmt import Put
 
+from .control_coordinates import ControlAddressDomain
 from .interrupt import Interrupt
 from .stack_helpers import StackEmulator
 from .stack_helpers import pop16 as stack_pop16
@@ -35,6 +36,7 @@ class _EmulatorArch(Protocol):
     """Architecture contract consumed by the emulator bridge."""
 
     register_list: Iterable[_ArchRegister]
+    control_address_domain: ControlAddressDomain
 
 
 class _LifterWithIrsb(Protocol):
@@ -86,6 +88,7 @@ class Emulator(Interrupt):
         """Initialize frontend runtime state for one architecture instance."""
         Interrupt.__init__(self)
         self.arch = arch
+        self.control_address_domain = arch.control_address_domain
         self.lifter = lifter
         self.irsb = lifter.irsb if lifter else None
         self.active_instruction: object | None = None

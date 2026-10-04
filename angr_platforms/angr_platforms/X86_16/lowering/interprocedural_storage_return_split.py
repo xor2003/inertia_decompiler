@@ -25,6 +25,7 @@ from ..caller_return_use_contracts import (
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
+from ..ir import IRValue
 from ..ir.condition_ir import ConditionIR
 from ..ir.ssa_function import SSAFunctionArtifact
 from .interprocedural_storage_contracts import (
@@ -46,6 +47,7 @@ from .interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeResult8616,
     ReturnStorageTypeVerdict8616,
 )
+from .return_witness_source import distinct_return_witness_sources_8616
 
 __all__ = ["classify_split_return_storage_8616"]
 
@@ -121,7 +123,7 @@ def _piece_use_8616(
     condition: ConditionIR,
     callsite_addr: int,
 ) -> tuple[StorageUseEvidence8616 | None, bool]:
-    """Resolve one unique direct register read at a condition producer."""
+    """Resolve exact direct reads of one SSA value at one physical condition site."""
     producer = condition.producer_insn
     if not isinstance(producer, int):
         return None, False
@@ -132,11 +134,27 @@ def _piece_use_8616(
         if instruction.addr == producer
         and any(
             split_return_register_matches_8616(argument, storage)
+            and isinstance(argument, IRValue) and argument.expr is None
             for argument in instruction.args
         )
     )
     if len(candidates) != 1:
-        return None, bool(candidates)
+        sites = {(block_addr, instr_addr) for block_addr, _, instr_addr in candidates}
+        values = tuple(
+            argument
+            for block in artifact.blocks
+            for instruction in block.instrs if instruction.addr == producer
+            for argument in instruction.args
+            if isinstance(argument, IRValue) and argument.expr is None
+            and split_return_register_matches_8616(argument, storage)
+        )
+        if (
+            len(sites) != 1
+            or not distinct_return_witness_sources_8616(artifact, candidates)
+            or not values or values[0].version is None
+            or any(value != values[0] for value in values)
+        ):
+            return None, bool(candidates)
     block_addr, instr_index, instr_addr = candidates[0]
     return (
         StorageUseEvidence8616(

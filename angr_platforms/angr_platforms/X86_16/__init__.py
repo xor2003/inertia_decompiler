@@ -6,6 +6,8 @@ Responsibility: owns package initialization and public imports for X86_16.
 
 from __future__ import annotations
 
+from .lifter_backend_selection import VEX_BACKEND
+
 try:
     import pyvex_compat
 
@@ -13,13 +15,13 @@ try:
 except Exception:
     pass
 
-import sys
 from collections.abc import Callable
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 __all__ = [
     "COD_SOURCE_REWRITE_REGISTRY",
+    "VEX_BACKEND",
     "CODSourceRewriteStatusKind",
     "DecompilerPostprocessPassInventoryItem",
     "DecompilerPostprocessPassInventoryViolation",
@@ -415,26 +417,6 @@ def __getattr__(name: str) -> object:
     globals()[name] = value
     return value
 
-
-def _alias_x86_16_module_tree() -> None:
-    canonical_root = "angr_platforms.X86_16"
-    legacy_root = "angr_platforms.angr_platforms.X86_16"
-    current_module = sys.modules[__name__]
-    sys.modules.setdefault(canonical_root, current_module)
-    sys.modules.setdefault(legacy_root, current_module)
-    prefixes = (
-        (canonical_root, legacy_root),
-        (legacy_root, canonical_root),
-    )
-    for name, module in tuple(sys.modules.items()):
-        for source_root, target_root in prefixes:
-            if name == source_root:
-                sys.modules.setdefault(target_root, module)
-            elif name.startswith(source_root + "."):
-                sys.modules.setdefault(target_root + name[len(source_root) :], module)
-
-
-_alias_x86_16_module_tree()
 
 try:
     _bootstrap = __getattr__("apply_x86_16_bootstrap")

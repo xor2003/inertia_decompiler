@@ -297,6 +297,15 @@ def decide_status_flag_liveness_8616(
             StatusFlagLivenessVerdict8616.SUPPRESS_DEAD,
         )
     for instruction in future_instructions:
+        # Decoder lookahead may extend beyond the active IRSB. An overwrite
+        # after a transfer need not execute, so only CFG evidence may cross it.
+        mnemonic = instruction.mnemonic
+        if mnemonic.startswith(("j", "loop")) or mnemonic in {
+            "call", "lcall", "ret", "retf", "retn", "iret", "iretd", "int", "into", "hlt",
+        }:
+            return _status_flag_liveness_decision_8616(
+                written, remaining, StatusFlagLivenessVerdict8616.KEEP_UNKNOWN, failed=True,
+            )
         effect = status_flag_effect_8616(instruction)
         if effect is None:
             return _status_flag_liveness_decision_8616(

@@ -5486,6 +5486,8 @@ def test_dosunit_compare_ssa_retains_pre_call_register_outputs():
     oracle_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
     candidate_callee = _ssa_stub("demo.exe:callee", "callee", ip="0x0500", linear="0x1500")
     for callee in (oracle_callee, candidate_callee):
+        # This fixture is a complete one-byte return, not an entry-block claim.
+        callee["part"] = {"entry_delta": 0}
         callee["source"]["machine_code_sha256"] = "same-callee"
         callee["source"]["machine_code_size"] = 1
         callee["source"]["function_machine_code_sha256"] = "same-callee"
@@ -6976,7 +6978,8 @@ def test_dosunit_straightline_ssa_lowers_ail_memory_and_call_boundary(tmp_path: 
     assert caller["source"]["jumpkind"] == "Ijk_Call"
     assert caller["source"]["transfer"]["target"]["low16"] == "0x1220"
     assert "memory" in caller["outputs"]
-    assert compare_ssa_documents(oracle=vex_call, candidate=ail_call)["summary"]["passed"] == 2
+    call_comparison = compare_ssa_documents(oracle=vex_call, candidate=ail_call)
+    assert call_comparison["summary"]["passed"] == 2, json.dumps(call_comparison, indent=2)
 
 
 def test_dosunit_straightline_ssa_refuses_oversized_slices_by_assignment_gate(tmp_path: Path):

@@ -112,6 +112,29 @@ def test_runtime_gate_cache_key_tracks_gate_content(tmp_path: Path) -> None:
     assert (second.output_root / "sample_runtime_gate" / "artifact.txt").read_text() == "second"
 
 
+def test_runtime_gate_cache_ignores_test_edits_but_tracks_decompiler_source(tmp_path: Path) -> None:
+    """Acceptance edits recheck existing artifacts; runtime edits rebuild them."""
+    repository = tmp_path / "repository"
+    (repository / "inertia_decompiler").mkdir(parents=True)
+    (repository / "angr_platforms" / "tests").mkdir(parents=True)
+    runtime_source = repository / "inertia_decompiler" / "runtime.py"
+    test_source = repository / "angr_platforms" / "tests" / "test_runtime.py"
+    runtime_source.write_text("VALUE = 1\n", encoding="utf-8")
+    test_source.write_text("assert True\n", encoding="utf-8")
+    inputs = replace(_inputs(tmp_path), repo_root=repository)
+
+    first = load_or_run_msc6_runtime_gate(inputs)
+    test_source.write_text("assert False\n", encoding="utf-8")
+    reused = load_or_run_msc6_runtime_gate(inputs)
+    assert reused.cache_hit
+    assert reused.output_root == first.output_root
+
+    runtime_source.write_text("VALUE = 2\n", encoding="utf-8")
+    rebuilt = load_or_run_msc6_runtime_gate(inputs)
+    assert not rebuilt.cache_hit
+    assert rebuilt.output_root != first.output_root
+
+
 def test_runtime_gate_cache_serializes_concurrent_producers(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
 

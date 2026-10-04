@@ -61,7 +61,17 @@ class TailValidationDisplayOutcome(StrEnum):
     UNCOLLECTED = "uncollected"
 
 
-def _normalize_tail_validation_status(raw_status: str | None) -> TailValidationDisplayOutcome:
+def normalize_tail_validation_status(
+    raw_status: str | None,
+) -> TailValidationDisplayOutcome:
+    """Normalize a raw tail-validation status string to the owned display outcome.
+
+    Unrecognized, missing, and malformed statuses fail closed to UNCOLLECTED. This
+    is the single owned conversion entry point; callers in other compiled
+    modules must use it instead of the enum constructor because mypyc cannot
+    emit a direct constructor call for a non-native enum across modules when
+    the defining module's IR is loaded from cache.
+    """
     if raw_status == "" or raw_status is None:
         return TailValidationDisplayOutcome.UNCOLLECTED
     try:
@@ -73,7 +83,7 @@ def _normalize_tail_validation_status(raw_status: str | None) -> TailValidationD
 def _tail_validation_to_item_status(
     raw_status: str | None,
 ) -> WorkItemStatus:
-    status = _normalize_tail_validation_status(raw_status)
+    status = normalize_tail_validation_status(raw_status)
     if status in (
         TailValidationDisplayOutcome.FAILED,
         TailValidationDisplayOutcome.CHANGED,

@@ -14,11 +14,12 @@ from angr_platforms.X86_16.caller_return_use_contracts import (
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
-from angr_platforms.X86_16.ir import IRInstr, IRValue, MemSpace
+from angr_platforms.X86_16.ir import IRAddress, IRInstr, IRValue, MemSpace
 from angr_platforms.X86_16.ir.condition_ir import ConditionIR
 from angr_platforms.X86_16.ir.function_ssa_registry import (
     function_ssa_artifact_at_address_8616,
 )
+from angr_platforms.X86_16.ir.instruction_origin import IRInstructionOrigin8616
 from angr_platforms.X86_16.ir.ssa import SSABlock
 from angr_platforms.X86_16.ir.ssa_function import SSAFunctionArtifact
 from angr_platforms.X86_16.lift_86_16 import Instruction_ANY, Lifter86_16  # noqa: F401
@@ -41,8 +42,10 @@ from angr_platforms.X86_16.lowering.interprocedural_storage_return_split_conditi
 )
 from angr_platforms.X86_16.lowering.interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeFailure8616,
+    ReturnStorageTypeResult8616,
     SplitReturnRelation8616,
 )
+from x86_16_native_call_fixtures import retain_native_call_index_8616
 
 
 def _storage(register: str) -> StorageIdentity8616:
@@ -175,6 +178,99 @@ def test_split_condition_refuses_semantically_active_trampoline() -> None:
     assert failure is ReturnStorageTypeFailure8616.SPLIT_CFG_INCOMPLETE
 
 
+@pytest.mark.parametrize("target", [0x1013, 0x1014, None, True])
+def test_split_condition_transfer_requires_exact_cfg_target(target) -> None:
+    """A retained JMP is transparent only with its exact constant successor."""
+    artifact = _artifact()
+    jump = IRInstr(
+        op="JMP", dst=None,
+        args=(IRValue(MemSpace.CONST, const=target, size=4),), addr=0x1008,
+    )
+    artifact = replace(artifact, blocks=tuple(
+        replace(block, instrs=(jump,)) if block.addr == 0x1008 else block
+        for block in artifact.blocks
+    ))
+    candidate, failure = select_split_return_condition_8616(
+        artifact, 0x1003, _conditions(), _storage("dx"), _storage("ax"),
+    )
+    if target == 0x1013:
+        assert failure is None
+        assert candidate is not None
+        assert candidate.transparent_block_addrs == (0x1008, 0x100C)
+    else:
+        assert candidate is None
+        assert failure is ReturnStorageTypeFailure8616.SPLIT_CFG_INCOMPLETE
+
+
+@pytest.mark.parametrize("mutation", [
+    "none", "version", "block", "unknown", "expression", "origin", "duplicate_origin", "origin_block",
+])
+def test_split_piece_witness_preserves_value_and_site_identity(mutation) -> None:
+    """Repeated reads are one witness only for the same known direct SSA value."""
+    from angr_platforms.X86_16.lowering.interprocedural_storage_contracts import (
+        StorageTrialStats8616,
+        StorageTrialValueClass8616,
+    )
+    from angr_platforms.X86_16.lowering.interprocedural_storage_return_split import (
+        _piece_use_8616,
+    )
+    from angr_platforms.X86_16.lowering.interprocedural_storage_return_trial_materialization import (
+        _witness_use_8616,
+    )
+    from angr_platforms.X86_16.lowering.interprocedural_storage_return_type_contracts import (
+        ReturnStorageTypeResult8616,
+        ReturnStorageTypeVerdict8616,
+    )
+
+    value = IRValue(MemSpace.REG, name="ax", size=2, version=0)
+    other = value
+    if mutation == "version":
+        other = replace(value, version=1)
+    elif mutation == "unknown":
+        value = other = replace(value, version=None)
+    elif mutation == "expression":
+        value = other = replace(value, expr=("Iop_Sub16",))
+    reads = tuple(
+        IRInstr("MOV", None, (argument,), addr=0x100E,
+                origin=IRInstructionOrigin8616(0x100E, index + 1))
+        for index, argument in enumerate((value, other))
+    )
+    if mutation == "origin":
+        reads = (reads[0], replace(reads[1], origin=None))
+    elif mutation == "duplicate_origin":
+        reads = (reads[0], replace(reads[1], origin=reads[0].origin))
+    elif mutation == "origin_block":
+        reads = (reads[0], replace(reads[1], origin=IRInstructionOrigin8616(0x2000, 2)))
+    blocks = (SSABlock(0x100E, reads, ()),)
+    if mutation == "block":
+        blocks = (SSABlock(0x100E, reads[:1], ()), SSABlock(0x2000, reads[1:], ()))
+    artifact = SSAFunctionArtifact(0x1000, blocks)
+    condition = _conditions()[2]
+    use, conflict = _piece_use_8616(artifact, _storage("ax"), condition, 0x1000)
+    scalar_uses, scalar_conflict = _witness_use_8616(
+        artifact,
+        CallerReturnUseFact8616(
+            caller_addr=0x1000, callsite_addr=0x1000,
+            verdict=CallerReturnUseVerdict8616.USED,
+            kind=CallsiteReturnUseKind8616.CONDITION, witness_instruction_addr=0x100E,
+        ),
+        ReturnStorageTypeResult8616(
+            ReturnStorageTypeVerdict8616.PROVEN, StorageTrialSignedness8616.UNSIGNED,
+            StorageTrialValueClass8616.VALUE, condition, None, StorageTrialStats8616(1, 1, 1, 1),
+        ),
+        (_storage("ax"),),
+    )
+    if mutation == "none":
+        assert use is not None
+        assert use.instr_index == 0
+        assert not conflict
+        assert scalar_uses == (use,)
+        assert not scalar_conflict
+    else:
+        assert use is None
+        assert scalar_uses is None
+
+
 @pytest.mark.parametrize("index", range(3))
 @pytest.mark.parametrize("field", ["block_addr", "taken_target", "fallthrough_target"])
 def test_split_condition_refuses_each_missing_graph_coordinate(index, field) -> None:
@@ -208,7 +304,7 @@ def _lifted_classification(
     code: bytes,
     block_addrs: set[int],
     registers: tuple[str, str] = ("ax", "dx"),
-) -> object:
+) -> ReturnStorageTypeResult8616:
     """Classify one real-lifter split CALL return with exact function bounds."""
     caller_addr = 0x1000
     callee_addr = 0x1020
@@ -223,17 +319,19 @@ def _lifted_classification(
         },
         auto_load_libs=False,
     )
-    caller = SimpleNamespace(addr=caller_addr, block_addrs_set=block_addrs, info={})
+    caller = SimpleNamespace(
+        addr=caller_addr, block_addrs_set=block_addrs, info={},
+        blocks=tuple(lifted.factory.block(address, opt_level=0) for address in sorted(block_addrs)),
+    )
     callee = SimpleNamespace(addr=callee_addr, block_addrs_set={callee_addr}, info={})
     functions = SimpleNamespace(
         function=lambda addr, create=False: (
             caller if addr == caller_addr else callee if addr == callee_addr else None
         )
     )
-    project = SimpleNamespace(
-        factory=lifted.factory,
-        kb=SimpleNamespace(functions=functions),
-    )
+    project = lifted
+    project.kb.functions = functions
+    callsite_index = retain_native_call_index_8616(project, caller_addr, caller_addr + len(code))
     original_cache = Instruction_ANY._inertia_module_condition_cache
     Instruction_ANY._inertia_module_condition_cache = {}
     try:
@@ -259,6 +357,7 @@ def _lifted_classification(
         callee_addr,
         (callee_addr,),
         output_storages,
+        project=project, callsite_index=callsite_index,
     )
     assert definitions.complete
     return classify_split_return_storage_8616(
@@ -342,3 +441,41 @@ def test_equality_split_refuses_branches_that_disagree_on_the_true_sink() -> Non
 
     assert not result.complete
     assert result.failure is ReturnStorageTypeFailure8616.SPLIT_CFG_INCOMPLETE
+
+
+@pytest.mark.parametrize("mutation", ("none", "register", "load", "store", "call", "unknown", "other_instruction", "missing_tmp_identity"))
+def test_split_trampoline_requires_closed_temporary_effects(mutation: str) -> None:
+    """Coordinate temporaries are transparent; observable or unknown effects refuse."""
+    temporary = IRValue(MemSpace.TMP, name="t_coordinate", size=2, version=1, source_tmp=0)
+    constant = IRValue(MemSpace.CONST, const=1, size=2)
+    prefix = IRInstr("MOV", temporary, (constant,), size=2, addr=0x1008)
+    if mutation == "register":
+        prefix = replace(prefix, dst=IRValue(MemSpace.REG, name="bx", size=2, version=1))
+    elif mutation == "load":
+        prefix = replace(prefix, op="LOAD", args=(IRAddress(MemSpace.DS, offset=0x1234, size=2),))
+    elif mutation == "store":
+        prefix = replace(prefix, op="STORE", dst=None,
+                         args=(IRAddress(MemSpace.DS, offset=0x1234, size=2), constant))
+    elif mutation == "call":
+        prefix = replace(prefix, op="CALL", dst=None)
+    elif mutation == "unknown":
+        prefix = replace(prefix, op="unmodeled_effect")
+    elif mutation == "other_instruction":
+        prefix = replace(prefix, addr=0x1007)
+    elif mutation == "missing_tmp_identity":
+        prefix = replace(prefix, dst=replace(temporary, source_tmp=None))
+    jump = IRInstr("JMP", None, (IRValue(MemSpace.CONST, const=0x1013, size=4),), addr=0x1008)
+    artifact = _artifact()
+    artifact = replace(artifact, blocks=tuple(
+        replace(block, instrs=(prefix, jump)) if block.addr == 0x1008 else block
+        for block in artifact.blocks
+    ))
+    candidate, failure = select_split_return_condition_8616(
+        artifact, 0x1003, _conditions(), _storage("dx"), _storage("ax"),
+    )
+    if mutation == "none":
+        assert candidate is not None
+        assert failure is None
+    else:
+        assert candidate is None
+        assert failure is ReturnStorageTypeFailure8616.SPLIT_CFG_INCOMPLETE

@@ -1,0 +1,593 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dosunit.symbolic_terminal_compare.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "terminal_status",
+    "execution_status",
+    "architecture",
+    "service",
+    "assumptions",
+    "domain",
+    "counters",
+    "oracle",
+    "candidate",
+    "inputs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dosunit.symbolic_terminal_compare.v1"
+    },
+    "status": {
+      "enum": [
+        "conditional",
+        "counterexample",
+        "unknown"
+      ]
+    },
+    "terminal_status": {
+      "enum": [
+        "equivalent",
+        "counterexample",
+        "unknown",
+        "refused",
+        "premise_mismatch"
+      ]
+    },
+    "execution_status": {
+      "const": "not_run"
+    },
+    "architecture": {
+      "enum": [
+        "real16",
+        "flat32",
+        null
+      ]
+    },
+    "service": {
+      "enum": [
+        "dos_int21_ah4c",
+        "pe32_declared_exit_gateway",
+        null
+      ]
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "domain": {
+      "type": "object",
+      "required": [
+        "instruction_memory",
+        "external_effects",
+        "faults",
+        "initial_data"
+      ],
+      "properties": {
+        "instruction_memory": {
+          "const": "immutable"
+        },
+        "external_effects": {
+          "enum": [
+            "compared",
+            "not_established"
+          ]
+        },
+        "faults": {
+          "enum": [
+            "refused",
+            "not_established",
+            "compared"
+          ]
+        },
+        "initial_data": {
+          "const": "shared_unconstrained"
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "required": [
+        "raw_fact_count",
+        "normalized_fact_count",
+        "classified_fact_count",
+        "materialized_count",
+        "failure_count"
+      ],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "oracle": {
+      "$ref": "#/$defs/lane"
+    },
+    "candidate": {
+      "$ref": "#/$defs/lane"
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "terminal_status": {
+            "const": "equivalent"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "conditional"
+          },
+          "assumptions": {
+            "minItems": 1
+          },
+          "domain": {
+            "properties": {
+              "external_effects": {
+                "const": "compared"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_status": {
+            "const": "counterexample"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "counterexample"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_status": {
+            "enum": [
+              "unknown",
+              "refused",
+              "premise_mismatch"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "unknown"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain": {
+            "properties": {
+              "faults": {
+                "const": "compared"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "terminal_status": {
+            "const": "equivalent"
+          },
+          "status": {
+            "const": "conditional"
+          },
+          "oracle": {
+            "required": [
+              "outcome",
+              "fault"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "processor_fault"
+              }
+            }
+          },
+          "candidate": {
+            "required": [
+              "outcome",
+              "fault"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "processor_fault"
+              }
+            }
+          },
+          "assumptions": {
+            "allOf": [
+              {
+                "contains": {
+                  "required": [
+                    "kind",
+                    "relation"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "fault_site_relation"
+                    },
+                    "relation": {
+                      "const": "entry_relative_instruction_offset"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "required": [
+                    "kind",
+                    "model"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "exception_scope"
+                    },
+                    "model": {
+                      "const": "stop_at_exception_no_handler"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_status": {
+            "const": "equivalent"
+          },
+          "oracle": {
+            "required": [
+              "outcome"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "processor_fault"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "domain": {
+            "properties": {
+              "faults": {
+                "const": "compared"
+              }
+            }
+          },
+          "candidate": {
+            "required": [
+              "outcome",
+              "fault"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "processor_fault"
+              }
+            }
+          },
+          "assumptions": {
+            "allOf": [
+              {
+                "contains": {
+                  "required": [
+                    "kind",
+                    "relation"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "fault_site_relation"
+                    },
+                    "relation": {
+                      "const": "entry_relative_instruction_offset"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "required": [
+                    "kind",
+                    "model"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "exception_scope"
+                    },
+                    "model": {
+                      "const": "stop_at_exception_no_handler"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "faultOutcome": {
+      "type": "object",
+      "required": [
+        "kind",
+        "vector",
+        "site_address",
+        "encoding",
+        "reason"
+      ],
+      "properties": {
+        "kind": {
+          "const": "divide_error"
+        },
+        "vector": {
+          "const": 0
+        },
+        "site_address": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "encoding": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{2})+$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "lane": {
+      "type": "object",
+      "properties": {
+        "service_events": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "address",
+                  "vector",
+                  "function",
+                  "data"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "dos_version",
+                      "bios_video_query"
+                    ]
+                  },
+                  "address": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "vector": {
+                    "enum": [
+                      16,
+                      33
+                    ]
+                  },
+                  "function": {
+                    "enum": [
+                      15,
+                      48
+                    ]
+                  },
+                  "data": {
+                    "type": "string",
+                    "pattern": "^(?:[0-9a-f]{2})+$"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "service",
+                  "slot",
+                  "site",
+                  "sequence"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "pe32_import"
+                  },
+                  "service": {
+                    "type": "string",
+                    "minLength": 7,
+                    "maxLength": 257,
+                    "pattern": "^[a-z0-9_.$-]{1,124}\\.dll![A-Za-z0-9_.$?@-]{1,128}$(?![\\s\\S])"
+                  },
+                  "slot": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  },
+                  "site": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  },
+                  "sequence": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "outcome": {
+          "enum": [
+            "declared_service",
+            "processor_fault"
+          ]
+        },
+        "fault": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/faultOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "site": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "address",
+                "encoding",
+                "target"
+              ],
+              "properties": {
+                "address": {
+                  "type": "integer"
+                },
+                "encoding": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "native_limits": {
+          "type": "object",
+          "required": [
+            "max_blocks",
+            "max_block_bytes",
+            "max_instructions"
+          ],
+          "properties": {
+            "max_blocks": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_block_bytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_instructions": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "outcome"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "processor_fault"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "fault"
+            ],
+            "properties": {
+              "fault": {
+                "$ref": "#/$defs/faultOutcome"
+              },
+              "site": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "outcome"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "declared_service"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "fault": {
+                "type": "null"
+              },
+              "site": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

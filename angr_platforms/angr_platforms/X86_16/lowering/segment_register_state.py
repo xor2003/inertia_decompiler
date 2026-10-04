@@ -40,6 +40,7 @@ __all__ = [
     "runtime_segment_push_source_cvar_8616",
     "runtime_segment_state_cvar_8616",
     "runtime_segment_state_symbol_8616",
+    "runtime_segment_state_variable_matches_8616",
 ]
 
 _RUNTIME_SEGMENT_STATE_SYMBOLS_8616: dict[str, str] = {
@@ -150,6 +151,27 @@ def runtime_segment_state_cvar_8616(
         ),
         variable_type=variable_type,
         codegen=codegen,
+    )
+
+
+def runtime_segment_state_variable_matches_8616(
+    variable: object, segment_name: str, function_addr: int,
+) -> bool:
+    """Check an owned runtime carrier without allocating codegen nodes.
+
+    This is the observational counterpart of runtime_segment_state_cvar_8616;
+    metadata and coordinates must agree with that single construction owner.
+    A spelling alone cannot identify architectural state.
+    """
+    normalized = segment_name.strip().lower()
+    address = _RUNTIME_SEGMENT_STATE_ADDRESSES_8616.get(normalized)
+    symbol = _RUNTIME_SEGMENT_STATE_SYMBOLS_8616.get(normalized)
+    if type(variable) is not SimMemoryVariable or address is None or symbol is None:
+        return False
+    actual = (variable.addr, variable.size, variable.name, variable.region,
+              variable.category, variable.ident)
+    return type(function_addr) is int and actual == (
+        address, 2, symbol, function_addr, "inertia_segment_state", None,
     )
 
 

@@ -7,6 +7,7 @@ from typing import cast
 
 import angr
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
 from angr_platforms.X86_16.stack_helpers import StackEmulator, near_return_ip16
 from pyvex.expr import Get
 
@@ -17,6 +18,11 @@ class _ReturnIpEmulator:
     def __init__(self, instruction_addr: int) -> None:
         """Bind one exact frontend instruction address."""
         self.lifter_instruction = SimpleNamespace(addr=instruction_addr)
+        self.control_address_domain = ControlAddressDomain.ARCHITECTURAL_OFFSET
+
+    def get_sgreg(self, _reg: object) -> int:
+        """Supply the unused CS input required by the stack boundary."""
+        return 0
 
     def get_gpreg(self, _reg: object) -> object:
         """Reject unresolved IP carriers in exact return-address recovery."""

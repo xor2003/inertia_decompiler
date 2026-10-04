@@ -1823,7 +1823,6 @@ class _StackCvarCanonicalize8616:
             return True, result
         self.active_expr_ids.discard(self.expr_id)
         return True, self.expr
-        return False, None
     def _part3_cvar_lane_8616(self) -> tuple[bool, object]:
         if isinstance(self.expr, structured_c.CVariable):
             self.variable = self.expr.variable

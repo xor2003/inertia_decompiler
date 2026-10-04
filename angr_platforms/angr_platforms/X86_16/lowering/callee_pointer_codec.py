@@ -45,6 +45,15 @@ def _int_tuple_8616(record: Mapping[str, object], key: str) -> tuple[int, ...]:
     return decoded
 
 
+def _optional_int_tuple_8616(
+    record: Mapping[str, object], key: str
+) -> tuple[int, ...]:
+    """Read an added evidence field while accepting older closed records."""
+    if key not in record:
+        return ()
+    return _int_tuple_8616(record, key)
+
+
 def callee_pointer_argument_evidence_record_8616(
     evidence: CalleePointerArgumentEvidence8616,
 ) -> dict[str, object]:
@@ -61,6 +70,9 @@ def callee_pointer_argument_evidence_record_8616(
         "pointer_argument_indices": list(evidence.pointer_argument_indices),
         "ambiguous_displaced_stack_offsets": list(
             evidence.ambiguous_displaced_stack_offsets
+        ),
+        "ambiguous_indexed_stack_offsets": list(
+            evidence.ambiguous_indexed_stack_offsets
         ),
     }
 
@@ -86,6 +98,10 @@ def callee_pointer_argument_evidence_from_record_8616(
         ambiguous_displaced_stack_offsets=_int_tuple_8616(
             record,
             "ambiguous_displaced_stack_offsets",
+        ),
+        ambiguous_indexed_stack_offsets=_optional_int_tuple_8616(
+            record,
+            "ambiguous_indexed_stack_offsets",
         ),
     )
     evidence.validate()

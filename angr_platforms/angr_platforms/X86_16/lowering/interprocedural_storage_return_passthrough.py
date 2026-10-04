@@ -13,22 +13,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from ..analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from ..call_target_identity import x86_16_call_targets_equivalent_8616
 from ..caller_return_use_contracts import (
     CallerReturnUseFact8616,
     CallsiteReturnUseKind8616,
 )
-from ..ir import IRInstr, IRValue, MemSpace
+from ..frontend_function_boundary import ExactFunctionRangeBoundary8616
+from ..ir import IRValue, MemSpace
 from ..ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
 )
 from ..semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
 )
+from ..semantics.call_target_evidence_8616 import resolve_call_target_evidence_8616
 from ..semantics.terminal_return_passthrough import (
     TerminalReturnPassThroughEvidence8616,
     collect_terminal_return_passthrough_evidence_8616,
 )
+from .call_target_ssa_binder import bind_ssa_call_target_8616
 from .interprocedural_storage_caller_context import CallerSSAContext8616
 from .interprocedural_storage_contracts import StorageTrialStats8616
 from .interprocedural_storage_return_defs import call_candidates_at_address_8616
@@ -147,8 +151,14 @@ def _callsite_call_gate_8616(
     caller_function: object,
     fact: CallerReturnUseFact8616,
     semantic_evidence: TerminalReturnPassThroughEvidence8616,
-) -> tuple[int, int, IRInstr] | ReturnPassThroughTrialResult8616:
-    """Return the single typed CALL at the callsite or a typed refusal."""
+    accepted_target_addrs: tuple[int, ...],
+) -> tuple[int, int, int] | ReturnPassThroughTrialResult8616:
+    """Bind the exact CALL to a constant or its shared native target proof.
+
+    Symbolic operands require the retained semantic projection and decoded
+    census. The shared binder verifies those identities without rewriting
+    the CALL or guessing a selector; missing evidence remains a refusal.
+    """
     ssa = semantic_function_ssa_artifact_at_address_8616(
         caller_project, fact.caller_addr, function=caller_function
     )
@@ -186,7 +196,33 @@ def _callsite_call_gate_8616(
             semantic_evidence=semantic_evidence,
             normalized=True,
         )
-    return block_addr, instr_index, instruction
+    target = instruction.args[0]
+    if target.space is MemSpace.CONST and type(target.const) is int:
+        return block_addr, instr_index, target.const
+    if caller_project is None:
+        return _refused_result_8616(
+            ReturnPassThroughTrialFailure8616.CALL_TARGET_UNKNOWN,
+            semantic_evidence=semantic_evidence, normalized=True,
+        )
+    evidence = resolve_call_target_evidence_8616(
+        caller_project, fact.caller_addr,
+        boundary=caller_function if isinstance(caller_function, ExactFunctionRangeBoundary8616) else None,
+        direct_target_resolver=lambda instruction: resolve_direct_call_target_from_instruction_8616(
+            caller_project, instruction
+        ),
+    )
+    binding = bind_ssa_call_target_8616(
+        artifact, fact.caller_addr, fact.callsite_addr, accepted_target_addrs,
+        project=caller_project,
+        callsite_index=evidence.callsite_index if evidence.complete else None,
+        projection=evidence.projection if evidence.complete else None,
+    )
+    if not binding.complete or binding.target_addr is None:
+        return _refused_result_8616(
+            ReturnPassThroughTrialFailure8616.CALL_TARGET_UNKNOWN,
+            semantic_evidence=semantic_evidence, normalized=True,
+        )
+    return block_addr, instr_index, binding.target_addr
 
 
 def materialize_return_passthrough_trial_8616(
@@ -223,26 +259,19 @@ def materialize_return_passthrough_trial_8616(
     semantic_evidence = gate
     semantic_fact = semantic_evidence.facts[0]
 
+    targets = tuple(sorted(frozenset((callee_addr, *accepted_target_addrs))))
     call_gate = _callsite_call_gate_8616(
-        caller_project, caller_function, fact, semantic_evidence
+        caller_project, caller_function, fact, semantic_evidence, targets
     )
     if isinstance(call_gate, ReturnPassThroughTrialResult8616):
         return call_gate
-    block_addr, instr_index, instruction = call_gate
-    target = instruction.args[0]
-    if target.space is not MemSpace.CONST or not isinstance(target.const, int):
-        return _refused_result_8616(
-            ReturnPassThroughTrialFailure8616.CALL_TARGET_UNKNOWN,
-            semantic_evidence=semantic_evidence,
-            normalized=True,
-        )
-    targets = frozenset((callee_addr, *accepted_target_addrs))
+    block_addr, instr_index, target_addr = call_gate
     target_matches = any(
-        x86_16_call_targets_equivalent_8616(caller_project, target.const, accepted)
+        x86_16_call_targets_equivalent_8616(caller_project, target_addr, accepted)
         for accepted in targets
     )
     semantic_target_matches = x86_16_call_targets_equivalent_8616(
-        caller_project, semantic_fact.target_addr, target.const
+        caller_project, semantic_fact.target_addr, target_addr
     )
     if not target_matches or not semantic_target_matches:
         return _refused_result_8616(
@@ -254,7 +283,7 @@ def materialize_return_passthrough_trial_8616(
         callee_addr=callee_addr,
         caller_addr=fact.caller_addr,
         callsite_addr=fact.callsite_addr,
-        target_addr=target.const,
+        target_addr=target_addr,
         return_instruction_addr=semantic_fact.return_instruction_addr,
         path_block_addrs=semantic_fact.path_block_addrs,
         call_block_addr=block_addr,

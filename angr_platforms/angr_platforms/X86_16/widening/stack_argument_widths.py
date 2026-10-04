@@ -138,6 +138,7 @@ class _WidthEvidenceTally8616:
 def _mov_return_pairs_8616(
     instructions: tuple[StackWordArithmeticFact8616, ...],
     tally: _WidthEvidenceTally8616,
+    carry_mnemonic: dict[str, str],
 ) -> None:
     """Census adjacent mov pairs returning AX:DX from adjacent BP words."""
     for index, (low, high) in enumerate(itertools.pairwise(instructions)):
@@ -147,6 +148,10 @@ def _mov_return_pairs_8616(
             or low.destination_role is not StackWordRegisterRole8616.AX_LOW_RETURN
             or high.destination_role is not StackWordRegisterRole8616.DX_HIGH_RETURN
         ):
+            continue
+        # A complete four-instruction carry chain owns these movs as its seed,
+        # not as a failed terminal AX:DX passthrough return.
+        if _exact_carry_seed_at_8616(instructions, index, carry_mnemonic):
             continue
         tally.raw_fact_count += 1
         if low.source_bp_offset is None or high.source_bp_offset is None:
@@ -166,6 +171,37 @@ def _mov_return_pairs_8616(
             continue
         tally.classified_offsets.add(low.source_bp_offset)
         tally.terminal_return_offsets.add(low.source_bp_offset)
+
+
+def _exact_carry_seed_at_8616(
+    instructions: tuple[StackWordArithmeticFact8616, ...],
+    index: int,
+    carry_mnemonic: dict[str, str],
+) -> bool:
+    """Identify only a fully matched mov/mov/add/adc or mov/mov/sub/sbb seed."""
+    if index + 4 > len(instructions):
+        return False
+    seed_low, seed_high, low, high = instructions[index : index + 4]
+    if (
+        seed_low.mnemonic.lower() != "mov"
+        or seed_high.mnemonic.lower() != "mov"
+        or carry_mnemonic.get(low.mnemonic.lower()) != high.mnemonic.lower()
+    ):
+        return False
+    if (
+        seed_low.source_bp_offset is None
+        or seed_high.source_bp_offset != seed_low.source_bp_offset + 2
+        or low.source_bp_offset is None
+        or high.source_bp_offset != low.source_bp_offset + 2
+    ):
+        return False
+    return (
+        low.destination_register is not None
+        and high.destination_register is not None
+        and low.destination_register != high.destination_register
+        and seed_low.destination_register == low.destination_register
+        and seed_high.destination_register == high.destination_register
+    )
 
 
 def _carry_pairs_8616(
@@ -272,7 +308,7 @@ def analyze_wide_stack_argument_widths_8616(
     carry_mnemonic = {"add": "adc", "sub": "sbb"}
     for instruction_group in instruction_groups:
         instructions = tuple(instruction_group)
-        _mov_return_pairs_8616(instructions, tally)
+        _mov_return_pairs_8616(instructions, tally, carry_mnemonic)
         _carry_pairs_8616(instructions, tally, carry_mnemonic)
         _cmp_seed_triples_8616(instructions, tally)
     return WideStackArgumentWidthEvidence8616(

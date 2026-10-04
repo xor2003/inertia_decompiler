@@ -18,7 +18,7 @@ from typing import Any, Protocol, cast
 
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeBottom, SimTypeFunction
-from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
+from capstone.x86_const import X86_INS_LCALL, X86_OP_IMM, X86_OP_MEM, X86_OP_REG
 
 from .alias.callsite_stack_merge import (
     CallsitePredecessorStackMerge8616,
@@ -59,7 +59,10 @@ from .frontend_caller_return_use_program import (
     current_caller_return_use_program_evidence_8616,
     use_caller_return_use_program_evidence_8616,
 )
-from .frontend_direct_callsite_index import DecodedDirectCallsiteIndex8616
+from .frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    DecodedFarCallTarget8616,
+)
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
 from .helper_abi import (
     known_helper_is_variadic_8616 as _catalog_helper_is_variadic_8616,
@@ -90,6 +93,7 @@ from .semantics.terminal_stack_cleanup import (
     TerminalStackCleanupEvidence8616,
     terminal_stack_cleanup_at_address_8616,
 )
+from .stack_helpers import far_linear_target_8616
 
 __all__ = [
     "CallerReturnUseEvidence8616",
@@ -151,6 +155,7 @@ class _CapstoneInstructionSurface8616(Protocol):
     """Typed fields used from a third-party Capstone instruction."""
 
     address: int
+    id: int
     size: int
     mnemonic: str
     op_str: str
@@ -3492,14 +3497,26 @@ def _return_use_insn_verdict_8616(
     return None, False, None
 
 
-def _linear_call_target_8616(insn: object) -> int | None:
-    """Return the direct immediate target of one decoded call instruction."""
+def _linear_call_target_8616(insn: object) -> int | DecodedFarCallTarget8616 | None:
+    """Return a near target or exact 20-bit immediate far-call target."""
     if not is_x86_16_call_mnemonic_8616(_mnemonic(insn)):
         return None
     operands = _instruction_operands(insn)
-    if len(operands) != 1:
+    if len(operands) == 1:
+        return _operand_imm_value(operands[0])
+    if len(operands) != 2:
         return None
-    return _operand_imm_value(operands[0])
+    try:
+        opcode_id = _capstone_insn(insn).id
+    except AttributeError:
+        return None
+    if opcode_id != X86_INS_LCALL:
+        return None
+    target = far_linear_target_8616(
+        _operand_imm_value(operands[0]),
+        _operand_imm_value(operands[1]),
+    )
+    return None if target is None else DecodedFarCallTarget8616(target)
 
 
 @dataclass(slots=True)
@@ -3560,6 +3577,15 @@ class _LinearReturnUseScan8616:
         instruction_addr = _instruction_address_8616(insn)
         witness_addr = instruction_addr if isinstance(instruction_addr, int) else None
         if mnemonic == "add" and len(operands) == 2 and _operand_is_reg(insn, operands[0], {"sp", "esp"}):
+            self.pending.append(index + 1)
+            return None
+        if (
+            mnemonic == "mov"
+            and len(operands) == 2
+            and _operand_is_reg(insn, operands[0], {"es"})
+            and _operand_is_reg(insn, operands[1], {"dx"})
+        ):
+            # DX may carry the far segment; this exact copy preserves AX.
             self.pending.append(index + 1)
             return None
         if _wide_return_condition_use_8616(self.insns, index):
@@ -3741,7 +3767,7 @@ class _CallerReturnUseResolver8616:
                 # A recursive tail pass-through cannot observe its own return.
                 # Ignore that cycle when independent callers provide evidence;
                 # a recursion-only function still resolves to unknown below.
-                if (fact.caller_addr & 0xFFFF) in next_active:
+                if self.direct_callsite_index.target_identity(fact.caller_addr) in next_active:
                     continue
                 resolutions.append(
                     self.return_observed_transitively(fact.caller_addr, next_active)
@@ -3809,8 +3835,8 @@ def collect_caller_return_use_evidence_8616(
     resolved_facts: list[CallerReturnUseFact8616] = []
     for fact in direct_facts.values():
         if fact.kind is CallsiteReturnUseKind8616.FUNCTION_RETURN and (
-            fact.caller_addr & 0xFFFF
-        ) in census_targets:
+            program.callsites.target_identity(fact.caller_addr) in census_targets
+        ):
             resolved_facts.append(
                 replace(fact, excluded_recursive_passthrough=True)
             )

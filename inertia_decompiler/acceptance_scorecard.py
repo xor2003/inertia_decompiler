@@ -11,7 +11,10 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from inertia_decompiler.work_items import TailValidationDisplayOutcome
+from inertia_decompiler.work_items import (
+    TailValidationDisplayOutcome,
+    normalize_tail_validation_status,
+)
 
 __all__ = [
     "AcceptanceScorecard",
@@ -188,8 +191,8 @@ _VVAR_RE = re.compile(r"\bvvar_[A-Za-z0-9]+\b")
 _SUB_RE = re.compile(r"\bsub_[0-9a-fA-F]+\b")
 _TAIL_VALIDATION_METADATA_RE = re.compile(r"@@INERTIA_TAIL_VALIDATION@@\s+(\{.*\})")
 _WHOLE_TAIL_REPORT_RE = re.compile(
-    r"^\[tail-validation\] whole-tail validation (clean|changed|failed|unknown|uncollected)"
-    r"(?: across \d+ functions)?\s*$", re.MULTILINE,
+    r"^\[tail-validation\] whole-tail (?:validation|acceptance) (clean|changed|failed|unknown|uncollected)"
+    r"(?: across \d+ functions)?(?:; semantic tail checks clean)?\s*$", re.MULTILINE,
 )
 _DS_HELPER_LINEAR_RE = re.compile(r"\b(?:SEG_PTR|MK_FP|SEG_U8|SEG_U16|SEG_U32)\s*\(\s*ds\s*,")
 _SS_LINEAR_RE = re.compile(r"\bss\s*\*\s*16\b")
@@ -245,6 +248,8 @@ def _metadata_validation_verdict(output: str) -> str | None:
     except json.JSONDecodeError:
         return None
     surface = payload.get("surface") if isinstance(payload, dict) else None
+    if isinstance(surface, dict) and surface.get("acceptance_validation_failed") is True:
+        return str(TailValidationDisplayOutcome.FAILED)
     severity = surface.get("severity") if isinstance(surface, dict) else None
     if not isinstance(severity, str) or not severity:
         return None
@@ -259,7 +264,11 @@ def _validation_verdict_from_output(output: str) -> str:
     reports = _WHOLE_TAIL_REPORT_RE.findall(output)
     if reports:
         final = reports[-1]
-        status = TailValidationDisplayOutcome.STABLE if final == "clean" else TailValidationDisplayOutcome(final)
+        status = (
+            TailValidationDisplayOutcome.STABLE
+            if final == "clean"
+            else normalize_tail_validation_status(final)
+        )
         return str(TailValidationDisplayOutcome.FAILED if status is TailValidationDisplayOutcome.CHANGED else status)
     lowered = output.lower()
     for verdict in ("failed", "unknown", "uncollected", "stable", "changed"):

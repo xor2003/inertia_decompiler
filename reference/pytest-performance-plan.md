@@ -1783,3 +1783,31 @@ single-run-only performance result remains.
 This order front-loads measurement and low-risk reuse, while postponing
 irreversible test deletion and scheduler tuning until their measurements are
 meaningful.
+
+## 2026-09-27 environment and failure audit
+
+The latest complete partitioned report in `.cache/pytest/partitioned-summary.json`
+is a failed run, not a performance acceptance: 12,774 nodes, 47 failures,
+31.8 minutes, and 1.69 GiB peak RSS. Its heavy lane used 39 fresh Python
+workers with only two admitted at a time and occupied 29.2 minutes. The
+SortDemo regression file alone accumulated 1,334 seconds of test-call time;
+the CLI and COD regression files added 514 and 249 seconds. The report cannot
+authorize measured-worker concurrency because it failed.
+
+Current local timing is not comparable to the accepted 2026-08 baseline. The
+host reported load averages of roughly 24-30 and 68-78% CPU `some`
+pressure during this audit. A fresh `import angr` took 18-23 seconds. A
+single `SwapBars` pytest node took 139 seconds with the full-suite timeout
+scale of four and failed because the MS C recompile check could not open
+`/dev/kvm`; the device is absent in this sandbox. The one-timescale rerun
+timed out and is not evidence of a semantic regression. The worktree also had
+uncommitted source edits, which can invalidate warm decompilation caches. A complete
+green, source-stable run in a KVM-capable environment is required before
+claiming the ten-minute target or accepting new worker resource measurements.
+
+The bounded `/home/xor/pytest_deduplicate` run covered 47 segmented-address
+and stack-lowering tests, found 24 coverage-overlap candidates, and reported
+zero tool errors. None was marked safe for automatic removal; matching
+coverage does not establish equal assertions. These millisecond-scale tests
+cannot explain the heavy lane's runtime. Keep their semantic contracts and
+prioritize the repeated decompilation work after the environment is stable.

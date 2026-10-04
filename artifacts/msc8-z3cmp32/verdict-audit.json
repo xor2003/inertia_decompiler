@@ -1,0 +1,47 @@
+{
+  "scope": "Replay of saved backend evidence; no new binary comparison",
+  "targets": {
+    "C13216": {
+      "total": 29,
+      "passed": 9,
+      "failed": 15,
+      "refused": 5,
+      "conditional": 0
+    },
+    "C1XX3216": {
+      "total": 58,
+      "passed": 21,
+      "failed": 32,
+      "refused": 5,
+      "conditional": 0
+    },
+    "C23216": {
+      "total": 14,
+      "passed": 7,
+      "failed": 6,
+      "refused": 1,
+      "conditional": 0
+    },
+    "C33216": {
+      "total": 7,
+      "passed": 1,
+      "failed": 3,
+      "refused": 3,
+      "conditional": 0
+    },
+    "CL": {
+      "total": 1,
+      "passed": 0,
+      "failed": 1,
+      "refused": 0,
+      "conditional": 0
+    },
+    "LINK": {
+      "total": 85,
+      "passed": 5,
+      "failed": 80,
+      "refused": 0,
+      "conditional": 0
+    }
+  }
+}

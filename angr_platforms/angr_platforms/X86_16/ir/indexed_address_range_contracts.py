@@ -2,7 +2,9 @@
 
 Layer: IR.
 Responsibility: retain explicit SSA/CFG witnesses for zero-based, unit-step,
-strict unsigned constant-bound natural loops that own indexed global accesses.
+strict constant-bound natural loops that own indexed global accesses. Signed
+bounds require exact positive constants below the sign bit; dynamic bounds
+remain refused.
 This module does not discover loops, infer Alias identity, choose object counts,
 widen storage, inspect rendered text, or mutate generated code.
 Owns typed Value, Address, Condition, instruction facts, and lossless normalization.
@@ -24,6 +26,7 @@ from .indexed_address_range_witnesses import (
     IndexedNaturalLoopWitness8616,
     canonical_induction_source_identity_8616,
 )
+from .indexed_induction_write_census import IndexedInductionWriteCensus8616
 from .logical_memory_write_value import (
     LogicalWordWriteValueFact8616,
     LogicalWordWriteValueKind8616,
@@ -38,6 +41,7 @@ class IndexedLoopRangeFailureKind8616(StrEnum):
     DUPLICATE_ACCESS = "duplicate_access"
     INDUCTION_IDENTITY_UNPROVEN = "induction_identity_unproven"
     INDUCTION_IDENTITY_MISMATCH = "induction_identity_mismatch"
+    INDUCTION_MUTATION_UNPROVEN = "induction_mutation_unproven"
     INIT_UNPROVEN = "init_unproven"
     INIT_NOT_ZERO = "init_not_zero"
     STEP_UNPROVEN = "step_unproven"
@@ -47,6 +51,7 @@ class IndexedLoopRangeFailureKind8616(StrEnum):
     BOUND_OUT_OF_RANGE = "bound_out_of_range"
     GUARD_UNPROVEN = "guard_unproven"
     GUARD_NOT_STRICT_UNSIGNED = "guard_not_strict_unsigned"
+    GUARD_NOT_STRICT_BOUND = "guard_not_strict_bound"
     NATURAL_LOOP_UNPROVEN = "natural_loop_unproven"
     DOMINANCE_UNPROVEN = "dominance_unproven"
     BACKEDGE_UNPROVEN = "backedge_unproven"
@@ -78,6 +83,7 @@ class IndexedLoopRangeCandidate8616:
     guard: IndexedLoopGuardWitness8616 | None = None
     init_write: LogicalWordWriteValueFact8616 | None = None
     step_write: LogicalWordWriteValueFact8616 | None = None
+    induction_write_census: IndexedInductionWriteCensus8616 | None = None
     generation_failure: IndexedLoopRangeFailureKind8616 | None = None
     generation_detail: str = ""
 
@@ -99,6 +105,7 @@ class IndexedLoopRangeFact8616:
     guard: IndexedLoopGuardWitness8616
     init_write: LogicalWordWriteValueFact8616
     step_write: LogicalWordWriteValueFact8616
+    induction_write_census: IndexedInductionWriteCensus8616 | None = None
 
     @property
     def proof_sites(self) -> tuple[IndexedLoopProofSite8616, ...]:
@@ -129,6 +136,12 @@ class IndexedLoopRangeFact8616:
         step_slice_indexes = {
             lane.execution_slice.instr_index for lane in self.step_write.lanes
         }
+        census = self.induction_write_census
+        if census is None or not census.matches_lifetime(
+            self.source.function_addr, self.induction_source, self.init_write, self.step_write,
+            loop.blocks, loop.header_block_addr,
+        ):
+            return False
         return bool(
             self.source.complete
             and canonical == self.induction_source
@@ -136,7 +149,7 @@ class IndexedLoopRangeFact8616:
             and self.init == 0
             and self.step == 1
             and self.init_write.complete
-            and self.init_write.kind is LogicalWordWriteValueKind8616.CONSTANT_ZERO
+            and self.init_write.proves_constant_zero
             and self.init_write.constant == self.init
             and init_identity == self.induction_source
             and self.step_write.complete
@@ -163,11 +176,19 @@ class IndexedLoopRangeFact8616:
             and self.step_site.instr_index in step_slice_indexes
             and self.guard_site.block_addr == loop.header_block_addr
             and self.access_site.block_addr in loop.blocks
+            and self.access_site.block_addr != loop.header_block_addr
+            and all(
+                site.block_addr != self.step_site.block_addr
+                or site.instr_index < min(step_slice_indexes)
+                for site in self.source.definition_path if site.op == "LOAD"
+            )
             and guard.guard_block_addr == loop.header_block_addr
             and guard.continue_block_addr in loop.blocks
             and guard.exit_block_addr not in loop.blocks
             and guard.complete
-            and guard.proves_strict_unsigned_continue
+            and (guard.proves_strict_unsigned_continue or guard.proves_positive_signed_bound(
+                self.upper_bound, self.source.index_value.size, self.induction_source,
+            ))
             and guard.guard_dominates_access
             and guard.guard_dominates_latch
         )

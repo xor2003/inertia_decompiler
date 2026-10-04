@@ -160,28 +160,34 @@ def test_full_lifter_omits_dead_sortd_status_flag_chain() -> None:
     from angr_platforms.X86_16.arch_86_16 import Arch86_16
     from angr_platforms.X86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
-    # SUB; SAR; MOV; INC; SHL; SHL; CMP; JG. Every intermediate status-bit
-    # definition dies before the final typed comparison consumes operands.
+    # SUB; SAR; MOV; INC; SHL; SHL; CMP; JG. Intermediate status-bit
+    # definitions die, but the final CMP FLAGS remain live at the cutpoint.
     code = bytes.fromhex("2bc2 d1f8 89c3 40 d1e1 d1e3 39d8 7f00")
     arch = Arch86_16()
     irsb = pyvex.lift(code, 0x1000, arch, max_inst=20, opt_level=0)
     flags_offset = arch.get_register_offset("flags")
 
-    assert not any(isinstance(statement, Put) and statement.offset == flags_offset for statement in irsb.statements)
-    assert "Xor8" not in str(irsb)
+    current_address = None
+    flag_writes = []
+    for statement in irsb.statements:
+        if isinstance(statement, pyvex.stmt.IMark):
+            current_address = statement.addr
+        if isinstance(statement, Put) and statement.offset == flags_offset:
+            flag_writes.append(current_address)
+    assert flag_writes == [0x100b]
 
 
-def test_wide_stack_compare_transports_condition_without_packed_flags() -> None:
+def test_wide_stack_compare_retains_flags_and_typed_condition() -> None:
     from angr_platforms.X86_16.arch_86_16 import Arch86_16
     from angr_platforms.X86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
     # cmp word ptr [bp+4], 0; jne next. The byte-safe word load is the typed
-    # condition source; materializing packed FLAGS would only duplicate it.
+    # condition source; architectural FLAGS must also survive the branch.
     arch = Arch86_16()
     irsb = pyvex.lift(bytes.fromhex("837e0400 7500"), 0x1000, arch, max_inst=2, opt_level=0)
     flags_offset = arch.get_register_offset("flags")
 
-    assert not any(isinstance(statement, Put) and statement.offset == flags_offset for statement in irsb.statements)
+    assert any(isinstance(statement, Put) and statement.offset == flags_offset for statement in irsb.statements)
     assert "CmpNE16" in str(irsb)
 
 

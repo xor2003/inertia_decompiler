@@ -6,6 +6,9 @@ Forbidden: decompiler helper recovery, source-backed IO semantics, or validation
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Protocol
 
 from pyvex.expr import Const as PyVexConst
@@ -14,7 +17,47 @@ from pyvex.lifting.util.vex_helper import Type
 from .dev_io import MemoryIO, PortIO
 from .memory import Memory
 
-__all__ = ("IO",)
+__all__ = ("IO", "retained_port_events")
+
+
+#: Scoped declaration that the bound environment models every scalar port
+#: access as an ordered event.  ``retained_port_events`` is the only writer;
+#: the concrete-port fold checks below are the only readers.  Outside the
+#: scope the default unregistered-device model is unchanged: a concrete port
+#: with no registered ``PortIO`` device reads the canonical all-ones value
+#: instead of producing a lifted event.
+_PORT_EVENT_RETENTION: ContextVar[bool] = ContextVar(
+    "x86_16_port_event_retention", default=False
+)
+
+
+@contextmanager
+def retained_port_events() -> Iterator[None]:
+    """Declare one bounded lifting scope that retains concrete port events.
+
+    Inside the scope, lifting an IN form with a concrete port emits the
+    ``x86g_dirtyhelper_IN`` event helper instead of folding to the canonical
+    unregistered-device constant, so ordered-event evidence observes the real
+    port access.  Concrete (non-lifting) execution is unchanged: with no
+    lifted statement to carry an event, the device model still supplies the
+    default value.  The binding is context-local and restored by token, so a
+    concurrent or later comparison cannot inherit the declared scope.
+    """
+    token = _PORT_EVENT_RETENTION.set(True)
+    try:
+        yield
+    finally:
+        _PORT_EVENT_RETENTION.reset(token)
+
+
+def _lifting_retains_port_events(io: IO) -> bool:
+    """Return whether this instruction lifts under declared event retention.
+
+    Retention applies only while a lifter instruction can emit the event
+    helper; in concrete execution there is no lifted statement to carry the
+    event and the unregistered-device model must still answer the read.
+    """
+    return _PORT_EVENT_RETENTION.get() and io.lifter_instruction is not None
 
 
 class _CastablePortArg(Protocol):
@@ -95,8 +138,13 @@ class IO:
         # return a deterministic canonical value instead of emitting a dirty
         # helper. This matches test expectations for default input behaviour
         # when no device is present. Accept both Python ints and pyvex Consts.
+        # A declared retained-port-events scope lifts the event helper instead.
         port_val = self._concrete_port_value(addr)
-        if port_val is not None and self.get_portio_base(port_val) is None:
+        if (
+            port_val is not None
+            and not _lifting_retains_port_events(self)
+            and self.get_portio_base(port_val) is None
+        ):
             return self.constant(0xFFFFFFFF & ((1 << 32) - 1), Type.int_32)
         port_arg = self._port_arg(addr)
         return self.lifter_instruction.dirty(Type.int_32, "x86g_dirtyhelper_IN", [port_arg, self.constant(32)])
@@ -104,7 +152,11 @@ class IO:
     def in_io16(self, addr: _PortArg) -> object:
         """Read a 16-bit value from a port or emit the frontend dirty helper."""
         port_val = self._concrete_port_value(addr)
-        if port_val is not None and self.get_portio_base(port_val) is None:
+        if (
+            port_val is not None
+            and not _lifting_retains_port_events(self)
+            and self.get_portio_base(port_val) is None
+        ):
             return self.constant(0xFFFF & ((1 << 16) - 1), Type.int_16)
         port_arg = self._port_arg(addr)
         return self.lifter_instruction.dirty(Type.int_16, "x86g_dirtyhelper_IN", [port_arg, self.constant(16)])
@@ -112,7 +164,11 @@ class IO:
     def in_io8(self, addr: _PortArg) -> object:
         """Read an 8-bit value from a port or emit the frontend dirty helper."""
         port_val = self._concrete_port_value(addr)
-        if port_val is not None and self.get_portio_base(port_val) is None:
+        if (
+            port_val is not None
+            and not _lifting_retains_port_events(self)
+            and self.get_portio_base(port_val) is None
+        ):
             return self.constant(0xFF & ((1 << 8) - 1), Type.int_8)
         port_arg = self._port_arg(addr)
         return self.lifter_instruction.dirty(Type.int_8, "x86g_dirtyhelper_IN", [port_arg, self.constant(8)])

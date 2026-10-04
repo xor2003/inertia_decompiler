@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Merge z3res_*.json worker outputs into aircmp-results.json + triage report."""
-import json, glob, collections, sys
+import collections
+import glob
+import json
 
 OUT = "/home/xor/vextest/artifacts/airborn-z3cmp/aircmp-results.json"
 res = {}
@@ -52,6 +54,7 @@ if inc:
 
 # expected total from worker logs ("worker N: X fns")
 import re
+
 exp = 0
 for lf in glob.glob("/home/xor/vextest/artifacts/airborn-z3cmp/batch/z3w*.log"):
     try:

@@ -19,6 +19,7 @@ dependencies = [
     "pycparser>=3,<4",
     "textual==8.2.8",
     "z3-solver==4.13.0.0",
+    "Cython>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ test = [
     "lark==1.1.9",
     "pytest>=9,<10",
     "pytest-xdist>=3.8,<4",
+    "jsonschema>=4,<5",
     "keystone-engine==0.9.2",
     "unicorn==2.1.4",
     "monkeytype",
@@ -37,6 +39,7 @@ dev = [
     "lark==1.1.9",
     "pytest>=9,<10",
     "pytest-xdist>=3.8,<4",
+    "jsonschema>=4,<5",
     "keystone-engine==0.9.2",
     "unicorn==2.1.4",
     "monkeytype",
@@ -51,6 +54,10 @@ dev = [
 ]
 mypyc = [
     "mypy",
+    "setuptools",
+]
+cython = [
+    "Cython>=3.2,<4",
     "setuptools",
 ]
 
@@ -150,6 +157,7 @@ max-bool-expr = 5
 
 [tool.mypy]
 python_version = "3.14"
+mypy_path = ["typings"]
 files = [
     "angr_platforms/angr_platforms/X86_16",
     "inertia_decompiler",
@@ -185,6 +193,10 @@ module = [
     "angr_platforms.angr_platforms.X86_16.postprocess.rollback_snapshot_cache",
     "angr_platforms.angr_platforms.X86_16.postprocess.validation_contracts",
     "angr_platforms.angr_platforms.X86_16.validation.control_flow_ast_index",
+    "angr_platforms.angr_platforms.X86_16.analysis_helpers",
+    "angr_platforms.angr_platforms.X86_16.call_target_identity",
+    "angr_platforms.angr_platforms.X86_16.lowering.call_target_ssa_binder",
+    "angr_platforms.angr_platforms.X86_16.lowering.call_target_ssa_contracts",
 ]
 follow_imports = "normal"
 
@@ -195,6 +207,7 @@ testpaths = [
 markers = [
     "repository_contract: validates current whole-repository state and runs as an explicit hard gate outside focused pytest lanes",
     "resource_serial: requires an exclusive partitioned-suite wave because external tools or shared resources become unreliable under heavy contention",
+    "requires_kvm: executes DOS code through /dev/kvm; skips when the current process cannot open the device read-write",
 ]
 addopts = [
     "--durations=10",

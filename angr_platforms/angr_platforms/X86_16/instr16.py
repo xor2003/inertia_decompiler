@@ -28,6 +28,7 @@ from .alu_helpers import (
     rotate_through_carry_right_state,
     unary_operation,
 )
+from .control_coordinates import NearTargetDomain
 from .debug import ERROR
 from .emulator import Emulator
 from .exception import EXP_UD
@@ -1003,13 +1004,13 @@ class Instr16(InstrBase):
         leave16(self._active_stack_emulator())
 
     def in_ax_imm8(self) -> None:
-        """Execute decoded ``IN_AX_IMM8`` semantics through frontend emulator effects."""
-        self.emu.set_gpreg(reg16_t.AX, self.emu.in_io16(self.instr.imm8))
+        """Use the unsigned 8-bit immediate port, independent of signed decoding."""
+        self.emu.set_gpreg(reg16_t.AX, self.emu.in_io16(self.instr.imm8 & 0xFF))
 
     def out_imm8_ax(self) -> None:
-        """Execute decoded ``OUT_IMM8_AX`` semantics through frontend emulator effects."""
+        """Use the unsigned 8-bit immediate port, independent of signed decoding."""
         ax = self.emu.get_gpreg(reg16_t.AX)
-        self.emu.out_io16(self.instr.imm8, ax)
+        self.emu.out_io16(self.instr.imm8 & 0xFF, ax)
 
     def call_rel16(self) -> None:
         """Execute decoded ``CALL_REL16`` semantics through frontend emulator effects."""
@@ -1951,10 +1952,10 @@ class Instr16(InstrBase):
         unary_operation(self.get_rm16, self.set_rm16, self.emu.update_eflags_dec, lambda value: value - 1)
 
     def call_rm16(self) -> None:
-        """Execute decoded ``CALL_RM16`` semantics through frontend emulator effects."""
+        """Push CS-relative return IP and compose the architectural CALL operand."""
         rm16 = self.get_rm16()
-        return_ip = self.emu.get_gpreg(reg16_t.IP) + self.emu.constant(self.instr.size, Type.int_16)
-        emit_near_call16(self._active_stack_emulator(), rm16, return_ip=return_ip)
+        emit_near_call16(self._active_stack_emulator(), rm16, instruction_size=self.instr.size,
+                         target_domain=NearTargetDomain.ARCHITECTURAL_OFFSET)
 
     def callf_m16_16(self) -> None:
         """Execute decoded ``CALLF_M16_16`` semantics through frontend emulator effects."""
@@ -1964,9 +1965,10 @@ class Instr16(InstrBase):
         )
 
     def jmp_rm16(self) -> None:
-        """Execute decoded ``JMP_RM16`` semantics through frontend emulator effects."""
+        """Compose the decoded architectural near-jump offset with unchanged CS."""
         rm16 = self.get_rm16()
-        emit_near_jump16(self._active_stack_emulator(), rm16)
+        emit_near_jump16(self._active_stack_emulator(), rm16,
+                         target_domain=NearTargetDomain.ARCHITECTURAL_OFFSET)
 
     def jmpf_m16_16(self) -> None:
         """Execute decoded ``JMPF_M16_16`` semantics through frontend emulator effects."""

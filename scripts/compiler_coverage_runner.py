@@ -1,6 +1,6 @@
 """Run a selected existing MS C case through the established round-trip owner.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: isolate artifacts, bound the child process tree, and retain a
 compact structured result. Compilation and decompilation stay in the old runner.
 """
@@ -25,7 +25,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.compiler_coverage_provenance import implementation_fingerprint, input_fingerprint  # noqa: E402
+from scripts.compiler_coverage_provenance import (  # noqa: E402
+    implementation_fingerprint,
+    input_fingerprint,
+    runtime_environment_snapshot,
+)
 from scripts.compiler_coverage_result import (  # noqa: E402
     CoverageOutcome,
     classify_roundtrip_report,
@@ -36,6 +40,7 @@ from scripts.pytest_process_metrics import process_tree_pids  # noqa: E402
 
 COMPILER_ROOT = Path("/home/xor/inertia_player/dos_compilers/Microsoft C v6ax")
 KVIKDOS = Path("/home/xor/kvikdos/kvikdos")
+CHILD_ENVIRONMENT_OVERRIDES: dict[str, str] = {"PYTHON_JIT": "1", "PYTHONHASHSEED": "0"}
 
 
 def _kill_and_reap(process: subprocess.Popen[bytes]) -> int:
@@ -54,7 +59,7 @@ def _kill_and_reap(process: subprocess.Popen[bytes]) -> int:
 
 def _execute(command: list[str], log: TextIO, timeout: float) -> tuple[int, bool]:
     """Bound the child tree and also clean it up when execution is interrupted."""
-    environment = dict(os.environ, PYTHON_JIT="1", PYTHONHASHSEED="0")
+    environment = dict(os.environ, **CHILD_ENVIRONMENT_OVERRIDES)
     process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT,
                                start_new_session=True)
     try:
@@ -94,6 +99,22 @@ def _read_roundtrip_report(report: Path) -> object:
         return json.loads(report.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _stable_input_outcome(
+    outcome: CoverageOutcome,
+    *,
+    implementation_unchanged: bool,
+    environment_unchanged: bool,
+) -> tuple[CoverageOutcome, str | None]:
+    """Refuse a reported pass when its execution identity changed in flight."""
+    if outcome is not CoverageOutcome.PASSED:
+        return outcome, None
+    if not implementation_unchanged:
+        return CoverageOutcome.HARNESS_FAILED, "Owned Python sources changed during execution; replay with stable inputs"
+    if not environment_unchanged:
+        return CoverageOutcome.HARNESS_FAILED, "Runtime environment changed during execution; replay with stable inputs"
+    return outcome, None
 
 
 def run_source_case(
@@ -137,6 +158,8 @@ def run_source_case(
     provenance["runtime_headers"] = {name: input_fingerprint(path) for name, path in headers.items()}
     provenance["signature_catalog"] = input_fingerprint(catalog) if catalog is not None else None
     provenance["implementation"] = implementation_fingerprint(ROOT)
+    provenance["environment"] = runtime_environment_snapshot().to_dict()
+    provenance["child_environment_overrides"] = dict(CHILD_ENVIRONMENT_OVERRIDES)
     start = time.monotonic()
     outcome = CoverageOutcome.HARNESS_FAILED
     returncode: int | None = None
@@ -156,9 +179,15 @@ def run_source_case(
         outcome = classify_roundtrip_report(payload, case, returncode)
     implementation_after = implementation_fingerprint(ROOT)
     implementation_unchanged = provenance["implementation"] == implementation_after
-    if not implementation_unchanged and outcome is CoverageOutcome.PASSED:
-        outcome = CoverageOutcome.HARNESS_FAILED
-        error = "Owned Python sources changed during execution; replay with stable inputs"
+    environment_after = runtime_environment_snapshot().to_dict()
+    environment_unchanged = provenance["environment"] == environment_after
+    outcome, stability_error = _stable_input_outcome(
+        outcome,
+        implementation_unchanged=implementation_unchanged,
+        environment_unchanged=environment_unchanged,
+    )
+    if stability_error is not None:
+        error = stability_error
     summary = {
         "schema": 1, "case": case, "outcome": outcome.value,
         "seconds": time.monotonic() - start, "returncode": returncode,
@@ -168,6 +197,8 @@ def run_source_case(
         "inputs": provenance,
         "implementation_after": implementation_after,
         "implementation_unchanged": implementation_unchanged,
+        "environment_after": environment_after,
+        "environment_unchanged": environment_unchanged,
         "memory_model": memory_model.value,
         "scope": "existing_roundtrip_only_not_feature_coverage",
     }

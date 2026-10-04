@@ -11,6 +11,8 @@ from typing import Any, ClassVar, cast
 
 from archinfo import ArchError, Endness, RegisterOffset
 
+from .control_coordinates import ControlAddressDomain
+
 try:
     import capstone as _capstone
 except ImportError:
@@ -35,11 +37,17 @@ __all__ = ("Arch86_16",)
 class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo base
     """16-bit x86 archinfo definition for real-mode DOS lifting and runtime setup."""
 
-    def __init__(self, endness: Endness = Endness.LE) -> None:
-        """Initialize the immutable register layout and 16-bit defaults."""
+    def __init__(
+        self, endness: Endness = Endness.LE, *,
+        control_address_domain: ControlAddressDomain = ControlAddressDomain.LOADER_LINEAR,
+    ) -> None:
+        """Bind the register layout and the execution adapter's PC domain."""
         import logging
 
         self.logger = logging.getLogger(__name__)
+        if not isinstance(control_address_domain, ControlAddressDomain):
+            raise TypeError("control_address_domain must be a ControlAddressDomain")
+        self.control_address_domain: ControlAddressDomain = control_address_domain
         super().__init__(endness)
         self_any = cast(Any, self)
         self_any.endness = "Iend_LE"
@@ -79,6 +87,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
             self.memory_endness,
             self.register_endness,
             self.vex_arch,
+            self.control_address_domain,
             os.environ.get("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS") == "1",
         )
 

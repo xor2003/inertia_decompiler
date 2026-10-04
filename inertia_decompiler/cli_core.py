@@ -23,7 +23,7 @@ import typing
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
 from concurrent.futures import FIRST_COMPLETED, wait
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -723,6 +723,7 @@ def _discover_ranked_binary_offsets(
     *,
     args: CliArguments,
 ) -> list[int]:
+    """Return ranked offsets from the selected binary discovery backend."""
     binary_path = args.binary
     include_library_functions = args.include_library_functions
     typing.cast(typing.Any, project)._inertia_include_library_functions = include_library_functions
@@ -752,12 +753,9 @@ def _discover_ranked_binary_offsets(
             backend,
         )
     _print_rizin_fallback_diagnostics_8616(rz_evidence, rz)
-    return cast(
-        list[int],
-        _rank_exe_function_seeds(
-            project,
-            include_library_functions=include_library_functions,
-        ),
+    return _rank_exe_function_seeds(
+        project,
+        include_library_functions=include_library_functions,
     )
 
 
@@ -1439,22 +1437,21 @@ def _cached_function_work_result_8616(
 def _isolated_project_recovery_target_8616(
     function: _AngrFunction,
     isolated_project: angr.Project,
-    fallback_linked_base: int,
     fallback_max_addr: int,
 ) -> tuple[int, int]:
+    """Resolve the candidate address and absolute exclusive image end.
+
+    ``Backend.max_addr`` is an absolute, already-rebased *inclusive* address for
+    the supported 16-bit backends (DOSMZ/DOSNE via cle ``Blob``), so the
+    exclusive image end is ``max_addr + 1``. The linked base must not be added
+    again.
+    """
     candidate_addr = function_original_addr(function)
     isolated_main_object = getattr(getattr(isolated_project, "loader", None), "main_object", None)
-    isolated_linked_base = getattr(isolated_main_object, "linked_base", fallback_linked_base)
     isolated_max_addr = getattr(isolated_main_object, "max_addr", fallback_max_addr)
-    if not isinstance(isolated_linked_base, int):
-        isolated_linked_base = fallback_linked_base
     if not isinstance(isolated_max_addr, int):
         isolated_max_addr = fallback_max_addr
-    isolated_image_end = (
-        isolated_max_addr + 1
-        if isolated_max_addr >= isolated_linked_base
-        else isolated_linked_base + isolated_max_addr + 1
-    )
+    isolated_image_end = isolated_max_addr + 1
     return candidate_addr, isolated_image_end
 
 
@@ -1988,7 +1985,6 @@ def _isolated_project_lane_8616(
         candidate_addr, isolated_image_end = _isolated_project_recovery_target_8616(
             item_function,
             isolated_project,
-            linked_base,
             max_addr,
         )
         isolated_cfg, isolated_function = _recover_candidate_function_pair(
@@ -5585,7 +5581,13 @@ class _DirectAddrCliRun8616:
     checked_blocker: Any = None
     checked_payload: Any = None
     checked_status: Any = None
-    clean_worker_caller_return_evidence_by_addr: Any = None
+    # Final caller-return evidence snapshot handed to clean-worker lanes.
+    # Bound once in part3 after serial hydration plus selected-target and
+    # neighbor fast-probe facts have been recorded on the project registry;
+    # a mapping copy isolates the payload from later registry mutations.
+    clean_worker_caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] = field(
+        default_factory=dict
+    )
     clinic_core_timeout: Any = None
     cod_metadata: Any = None
     code_name: Any = None
@@ -6595,7 +6597,6 @@ class _DirectAddrCliRun8616:
                 flush=True,
             )
         _hydrate_serial_clean_worker_evidence_8616(self.project)
-        self.clean_worker_caller_return_evidence_by_addr = dict(caller_return_use_evidence_by_addr_8616(self.project))
         self.function_label = self.context.function_label
         self.cod_metadata = self.context.cod_metadata
         self.synthetic_globals = self.context.synthetic_globals
@@ -6684,6 +6685,7 @@ class _DirectAddrCliRun8616:
         _rc = self._phase_direct_fast_probe_8616()
         if _rc is not None:
             return _rc
+        self._snapshot_clean_worker_caller_return_evidence_8616()
         _transfer_caller_return_use_evidence_8616(self.project, self.direct_project)
         typing.cast(typing.Any, self.direct_project)._inertia_trace_c_stages = bool(self.args.trace_c_stages)
         typing.cast(typing.Any, self.direct_project)._inertia_dump_layers = bool(self.args.dump_layers)
@@ -6711,6 +6713,20 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    def _snapshot_clean_worker_caller_return_evidence_8616(self) -> None:
+        """Bind the final caller-return evidence snapshot for clean-worker lanes.
+
+        Serial-hydrated facts land on ``self.project`` in part0, the selected
+        direct target is recorded in part2, and neighbor call targets are
+        recorded by the part3 fast-probe. Snapshotting the registry here —
+        after all of those recorders and before any clean-worker lane runs —
+        keeps those late facts in the transported payload while the mapping
+        copy isolates it from later registry mutations.
+        """
+        self.clean_worker_caller_return_evidence_by_addr = dict(
+            caller_return_use_evidence_by_addr_8616(self.project)
+        )
+
     def run_8616_part4_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
         self.direct_cache_item = FunctionWorkItem(index=1, function_cfg=self.cfg, function=self.func)
@@ -10595,7 +10611,7 @@ class _MainCliRun8616:
             self.shown_total = len(self.function_tasks)
         return None
     def _phase_build_tasks_8616_else_8616_part0_8616_o1(self) -> int | None:
-        """Run an extracted zone sub-phase; return an exit code to abort."""
+        """Build the limited ranked queue without mutating or losing prior tasks."""
         if _library_ranked_task_gate_8616(
             self.args, self.lst_metadata, self.visible_code_labels, self.include_library_functions, self.ranked_binary_offsets
         ) and self.args.max_functions > 0:
@@ -10610,7 +10626,7 @@ class _MainCliRun8616:
                 self.addr = _addr_lp8616
                 self.existing = self.existing_by_addr.get(_addr_lp8616)
                 if self.existing is not None:
-                    self.function_tasks.append(
+                    self.replacement_tasks.append(
                         FunctionWorkItem(
                             index=_index_lp8616,
                             function_cfg=self.existing.function_cfg,
@@ -10619,7 +10635,7 @@ class _MainCliRun8616:
                         )
                     )
                     continue
-                self.function_tasks.append(
+                self.replacement_tasks.append(
                     FunctionWorkItem(
                         index=_index_lp8616,
                         function_cfg=None,
@@ -10674,7 +10690,10 @@ class _MainCliRun8616:
         self.deadlines = {future: time.monotonic() + max(1, self.args.timeout) for future in self.future_map}
         self.has_expired_futures = False
         while self.pending:
-            if self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0():
+            exhausted, exit_code = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0()
+            if exit_code is not None:
+                return exit_code
+            if exhausted:
                 break
             self.done, self._ = wait(self.pending, timeout=0.25, return_when=FIRST_COMPLETED)
             _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w1()
@@ -10705,7 +10724,7 @@ class _MainCliRun8616:
                             function=item.function,
                             function_cfg=item.function_cfg,
                         )
-                    current_result = self.result_map.get(item.index)
+                    current_result = self.result_map[item.index]
                     _rc = self._expire_late_done_emit_8616(item, current_result)
                     if _rc is not None:
                         return _rc
@@ -10744,115 +10763,50 @@ class _MainCliRun8616:
         return None
 
     def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w1(self) -> int | None:
-        """Run an extracted loop sub-phase; return an exit code to abort."""
-        if self.done:
-            for _future_lp8616 in sorted(self.done, key=lambda candidate: self.item_by_future[candidate].index):
-                self.future = _future_lp8616
-                self.item = self.item_by_future[_future_lp8616]
-                self.function = cast(_AngrFunction, self.item.function)
-                self.function_timeout = self.timeout_by_index[self.item.index]
-                self.worker_debug = (
-                    f"[dbg] clean parallel function worker: start "
-                    f"{_function_work_item_recovery_addr_8616(self.item):#x} {self.function.name} "
-                    f"requested_timeout={self.function_timeout}s "
-                    f"hard_timeout={_serial_clean_worker_outer_timeout_8616(self.function_timeout)}s\n"
+        """Collect shared-worker results through their own submitted task map.
+
+        The isolated-worker map and timeout table belong to a different lane.
+        Retain worker failures as visible error results, and use the same
+        emission/accounting boundary as late completion.
+        """
+        for future in sorted(self.done, key=lambda candidate: self.future_map[candidate].index):
+            item: FunctionWorkItem = self.future_map[future]
+            try:
+                result: FunctionWorkResult = future.result()
+            except Exception as ex:
+                # Future.result rethrows arbitrary worker exceptions. Preserve
+                # their cause in the reported failure rather than guessing a
+                # fallback result or claiming successful decompilation.
+                result = FunctionWorkResult(
+                    index=item.index,
+                    status="error",
+                    payload=f"Shared function worker failed: {_describe_exception(ex)}",
+                    debug_output="",
+                    function=item.function,
+                    function_cfg=item.function_cfg,
+                    elapsed=float(self.args.timeout),
                 )
-                try:
-                    self.result = _future_lp8616.result()
-                except Exception as ex:
-                    self.result = FunctionWorkResult(
-                        index=self.item.index,
-                        status="error",
-                        payload=f"Clean parallel worker failed: {_describe_exception(ex)}",
-                        debug_output=self.worker_debug,
-                        function=self.item.function,
-                        function_cfg=self.item.function_cfg,
-                        elapsed=float(self.function_timeout),
-                    )
-                else:
-                    self.result = replace(
-                        self.result,
-                        debug_output=self.worker_debug + self.result.debug_output,
-                    )
-                self.result_map[self.item.index] = self.result
-                self.d, self.f = _emit_function_result(
-                    self.item,
-                    self.result,
-                    project=self.project,
-                    args=self.args,
-                    lst_metadata=self.lst_metadata,
-                    cod_metadata=self.cod_metadata,
-                    synthetic_globals=self.synthetic_globals,
-                    precise_sidecar_regions=self.precise_sidecar_regions,
-                    allow_heavy_fallbacks=self.allow_heavy_fallbacks,
-                    interactive_stdout=self.interactive_stdout,
-                    use_serial_fork_per_function=self.use_serial_fork_per_function,
-                    fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
-                    result_state_by_index=self.result_map,
-                    timeout_was_explicit=self.timeout_was_explicit,
-                )
-                self.decompiled += self.d
-                self.failed += self.f
-                self.emitted_indexes.add(self.item.index)
-                self.pending.discard(_future_lp8616)
+            self.result_map[item.index] = result
+            exit_code = self._expire_late_done_emit_8616(item, result)
+            self.pending.discard(future)
+            if exit_code is not None:
+                return exit_code
         return None
 
-    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0(self) -> bool:
-        """Handle the budget-exhausted sweep; return True when the caller must break out of its wait loop."""
-        if self._sweep_budget_exhausted():
-            for _future_lp8616 in sorted(self.done, key=lambda candidate: self.item_by_future[candidate].index):
-                self.future = _future_lp8616
-                self.item = self.item_by_future[_future_lp8616]
-                self.function = cast(_AngrFunction, self.item.function)
-                self.function_timeout = self.timeout_by_index[self.item.index]
-                self.worker_debug = (
-                    f"[dbg] clean parallel function worker: start "
-                    f"{_function_work_item_recovery_addr_8616(self.item):#x} {self.function.name} "
-                    f"requested_timeout={self.function_timeout}s "
-                    f"hard_timeout={_serial_clean_worker_outer_timeout_8616(self.function_timeout)}s\n"
-                )
-                try:
-                    self.result = _future_lp8616.result()
-                except Exception as ex:
-                    self.result = FunctionWorkResult(
-                        index=self.item.index,
-                        status="error",
-                        payload=f"Clean parallel worker failed: {_describe_exception(ex)}",
-                        debug_output=self.worker_debug,
-                        function=self.item.function,
-                        function_cfg=self.item.function_cfg,
-                        elapsed=float(self.function_timeout),
-                    )
-                else:
-                    self.result = replace(
-                        self.result,
-                        debug_output=self.worker_debug + self.result.debug_output,
-                    )
-                self.result_map[self.item.index] = self.result
-                self.d, self.f = _emit_function_result(
-                    self.item,
-                    self.result,
-                    project=self.project,
-                    args=self.args,
-                    lst_metadata=self.lst_metadata,
-                    cod_metadata=self.cod_metadata,
-                    synthetic_globals=self.synthetic_globals,
-                    precise_sidecar_regions=self.precise_sidecar_regions,
-                    allow_heavy_fallbacks=self.allow_heavy_fallbacks,
-                    interactive_stdout=self.interactive_stdout,
-                    use_serial_fork_per_function=self.use_serial_fork_per_function,
-                    fallback_tail_validation_by_index=self.fallback_tail_validation_by_index,
-                    result_state_by_index=self.result_map,
-                    timeout_was_explicit=self.timeout_was_explicit,
-                )
-                self.decompiled += self.d
-                self.failed += self.f
-                self.emitted_indexes.add(self.item.index)
-                self.pending.discard(_future_lp8616)
-            self.pending.clear()
-            self.has_expired_futures = True
-            return True
-        return False
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0(self) -> tuple[bool, int | None]:
+        """Stop an exhausted sweep after collecting ready pending work.
+
+        A sweep can expire before the first wait, so the previous ``done``
+        census is not authoritative. Never block on unfinished futures; retain
+        the normal emission boundary's exit code for the caller to propagate.
+        """
+        if not self._sweep_budget_exhausted():
+            return False, None
+        self.done = {future for future in self.pending if future.done()}
+        exit_code = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w1()
+        self.has_expired_futures = bool(self.pending)
+        self.pending.clear()
+        return True, exit_code
 
     def _phase_seed_rank_8616_else_8616_part4_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
@@ -11075,5 +11029,3 @@ def main(argv: list[str] | None = None) -> int:
             return _impl()
         finally:
             emit_compact_summary()
-
-

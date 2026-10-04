@@ -15,7 +15,7 @@ import contextlib
 import copy
 import logging
 import re
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -42,7 +42,10 @@ from angr_platforms.X86_16.analysis_helpers import (
     render_interrupt_call,
 )
 from angr_platforms.X86_16.annotations import _normalize_bp_disp
-from angr_platforms.X86_16.c_ast_utils import _structured_codegen_node_8616
+from angr_platforms.X86_16.c_ast_utils import (
+    _structured_codegen_node_8616,
+    _structured_slot_names_for_type_8616,
+)
 from angr_platforms.X86_16.cod_extract import CODProcMetadata
 from angr_platforms.X86_16.cod_source_rewrites import rewrite_cod_proc_from_source as _rewrite_cod_proc_from_source
 from angr_platforms.X86_16.lowering.c_runtime_header import (
@@ -573,47 +576,22 @@ def _structured_codegen_node(value: StructuredAstValue) -> bool:
     return bool(_structured_codegen_node_8616(value))
 
 
-def _class_slot_names_8616(value: StructuredAstValue) -> list[str]:
-    """Collect public non-codegen slot names across the class hierarchy."""
-
-    attrs: list[str] = []
-    for cls in type(value).mro():
-        slots = getattr(cls, "__slots__", ())
-        if not slots:
-            continue
-        if isinstance(slots, str):
-            slots = (slots,)
-        for slot in slots:
-            if isinstance(slot, str) and not slot.startswith("_") and slot != "codegen":
-                attrs.append(slot)
-    return attrs
+_CLI_AST_NON_CHILD_ATTRS_8616: frozenset[str] = frozenset({"codegen"})
+_CLI_AST_LEAF_TYPES_8616: frozenset[type] = frozenset({str, bytes, int, float, complex, bool, type(None)})
 
 
 def _structured_slot_names_8616(value: StructuredAstValue) -> tuple[str, ...]:
-    def _impl() -> tuple[str, ...]:
-        if type(value) is object:
-            return ()
-        attrs = _class_slot_names_8616(value)
-
-        if hasattr(value, "__dict__"):
-            attrs.extend(
-                attr
-                for attr in value.__dict__
-                if isinstance(attr, str) and not attr.startswith("_") and attr != "codegen"
-            )
-
-        # Preserve deterministic traversal order and avoid duplicates when
-        # inherited slots repeat between classes.
-        seen = set()
-        ordered: list[str] = []
-        for attr in attrs:
-            if attr in seen:
-                continue
-            seen.add(attr)
-            ordered.append(attr)
-        return tuple(ordered)
-
-    return _impl()
+    """Reuse class layouts and read every instance's current public fields."""
+    base_attrs = _structured_slot_names_for_type_8616(type(value), _CLI_AST_NON_CHILD_ATTRS_8616)
+    # __dict__ is the dynamic third-party codegen boundary, not owned state.
+    dynamic_attrs = getattr(value, "__dict__", None)
+    if not dynamic_attrs:
+        return base_attrs
+    return tuple(dict.fromkeys((
+        *base_attrs,
+        *(attr for attr in dynamic_attrs
+          if isinstance(attr, str) and not attr.startswith("_") and attr != "codegen"),
+    )))
 
 
 def _push_iterable_children_8616(current: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
@@ -635,32 +613,22 @@ def _push_iterable_children_8616(current: StructuredAstValue, stack: list[Struct
 
 
 def _iter_c_node_children_8616(value: StructuredAstValue, seen_values: set[int] | None = None) -> tuple[StructuredAstValue, ...]:
-    def _impl() -> tuple[StructuredAstValue, ...]:
-        nonlocal seen_values
-        if seen_values is None:
-            seen_values = set()
-
-        collected: list[StructuredAstValue] = []
-        stack = [value]
-        while stack:
-            current = stack.pop()
-            try:
-                current_id = id(current)
-            except Exception:
-                continue
-            if current_id in seen_values:
-                continue
-            seen_values.add(current_id)
-
-            if _structured_codegen_node(current):
-                collected.append(current)
-                continue
-
-            _push_iterable_children_8616(current, stack)
-
-        return tuple(collected)
-
-    return _impl()
+    """Collect children in the existing container order, breaking value cycles."""
+    if seen_values is None:
+        seen_values = set()
+    collected: list[StructuredAstValue] = []
+    stack = [value]
+    while stack:
+        current = stack.pop()
+        current_id = id(current)
+        if current_id in seen_values:
+            continue
+        seen_values.add(current_id)
+        if _structured_codegen_node(current):
+            collected.append(current)
+            continue
+        _push_iterable_children_8616(current, stack)
+    return tuple(collected)
 
 
 def _c_constant_value(node: StructuredAstValue) -> int | None:
@@ -1147,7 +1115,8 @@ def _replace_c_children(
     return changed
 
 
-def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -> StructuredAstValue:
+def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -> Iterator[StructuredAstValue]:
+    """Walk current AST children without allocating containers for leaf fields."""
     if seen is None:
         seen = set()
     if not _structured_codegen_node(node):
@@ -1166,11 +1135,14 @@ def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -
         for attr in _structured_slot_names_8616(current):
             try:
                 value = getattr(current, attr)
-            except Exception:
+            except AttributeError:
                 continue
-            for item in _iter_c_node_children_8616(value, set()):
-                if _structured_codegen_node(item):
-                    node_stack.append(item)
+            if type(value) in _CLI_AST_LEAF_TYPES_8616:
+                continue
+            if _structured_codegen_node(value):
+                node_stack.append(value)
+            else:
+                node_stack.extend(_iter_c_node_children_8616(value))
 
 
 def _same_c_function_call_8616(

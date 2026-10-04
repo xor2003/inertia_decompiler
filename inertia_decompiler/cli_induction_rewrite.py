@@ -134,7 +134,7 @@ def _induction_candidate_index_key(candidate: object) -> object | None:
 
 
 def _stable_induction_index_keys_8616(
-    traits: dict,
+    traits: dict[str, dict[BaseKey, object]],
     build_access_trait_evidence_profiles: BuildAccessTraitEvidenceProfiles,
     infer_induction_variable: InferInductionVariable,
 ) -> set[object]:

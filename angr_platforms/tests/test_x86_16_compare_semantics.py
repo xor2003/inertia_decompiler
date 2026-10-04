@@ -6,6 +6,7 @@ import angr
 import pyvex
 from angr import options as o
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
 from archinfo import ArchX86
 
 
@@ -385,7 +386,7 @@ def _run_far_load_instruction(code: bytes, si: int = 0x220):
 def _run_iret_instruction(code: bytes, sp: int = 0x300):
     project = angr.load_shellcode(
         code,
-        arch=Arch86_16(),
+        arch=Arch86_16(control_address_domain=ControlAddressDomain.ARCHITECTURAL_OFFSET),
         start_offset=0x100,
         load_address=0x100,
         selfmodifying_code=False,
@@ -405,10 +406,13 @@ def _run_iret_instruction(code: bytes, sp: int = 0x300):
     return simgr.active[0], block
 
 
-def _run_control_flow_instruction(code: bytes, setup=None, sp: int = 0x300):
+def _run_control_flow_instruction(
+    code: bytes, setup=None, sp: int = 0x300,
+    control_domain=ControlAddressDomain.ARCHITECTURAL_OFFSET,
+):
     project = angr.load_shellcode(
         code,
-        arch=Arch86_16(),
+        arch=Arch86_16(control_address_domain=control_domain),
         start_offset=0x100,
         load_address=0x100,
         selfmodifying_code=False,
@@ -1264,6 +1268,7 @@ def test_jmpf_ptr16_16_preserves_segment_and_executes_linear_target():
     state = _run_control_flow_instruction(
         b"\xea\x08\x01\x00\x01",
         setup=lambda s: s.memory.store(target_linear, b"\xb8\xcd\xab"),
+        control_domain=ControlAddressDomain.LOADER_LINEAR,
     )
 
     assert state.addr == target_linear
@@ -1283,7 +1288,9 @@ def test_callf_ptr16_16_pushes_return_frame_and_jumps():
     # real-mode address; the 16-bit concrete successor stays below 64K with
     # segment 0x0100, and the CS register plus the pushed far frame keep their
     # architectural values.
-    state = _run_control_flow_instruction(b"\x9a\x78\x05\x00\x01")
+    state = _run_control_flow_instruction(
+        b"\x9a\x78\x05\x00\x01", control_domain=ControlAddressDomain.LOADER_LINEAR,
+    )
 
     assert state.addr == ((0x0100 << 4) + 0x0578)
     assert state.solver.eval(state.regs.cs) == 0x0100

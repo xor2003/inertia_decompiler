@@ -1,4 +1,11 @@
-import importlib.util, sys, logging, json, time, signal, os
+import importlib.util
+import json
+import logging
+import os
+import signal
+import sys
+import time
+
 logging.disable(logging.CRITICAL)
 wid, nw = int(sys.argv[1]), int(sys.argv[2])
 OUTDIR = "/home/xor/vextest/artifacts/airborn-z3cmp/batch"
@@ -6,7 +13,7 @@ spec = importlib.util.spec_from_file_location("aircmp", "/home/xor/vextest/artif
 m = importlib.util.module_from_spec(spec); sys.modules["aircmp"]=m; spec.loader.exec_module(m)
 orc = m.load_side("/home/xor/games/airborn/build_sdl/ar_m2c", m2c=True, srcdir=m.Path("/home/xor/games/airborn"))
 cnd = m.load_side("/home/xor/games/airborn/port/ar_port", m2c=False)
-def handler(s,f): raise TimeoutError()
+def handler(s,f): raise TimeoutError
 signal.signal(signal.SIGALRM, handler)
 ar_names = set(orc.ksub_map.values())  # AR.EXE procs only (0x1a2-space tokens)
 subs = sorted(n for n in orc.proc_syms if n.startswith("sub_")

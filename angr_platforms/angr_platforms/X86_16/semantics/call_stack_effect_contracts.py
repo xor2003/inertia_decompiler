@@ -10,10 +10,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from ..ir import IRCallStackEffect8616
+from ..ir.core import IRCallStackEffect8616
+
+if TYPE_CHECKING:
+    from .bp_call_preservation import BPCallPreservationResult8616
+    from .direct_near_call_target_binding import DirectNearCallTargetBinding8616
 
 
 class CallStackEffectVerdict8616(StrEnum):
@@ -55,6 +60,10 @@ class CallStackEffectFact8616:
     verdict: CallStackEffectVerdict8616
     effect: IRCallStackEffect8616
     failure: CallStackEffectFailure8616 | None
+    bp_preservation: BPCallPreservationResult8616 | None = field(default=None, compare=False, repr=False)
+    target_binding: DirectNearCallTargetBinding8616 | None = field(
+        default=None, compare=False, repr=False
+    )
 
 
 @dataclass(frozen=True, slots=True)

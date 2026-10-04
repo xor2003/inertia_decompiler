@@ -100,6 +100,9 @@ from angr_platforms.X86_16.lowering.gp_word_runtime import (
     gp_runtime_replaced_declaration_names_8616,
     project_gp_runtime_declarations_8616,
 )
+from angr_platforms.X86_16.lowering.near_pointer_argument_values import (
+    is_near_pointer_argument_helper_call_8616,
+)
 from angr_platforms.X86_16.lowering.real_mode_linear import (
     DirectStackMoveSourceKind8616,
     lower_stable_ss_linear_stack_dereferences_8616,
@@ -3125,6 +3128,31 @@ def _final_c_unreachable_after_return_penalty_8616(rendered_text: str) -> int:
 _IMPLICIT_STACK_PLACEHOLDER_RE_8616 = re.compile(r"\b(?:arg|s|ir|vvar)_[0-9a-fA-F]+\b")
 _CALL_EXPRESSION_NAME_RE_8616 = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z_]\w*)\s*\(")
 _NON_EXECUTABLE_CALL_NAMES_8616 = frozenset({"if", "for", "while", "switch", "sizeof"})
+# Codegen helper spellings that render as calls but are not machine call
+# edges. Owned near-pointer representation wrappers are excluded separately
+# by identity (is_near_pointer_argument_helper_call_8616), never by name.
+_SEMANTIC_CODEGEN_HELPER_NAMES_8616: frozenset[str] = frozenset({
+    "Add",
+    "And",
+    "Concat",
+    "Div",
+    "MK_FP",
+    "MEM_U16",
+    "MEM_U32",
+    "MEM_U8",
+    "Mul",
+    "Or",
+    "Reference",
+    "SEG_LINEAR",
+    "SEG_PTR",
+    "SEG_U16",
+    "SEG_U32",
+    "SEG_U8",
+    "Sub",
+    "Xor",
+    "aNchkstk",
+    "__aNchkstk",
+})
 
 
 def _implicit_placeholder_artifact_count_8616(rendered_text: str) -> int:
@@ -4478,28 +4506,7 @@ class _DecompileRun8616:
             and getattr(self.function, "name", "") == "fold_values"
         )
         typing.cast(typing.Any, self.project)._inertia_structuring_enabled = bool(self.enable_structured_simplify and not self.small_function and not self.fold_values_cod_outlier)
-        self.semantic_call_helper_names = {
-            "Add",
-            "And",
-            "Concat",
-            "Div",
-            "MK_FP",
-            "MEM_U16",
-            "MEM_U32",
-            "MEM_U8",
-            "Mul",
-            "Or",
-            "Reference",
-            "SEG_LINEAR",
-            "SEG_PTR",
-            "SEG_U16",
-            "SEG_U32",
-            "SEG_U8",
-            "Sub",
-            "Xor",
-            "aNchkstk",
-            "__aNchkstk",
-        }
+        self.semantic_call_helper_names = _SEMANTIC_CODEGEN_HELPER_NAMES_8616
 
 
 
@@ -5925,7 +5932,6 @@ class _DecompileRun8616:
                 )
         typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
         return "ok", self.formatted
-        return None
 
     def _analysis_log_messages(self, dec_obj: object) -> list[str]:
         messages: list[str] = []
@@ -6142,6 +6148,12 @@ class _DecompileRun8616:
 
     def _is_semantic_codegen_call(self, node: object) -> bool:
         if not isinstance(node, structured_c.CFunctionCall):
+            return False
+        if is_near_pointer_argument_helper_call_8616(node):
+            # Owned single-evaluation representation wrapper, not a machine
+            # call edge: Lowering may legitimately replace it, so counting it
+            # here would fabricate call loss. Its argument subtree is still
+            # walked and real calls inside it still count.
             return False
         if _call_node_is_proven_stack_probe_8616(node, self.dec.codegen, self.project):
             return False

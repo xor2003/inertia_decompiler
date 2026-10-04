@@ -1,0 +1,737 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dosunit.real16_program_replay.v1",
+  "title": "Concrete initialized MZ program comparison; no proof promotion",
+  "type": "object",
+  "required": [
+    "schema",
+    "agreement",
+    "proof_status",
+    "contract",
+    "inputs",
+    "oracle",
+    "candidate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dosunit.real16_program_replay.v1"
+    },
+    "agreement": {
+      "enum": [
+        "agreed",
+        "mismatched",
+        "incomplete"
+      ]
+    },
+    "proof_status": {
+      "const": "not_established_by_execution"
+    },
+    "contract": {
+      "type": "object",
+      "properties": {
+        "entry_and_stack": {
+          "type": "string"
+        },
+        "interrupt_entry": {
+          "enum": [
+            "real16_int21_stack_v1",
+            "real16_int21_int10_stack_v2"
+          ]
+        },
+        "initial_memory": {
+          "type": "string"
+        },
+        "observations": {
+          "type": "string"
+        },
+        "registers_and_writes": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "services": {
+          "type": "object",
+          "properties": {
+            "termination": {
+              "const": "INT21/AH4C"
+            },
+            "input_files": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "output_streams": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "dos_version": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "dos_resize": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "dos_vectors": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "dos_device_info": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "bios_video": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "bios_video_state": {
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "termination",
+            "input_files",
+            "output_streams"
+          ],
+          "additionalProperties": false
+        },
+        "read_only_rom": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "segment",
+                  "offset",
+                  "data_hex"
+                ],
+                "properties": {
+                  "segment": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  "data_hex": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 131072,
+                    "pattern": "^(?:[0-9a-fA-F]{2})+$"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "entry_and_stack",
+        "initial_memory",
+        "observations",
+        "registers_and_writes",
+        "scope",
+        "services"
+      ],
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "oracle": {
+      "type": "object",
+      "required": [
+        "status",
+        "exit_code",
+        "registers",
+        "observations",
+        "requested_observations",
+        "writes",
+        "events",
+        "requested_streams",
+        "instructions",
+        "boot_identity",
+        "environment_identity",
+        "detail",
+        "requested_input_files",
+        "input_file_positions",
+        "file_receipts"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "terminated",
+            "faulted",
+            "unsupported",
+            "budget_exhausted",
+            "unavailable"
+          ]
+        },
+        "exit_code": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "bytes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "size"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 67108864
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "pe_exit",
+                  "cpu_fault",
+                  "unsupported_instruction",
+                  "control_escape",
+                  "undeclared_access",
+                  "code_write",
+                  "dos_exit",
+                  "output_write",
+                  "dos_version",
+                  "dos_resize",
+                  "dos_vector",
+                  "dos_device_info",
+                  "bios_video_query",
+                  "bios_video_state",
+                  "read_only_write"
+                ]
+              },
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_streams": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              1,
+              2
+            ]
+          }
+        },
+        "instructions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boot_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "environment_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "requested_input_files": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "handle": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 65535
+              },
+              "cursor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              }
+            },
+            "required": [
+              "handle",
+              "cursor"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "input_file_positions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "handle": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 65535
+              },
+              "cursor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              }
+            },
+            "required": [
+              "handle",
+              "cursor"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "file_receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "enum": [
+                  "read",
+                  "seek"
+                ]
+              },
+              "handle": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 65535
+              },
+              "before": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "after": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$",
+                "maxLength": 131070
+              }
+            },
+            "required": [
+              "operation",
+              "handle",
+              "before",
+              "after",
+              "bytes"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "status",
+        "exit_code",
+        "registers",
+        "observations",
+        "requested_observations",
+        "writes",
+        "events",
+        "requested_streams",
+        "instructions",
+        "boot_identity",
+        "environment_identity",
+        "detail",
+        "requested_input_files",
+        "input_file_positions",
+        "file_receipts"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "terminated",
+            "faulted",
+            "unsupported",
+            "budget_exhausted",
+            "unavailable"
+          ]
+        },
+        "exit_code": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "bytes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "size"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 67108864
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "pe_exit",
+                  "cpu_fault",
+                  "unsupported_instruction",
+                  "control_escape",
+                  "undeclared_access",
+                  "code_write",
+                  "dos_exit",
+                  "output_write",
+                  "dos_version",
+                  "dos_resize",
+                  "dos_vector",
+                  "dos_device_info",
+                  "bios_video_query",
+                  "bios_video_state",
+                  "read_only_write"
+                ]
+              },
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_streams": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              1,
+              2
+            ]
+          }
+        },
+        "instructions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boot_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "environment_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "requested_input_files": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "handle": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 65535
+              },
+              "cursor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              }
+            },
+            "required": [
+              "handle",
+              "cursor"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "input_file_positions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "handle": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 65535
+              },
+              "cursor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              }
+            },
+            "required": [
+              "handle",
+              "cursor"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "file_receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "enum": [
+                  "read",
+                  "seek"
+                ]
+              },
+              "handle": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 65535
+              },
+              "before": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "after": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$",
+                "maxLength": 131070
+              }
+            },
+            "required": [
+              "operation",
+              "handle",
+              "before",
+              "after",
+              "bytes"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

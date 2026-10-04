@@ -43,6 +43,7 @@ from .interprocedural_storage_reaching_contracts import (
     PhysicalCallArgument8616,
     PhysicalCallArgumentPiece8616,
 )
+from .modular_argument_type_facts import ModularArgumentTypeFacts8616
 
 __all__ = [
     "InputArgumentTypeClassification8616",
@@ -115,9 +116,28 @@ def _pointer_evidence_for_storage_8616(
         return False, False
     start = storage.offset
     end = start + storage.size
-    ambiguous = any(start <= offset < end for offset in evidence.ambiguous_displaced_stack_offsets)
+    ambiguous_offsets = (
+        evidence.ambiguous_displaced_stack_offsets
+        + evidence.ambiguous_indexed_stack_offsets
+    )
+    ambiguous = any(start <= offset < end for offset in ambiguous_offsets)
     proven = logical_index in evidence.pointer_argument_indices or start in evidence.pointer_stack_offsets
     return proven, ambiguous
+
+
+def _modular_sign_insensitive_proof_8616(
+    modular_facts: ModularArgumentTypeFacts8616 | None,
+    storage: IRAddress,
+) -> bool:
+    """Adopt one callee-bound modular word proof only for this exact slot.
+
+    A bare PROVEN verdict is not identity: the retained result must be
+    complete and bound to the requested census storage.
+    """
+    if modular_facts is None:
+        return False
+    proof = modular_facts.proof_for_8616(storage)
+    return bool(proof.complete and proof.storage == storage)
 
 
 def classify_input_argument_8616(
@@ -128,6 +148,7 @@ def classify_input_argument_8616(
     argument_count: int,
     signedness_facts: ConditionArgumentFactsResult8616,
     pointer_evidence: CalleePointerArgumentEvidence8616 | None,
+    modular_facts: ModularArgumentTypeFacts8616 | None = None,
 ) -> InputArgumentTypeClassification8616:
     """Join independent type-class evidence and refuse unknown interpretations."""
     summary_class, malformed_classes = _logical_summary_class_8616(
@@ -167,6 +188,15 @@ def classify_input_argument_8616(
         )
     signedness = _signedness_for_storage_8616(storage, signedness_facts)
     if signedness is None:
+        if signedness_facts.failure_count == 0 and _modular_sign_insensitive_proof_8616(
+            modular_facts,
+            storage,
+        ):
+            return InputArgumentTypeClassification8616(
+                StorageTrialSignedness8616.SIGN_INSENSITIVE,
+                StorageTrialValueClass8616.VALUE,
+                None,
+            )
         failure = (
             StorageTrialCollectionFailureKind8616.SIGNEDNESS_CONFLICT
             if signedness_facts.failure_count > 0

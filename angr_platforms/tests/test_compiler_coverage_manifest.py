@@ -84,3 +84,24 @@ def test_repository_inventory_has_candidate_witnesses():
     manifest = load_manifest(root / "examples/compiler_coverage/pilot.json")
     for case in manifest.cases:
         assert (root / "examples/msc6_constructs" / f"{case.construct}.c").is_file()
+
+
+def test_large_manifest_selects_only_admitted_far_function_pointer_witness():
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(root / "examples/compiler_coverage/large.json")
+    statuses = {feature.identifier: feature.status for feature in manifest.features}
+
+    assert statuses["pointer.far_function"] is ScopeStatus.ADMITTED
+    assert statuses["pointer.far_data"] is ScopeStatus.LATER
+    assert statuses["calls.pointer_return"] is ScopeStatus.LATER
+    assert {case.identifier for case in manifest.cases} == {
+        "large_global_calls", "large_function_pointers",
+    }
+    assert manifest.select(case="large_function_pointers") == manifest.select(
+        obligation="pointer.far_function",
+    )
+    for deferred in ("pointer.far_data", "calls.pointer_return"):
+        with pytest.raises(ValueError, match="No admitted cases"):
+            manifest.select(obligation=deferred)
+    with pytest.raises(ValueError, match="No admitted cases"):
+        manifest.select(case="large_pointer_arguments")

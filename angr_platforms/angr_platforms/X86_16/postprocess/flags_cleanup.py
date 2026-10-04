@@ -29,6 +29,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_variable import SimRegisterVariable
 
+from ..c_ast_utils import _iter_c_node_children_8616, _structured_slot_names_8616
 from ..decompiler_postprocess_utils import (
     _c_constant_value_8616,
     _replace_c_children_8616,
@@ -1273,36 +1274,6 @@ def _fix_interval_guard_conditions_8616(codegen: object) -> bool:
     return changed
 
 
-def _iter_seq_children_8616(node: object) -> list[object]:
-    """Collect child nodes from sequence-valued slots, flattening tuples."""
-    children: list[object] = []
-    for attr in ("args", "operands", "statements"):
-        seq = _dynamic_attr_8616(node, attr, None)
-        if not seq:
-            continue
-        for item in seq:
-            if _structured_codegen_node_8616(item):
-                children.append(item)
-                continue
-            if isinstance(item, tuple):
-                children.extend(subitem for subitem in item if _structured_codegen_node_8616(subitem))
-    return children
-
-
-def _iter_seq_pair_switch_children_8616(node: object) -> list[object]:
-    """Collect sequence-valued, condition-pair, and switch-case child nodes."""
-    children = _iter_seq_children_8616(node)
-    pairs = _dynamic_attr_8616(node, "condition_and_nodes", None)
-    if pairs:
-        for cond, body in pairs:
-            if _structured_codegen_node_8616(cond):
-                children.append(cond)
-            if _structured_codegen_node_8616(body):
-                children.append(body)
-    children.extend(_switch_case_children_8616(node))
-    return children
-
-
 @dataclass
 class _FlagReadCensus8616:
     """Traverse the C-AST collecting read register offsets and variable ids."""
@@ -1310,7 +1281,7 @@ class _FlagReadCensus8616:
     used_registers: set[int]
     used_variables: set[int]
     traversal_stack: list[tuple[object, bool]]
-    seen: set[int]
+    seen: set[tuple[int, bool]]
 
     @classmethod
     def run(cls, root: object) -> _FlagReadCensus8616:
@@ -1334,41 +1305,24 @@ class _FlagReadCensus8616:
             self.used_variables.add(id(unified))
         return True
 
-    def _push_scalar_children(self, node: object) -> None:
-        for attr in (
-            "rhs",
-            "expr",
-            "operand",
-            "condition",
-            "cond",
-            "body",
-            "iffalse",
-            "iftrue",
-            "callee_target",
-            "else_node",
-            "retval",
-        ):
-            child = _dynamic_attr_8616(node, attr, None)
-            if _structured_codegen_node_8616(child):
-                self.traversal_stack.append((child, False))
-        lhs = _dynamic_attr_8616(node, "lhs", None)
-        if _structured_codegen_node_8616(lhs):
-            self.traversal_stack.append((lhs, isinstance(node, CAssignment)))
-
     def _push_children(self, node: object) -> None:
-        self._push_scalar_children(node)
-        for child in _iter_seq_pair_switch_children_8616(node):
-            self.traversal_stack.append((child, False))
+        """Consume the canonical syntax schema, including both for-loop headers."""
+        for attr in _structured_slot_names_8616(node):
+            assignment_lhs = isinstance(node, CAssignment) and attr == "lhs"
+            value = _dynamic_attr_8616(node, attr, None)
+            for child in _iter_c_node_children_8616(value):
+                self.traversal_stack.append((child, assignment_lhs))
 
     def collect(self) -> None:
+        """Census reads without mistaking a shared write occurrence for a read."""
         while self.traversal_stack:
             node, assignment_lhs = self.traversal_stack.pop()
             if not _structured_codegen_node_8616(node):
                 continue
-            node_id = id(node)
-            if node_id in self.seen:
+            occurrence = (id(node), assignment_lhs)
+            if occurrence in self.seen:
                 continue
-            self.seen.add(node_id)
+            self.seen.add(occurrence)
             if not assignment_lhs and self._record_read(node):
                 continue
             if isinstance(node, CVariable):
@@ -1450,25 +1404,9 @@ def _prune_unused_flag_assignments_8616(project: object, codegen: object) -> boo
 
 
 def _push_uses_children_8616(stack: list[object], node: object) -> None:
-    """Queue all child nodes for the register-use scan."""
-    for attr in (
-        "lhs",
-        "rhs",
-        "expr",
-        "operand",
-        "condition",
-        "cond",
-        "body",
-        "iftrue",
-        "iffalse",
-        "callee_target",
-        "else_node",
-        "retval",
-    ):
-        child = _dynamic_attr_8616(node, attr, None)
-        if _structured_codegen_node_8616(child):
-            stack.append(child)
-    stack.extend(_iter_seq_pair_switch_children_8616(node))
+    """Queue register-use children from the same canonical structured schema."""
+    for attr in _structured_slot_names_8616(node):
+        stack.extend(_iter_c_node_children_8616(_dynamic_attr_8616(node, attr, None)))
 
 
 def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:

@@ -30,6 +30,8 @@ from ..lowering.runtime_segment_access import (
 from ..lowering.segment_access_policy import instruction_addrs_from_node_8616
 from ..lowering.segmented_lowering import _SegmentedAccess
 from ..structuring.simple_loop_recovery import _function_instruction_summaries_8616
+from .segmented_load_identity import segmented_load_identity_8616, segmented_load_tags_8616
+from .segmented_load_widening import join_adjacent_segmented_load_identities_8616
 from .stack_subview_projection import materialize_contained_stack_subviews_8616
 from .widening_copyprop_8616 import _widening_copy_propagation_8616
 from .word_projection_recomposition import (
@@ -684,7 +686,19 @@ def _word_lvalue_for_addr_8616(ctx: _WordStoreCoalesceCtx8616, low_addr_expr: ob
 def _runtime_word_store_lvalue_8616(
     ctx: _WordStoreCoalesceCtx8616, low_lhs: object, high_lhs: object
 ) -> structured_c.CFunctionCall | None:
-    """Join two typed adjacent runtime byte accesses into one word access."""
+    """Join alias-proven byte identities whose word extent cannot wrap the segment.
+
+    Structural ``offset + 1`` equality does not establish contiguity when the
+    native byte offsets wrap at16bits. Unknown offsets retain their byte stores.
+    The joined identity survives into subsequent lowering and diagnostics.
+    """
+    low_access = _wstore_unwrap_casts_8616(low_lhs)
+    high_access = _wstore_unwrap_casts_8616(high_lhs)
+    identity = join_adjacent_segmented_load_identities_8616(
+        segmented_load_identity_8616(low_access), segmented_load_identity_8616(high_access)
+    )
+    if identity is None:
+        return None
     for space in (MemSpace.DS, MemSpace.ES):
         low_offset = runtime_segment_access_offset_expr_8616(
             ctx.project,
@@ -708,14 +722,14 @@ def _runtime_word_store_lvalue_8616(
             or not ctx.addr_exprs_are_byte_pair(low_offset, high_offset, ctx.project)
         ):
             continue
-        low_access = _wstore_unwrap_casts_8616(low_lhs)
-        if not isinstance(low_access, structured_c.CFunctionCall):
+        if not isinstance(low_access, structured_c.CFunctionCall) or not isinstance(high_access, structured_c.CFunctionCall):
             return None
         low_args = tuple(low_access.args or ())
-        if len(low_args) != 2:
+        high_args = tuple(high_access.args or ())
+        if len(low_args) != 2 or len(high_args) != 2 or not _same_expr_8616(ctx, low_args[0], high_args[0]):
             return None
         source_addrs = instruction_addrs_from_node_8616(low_lhs) | instruction_addrs_from_node_8616(high_lhs)
-        tags: dict[str, object] = {"inertia_x86_16_runtime_segment_helper": "SEG_U16"}
+        tags = segmented_load_tags_8616(identity, existing={"inertia_x86_16_runtime_segment_helper": "SEG_U16"})
         if source_addrs:
             tags["inertia_source_instruction_addrs"] = tuple(sorted(source_addrs))
         return structured_c.CFunctionCall(

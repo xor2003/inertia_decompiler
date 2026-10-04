@@ -278,12 +278,18 @@ type IRAtom = IRValue | IRBinaryValue | IRAddress | IRCondition
 
 
 def _atom_to_dict(atom: IRAtom) -> dict[str, object]:
+    """Serialize one owned typed atom without losing its metadata."""
     return atom.to_dict()
 
 
 @dataclass(frozen=True, slots=True)
 class IRInstr:
-    """Typed instruction fact with destination, arguments, size, and address."""
+    """Typed instruction fact with destination, arguments, size, and address.
+
+    ``CALL.dst`` is an input call target, not an output definition. Register
+    results and clobbers require separate explicit semantic evidence; a CALL
+    target use never proves a producer, return value or preservation effect.
+    """
 
     op: str
     dst: IRValue | None

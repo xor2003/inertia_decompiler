@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 type LineTrackedNode = (
@@ -74,6 +75,29 @@ def _changed_lines(path: Path) -> set[int]:
     return _changed_lines_for_tracked_path(path)
 
 
+@dataclass(frozen=True)
+class _ModuleReview:
+    """One file's source and changed-line snapshot for a single gate visit."""
+
+    path: Path
+    changed: set[int]
+    source: str
+    tree: ast.Module
+    nodes: tuple[ast.AST, ...]
+
+
+def _module_review(path: Path, review: _ModuleReview | None) -> _ModuleReview:
+    """Reuse only an explicitly supplied same-file snapshot, never global state."""
+    if review is not None:
+        if review.path != path:
+            raise ValueError("module review belongs to a different path")
+        return review
+    changed = _changed_lines(path)
+    source = path.read_text(encoding="utf-8") if changed else ""
+    tree = ast.parse(source, filename=str(path)) if changed else ast.Module(body=[], type_ignores=[])
+    return _ModuleReview(path, changed, source, tree, tuple(ast.walk(tree)))
+
+
 def _arg_missing_annotation(arg: ast.arg) -> bool:
     """Return whether a function argument lacks an annotation."""
 
@@ -120,15 +144,15 @@ def _line_range_touches_changed_lines(start: int, end: int | None, changed: set[
     return any(line in changed for line in range(start, last + 1))
 
 
-def _changed_functions_missing_annotations(path: Path) -> list[str]:
+def _changed_functions_missing_annotations(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed functions without full annotations."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     diagnostics: list[str] = []
-    for node in ast.walk(tree):
+    for node in review.nodes:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if not _definition_touches_changed_lines(node, changed):
@@ -139,13 +163,14 @@ def _changed_functions_missing_annotations(path: Path) -> list[str]:
     return diagnostics
 
 
-def _changed_definitions_missing_docstrings(path: Path) -> list[str]:
+def _changed_definitions_missing_docstrings(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed public definitions without docstrings."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     diagnostics: list[str] = []
     public_defs: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef] = []
     for node in tree.body:
@@ -206,15 +231,15 @@ def _assignment_target_names(node: ast.Assign) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _changed_dataclass_fields_missing_annotations(path: Path) -> list[str]:
+def _changed_dataclass_fields_missing_annotations(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed dataclass fields written without annotations."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     diagnostics: list[str] = []
-    for class_node in ast.walk(tree):
+    for class_node in review.nodes:
         if not isinstance(class_node, ast.ClassDef) or not _class_is_dataclass(class_node):
             continue
         for stmt in class_node.body:
@@ -226,15 +251,15 @@ def _changed_dataclass_fields_missing_annotations(path: Path) -> list[str]:
     return diagnostics
 
 
-def _changed_enum_members_missing_string_values(path: Path) -> list[str]:
+def _changed_enum_members_missing_string_values(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed status enum members without string values."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     diagnostics: list[str] = []
-    for class_node in ast.walk(tree):
+    for class_node in review.nodes:
         if not isinstance(class_node, ast.ClassDef) or not _class_is_string_status_enum(class_node):
             continue
         for stmt in class_node.body:
@@ -250,13 +275,14 @@ def _changed_enum_members_missing_string_values(path: Path) -> list[str]:
     return diagnostics
 
 
-def _changed_public_assignments_missing_annotations(path: Path) -> list[str]:
+def _changed_public_assignments_missing_annotations(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed public module/class assignments without annotations."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     diagnostics: list[str] = []
     scopes: list[tuple[str | None, list[ast.stmt]]] = [(None, tree.body)]
     scopes.extend(
@@ -289,13 +315,14 @@ def _literal_dunder_all_names(value: ast.AST | None) -> tuple[str, ...] | None:
     return tuple(names)
 
 
-def _changed_computed_dunder_all(path: Path) -> list[str]:
+def _changed_computed_dunder_all(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed computed __all__ export contracts."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     diagnostics: list[str] = []
     for stmt in tree.body:
         targets: Sequence[ast.expr]
@@ -346,11 +373,13 @@ def _dynamic_attr_reason_in_text(text: str | None) -> bool:
     )
 
 
-def _enclosing_dynamic_attr_reason(tree: ast.Module, line_no: int) -> str | None:
+def _enclosing_dynamic_attr_reason(
+    tree: ast.Module, line_no: int, *, nodes: tuple[ast.AST, ...] | None = None,
+) -> str | None:
     """Return the nearest enclosing docstring that explains dynamic attribute access."""
 
     owner: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | None = None
-    for node in ast.walk(tree):
+    for node in ast.walk(tree) if nodes is None else nodes:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         end = node.end_lineno if node.end_lineno is not None else node.lineno
@@ -396,34 +425,38 @@ def _static_setattr_key(node: ast.Call) -> tuple[str, str] | None:
     return ast.unparse(node.args[0]), node.args[1].value
 
 
-def _static_setattr_counts(source: str | None) -> Counter[tuple[str, str]]:
+def _static_setattr_counts(
+    source: str | None, *, tree: ast.Module | None = None, nodes: tuple[ast.AST, ...] | None = None,
+) -> Counter[tuple[str, str]]:
     """Count fixed-name setattr slots in source for debt-ratchet comparison."""
 
     if source is None:
         return Counter()
-    tree = ast.parse(source)
+    if tree is None:
+        tree = ast.parse(source)
     return Counter(
         key
-        for node in ast.walk(tree)
+        for node in (ast.walk(tree) if nodes is None else nodes)
         if isinstance(node, ast.Call)
         for key in (_static_setattr_key(node),)
         if key is not None
     )
 
 
-def _changed_dynamic_attribute_access_missing_reason(path: Path) -> list[str]:
+def _changed_dynamic_attribute_access_missing_reason(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics for changed getattr/setattr calls without a dynamic-boundary reason."""
 
-    changed = _changed_lines(path)
+    review = _module_review(path, review)
+    changed = review.changed
     if not changed:
         return []
-    source = path.read_text(encoding="utf-8")
+    source = review.source
     lines = source.splitlines()
-    tree = ast.parse(source, filename=str(path))
+    tree = review.tree
     diagnostics: list[str] = []
     baseline_static_setattrs = _static_setattr_counts(_head_source(path))
-    current_static_setattrs = _static_setattr_counts(source)
-    for node in ast.walk(tree):
+    current_static_setattrs = _static_setattr_counts(source, tree=tree, nodes=review.nodes)
+    for node in review.nodes:
         if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -440,7 +473,7 @@ def _changed_dynamic_attribute_access_missing_reason(path: Path) -> list[str]:
                 "dynamic-boundary exceptions require a runtime-computed field name"
             )
             continue
-        if _dynamic_attr_access_has_reason(lines, node.lineno) or _enclosing_dynamic_attr_reason(tree, node.lineno):
+        if _dynamic_attr_access_has_reason(lines, node.lineno) or _enclosing_dynamic_attr_reason(tree, node.lineno, nodes=review.nodes):
             continue
         diagnostics.append(
             f"{path}:{node.lineno}: {node.func.id} requires nearby dynamic-boundary reason; "
@@ -449,35 +482,38 @@ def _changed_dynamic_attribute_access_missing_reason(path: Path) -> list[str]:
     return diagnostics
 
 
-def _changed_module_missing_docstring(path: Path) -> list[str]:
+def _changed_module_missing_docstring(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics when a changed module lacks a module docstring."""
 
-    if not _changed_lines(path):
+    review = _module_review(path, review)
+    if not review.changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     if (ast.get_docstring(tree) or "").strip():
         return []
     return [f"{path}:1: module missing docstring"]
 
 
-def _changed_module_docstring_missing_layer(path: Path) -> list[str]:
+def _changed_module_docstring_missing_layer(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics when a changed module docstring lacks ownership."""
 
-    if not _changed_lines(path):
+    review = _module_review(path, review)
+    if not review.changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     docstring = ast.get_docstring(tree) or ""
     if not docstring.strip() or "Layer:" in docstring:
         return []
     return [f"{path}:1: module docstring missing Layer: ownership"]
 
 
-def _changed_module_docstring_missing_responsibility(path: Path) -> list[str]:
+def _changed_module_docstring_missing_responsibility(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics when a changed module docstring lacks responsibility."""
 
-    if not _changed_lines(path):
+    review = _module_review(path, review)
+    if not review.changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     docstring = ast.get_docstring(tree) or ""
     if not docstring.strip() or "Responsibility:" in docstring:
         return []
@@ -495,12 +531,13 @@ def _module_has_future_annotations(tree: ast.Module) -> bool:
     )
 
 
-def _changed_module_missing_future_annotations(path: Path) -> list[str]:
+def _changed_module_missing_future_annotations(path: Path, review: _ModuleReview | None = None) -> list[str]:
     """Return diagnostics when a changed module lacks postponed annotations."""
 
-    if not _changed_lines(path):
+    review = _module_review(path, review)
+    if not review.changed:
         return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = review.tree
     if _module_has_future_annotations(tree):
         return []
     return [f"{path}:1: module missing 'from __future__ import annotations'"]
@@ -517,17 +554,18 @@ def main(argv: list[str] | None = None) -> int:
         path = Path(raw_path)
         if path.suffix != ".py" or _is_test_path(path) or not path.exists():
             continue
-        diagnostics.extend(_changed_module_missing_docstring(path))
-        diagnostics.extend(_changed_module_docstring_missing_layer(path))
-        diagnostics.extend(_changed_module_docstring_missing_responsibility(path))
-        diagnostics.extend(_changed_module_missing_future_annotations(path))
-        diagnostics.extend(_changed_functions_missing_annotations(path))
-        diagnostics.extend(_changed_definitions_missing_docstrings(path))
-        diagnostics.extend(_changed_dataclass_fields_missing_annotations(path))
-        diagnostics.extend(_changed_enum_members_missing_string_values(path))
-        diagnostics.extend(_changed_public_assignments_missing_annotations(path))
-        diagnostics.extend(_changed_computed_dunder_all(path))
-        diagnostics.extend(_changed_dynamic_attribute_access_missing_reason(path))
+        review = _module_review(path, None)
+        diagnostics.extend(_changed_module_missing_docstring(path, review))
+        diagnostics.extend(_changed_module_docstring_missing_layer(path, review))
+        diagnostics.extend(_changed_module_docstring_missing_responsibility(path, review))
+        diagnostics.extend(_changed_module_missing_future_annotations(path, review))
+        diagnostics.extend(_changed_functions_missing_annotations(path, review))
+        diagnostics.extend(_changed_definitions_missing_docstrings(path, review))
+        diagnostics.extend(_changed_dataclass_fields_missing_annotations(path, review))
+        diagnostics.extend(_changed_enum_members_missing_string_values(path, review))
+        diagnostics.extend(_changed_public_assignments_missing_annotations(path, review))
+        diagnostics.extend(_changed_computed_dunder_all(path, review))
+        diagnostics.extend(_changed_dynamic_attribute_access_missing_reason(path, review))
     if diagnostics:
         print("changed non-test modules and definitions must be typed and documented:", file=sys.stderr)
         for diagnostic in diagnostics:

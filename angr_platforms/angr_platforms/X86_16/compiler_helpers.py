@@ -119,13 +119,13 @@ _MSC_ANCHKSTK_PATTERN_8616: tuple[int | None, ...] = (
     0x2B,
     0xD8,  # sub bx, ax
     0x72,
-    None,  # jb stack_overflow
+    0x0A,  # jb past the returning path, not into its stack writes
     0x3B,
     0x1E,
     None,
     None,  # cmp bx, word ptr [limit]
     0x72,
-    None,  # jb stack_overflow
+    0x04,  # jb past the returning path
     0x8B,
     0xE3,  # mov sp, bx
     0xFF,
@@ -140,13 +140,13 @@ _MSC_AFCHKSTK_PATTERN_8616: tuple[int | None, ...] = (
     0x2B,
     0xD8,  # sub bx, ax
     0x72,
-    None,  # jb stack_overflow
+    0x0B,  # jb past the returning path, not into its stack writes
     0x3B,
     0x1E,
     None,
     None,  # cmp bx, word ptr [limit]
     0x72,
-    None,  # jb stack_overflow
+    0x05,  # jb past the returning path
     0x8B,
     0xE3,  # mov sp, bx
     0x52,  # push dx

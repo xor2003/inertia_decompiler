@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, cast
 
 import bitstring
+import cython
 from pyvex.lifting import register
 from pyvex.lifting.util import GymratLifter, Instruction, JumpKind, ParseError
 from pyvex.lifting.util.syntax_wrapper import VexValue
@@ -26,7 +27,14 @@ from pyvex.stmt import Dirty
 from inertia_decompiler.runtime_support import AnalysisTimeout
 
 from .arch_86_16 import Arch86_16
-from .compiler_helpers import is_x86_16_registered_stack_probe_target_8616
+from .control_coordinates import (
+    ControlWidth,
+    CoordinateConstant,
+    CoordinateValue,
+    architectural_offset,
+    linear_continuation,
+    relative_continuation,
+)
 from .emulator import Emulator
 from .instr16 import Instr16
 from .instr32 import Instr32
@@ -51,6 +59,7 @@ from .ir.condition_ir import (
     condition_sort_key_8616,
 )
 from .ir.condition_register_bindings import snapshot_condition_register_bindings_8616
+from .ir.condition_relative_edge import attach_relative_condition_edge
 from .ir.condition_value_extensions import sign_extend_condition_value_8616
 from .ir.core import AddressStatus, IRAddress, IRBinaryValue, IRCondition, IRValue, MemSpace, SegmentOrigin
 from .ir.status_flag_lift_context import cfg_status_flag_dead_write_mask_8616
@@ -67,7 +76,6 @@ from .semantics.status_flag_liveness import (
     decoded_status_flag_instruction_8616,
     status_flags_dead_before_use_8616,
 )
-from .stack_helpers import far_linear_target_8616
 from .vex_value_contract import require_vex_value_8616
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -96,21 +104,30 @@ def _bitstream_is_empty(bitstrm: bitstring.ConstBitStream) -> bool:
         return True
 
 
+_MISSING_FACADE_ATTRIBUTE: object = object()
+
+
 class _LifterInstructionFacade:
     """Combine the raw IRSB customizer API with the higher-level Instruction helpers.
     Modern pyvex exposes jump/get/put on Instruction, but low-level IR building
     helpers like _append_stmt() and _settmp() still live on the IRSB customizer.
     """
 
+    _irsb_c: Any
+    _instruction: Any
+
     def __init__(self, irsb_c: Any, instruction: Instruction) -> None:
+        """Keep live providers; never cache mutable helper methods or metadata."""
         self._irsb_c = irsb_c
         self._instruction = instruction
 
+    @cython.locals(value=object)
     def __getattr__(self, name: str) -> Any:
-        try:
-            return getattr(self._instruction, name)
-        except AttributeError:
+        """Prefer instruction helpers and resolve absent ones on the customizer."""
+        value = getattr(self._instruction, name, _MISSING_FACADE_ATTRIBUTE)
+        if value is _MISSING_FACADE_ATTRIBUTE:
             return getattr(self._irsb_c, name)
+        return value
 
 
 class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
@@ -265,16 +282,15 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _match_simple_unary_semantics_8616(self, ops: Any) -> tuple[Any, ...] | None:
         matchers = {
-            "nop": lambda _self, ops_: ("nop",),
+            "nop": lambda _self, _ops: ("nop",),
             "ret": _match_ret_8616,
-            "leave": lambda _self, ops_: ("leave",),
+            "leave": lambda _self, _ops: ("leave",),
             "cbw": _match_cbw_8616,
             "cwde": _match_cbw_8616,
             "enter": _match_enter_8616,
             "push": _match_push_pop_8616,
             "pop": _match_push_pop_8616,
             "call": _match_call_8616,
-            "lcall": _match_lcall_8616,
             "inc": _match_incdec_8616,
             "dec": _match_incdec_8616,
         }
@@ -675,8 +691,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             result = dst | src
         elif op_name == "cmp":
             self._record_cmp_condition_source(dst, src)
-            if not self._next_instruction_is_simple_jcc():
-                self._update_binop_flags16("sub", dst, src)
+            self._update_binop_flags16("sub", dst, src)
             return
         else:
             raise NotImplementedError(op_name)
@@ -693,6 +708,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         self.put(result, dst_reg)
 
     def _binop_reg_imm(self, op_name: str, dst_reg: str, imm: Any) -> None:
+        """Lift word/immediate arithmetic and publish every live CMP flag effect."""
         dst = self._get_reg16(dst_reg)
         src = self._const16(imm)
         if op_name == "add":
@@ -708,8 +724,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             result = dst | src
         elif op_name == "cmp":
             self._record_cmp_condition_source(dst, src)
-            if not self._next_instruction_is_simple_jcc():
-                self._update_binop_flags16("sub", dst, src)
+            self._update_binop_flags16("sub", dst, src)
             return
         else:
             raise NotImplementedError(op_name)
@@ -728,6 +743,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self._update_condition_reg_affine_offset_8616(dst_reg, int(imm), width_bits=16)
 
     def _binop_reg_mem(self, op_name: str, dst_reg: str, mem_spec: _BPMemorySpec8616) -> None:
+        """Lift frame-memory arithmetic with explicit register and FLAGS effects."""
         dst = self._get_reg16(dst_reg)
         src = self._load_mem16(mem_spec)
         if op_name == "add":
@@ -744,8 +760,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             result = dst | src
         elif op_name == "cmp":
             self._record_cmp_condition_source(dst, src)
-            if not self._next_instruction_is_simple_jcc():
-                self._update_binop_flags16("sub", dst, src)
+            self._update_binop_flags16("sub", dst, src)
             return
         else:
             raise NotImplementedError(op_name)
@@ -1813,7 +1828,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
     ]] = {}
 
     def _record_typed_condition_8616(self, cond: ConditionIR | ConditionFailure) -> None:
-        """Record a typed condition on the emulator AND module cache for function-level transfer."""
+        """Bind current conditional bytes, then retain one coherent fact in both caches."""
+        if isinstance(cond, ConditionIR) and cond.src_insn == self.addr:
+            cond = attach_relative_condition_edge(cond, self.addr, bytes(self.cs.bytes))
         log = getattr(self.emu, "_inertia_typed_conditions", None)
         if not isinstance(log, list):
             log = []
@@ -2000,6 +2017,7 @@ def _disasm_sanitized_pop_8616(self: Instruction_ANY, raw: bytes, prefix_index: 
     sanitized[prefix_index + 1] &= 0xC7
     return _disasm_once_8616(self, bytes(sanitized))
 
+@cython.locals(strip_len=cython.int)
 def _disasm_stripped_prefix_8616(self: Instruction_ANY, raw: bytes) -> tuple[list[Any], int]:
     """Strip leading prefix bytes until capstone decodes the opcode."""
     # Capstone rejects several LOCK-prefixed forms that the real 286 still
@@ -2040,6 +2058,18 @@ def _parse_full_insn_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len: in
     self.bitwidth = (bitstrm.bytepos - self.start) * 8
     return {"x": "00000000"}
 
+@cython.locals(
+    raw=bytes,
+    prefix_bytes=set,
+    prefix_index=cython.int,
+    cs_prefix_len=cython.int,
+    capstone_rejected_full=cython.bint,
+    invalid_pop_extension=cython.bint,
+    width_override=cython.bint,
+    segment_override=cython.bint,
+    wide_memory_operand=cython.bint,
+    dead_flags_wide_register_semantics=cython.bint,
+)
 def _parse_insn_8616(self: Instruction_ANY, bitstrm: Any) -> dict[str, str]:
     """Decode one instruction and choose simple vs full semantics."""
     self.start = bitstrm.bytepos
@@ -2140,22 +2170,6 @@ def _match_call_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
         return ("call_mem16", mem)
     return None
 
-def _match_lcall_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
-    """Match a proven far stack-probe ``lcall`` to inline semantics."""
-    if not (len(ops) == 2 and all(op.type == 2 for op in ops)):
-        return None
-    # Far calls reach the emulator path unless the linear target is a
-    # binary-proven far stack probe, which is inlined with local effects.
-    segment = ops[0].imm & 0xFFFF
-    offset = ops[1].imm & 0xFFFF
-    linear_target = far_linear_target_8616(segment, offset)
-    if linear_target is not None and is_x86_16_registered_stack_probe_target_8616(
-        self.arch,
-        linear_target,
-    ):
-        return ("far_probe_call", segment, offset)
-    return None
-
 def _match_incdec_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
     """Match ``inc``/``dec reg16`` when a condition-forming pattern follows."""
     if len(ops) != 1:
@@ -2246,12 +2260,14 @@ def _consume_last_condition_8616(self: Instruction_ANY, last_condition: Any, pre
             prev_emu.clear_last_condition()
 
 def _prev_cmp_semantics_8616(self: Instruction_ANY, prev: Any) -> tuple[Any, ...] | None:
-    """Recover previous-instruction CMP semantics, including pending evidence."""
+    """Read CMP semantics from the actual preceding instruction in this IRSB.
+
+    Pending transfer evidence is keyed only by address and can belong to a
+    different image or path. It cannot replace architectural FLAGS in emitted
+    execution IR; a branch without an adjacent producer reads those flags.
+    ``prev`` is the dynamic pyvex instruction boundary.
+    """
     prev_semantics = getattr(prev, "simple_semantics", None) if prev is not None else None
-    if prev_semantics is None:
-        pending = Instruction_ANY._inertia_pending_condition_sources_by_addr.get(int(self.addr))
-        if isinstance(pending, ConditionSource) and pending.kind == "cmp":
-            prev_semantics = pending.semantics
     return cast(tuple[Any, ...] | None, prev_semantics)
 
 def _cmp_result_jcc_condition_8616(self: Instruction_ANY, kind: str, lhs: Any, rhs: Any) -> Any | None:
@@ -2698,52 +2714,50 @@ def _lift_pop_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> N
         self.put(next_sp, "sp")
     self._clear_condition_reg_value_state_8616(reg_name)
 
-def _probe_allocation_sp_8616(self: Instruction_ANY) -> tuple[Any, Any]:
-    """Return the (allocation, next_sp) pair for a proven stack-probe call."""
-    proven_ax = self._condition_proven_reg_value_8616("ax", width_bits=16)
-    allocation = proven_ax.const if isinstance(proven_ax, IRValue) else None
-    ax_value = self._const16(allocation) if allocation is not None else self._get_reg16("ax")
-    return allocation, self._get_reg16("sp") - ax_value
+def _saved_call_ip_8616(self: Instruction_ANY) -> VexValue:
+    """Convert the decoded instruction's next address to an architectural IP."""
+    # The typed arithmetic owner also supports concrete emulator values; this
+    # adapter supplies PyVEX's expression and constant surfaces.
+    return cast(VexValue, architectural_offset(
+        self.addr + self.cs.size, cast(CoordinateValue, self._get_reg16("cs")),
+        ControlWidth.WORD, cast(CoordinateConstant, self.constant),
+        domain=self.arch.control_address_domain,
+    ))
 
-def _lift_probe_target_call_8616(self: Instruction_ANY, ret_addr: Any) -> None:
-    """Inline a near-call stack probe's register and SP effects."""
-    allocation, next_sp = _probe_allocation_sp_8616(self)
-    self.put(ret_addr, "cx")
-    self.put(next_sp, "bx")
-    if allocation != 0:
-        self.put(next_sp, "sp")
 
 def _lift_call_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+    """Retain the native near-call frame and selector-relative target.
+
+    Recognizing a helper's bytes does not prove the selected runtime target,
+    its normal-return path, or its memory/flag effects. Summaries belong to
+    proof consumers; helper registration must never erase this native call.
+    """
     _, target = semantics
-    ret_addr = self._const16(self.addr + self.cs.size)
-    if is_x86_16_registered_stack_probe_target_8616(self.arch, target):
-        _lift_probe_target_call_8616(self, ret_addr)
-        return
+    ret_addr = _saved_call_ip_8616(self)
     sp = self._get_reg16("sp") - self._const16(2)
     self.put(sp, "sp")
     self._stack_store16(sp, ret_addr, offset=-2)
-    self.jump(None, self._const16(target), JumpKind.Call)
+    # Capstone's immediate is a decoded relative destination. Recover the
+    # displacement modulo WORD, wrap architectural IP, then restore CS's
+    # full loader coordinate rather than truncating the physical destination.
+    next_address = self.addr + self.cs.size
+    destination = relative_continuation(
+        next_address, cast(CoordinateValue, self._get_reg16("cs")),
+        int(target) - next_address, ControlWidth.WORD,
+        cast(CoordinateConstant, self.constant),
+        domain=self.arch.control_address_domain,
+    )
+    self.jump(None, cast(VexValue, destination), JumpKind.Call)
 
 def _lift_call_mem16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+    """Preserve the architectural frame for an indirect near word call."""
     _, mem_spec = semantics
     target = self._load_mem16(mem_spec)
-    ret_addr = self._const16(self.addr + self.cs.size)
+    ret_addr = _saved_call_ip_8616(self)
     sp = self._get_reg16("sp") - self._const16(2)
     self.put(sp, "sp")
     self._stack_store16(sp, ret_addr, offset=-2)
     self.jump(None, target, JumpKind.Call)
-
-def _lift_far_probe_call_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
-    # Binary-proven far stack probe inlined with local effects: the
-    # helper pops the far return pair, subtracts AX from SP, pushes
-    # the pair back, and RETFs, so the net effect is the register
-    # scratch updates plus the SP allocation without any call edge.
-    allocation, next_sp = _probe_allocation_sp_8616(self)
-    self.put(self._const16(self.addr + self.cs.size), "cx")
-    self.put(self._get_reg16("cs"), "dx")
-    self.put(next_sp, "bx")
-    if allocation != 0:
-        self.put(next_sp, "sp")
 
 def _lift_enter_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
     _, frame_size, nesting = semantics
@@ -2858,10 +2872,17 @@ def _lift_binop_abs_dst_8616(self: Instruction_ANY, semantics: tuple[Any, ...], 
         self._binop_abs_reg(op_name[:-10], offset, src_operand)
 
 def _lift_ret_8616(self: Instruction_ANY, imm: int = 0) -> None:
+    """Pop a word IP and retain the full loaded destination after adding CS."""
     sp = self._get_reg16("sp")
     ret_addr = self._stack_load16(sp, offset=0)
     self.put(sp + self._const16(2 + imm), "sp")
-    self.jump(None, ret_addr, JumpKind.Ret)
+    # PyVEX values form a dynamic third-party arithmetic boundary.
+    target = linear_continuation(
+        cast(CoordinateValue, self._get_reg16("cs")), cast(CoordinateValue, ret_addr),
+        ControlWidth.WORD, cast(CoordinateConstant, self.constant), control_width=ControlWidth.DWORD,
+        domain=self.arch.control_address_domain,
+    )
+    self.jump(None, cast(VexValue, target), JumpKind.Ret)
 
 def _lift_simple_suffix_8616(self: Instruction_ANY, kind: Any, semantics: tuple[Any, ...]) -> bool:
     """Dispatch the op-prefixed binop suffix semantics."""
@@ -2906,7 +2927,6 @@ def _lift_simple_kind_8616(self: Instruction_ANY, kind: Any, semantics: tuple[An
         "pop_reg16": _lift_pop_reg16_8616,
         "call": _lift_call_8616,
         "call_mem16": _lift_call_mem16_8616,
-        "far_probe_call": _lift_far_probe_call_8616,
         "enter": _lift_enter_8616,
         "mov_reg_imm16": _lift_mov_reg_imm16_8616,
         "mov_mem_reg16": _lift_mov_mem_reg16_8616,
@@ -2952,7 +2972,9 @@ def _exec_lifted_insn_8616(self: Instruction_ANY) -> None:
     else:
         self.instr16.exec()
 
+@cython.locals(debug_enabled=cython.bint)
 def _compute_result_8616(self: Instruction_ANY) -> None:
+    """Execute instruction effects and preserve explicit failure diagnostics."""
     try:
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         if debug_enabled:
@@ -3507,7 +3529,11 @@ def _match_cmp_binary_semantics_8616(
     )
 
 def _lift_simple_cmp_8616(self: Instruction_ANY, kind: str) -> bool:
-    """Lift one classified CMP and retain normalized condition operands."""
+    """Lift CMP's architectural flag effect and its typed condition operands.
+
+    A direct predicate for the following Jcc does not kill FLAGS: successors
+    still observe the updated status bits at the block cutpoint.
+    """
     shape = _CMP_LIFT_SHAPES_8616.get(kind)
     if shape is None:
         return False
@@ -3516,15 +3542,25 @@ def _lift_simple_cmp_8616(self: Instruction_ANY, kind: str) -> bool:
     lhs_val = _cmp_lift_operand_value_8616(self, lhs_role, lhs_operand)
     rhs_val = _cmp_lift_operand_value_8616(self, rhs_role, rhs_operand)
     self._record_cmp_condition_source(lhs_val, rhs_val, width_bits=width_bits)
-    if not self._next_instruction_is_simple_jcc():
-        self._update_binop_flags16("sub", lhs_val, rhs_val)
+    self._update_binop_flags16("sub", lhs_val, rhs_val)
     return True
 
 def _lift_simple_jcc_8616(self: Instruction_ANY, kind: str) -> bool:
+    """Emit direct control without discarding a word JMP's selector coordinate."""
     if kind not in (self._SIMPLE_JCC_8616 | {"jmp"}):
         return False
     semantics = cast(tuple[Any, ...], self.simple_semantics)
     _, abs_target = semantics
+    if kind == "jmp" and self.cs.operands[0].size == 2:
+        next_address = self.addr + self.cs.size
+        destination = relative_continuation(
+            next_address, cast(CoordinateValue, self._get_reg16("cs")),
+            int(abs_target) - next_address, ControlWidth.WORD,
+            cast(CoordinateConstant, self.constant),
+            domain=self.arch.control_address_domain,
+        )
+        self.jump(None, cast(VexValue, destination), JumpKind.Boring)
+        return True
     linear_target = self._linear_near_target_8616(int(abs_target))
     target = self._code_address_constant_8616(linear_target)
     if kind == "jmp":
@@ -3547,6 +3583,7 @@ class Lifter86_16(GymratLifter):  # type: ignore[misc]  # dynamic pyvex base
 
     instrs: ClassVar[list[type[Instruction_ANY]]] = [Instruction_ANY]
 
+    @cython.locals(instructions=list)
     def decode(self) -> list[Any]:
         """Decode a pyvex block into 16-bit instruction objects."""
 

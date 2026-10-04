@@ -267,7 +267,7 @@ def collect_function_memory_live_out_trials_8616(
             caller_project, site.caller_addr, conditions_by_caller
         )
         collected = collect_callsite_memory_live_out_8616(
-            aliases, artifact, site, targets, conditions
+            aliases, artifact, site, targets, conditions, project=caller_project,
         )
         raw += collected.stats.raw_fact_count
         normalized += collected.stats.normalized_fact_count

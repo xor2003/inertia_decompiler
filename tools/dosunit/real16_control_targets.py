@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
 
@@ -624,20 +624,27 @@ def _bounded_solver_check(solver: Any, budget: ControlProofBudget) -> Any:  # no
     return result
 
 
-def _prove_candidates(
+def _premise_checked_solver(
     gate: _EvidenceGate,
-    term_width: int,
-    candidates: Iterable[int],
-    *,
-    require_shared_guard: bool,
     budget: ControlProofBudget,
     started: float,
     z3: Any,  # noqa: ANN401
-) -> ControlDestinationProof:
-    """Replay ``term != candidate`` under the window premise; unsat proves it."""
+) -> Any | ControlDestinationProof:  # noqa: ANN401
+    """Build one solver, assert the fetch-window premise and confirm it is sat.
+
+    The premise is execution definedness: the selector term bound to ``cs``
+    lies inside the verified fetch window.  Exactly one satisfiability query
+    is issued here; callers sharing the returned solver across several terms
+    add that single query to their running total exactly once.
+    """
     import time
 
-    solver = z3.Solver()
+    # The incremental solver core decides these quantifier-free BV/array
+    # queries directly; the default tactic-wrapped ``Solver`` pays a large
+    # first-check pipeline cost that dominates this module's small queries.
+    # ``timeout``/``rlimit`` are still honored, and deadline checks in
+    # ``_bounded_solver_check`` keep bounding every query end-to-end.
+    solver = z3.SimpleSolver()
     solver.set("timeout", budget.solver_timeout_ms)
     solver.set("rlimit", budget.solver_rlimit)
     solver.add(
@@ -653,7 +660,29 @@ def _prove_candidates(
             term_nodes=gate.term_nodes,
             solver_time_ms=int((time.monotonic() - started) * 1000),
         )
-    queries = 1
+    return solver
+
+
+def _prove_candidates_on(
+    solver: Any,  # noqa: ANN401
+    gate: _EvidenceGate,
+    term_width: int,
+    candidates: Iterable[int],
+    *,
+    require_shared_guard: bool,
+    budget: ControlProofBudget,
+    started: float,
+    z3: Any,  # noqa: ANN401
+    queries: int,
+) -> ControlDestinationProof:
+    """Replay ``term != candidate`` on a premise-checked solver; unsat proves.
+
+    ``queries`` is the number of solver queries already issued on ``solver``
+    (the premise check plus any earlier terms sharing it); the returned stats
+    keep counting from there so shared-solver callers never double count.
+    """
+    import time
+
     mask = (1 << term_width) - 1
     seen: set[int] = set()
     for candidate in sorted(set(candidates)):
@@ -706,6 +735,33 @@ def _prove_candidates(
     )
 
 
+def _prove_candidates(
+    gate: _EvidenceGate,
+    term_width: int,
+    candidates: Iterable[int],
+    *,
+    require_shared_guard: bool,
+    budget: ControlProofBudget,
+    started: float,
+    z3: Any,  # noqa: ANN401
+) -> ControlDestinationProof:
+    """Replay ``term != candidate`` under the window premise; unsat proves it."""
+    solver = _premise_checked_solver(gate, budget, started, z3)
+    if isinstance(solver, ControlDestinationProof):
+        return solver
+    return _prove_candidates_on(
+        solver,
+        gate,
+        term_width,
+        candidates,
+        require_shared_guard=require_shared_guard,
+        budget=budget,
+        started=started,
+        z3=z3,
+        queries=1,
+    )
+
+
 def prove_term_destination(
     part: dict[str, Any],
     term: dict[str, Any],
@@ -751,6 +807,100 @@ def prove_term_destination(
     )
 
 
+def _prove_branch_arms(
+    part: dict[str, Any],
+    arms: list[dict[str, Any]],
+    *,
+    current_cs: dict[str, Any] | None,
+    destinations: frozenset[int],
+    encode_term: Callable[[dict[str, Any]], Any],
+    z3: Any,  # noqa: ANN401
+    budget: ControlProofBudget,
+) -> tuple[list[int] | None, ControlDestinationProof]:
+    """Prove each arm denotes a destination on one shared premise solver.
+
+    The fetch window and the cs binding are identical for every arm of the
+    ITE, so the window premise is asserted and satisfiability-checked once;
+    re-asserting and re-checking it per arm is duplicate proof work, not new
+    evidence.  Every arm's evidence gate still runs and every candidate
+    query counts against the shared ``max_queries`` budget.  A ``None``
+    proved list pairs with the typed refusal inside the returned proof.
+    """
+    import time
+
+    proved: list[int] = []
+    total_queries = 0
+    started = time.monotonic()
+    solver: Any = None
+    for arm in arms:
+        if total_queries >= budget.max_queries:
+            return None, _refuse(
+                ControlDomainFailure.BUDGET_EXHAUSTED,
+                queries=total_queries,
+                solver_time_ms=int((time.monotonic() - started) * 1000),
+            )
+        gate = _evidence_gate(
+            part, arm, current_cs=current_cs, encode_term=encode_term, z3=z3, budget=budget
+        )
+        if isinstance(gate, ControlDestinationProof):
+            total_queries += gate.stats.queries
+            return None, ControlDestinationProof(
+                verdict=gate.verdict,
+                value=None,
+                failure=gate.failure,
+                stats=ControlProofStats(
+                    total_queries, gate.stats.term_nodes,
+                    int((time.monotonic() - started) * 1000), 1,
+                ),
+            )
+        if solver is None:
+            premise = _premise_checked_solver(gate, budget, started, z3)
+            if isinstance(premise, ControlDestinationProof):
+                total_queries += premise.stats.queries
+                return None, ControlDestinationProof(
+                    verdict=premise.verdict,
+                    value=None,
+                    failure=premise.failure,
+                    stats=ControlProofStats(
+                        total_queries, premise.stats.term_nodes,
+                        int((time.monotonic() - started) * 1000), 1,
+                    ),
+                )
+            solver = premise
+            total_queries += 1
+        outcome = _prove_candidates_on(
+            solver,
+            gate,
+            _term_width(_resolve_ref(part, arm)),
+            destinations,
+            require_shared_guard=True,
+            budget=budget,
+            started=started,
+            z3=z3,
+            queries=total_queries,
+        )
+        total_queries = outcome.stats.queries
+        if not outcome.proven or outcome.value is None:
+            return None, ControlDestinationProof(
+                verdict=outcome.verdict,
+                value=None,
+                failure=outcome.failure,
+                stats=ControlProofStats(
+                    total_queries, outcome.stats.term_nodes,
+                    int((time.monotonic() - started) * 1000), 1,
+                ),
+            )
+        proved.append(outcome.value)
+    return proved, ControlDestinationProof(
+        verdict=ControlProofVerdict.PROVEN,
+        value=None,
+        failure=None,
+        stats=ControlProofStats(
+            total_queries, 0, int((time.monotonic() - started) * 1000), 0,
+        ),
+    )
+
+
 def prove_branch_destinations(
     part: dict[str, Any],
     ite_term: dict[str, Any],
@@ -780,36 +930,25 @@ def prove_branch_destinations(
         return None, _refuse(decoded)
     if decoded.kind is not NativeTransferKind.DIRECT_SUCCESSORS or len(decoded.destinations) != 2:
         return None, _refuse(ControlDomainFailure.TERMINAL_DECODE_UNSUPPORTED)
-    proved: list[int] = []
-    total_queries = 0
-    total_ms = 0
-    for arm in arms:
-        outcome = prove_term_destination(
-            part,
-            arm,
-            current_cs=current_cs,
-            candidates=decoded.destinations,
-            encode_term=encode_term,
-            z3=z3,
-            budget=replace(budget, max_queries=max(0, budget.max_queries - total_queries)),
-            require_shared_guard=True,
-        )
-        total_queries += outcome.stats.queries
-        total_ms += outcome.stats.solver_time_ms
-        if not outcome.proven or outcome.value is None:
-            return None, ControlDestinationProof(
-                verdict=outcome.verdict,
-                value=None,
-                failure=outcome.failure,
-                stats=ControlProofStats(total_queries, outcome.stats.term_nodes, total_ms, 1),
-            )
-        proved.append(outcome.value)
+    proved, outcome = _prove_branch_arms(
+        part,
+        arms,
+        current_cs=current_cs,
+        destinations=decoded.destinations,
+        encode_term=encode_term,
+        z3=z3,
+        budget=budget,
+    )
+    if proved is None:
+        return None, outcome
     if len(set(proved)) != 2 or set(proved) != decoded.destinations:
         return None, ControlDestinationProof(
             verdict=ControlProofVerdict.UNKNOWN_REFUSE,
             value=None,
             failure=ControlDomainFailure.COVERAGE_INCOMPLETE,
-            stats=ControlProofStats(total_queries, 0, total_ms, 1),
+            stats=ControlProofStats(
+                outcome.stats.queries, 0, outcome.stats.solver_time_ms, 1,
+            ),
         )
     arm_widths = [_term_width(arm) for arm in arms]
     normalized = {
@@ -829,12 +968,7 @@ def prove_branch_destinations(
             },
         ],
     }
-    return normalized, ControlDestinationProof(
-        verdict=ControlProofVerdict.PROVEN,
-        value=None,
-        failure=None,
-        stats=ControlProofStats(total_queries, 0, total_ms, 0),
-    )
+    return normalized, outcome
 
 
 def prove_control_term(

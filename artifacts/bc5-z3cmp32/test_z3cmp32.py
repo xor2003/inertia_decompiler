@@ -112,6 +112,7 @@ def test_flat32_repeat_movsd_lowers_summary_with_fallthrough_eip() -> None:
     """`rep movsd` must produce a summary part, not a raw back-edge ip."""
     instructions = [
         {
+            "bytes": "f3a5",
             "disassembly": "rep movsd",
             "mnemonic": "rep movsd",
             "size": 2,
@@ -130,6 +131,7 @@ def test_flat32_repeat_movsd_lowers_summary_with_fallthrough_eip() -> None:
     assert lowered["summary"]["kind"] == "repeat_string"
     assert lowered["outputs"]["eip"] == {"op": "const", "value": "0x401002", "width": 32}
     assert lowered["outputs"]["ip"]["op"] == "const"
+    assert {"name": "d", "width": 32} in lowered["inputs"]
     assignments = {item["id"]: item for item in lowered["assignments"]}
 
     def resolved_op(reg: str) -> str:

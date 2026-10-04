@@ -1,6 +1,6 @@
 """Persist original-program evidence before potentially long decompilation.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: retain completed compiler/emulator observations on timeout.
 This checkpoint never claims generated-C validation or behavioral equivalence.
 """

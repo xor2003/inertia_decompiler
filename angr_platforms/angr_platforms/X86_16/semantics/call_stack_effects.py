@@ -21,15 +21,18 @@ from ..callsite_summary import (
     CallsiteSummary8616,
     callsite_machine_frame_kind_8616,
 )
-from ..ir import (
+from ..ir.core import (
     IRAddress,
     IRBlock,
     IRCallStackEffect8616,
     IRFunctionArtifact,
     IRInstr,
+    IRValue,
+    MemSpace,
 )
 from ..ir.frame_memory_accesses import stable_bp_memory_ranges_8616
 from ..ir.stack_range_overlap import stack_ranges_may_overlap_8616
+from .bp_call_preservation import BPCallPreservationResult8616, prove_direct_bp_call_preservation_8616
 from .call_register_effects import (
     SyntheticCallRegisterEffectVerdict8616,
     classify_synthetic_call_register_effect_8616,
@@ -43,6 +46,11 @@ from .call_stack_effect_contracts import (
     CallStackEffectVerdict8616,
 )
 from .call_stack_provenance import stack_address_offset_8616
+from .direct_near_call_target_binding import (
+    DirectNearCallTargetBinding8616,
+    prove_direct_near_call_target_binding_8616,
+)
+from .direct_ret_call_effect import prove_direct_near_ret_only_effect_8616
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +79,26 @@ class CallStackEffectArtifact8616:
                     "verdict": fact.verdict.value,
                     "effect": fact.effect.to_dict(),
                     "failure": None if fact.failure is None else fact.failure.value,
+                    "bp_preservation": None if fact.bp_preservation is None else {
+                        "complete": fact.bp_preservation.complete,
+                        "failure": None if fact.bp_preservation.failure is None else fact.bp_preservation.failure.value,
+                        "body_failure": (
+                            None if fact.bp_preservation.body is None or fact.bp_preservation.body.failure is None
+                            else fact.bp_preservation.body.failure.value
+                        ),
+                        "raw_fact_count": fact.bp_preservation.raw_fact_count,
+                        "normalized_fact_count": fact.bp_preservation.normalized_fact_count,
+                        "classified_fact_count": fact.bp_preservation.classified_fact_count,
+                        "materialized_count": fact.bp_preservation.materialized_count,
+                        "failure_count": fact.bp_preservation.failure_count,
+                    },
+                    "target_binding": None if fact.target_binding is None else {
+                        "verdict": fact.target_binding.verdict.value,
+                        "failure": (
+                            None if fact.target_binding.failure is None
+                            else fact.target_binding.failure.value
+                        ),
+                    },
                 }
                 for fact in self.facts
             ],
@@ -136,7 +164,9 @@ def _effect_from_summary_8616(
     allocation: CallStackAllocationProof8616 | None = None,
 ) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None]:
     """Classify caller-frame preservation from one authoritative summary."""
-    allocation_effect = resolve_call_stack_allocation_8616(summary, ranges, allocation)
+    allocation_effect: tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None] | None = (
+        resolve_call_stack_allocation_8616(summary, ranges, allocation)
+    )
     if allocation_effect is not None:
         return allocation_effect
     if summary.target_addr is None:
@@ -194,20 +224,72 @@ def _effect_from_summary_8616(
     )
 
 
-def _with_synthetic_bp_proof_8616(
+def _bound_call_target_8616(
+    project: object,
+    block: IRBlock,
+    summary: CallsiteSummary8616,
+    instruction: IRInstr,
+) -> tuple[bool, DirectNearCallTargetBinding8616 | None]:
+    """Prove the CALL control operand denotes the summary target.
+
+    A constant operand binds by exact address equality. A symbolic operand
+    binds only through the retained CS-relative continuation provenance:
+    block-``next`` origin, exact operand DAG, embedded continuation constants,
+    and matching mapped bytes. Anything else refuses without guessing.
+    """
+    target_addr = summary.target_addr
+    target = instruction.args[0] if instruction.args else None
+    if (
+        target_addr is not None
+        and isinstance(target, IRValue)
+        and target.space is MemSpace.CONST
+        and type(target.const) is int
+        and target.const == target_addr
+    ):
+        return True, None
+    binding = prove_direct_near_call_target_binding_8616(
+        project, block=block, instruction=instruction, summary=summary,
+    )
+    return binding.complete, binding
+
+
+def _with_proven_bp_effect_8616(
     effect: IRCallStackEffect8616,
     project: object | None,
     summary: CallsiteSummary8616,
-    callsite_addr: int,
-) -> IRCallStackEffect8616:
-    """Keep frame-register preservation independent of stack cleanup evidence."""
-    if not effect.complete or project is None or summary.callsite_addr != callsite_addr:
-        return effect
+    instruction: IRInstr,
+    block: IRBlock,
+) -> tuple[
+    IRCallStackEffect8616,
+    BPCallPreservationResult8616 | None,
+    DirectNearCallTargetBinding8616 | None,
+]:
+    """Join exact real-body or synthetic ABI proof with stack cleanup evidence."""
+    callsite_addr = instruction.addr
+    if callsite_addr is None or not effect.complete or project is None or summary.callsite_addr != callsite_addr:
+        return effect, None, None
+    if summary.target_addr is None:
+        return effect, None, None
+    bound, binding = _bound_call_target_8616(project, block, summary, instruction)
+    if not bound:
+        return effect, None, binding
+    real_body = prove_direct_near_ret_only_effect_8616(
+        project, callsite_addr, summary.return_addr, summary.target_addr,
+        callsite_machine_frame_kind_8616(summary),
+    )
+    if real_body.complete:
+        return replace(effect, bp_preserved=True), None, binding
     proof = classify_synthetic_call_register_effect_8616(
         project, callsite_addr=callsite_addr, target_addr=summary.target_addr, register="bp",
     )
     proven = proof.closes_evidence and proof.verdict is SyntheticCallRegisterEffectVerdict8616.PRESERVED
-    return replace(effect, bp_preserved=True) if proven else effect
+    if proven:
+        return replace(effect, bp_preserved=True), None, binding
+    body = prove_direct_bp_call_preservation_8616(
+        project, callsite_addr, summary.return_addr, summary.target_addr,
+        callsite_machine_frame_kind_8616(summary),
+    )
+    return (replace(effect, bp_preserved=True) if body.complete else effect), body, binding
 
 
 def materialize_call_stack_effects_8616(
@@ -238,6 +320,8 @@ def materialize_call_stack_effects_8616(
             summary = summaries.get(instruction.addr) if instruction.addr is not None else None
             target_addr = None if summary is None else summary.target_addr
             failure: CallStackEffectFailure8616 | None
+            bp_preservation = None
+            target_binding = None
             if instruction.addr is None:
                 effect, failure = _refused_effect_8616(
                     ranges,
@@ -256,7 +340,9 @@ def materialize_call_stack_effects_8616(
             else:
                 allocation = allocation_proofs.get(instruction.addr) if allocation_proofs is not None else None
                 effect, failure = _effect_from_summary_8616(summary, ranges, allocation)
-                effect = _with_synthetic_bp_proof_8616(effect, project, summary, instruction.addr)
+                effect, bp_preservation, target_binding = _with_proven_bp_effect_8616(
+                    effect, project, summary, instruction, block,
+                )
                 frame = return_segment_frames.get(instruction.addr) if return_segment_frames is not None else None
                 if failure is None and frame is not None and frame.callsite_addr == instruction.addr:
                     adjustment = frame.additional_return_bytes
@@ -281,6 +367,8 @@ def materialize_call_stack_effects_8616(
                     verdict,
                     effect,
                     failure,
+                    bp_preservation,
+                    target_binding,
                 )
             )
             rewritten.append(

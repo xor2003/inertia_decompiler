@@ -23,6 +23,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CConstant,
     CExpressionStatement,
     CFakeVariable,
+    CForLoop,
     CFunctionCall,
     CIndexedVariable,
     CStatements,
@@ -41,6 +42,7 @@ from angr.sim_variable import (
     SimVariable,
 )
 
+from ...c_ast_utils import _iter_c_node_children_8616, _structured_slot_names_8616
 from ...decompiler_postprocess_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
 from ...lowering.stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 from .dce_local_array_reads import is_pure_local_array_read_8616
@@ -721,7 +723,7 @@ class _DeadCodeEliminationRun8616:
             else DceValuePurity8616.UNKNOWN
         )
 
-    def _call_value_purity_8616(self, expr: object) -> DceValuePurity8616:
+    def _call_value_purity_8616(self, expr: CFunctionCall) -> DceValuePurity8616:
         """Classify purity for a call expression against the pure-helper allowlist."""
         if self._is_pure_address_helper_call_8616(expr):
             return DceValuePurity8616.LOCAL_VALUE
@@ -1117,34 +1119,14 @@ class _DeadCodeEliminationRun8616:
             self._push_block_children_8616(node, stack)
 
     def _push_block_children_8616(self, node: object, stack: list[object]) -> None:
-        """Push all structured-C child nodes of one block onto the work stack."""
-        for attr in (
-            "condition",
-            "cond",
-            "body",
-            "else_node",
-            "iftrue",
-            "iffalse",
-            "true_node",
-            "false_node",
-            "expr",
-            "retval",
-        ):
-            child = _dynamic_dce_getattr_8616(node, attr, None)
-            if child is not None:
-                stack.append(child)
-        for pair in _dynamic_dce_getattr_8616(node, "condition_and_nodes", ()) or ():
-            if len(pair) >= 2:
-                stack.append(pair[0])
-                stack.append(pair[1])
-        cases = _dynamic_dce_getattr_8616(node, "cases", None)
-        stack.extend(self._iter_switch_case_bodies_8616(cases))
-        default = _dynamic_dce_getattr_8616(node, "default", None)
-        if default is not None:
-            stack.append(default)
+        """Visit canonical structured children, including statement-valued headers."""
+        for attr in _structured_slot_names_8616(node):
+            value = _dynamic_dce_getattr_8616(node, attr, None)
+            stack.extend(_iter_c_node_children_8616(value))
 
     def _collect_stmt_reads(self, stmt: object) -> set[tuple[str, int | str]]:
-        reads: set[tuple[str, int | str]] = set()
+        """Consume typed reads in one statement and its non-body loop headers."""
+        reads = self._collect_for_header_reads_8616(stmt)
 
         def _collect_expr(expr: object) -> None:
             for node in self._iter_with_root(expr):
@@ -1186,6 +1168,19 @@ class _DeadCodeEliminationRun8616:
         _collect_expr(stmt)
         return reads
 
+    def _collect_for_header_reads_8616(self, stmt: object) -> set[tuple[str, int | str]]:
+        """Read loop headers as statements, excluding plain write destinations."""
+        reads: set[tuple[str, int | str]] = set()
+        if not isinstance(stmt, CForLoop):
+            return reads
+        # Headers execute in the enclosing scope, not in the separate body
+        # block. RHS/address consumers remain visible to every read census.
+        for header in (stmt.initializer, stmt.iterator):
+            statements = header.statements if isinstance(header, CStatements) else (header,)
+            for header_statement in statements:
+                reads.update(self._collect_stmt_reads(header_statement))
+        return reads
+
     def _lhs_needs_read_scan_8616(self, lhs: object) -> bool:
         """Return True when an assignment LHS shape contributes read keys."""
         return (
@@ -1214,6 +1209,8 @@ class _DeadCodeEliminationRun8616:
         seen: set[int] = set()
         for attr in (
             "body",
+            "initializer",
+            "iterator",
             "else_node",
             "iftrue",
             "iffalse",
@@ -1723,7 +1720,6 @@ class _DeadCodeEliminationRun8616:
         if self.debug_optimization:
             self._debug_completion_dump_8616()
         return True, self.changed
-        return False, None
 
 
     def _expr_debug_label_8616(self, expr: object) -> str:

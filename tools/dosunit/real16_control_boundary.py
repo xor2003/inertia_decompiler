@@ -18,6 +18,7 @@ work must materialize or count as failure, so the pipeline fails closed.
 from __future__ import annotations
 
 import contextlib
+import sys
 import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
@@ -456,7 +457,7 @@ def _attempt_guard(
         yield
     finally:
         if guard is not None:
-            guard.__exit__(None, None, None)
+            guard.__exit__(*sys.exc_info())
 
 
 def _domain_of(part: dict[str, Any]) -> dict[str, Any]:

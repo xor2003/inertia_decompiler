@@ -109,23 +109,38 @@ def _bounded_instructions_8616(
 def _carrier_deref_scan_8616(
     operands: tuple[object, ...],
     carriers: dict[int, int],
-) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
-    """Count carrier dereferences on one instruction's memory operands."""
+) -> tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+    """Count direct and indexed carrier uses on memory operands."""
     raw = 0
     observed: list[int] = []
     pointer: list[int] = []
+    indexed: list[int] = []
     for operand_value in operands:
         operand = cast(Any, operand_value)
         if operand.type != X86_OP_MEM:
             continue
-        stack_offset = carriers.get(int(operand.mem.base))
-        if stack_offset is None or int(operand.size) <= 0:
+        if int(operand.size) <= 0:
             continue
-        raw += 1
-        observed.append(stack_offset)
-        if int(operand.mem.index) == X86_REG_INVALID and int(operand.mem.disp) == 0:
-            pointer.append(stack_offset)
-    return raw, tuple(observed), tuple(pointer)
+        base_offset = carriers.get(int(operand.mem.base))
+        index_offset = carriers.get(int(operand.mem.index))
+        carrier_offsets = {
+            offset for offset in (base_offset, index_offset) if offset is not None
+        }
+        if not carrier_offsets:
+            continue
+        raw += len(carrier_offsets)
+        observed.extend(sorted(carrier_offsets))
+        # A carrier in BX+SI is an observed address term, not proof that it
+        # owns the pointer base rather than a scalar index into another base.
+        if int(operand.mem.index) != X86_REG_INVALID:
+            indexed.extend(sorted(carrier_offsets))
+        if (
+            base_offset is not None
+            and int(operand.mem.index) == X86_REG_INVALID
+            and int(operand.mem.disp) == 0
+        ):
+            pointer.append(base_offset)
+    return raw, tuple(observed), tuple(pointer), tuple(indexed)
 
 
 def _carrier_transfer_8616(
@@ -164,23 +179,27 @@ def _carrier_transfer_8616(
 
 def _pointer_stack_offsets_8616(
     instructions: Sequence[object],
-) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
-    """Classify direct carrier dereferences and displaced-only ambiguities."""
+) -> tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+    """Classify direct dereferences and distinct ambiguous address uses."""
     carriers: dict[int, int] = {}
     observed_offsets: set[int] = set()
+    indexed_offsets: set[int] = set()
     pointer_offsets: list[int] = []
     raw_fact_count = 0
     for insn_value in instructions:
         insn = cast(Any, insn_value)
         operands = tuple(insn.operands)
-        raw, observed, pointer = _carrier_deref_scan_8616(operands, carriers)
+        raw, observed, pointer, indexed = _carrier_deref_scan_8616(operands, carriers)
         raw_fact_count += raw
         observed_offsets.update(observed)
+        indexed_offsets.update(indexed)
         pointer_offsets.extend(pointer)
         _carrier_transfer_8616(insn, operands, carriers)
     proven_offsets = tuple(sorted(set(pointer_offsets)))
-    ambiguous_offsets = tuple(sorted(observed_offsets - set(proven_offsets)))
-    return raw_fact_count, proven_offsets, ambiguous_offsets
+    unresolved_offsets = observed_offsets - set(proven_offsets)
+    ambiguous_indexed = tuple(sorted(unresolved_offsets & indexed_offsets))
+    ambiguous_displaced = tuple(sorted(unresolved_offsets - indexed_offsets))
+    return raw_fact_count, proven_offsets, ambiguous_displaced, ambiguous_indexed
 
 
 def _prototype_stack_offsets_8616(
@@ -228,9 +247,12 @@ def recover_callee_pointer_argument_evidence_at_address_8616(
         address,
         scan_size=scan_size,
     )
-    raw_count, pointer_offsets, ambiguous_offsets = _pointer_stack_offsets_8616(
-        instructions
-    )
+    (
+        raw_count,
+        pointer_offsets,
+        ambiguous_displaced,
+        ambiguous_indexed,
+    ) = _pointer_stack_offsets_8616(instructions)
     offset_to_index = (
         _prototype_stack_offsets_8616(prototype)
         if isinstance(prototype, SimTypeFunction)
@@ -259,11 +281,13 @@ def recover_callee_pointer_argument_evidence_at_address_8616(
         materialized_count=classified_count,
         failure_count=(
             max(0, len(pointer_offsets) - classified_count)
-            + len(ambiguous_offsets)
+            + len(ambiguous_displaced)
+            + len(ambiguous_indexed)
         ),
         pointer_stack_offsets=pointer_offsets,
         pointer_argument_indices=pointer_indices,
-        ambiguous_displaced_stack_offsets=ambiguous_offsets,
+        ambiguous_displaced_stack_offsets=ambiguous_displaced,
+        ambiguous_indexed_stack_offsets=ambiguous_indexed,
     )
 
 

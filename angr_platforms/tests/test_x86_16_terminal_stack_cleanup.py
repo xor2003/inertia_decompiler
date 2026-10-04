@@ -78,6 +78,49 @@ def test_terminal_stack_cleanup_accepts_consistent_return_paths() -> None:
     assert evidence.raw_fact_count == evidence.materialized_count == 2
 
 
+def test_terminal_stack_cleanup_visits_shared_branch_suffix_once() -> None:
+    """A diamond chain has one return fact, not exponentially many paths."""
+    blocks: dict[int, object] = {}
+    for index in range(8):
+        branch_addr = 0x1000 + index * 0x20
+        join_addr = branch_addr + 0x10
+        blocks[branch_addr] = SimpleNamespace(
+            capstone=SimpleNamespace(
+                insns=(_insn(branch_addr, "je", size=2, target=branch_addr + 8),)
+            )
+        )
+        for arm_addr in (branch_addr + 2, branch_addr + 8):
+            blocks[arm_addr] = SimpleNamespace(
+                capstone=SimpleNamespace(insns=(_insn(arm_addr, "jmp", target=join_addr),))
+            )
+        join_insn = (
+            _insn(join_addr, "jmp", target=branch_addr + 0x20)
+            if index < 7
+            else _ret(join_addr, 6)
+        )
+        blocks[join_addr] = SimpleNamespace(capstone=SimpleNamespace(insns=(join_insn,)))
+
+    class _CountingFactory(_Factory):
+        def __init__(self, code_blocks: dict[int, object]) -> None:
+            super().__init__(code_blocks)
+            self.loads: dict[int, int] = {}
+
+        def block(self, address: int, *, opt_level: int) -> object:
+            self.loads[address] = self.loads.get(address, 0) + 1
+            return super().block(address, opt_level=opt_level)
+
+    factory = _CountingFactory(blocks)
+    project = SimpleNamespace(factory=factory)
+    function = SimpleNamespace(addr=0x1000, block_addrs_set=set(blocks))
+
+    evidence = collect_terminal_stack_cleanup_evidence_8616(project, function)
+
+    assert evidence.complete is True
+    assert evidence.consistent_cleanup == 6
+    assert evidence.raw_fact_count == evidence.materialized_count == 1
+    assert factory.loads == dict.fromkeys(blocks, 1)
+
+
 def test_terminal_stack_cleanup_refuses_incomplete_successor() -> None:
     branch = _insn(0x1000, "je", size=2, target=0x1010)
     blocks = {

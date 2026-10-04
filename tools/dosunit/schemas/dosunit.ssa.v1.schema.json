@@ -3,31 +3,133 @@
   "$id": "dosunit.ssa.v1",
   "title": "DOS Unit Straight-Line SSA",
   "type": "object",
-  "required": ["schema", "exe", "source_ir", "module", "parameters", "functions", "refusals", "counters"],
+  "required": [
+    "schema",
+    "exe",
+    "source_ir",
+    "module",
+    "parameters",
+    "functions",
+    "refusals",
+    "counters"
+  ],
   "properties": {
-    "schema": { "const": "dosunit.ssa.v1" },
-    "id": { "type": "string" },
-    "exe": { "type": "string" },
-    "source_ir": { "const": "vex" },
-    "module": { "type": "string" },
-    "parameters": { "type": "object" },
+    "schema": {
+      "const": "dosunit.ssa.v1"
+    },
+    "id": {
+      "type": "string"
+    },
+    "exe": {
+      "type": "string"
+    },
+    "source_ir": {
+      "const": "vex"
+    },
+    "module": {
+      "type": "string"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "successor_range_policy": {
+          "enum": [
+            "discover",
+            "declared_only"
+          ]
+        }
+      }
+    },
     "functions": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["function", "entry", "source", "inputs", "outputs", "assignments"],
+        "required": [
+          "function",
+          "entry",
+          "source",
+          "inputs",
+          "outputs",
+          "assignments"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "function": { "type": "object" },
-          "entry": { "type": "object" },
-          "source": { "type": "object" },
-          "inputs": { "type": "array" },
-          "outputs": { "type": "object" },
-          "assignments": { "type": "array" }
+          "id": {
+            "type": "string"
+          },
+          "function": {
+            "type": "object"
+          },
+          "entry": {
+            "type": "object"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "successor_range_policy": {
+                "enum": [
+                  "discover",
+                  "declared_only"
+                ]
+              },
+              "control_domain": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "arch",
+                  "control_address_domain",
+                  "head_linear",
+                  "terminal_linear",
+                  "selector_min",
+                  "selector_max"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "real16_fetch_window"
+                  },
+                  "arch": {
+                    "const": "86_16"
+                  },
+                  "control_address_domain": {
+                    "const": "loader_linear"
+                  },
+                  "head_linear": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-fA-F]+$"
+                  },
+                  "terminal_linear": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-fA-F]+$"
+                  },
+                  "selector_min": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-fA-F]+$"
+                  },
+                  "selector_max": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-fA-F]+$"
+                  }
+                }
+              }
+            }
+          },
+          "inputs": {
+            "type": "array"
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "assignments": {
+            "type": "array"
+          }
         }
       }
     },
-    "refusals": { "type": "array" },
-    "counters": { "type": "object" }
+    "refusals": {
+      "type": "array"
+    },
+    "counters": {
+      "type": "object"
+    }
   }
 }

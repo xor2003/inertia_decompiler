@@ -60,6 +60,8 @@ def test_external_fixture_uses_existing_owner_and_fingerprints_headers(tmp_path,
     report = json.loads((output / "coverage-result.json").read_text())
     assert report["inputs"]["runtime_headers"]["RUNTIME.H"]["sha256"]
     assert report["inputs"]["signature_catalog"]["sha256"]
+    assert report["inputs"]["environment"]["installed_distributions"]
+    assert report["inputs"]["environment"]["kvm"]["status"]
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -88,6 +90,28 @@ def test_source_identity_is_retained_and_changes_refuse_acceptance(tmp_path, mon
     assert report["implementation_unchanged"] is (not changed)
     assert report["inputs"]["implementation"]["sha256"]
     assert (report["inputs"]["implementation"] == report["implementation_after"]) is (not changed)
+
+
+def test_environment_drift_refuses_an_otherwise_passing_roundtrip(tmp_path, monkeypatch):
+    """A valid child report cannot attest to a different runtime environment."""
+    source = tmp_path / "fixture.c"
+    source.write_text("int main(void) { return 0; }")
+    monkeypatch.setattr(runner, "classify_roundtrip_report", lambda *args: CoverageOutcome.PASSED)
+    monkeypatch.setattr(runner, "_execute", Mock(return_value=(0, False)))
+    environment = Mock()
+    environment.to_dict.side_effect = [
+        {"installed_distributions": [["angr", "before"]]},
+        {"installed_distributions": [["angr", "after"]]},
+    ]
+    monkeypatch.setattr(runner, "runtime_environment_snapshot", Mock(return_value=environment))
+
+    outcome = runner.run_source_case(source, tmp_path / "case")
+
+    assert outcome is CoverageOutcome.HARNESS_FAILED
+    report = json.loads((tmp_path / "case" / "coverage-result.json").read_text())
+    assert report["environment_unchanged"] is False
+    assert report["inputs"]["environment"] != report["environment_after"]
+    assert "Runtime environment changed" in report["error"]
 
 
 @pytest.mark.parametrize("names", [("../escape.h",), ("file.c",), ("R.H", "r.h")])

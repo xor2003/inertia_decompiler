@@ -14,9 +14,13 @@ from typing import Any
 
 import angr
 import pyvex
-from flat32_adapter import ARCH, REG32, S, installed
+from flat32_adapter import ARCH, OUTPUT_REGS, REG32, S, installed
 from flat32_catalog import mapping
 from flat32_verdict import Status, aggregate, checked_results
+
+from tools.dosunit.flat32_cfg_lifting import CfgLiftingRefusal, lift_cfg_block
+from tools.dosunit.proof_contracts import ProofStatus, legacy_status_for, proof_status_from_legacy
+from tools.dosunit.proof_scope import ProofScope, admit_scope_status
 
 
 @dataclass(frozen=True)
@@ -94,7 +98,14 @@ def discover(project: angr.Project, start: int, size: int, max_blocks: int) -> d
             raise CfgRefusal("edge_outside_declared_function")
         if len(blocks) >= max_blocks:
             raise CfgRefusal("block_limit")
-        irsb = project.factory.block(address, size=start + size - address, opt_level=0).vex
+        try:
+            irsb = lift_cfg_block(project, address, start + size - address)
+        except CfgLiftingRefusal as error:
+            raise CfgRefusal(error.reason.value) from error
+        from tools.dosunit.binary_environment import requires_environment_contract
+
+        if requires_environment_contract(irsb):
+            raise CfgRefusal("external_environment_contract_required")
         if not isinstance(irsb, pyvex.IRSB):
             raise CfgRefusal("non_vex_lifter")
         successors = direct_successors(irsb)
@@ -151,7 +162,7 @@ def lower_blocks(
                     "part": {"kind": "block", "index": 0, "entry_delta": "0x0"},
                     "entry": {"linear": hex(address)},
                     "function_entry": {"linear": hex(address)},
-                    "source": {"jumpkind": block.irsb.jumpkind},
+                    "source": {"jumpkind": block.irsb.jumpkind, "machine_code_size": block.irsb.size},
                     **body,
                 }
             )
@@ -171,6 +182,7 @@ def compare_cfg(
     normalization: dict[int, int] | None = None,
 ) -> dict[str, Any]:
     """Prove matching CFGs including loops by checking every inductive edge relation."""
+    outputs = tuple(dict.fromkeys((*outputs, *OUTPUT_REGS[2:])))
     try:
         oblocks = discover(oracle, *oracle_range, max_blocks)
         cblocks = discover(candidate, *candidate_range, max_blocks)
@@ -200,11 +212,16 @@ def compare_cfg(
         )
     expected = {f"block_{i}": f"oracle:block_{i}" for i in range(len(pairs))}
     verdicts = checked_results(expected, compared, relocation=normalization)
-    status = aggregate(verdicts)
+    backend_status = aggregate(verdicts)
+    admitted = admit_scope_status(proof_status_from_legacy(backend_status) or ProofStatus.UNKNOWN,
+                                 ProofScope.CUTPOINT_SIMULATION)
+    status = Status(legacy_status_for(admitted))
     return {
         "function": {"name": name},
         "status": status,
         "reason": "matched_cfg_induction",
+        "proof_scope": ProofScope.CUTPOINT_SIMULATION,
+        "backend_status": backend_status,
         "block_pairs": [[hex(left), hex(right)] for left, right in pairs],
         "oracle_ssa": ossa,
         "candidate_ssa": cssa,

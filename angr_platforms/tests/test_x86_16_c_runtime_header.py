@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import shutil
+import signal
+import subprocess
+
 import pytest
 from angr_platforms.X86_16.analysis_helpers import InterruptCall, interrupt_service_name
 from angr_platforms.X86_16.lowering.c_runtime_header import (
@@ -8,6 +12,7 @@ from angr_platforms.X86_16.lowering.c_runtime_header import (
     interrupt_helper_declarations_8616,
     is_lowered_runtime_macro_8616,
     render_c_runtime_header_8616,
+    render_near_pointer_arithmetic_macros_8616,
     render_pointer_storage_macros_8616,
     runtime_helper_declaration_8616,
 )
@@ -160,3 +165,85 @@ def test_pointer_storage_macros_share_target_abi(target: str) -> None:
 def test_pointer_storage_macros_refuse_unknown_target() -> None:
     with pytest.raises(ValueError, match="Unsupported pointer-storage target"):
         render_pointer_storage_macros_8616("unknown")
+
+
+@pytest.mark.parametrize("optimization", ["-O0", "-O2"])
+@pytest.mark.parametrize("corruption", [None, "flatten_segments", "word_step", "no_wrap"])
+def test_near_byte_arithmetic_preserves_segments_word_wrap_and_null(tmp_path, optimization, corruption):
+    """Execute offset arithmetic independently of host pointer bits and pointee size."""
+    compiler = shutil.which("gcc")
+    assert compiler is not None, "GCC is required for the pointer representation oracle"
+    source = tmp_path / "near.c"
+    header = render_c_runtime_header_8616("portable-flat")
+    corrupted_additions = {
+        "flatten_segments": "((void *)((uint8_t *)(ptr) + (uint16_t)(bytes)))",
+        "word_step": "NEAR_PTR(dst_seg, (uint16_t)(NEAR_OFFSET(src_seg, ptr) + 2 * (uint16_t)(bytes)))",
+        "no_wrap": "((void *)((uint8_t *)SEG_PTR(dst_seg, NEAR_OFFSET(src_seg, ptr)) + (uint16_t)(bytes)))",
+    }
+    if corruption is not None:
+        header += "#undef NEAR_BYTE_ADD\n#define NEAR_BYTE_ADD(src_seg, dst_seg, ptr, bytes) " + corrupted_additions[corruption] + "\n"
+    source.write_text(header + r"""
+uint8_t inertia_memory[0x30000];
+uint16_t inertia_cs, inertia_ds, inertia_es, inertia_ss;
+int main(int argc, char **argv) {
+    static const uint16_t cases[][4] = {
+        {0x123, 0x432, 17, 6},
+        {0x123, 0x432, 0xfffe, 2},
+        {0x123, 0x432, 0xffff, 3},
+        {0x123, 0x432, 0x1234, 0xfffe},
+        {0x123, 0x432, 0, 0},
+        {0x123, 0x432, 0, 7}
+    };
+    unsigned int i;
+    uint8_t unrelated_native_object = 0;
+    (void)argv;
+    if (argc > 1) {
+        (void)NEAR_BYTE_ADD(0x123, 0x432, &unrelated_native_object, 2);
+        return 90;
+    }
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        uint16_t source_segment = cases[i][0], target_segment = cases[i][1];
+        uint16_t original = cases[i][2], delta = cases[i][3];
+        uint16_t expected = (uint16_t)(original + delta);
+        void *base = original ? SEG_PTR(source_segment, original) : 0;
+        void *result = NEAR_BYTE_ADD(source_segment, target_segment, base, delta);
+        void *expected_pointer = expected ? SEG_PTR(target_segment, expected) : 0;
+        if (NEAR_OFFSET(source_segment, base) != original) return 1;
+        if (result != expected_pointer) return 2;
+        if (NEAR_OFFSET(target_segment, result) != expected) return 3;
+    }
+    return 0;
+}
+""")
+    executable = tmp_path / "near"
+    compiled = subprocess.run(
+        [compiler, "-std=c99", "-pedantic-errors", "-Wall", "-Wextra", "-Werror",
+         optimization, str(source), "-o", str(executable)],
+        capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert compiled.returncode == 0, compiled.stderr
+    executed = subprocess.run(
+        [str(executable)], capture_output=True, text=True, check=False, timeout=10,
+    )
+    if corruption is not None:
+        assert executed.returncode == 2, "the pointer-value oracle must reject the deliberately incorrect helper"
+        return
+    assert executed.returncode == 0, executed.stderr
+    refused = subprocess.run(
+        [str(executable), "unbound"], capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert refused.returncode == -signal.SIGABRT, "an unbound native object must abort, not become a guessed DOS offset"
+
+
+@pytest.mark.parametrize("target", ["msc-dos", "portable-flat"])
+def test_near_arithmetic_macros_share_the_authoritative_target_header(target):
+    """Headers and macro classification must expose one coherent runtime owner."""
+    macros = render_near_pointer_arithmetic_macros_8616(target)
+    assert macros in render_c_runtime_header_8616(target)
+    for name in ("NEAR_OFFSET", "NEAR_PTR", "NEAR_BYTE_ADD"):
+        assert is_lowered_runtime_macro_8616(name)
+
+
+def test_near_arithmetic_macros_refuse_unknown_target():
+    with pytest.raises(ValueError, match="Unsupported near-pointer arithmetic target"):
+        render_near_pointer_arithmetic_macros_8616("unknown")

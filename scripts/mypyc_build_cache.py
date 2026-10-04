@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.machinery
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -17,7 +19,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 
 class _DigestWriter(Protocol):
@@ -89,6 +91,86 @@ def disable_importable_project_extensions(repo_root: Path) -> Iterator[None]:
         if conflicts:
             paths = ", ".join(str(path) for path in sorted(conflicts))
             raise FileExistsError(f"cannot restore parked Python extensions: {paths}")
+
+
+_LIFTER_BACKEND_SOURCE: Path = Path("angr_platforms/angr_platforms/X86_16/lifter_backend.py")
+
+
+class _LifterBackendContract(Protocol):
+    """Owned verifier surface of lifter_backend loaded without package startup."""
+
+    LIFTER_SOURCE: str
+    PACKAGE_BUNDLE: str
+
+    def verified_extension_directory(self, _root: Path, /) -> Path | None:
+        """Return the verified repository extension directory, if current."""
+        ...
+
+    def verified_packaged_extension_directory(self, _package_dir: Path, /) -> Path | None:
+        """Return the verified packaged-bundle extension directory, if current."""
+        ...
+
+
+def _load_lifter_backend_contract(repo_root: Path) -> _LifterBackendContract:
+    """Load the authoritative backend verifier without running package startup.
+
+    ``lifter_backend.py`` is intentionally self-contained so it can be loaded
+    standalone; importing ``angr_platforms.X86_16`` would run backend selection
+    before the isolated bundle exists and fail closed on the missing artifact.
+    """
+    source = repo_root / _LIFTER_BACKEND_SOURCE
+    spec = importlib.util.spec_from_file_location("inertia_lifter_backend_contract", source)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load lifter backend contract from {source}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return cast("_LifterBackendContract", module)  # dynamic importlib module boundary
+
+
+def stage_isolated_vex_extension(*, repo_root: Path, artifact_root: Path) -> Path | None:
+    """Mirror the verified Cython lifter build into the isolated package tree.
+
+    The staged bundle is a byte copy of the verified repository manifest and
+    its extension, rebound to the copied lifter source: the same
+    schema/ABI/source/digest/confinement checks run against the staged files
+    before this call reports success. Any previous bundle is removed first so
+    a missing or outdated source build fails closed instead of reusing stale
+    artifacts. Returns the verified staged extension directory, or None when
+    no verified build can be bound to the copied package.
+    """
+    backend = _load_lifter_backend_contract(repo_root)
+    package_dir = artifact_root.joinpath(*Path(backend.LIFTER_SOURCE).parts[1:-1])
+    bundle = package_dir / backend.PACKAGE_BUNDLE
+    if not bundle.resolve().is_relative_to(artifact_root.resolve()):
+        raise ValueError(f"isolated VEX bundle escapes artifact root: {bundle}")
+    if bundle.is_symlink() or bundle.is_file():
+        bundle.unlink()
+    elif bundle.is_dir():
+        shutil.rmtree(bundle)
+    if backend.verified_extension_directory(repo_root) is None or not package_dir.is_dir():
+        return None
+    cache = repo_root / ".cache" / "cython-vex"
+    try:
+        manifest = json.loads((cache / "active.json").read_text(encoding="utf-8"))
+        relative = manifest["extension"]
+        if not isinstance(relative, str):
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    extension_source = (cache / relative).resolve()
+    extension_target = (bundle / relative).resolve()
+    if not extension_source.is_relative_to(cache.resolve()):
+        return None
+    if not extension_target.is_relative_to(bundle.resolve()):
+        return None
+    extension_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(cache / "active.json", bundle / "active.json")
+    shutil.copyfile(extension_source, extension_target)
+    return backend.verified_packaged_extension_directory(package_dir)
 
 
 def sync_isolated_package_sources(
@@ -265,16 +347,26 @@ def run_compiled_import_smoke(
             "    module_file = module.__file__",
             "    path = '' if module_file is None else os.path.realpath(module_file)",
             "    paths.append((name, path))",
+            "lifter = importlib.import_module('angr_platforms.X86_16.lift_86_16')",
+            "lifter_path = os.path.realpath(lifter.__file__ or '')",
+            "backend = str(importlib.import_module('angr_platforms.X86_16').VEX_BACKEND)",
             "bad_location = [(name, path) for name, path in paths if os.path.commonpath((lib, path)) != lib]",
             "bad_native = [(name, path) for name, path in paths if not path.endswith(extension_suffixes)]",
+            "bad_backend = [] if backend == 'cython' else [backend]",
+            "bad_lifter = [] if lifter_path.endswith(extension_suffixes) and os.path.commonpath((lib, lifter_path)) == lib else [lifter_path]",
             "print(paths)",
-            "raise SystemExit(1 if bad_location or bad_native else 0)",
+            "print((('angr_platforms.X86_16.backend', backend), ('angr_platforms.X86_16.lift_86_16', lifter_path)))",
+            "raise SystemExit(1 if bad_location or bad_native or bad_backend or bad_lifter else 0)",
         )
     )
     result = subprocess.run(
         [str(python_executable), "-c", script],
         cwd=source_path.parent,
-        env={**os.environ, "PYTHONPATH": os.pathsep.join((str(lib_path), str(source_path)))},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join((str(lib_path), str(source_path))),
+            "INERTIA_VEX_BACKEND": "cython",
+        },
         check=False,
         text=True,
         capture_output=True,

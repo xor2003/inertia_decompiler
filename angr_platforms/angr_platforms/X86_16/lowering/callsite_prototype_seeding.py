@@ -11,12 +11,14 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import SimpleNamespace
 from typing import Protocol, cast
 
 from angr.sim_type import SimType, SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
+from archinfo import Arch
 
 from ..callsite_summary import CallsiteSummary8616, summarize_x86_16_callsite
 from .argument_frame_base import msc_calling_convention_for_function_8616
@@ -24,9 +26,13 @@ from .argument_frame_base import msc_calling_convention_for_function_8616
 __all__ = [
     "CallsitePrototypeSeedDecision8616",
     "CallsitePrototypeSeedResult8616",
+    "PhysicalCallsitePrototypeSeed8616",
     "materialize_physical_callsite_prototype_8616",
+    "physical_callsite_prototype_seed_8616",
     "seed_physical_callsite_prototype_8616",
 ]
+
+_SEED_INFO_KEY_8616 = "_inertia_physical_callsite_prototype_seed_8616"
 
 
 class CallsitePrototypeSeedDecision8616(StrEnum):
@@ -51,10 +57,44 @@ class CallsitePrototypeSeedResult8616:
     failure_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class PhysicalCallsitePrototypeSeed8616:
+    """Exact machine-argument prototype owned by an earlier callsite seed."""
+
+    callsite_addr: int
+    target_addr: int | None
+    physical_widths: tuple[int, ...]
+    return_width_bits: int
+
+    def matches(self, summary: CallsiteSummary8616, current: object) -> bool:
+        """Authorize replacing only this unchanged physical projection."""
+        return bool(
+            self.callsite_addr == summary.callsite_addr
+            and self.target_addr == summary.target_addr
+            and self.physical_widths == summary.arg_widths
+            and isinstance(current, SimTypeFunction)
+            and not current.variadic
+            and tuple(arg.size for arg in current.args or ())
+            == tuple(width * 8 for width in reversed(self.physical_widths))
+            and current.returnty is not None
+            and current.returnty.size == self.return_width_bits
+        )
+
+    def as_record(self) -> dict[str, object]:
+        """Store the typed seed using angr FunctionInfo's JSON-safe contract."""
+        return {
+            "schema": 1,
+            "callsite_addr": self.callsite_addr,
+            "target_addr": self.target_addr,
+            "physical_widths": list(self.physical_widths),
+            "return_width_bits": self.return_width_bits,
+        }
+
+
 class _ProjectSurface8616(Protocol):
     """Third-party project fields required to bind an angr prototype."""
 
-    arch: object
+    arch: Arch
 
 
 class _CalleeSurface8616(Protocol):
@@ -63,6 +103,38 @@ class _CalleeSurface8616(Protocol):
     prototype: object | None
     calling_convention: object | None
     is_prototype_guessed: bool
+    info: MutableMapping[str, object]
+
+
+def physical_callsite_prototype_seed_8616(callee: object) -> PhysicalCallsitePrototypeSeed8616 | None:
+    """Read a seed's typed ownership marker from a third-party function."""
+    try:
+        info = cast(_CalleeSurface8616, callee).info
+    except AttributeError:
+        return None
+    if not isinstance(info, Mapping):
+        return None
+    record = info.get(_SEED_INFO_KEY_8616)
+    if not isinstance(record, dict) or set(record) != {
+        "schema", "callsite_addr", "target_addr", "physical_widths", "return_width_bits",
+    }:
+        return None
+    widths = record["physical_widths"]
+    target = record["target_addr"]
+    if not (
+        record["schema"] == 1
+        and type(record["callsite_addr"]) is int
+        and (target is None or type(target) is int)
+        and isinstance(widths, list)
+        and widths
+        and all(type(width) is int and width > 0 for width in widths)
+        and type(record["return_width_bits"]) is int
+    ):
+        return None
+    return PhysicalCallsitePrototypeSeed8616(
+        record["callsite_addr"], target,
+        tuple(cast(list[int], widths)), record["return_width_bits"],
+    )
 
 
 def _physical_stack_type_8616(project: _ProjectSurface8616, width: int) -> SimType | None:
@@ -126,15 +198,23 @@ def materialize_physical_callsite_prototype_8616(
             1,
         )
 
+    return_type = _physical_return_type_8616(typed_project, summary)
+    return_width_bits = return_type.size
+    if return_width_bits is None:
+        raise TypeError("physical callsite seed requires a sized machine return type")
     prototype = SimTypeFunction(
         [cast(SimType, argument_type) for argument_type in argument_types],
-        _physical_return_type_8616(typed_project, summary),
+        return_type,
         arg_names=[f"a{index}" for index in range(len(argument_types))],
         variadic=False,
     ).with_arch(typed_project.arch)
     typed_callee.prototype = prototype
     typed_callee.calling_convention = msc_calling_convention_for_function_8616(project, callee)
     typed_callee.is_prototype_guessed = False
+    typed_callee.info[_SEED_INFO_KEY_8616] = PhysicalCallsitePrototypeSeed8616(
+        summary.callsite_addr, summary.target_addr, summary.arg_widths,
+        return_width_bits,
+    ).as_record()
     return CallsitePrototypeSeedResult8616(
         CallsitePrototypeSeedDecision8616.SEEDED,
         1,

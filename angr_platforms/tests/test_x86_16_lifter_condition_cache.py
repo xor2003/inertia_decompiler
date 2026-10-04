@@ -28,6 +28,7 @@ def test_lifter_condition_cache_deduplicates_without_operand_equality() -> None:
     original_cache = Instruction_ANY._inertia_module_condition_cache
     instruction = Instruction_ANY.__new__(Instruction_ANY)
     instruction.addr = 0x4014
+    instruction.cs = SimpleNamespace(bytes=b"\x90")
     instruction.emu = SimpleNamespace(
         _inertia_current_block_addr=0x4010,
         _inertia_typed_conditions=[],

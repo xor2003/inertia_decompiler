@@ -7,8 +7,8 @@
     "memory_model": "large"
   },
   "scope": {
-    "admitted": ["model.large", "storage.global", "storage.static_local", "calls.far"],
-    "later": ["pointer.far_data", "pointer.far_function", "calls.pointer_return"],
+    "admitted": ["model.large", "storage.global", "storage.static_local", "calls.far", "pointer.far_function"],
+    "later": ["pointer.far_data", "calls.pointer_return"],
     "excluded": [],
     "undecided": []
   },
@@ -17,11 +17,6 @@
       "id": "large_global_calls",
       "construct": "storage_classes",
       "obligations": ["model.large", "storage.global", "storage.static_local", "calls.far"]
-    },
-    {
-      "id": "large_pointer_arguments",
-      "construct": "pointer_memory",
-      "obligations": ["pointer.far_data", "calls.pointer_return"]
     },
     {
       "id": "large_function_pointers",

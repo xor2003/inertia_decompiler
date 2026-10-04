@@ -18,6 +18,7 @@ from ..analysis_helpers import (
 )
 from ..simos_86_16 import get_interrupt_handler_class
 from .gp_word_runtime import GPRegisterRuntimeABI8616, coherent_gp_runtime_header_8616
+from .near_pointer_value_runtime import NearPointerArgumentHelper8616, render_near_pointer_argument_runtime_8616
 
 LOWERED_RUNTIME_HELPER_DECLARATIONS_8616: dict[str, str] = {
     "clock": "clock_t clock(void);",
@@ -48,6 +49,10 @@ LOWERED_RUNTIME_MACROS_8616: frozenset[str] = frozenset(
         "MEM_U16",
         "MEM_U32",
         "MK_FP",
+        "NEAR_BYTE_ADD",
+        NearPointerArgumentHelper8616.SINGLE_EVALUATION.value,
+        "NEAR_OFFSET",
+        "NEAR_PTR",
         "PTR_U16",
         "PTR_U32",
         "SEG_LINEAR",
@@ -154,6 +159,39 @@ def render_pointer_storage_macros_8616(target: str) -> str:
     )
 
 
+def render_near_pointer_arithmetic_macros_8616(target: str) -> str:
+    """Render explicit guest-offset arithmetic, not native element arithmetic.
+
+    Consumers must prove the source and result segment bindings and provide
+    side-effect-free operands. Portable pointers must denote the supplied guest
+    segment's memory view (or null); an unrelated native object aborts rather
+    than contributing host address bits. Native DOS consumers additionally
+    require the result segment to be the native near-data segment. This helper
+    does not establish those bindings or infer a pointee type.
+    """
+    if target not in {"msc-dos", "portable-flat"}:
+        raise ValueError(f"Unsupported near-pointer arithmetic target: {target!r}")
+    if target == "msc-dos":
+        offset = "#define NEAR_OFFSET(seg, ptr) ((uint16_t)(ptr))\n"
+        pointer = "#define NEAR_PTR(seg, off) ((void near *)(uint16_t)(off))\n"
+    else:
+        offset = (
+            "#define NEAR_OFFSET(seg, ptr) ((ptr) == 0 ? (uint16_t)0 : "
+            "((uintptr_t)(ptr) - (uintptr_t)SEG_PTR((seg), 0) <= 0xffffUL ? "
+            "(uint16_t)((uintptr_t)(ptr) - (uintptr_t)SEG_PTR((seg), 0)) : "
+            "(abort(), (uint16_t)0)))\n"
+        )
+        pointer = (
+            "#define NEAR_PTR(seg, off) ((uint16_t)(off) == 0 ? (void *)0 : "
+            "(void *)SEG_PTR((seg), (uint16_t)(off)))\n"
+        )
+    return offset + pointer + (
+        "#define NEAR_BYTE_ADD(src_seg, dst_seg, ptr, bytes) "
+        "NEAR_PTR((dst_seg), (uint16_t)(NEAR_OFFSET((src_seg), (ptr)) + "
+        "(uint16_t)(bytes)))\n"
+    )
+
+
 def render_c_runtime_header_8616(
     target: str | None,
     *,
@@ -197,6 +235,8 @@ def render_c_runtime_header_8616(
             "#define MEM_U16(ptr)       (*(uint16_t *)(ptr))\n"
             "#define MEM_U32(ptr)       (*(uint32_t *)(ptr))\n"
             f"{render_pointer_storage_macros_8616(normalized)}"
+            f"{render_near_pointer_arithmetic_macros_8616(normalized)}"
+            f"{render_near_pointer_argument_runtime_8616(normalized)}"
         )
     if normalized == "portable-flat":
         compiler_helper_declarations = "\n".join(_PORTABLE_COMPILER_RUNTIME_HELPER_DECLARATIONS_8616)
@@ -204,6 +244,7 @@ def render_c_runtime_header_8616(
             "#include <stdbool.h>\n"
             "#include <stddef.h>\n"
             "#include <stdint.h>\n"
+            "#include <stdlib.h>\n"
             "\n"
             "typedef long clock_t;\n"
             "typedef long time_t;\n"
@@ -228,6 +269,8 @@ def render_c_runtime_header_8616(
             "#define MEM_U16(ptr)         (*(uint16_t *)(ptr))\n"
             "#define MEM_U32(ptr)         (*(uint32_t *)(ptr))\n"
             f"{render_pointer_storage_macros_8616(normalized)}"
+            f"{render_near_pointer_arithmetic_macros_8616(normalized)}"
+            f"{render_near_pointer_argument_runtime_8616(normalized)}"
         )
     return gp_header
 
@@ -241,6 +284,7 @@ __all__ = [
     "interrupt_helper_declarations_8616",
     "is_lowered_runtime_macro_8616",
     "render_c_runtime_header_8616",
+    "render_near_pointer_arithmetic_macros_8616",
     "render_pointer_storage_macros_8616",
     "runtime_helper_declaration_8616",
 ]

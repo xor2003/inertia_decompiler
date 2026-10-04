@@ -127,10 +127,12 @@ def test_direct_argument_context_accepts_nonseed_with_closed_caller_evidence(
         "_pre_entry_source_function_ranges_8616",
         lambda project, seeds: ranges,
     )
+    original_evidence_lookup = cli_function_discovery.caller_return_use_evidence_by_addr_8616
     monkeypatch.setattr(
         cli_function_discovery,
         "caller_return_use_evidence_by_addr_8616",
-        lambda project: {target_addr: caller_evidence},
+        lambda project: {target_addr: caller_evidence}
+        if project is source_project else original_evidence_lookup(project),
     )
 
     assert cli_function_discovery.attach_direct_target_argument_evidence_context_8616(
@@ -140,3 +142,4 @@ def test_direct_argument_context_accepts_nonseed_with_closed_caller_evidence(
     )
     assert target_project._inertia_caller_function_ranges_8616 == ranges
     assert target_project._inertia_caller_target_aliases_8616 == (target_addr,)
+    assert cli_function_discovery.caller_return_use_evidence_by_addr_8616(target_project)[target_addr] == caller_evidence

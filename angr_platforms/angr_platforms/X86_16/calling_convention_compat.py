@@ -354,14 +354,42 @@ def _function_target_addrs_8616(function: object) -> set[int]:
     return targets
 
 
-def _caller_sign_extends_byte_return_8616(project: object, function: object) -> bool | None:
-    """Return whether callers prove signed or non-signed AL consumption."""
+def _caller_byte_extension_verdict_8616(project: object, target_addrs: set[int]) -> bool | None:
+    """Classify only complete, consistent caller AL-extension evidence."""
+    # Deferred import: callsite contracts depend on the package semantics initializer.
+    from .caller_return_use_contracts import (
+        ByteReturnExtensionKind8616,
+        CallerReturnUseEvidence8616,
+        CallerReturnUseVerdict8616,
+    )
+    from .callsite_summary import caller_return_use_evidence_by_addr_8616
+
+    evidence_by_addr = caller_return_use_evidence_by_addr_8616(project)
+    extensions = {
+        fact.byte_extension
+        for target_addr in target_addrs
+        if isinstance((evidence := evidence_by_addr.get(target_addr)), CallerReturnUseEvidence8616)
+        and evidence.target_addr == target_addr
+        and evidence.verdict is not CallerReturnUseVerdict8616.UNKNOWN
+        and evidence.fact_census_complete
+        for fact in evidence.facts
+        if fact.verdict is CallerReturnUseVerdict8616.USED
+        and not fact.excluded_recursive_passthrough
+        and fact.extension_complete
+        and fact.byte_extension is not None
+    }
+    if len(extensions) > 1:
+        return None
+    if extensions:
+        return ByteReturnExtensionKind8616.SIGN_EXTEND_AL_TO_AX in extensions
+    return None
+
+
+def _caller_cfg_sign_extension_verdict_8616(project: object, target_addrs: set[int]) -> bool | None:
+    """Inspect already recovered caller CFGs when typed extension facts are absent."""
     try:
         from .analysis_helpers import collect_neighbor_call_targets
-    except Exception:
-        return None
-    target_addrs = _function_target_addrs_8616(function)
-    if not target_addrs:
+    except ImportError:
         return None
     # Dynamic angr project compatibility boundary.
     functions = getattr(getattr(project, "kb", None), "functions", None)
@@ -370,12 +398,12 @@ def _caller_sign_extends_byte_return_8616(project: object, function: object) -> 
     saw_matching_call = False
     try:
         callers = tuple(functions.values())
-    except Exception:
+    except (AttributeError, TypeError):
         return False
     for caller in callers:
         try:
             seeds = tuple(collect_neighbor_call_targets(caller))
-        except Exception:
+        except (AttributeError, KeyError, TypeError, ValueError):
             continue
         for seed in seeds:
             # CallTargetSeed is owned evidence, not part of the angr boundary.
@@ -385,6 +413,17 @@ def _caller_sign_extends_byte_return_8616(project: object, function: object) -> 
             if _callsite_cbw_verdict_8616(caller, seed.callsite_addr) is True:
                 return True
     return False if saw_matching_call else None
+
+
+def _caller_sign_extends_byte_return_8616(project: object, function: object) -> bool | None:
+    """Return whether callers prove signed or non-signed AL consumption."""
+    target_addrs = _function_target_addrs_8616(function)
+    if not target_addrs:
+        return None
+    extension_verdict = _caller_byte_extension_verdict_8616(project, target_addrs)
+    if extension_verdict is not None:
+        return extension_verdict
+    return _caller_cfg_sign_extension_verdict_8616(project, target_addrs)
 
 
 def _callsite_cbw_verdict_8616(caller: object, callsite_addr: int) -> bool | None:

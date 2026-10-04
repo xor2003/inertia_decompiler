@@ -917,7 +917,7 @@ def test_tail_validation_summary_uses_typed_result_status(tmp_path, monkeypatch,
             "summary": {},
             "surface": {
                 "severity": "clean",
-                "merge_gate": "pass",
+                "merge_gate": True,
                 "headline": "whole-tail validation clean",
             },
         },
@@ -937,12 +937,12 @@ def test_tail_validation_summary_uses_typed_result_status(tmp_path, monkeypatch,
     _tail_validation.emit_tail_validation_console_summary([direct_item], {1: direct_result}, binary_path=cod_path)
     direct_metadata = _tail_validation_metadata_payload(capsys.readouterr().err)
 
-    assert direct_metadata["surface"]["severity"] == "changed"
-    assert direct_metadata["surface"]["merge_gate"] == "hold"
-    assert direct_metadata["surface"]["headline"] == "whole-tail validation failed across 1 functions"
+    assert direct_metadata["surface"]["severity"] == "acceptance_failed"
+    assert direct_metadata["surface"]["merge_gate"] is False
+    assert direct_metadata["surface"]["headline"] == "whole-tail acceptance failed across 1 functions; semantic tail checks clean"
 
 
-def test_tail_validation_summary_does_not_let_stale_failed_status_poison_passed_snapshot(
+def test_tail_validation_summary_preserves_passed_snapshot_but_reports_acceptance_failure(
     tmp_path, monkeypatch, capsys
 ):
     cod_path = tmp_path / "COCKPIT.COD"
@@ -957,7 +957,7 @@ def test_tail_validation_summary_does_not_let_stale_failed_status_poison_passed_
             "summary": {},
             "surface": {
                 "severity": "clean",
-                "merge_gate": "pass",
+                "merge_gate": True,
                 "headline": "whole-tail validation clean",
             },
         },
@@ -980,9 +980,9 @@ def test_tail_validation_summary_does_not_let_stale_failed_status_poison_passed_
     _tail_validation.emit_tail_validation_console_summary([direct_item], {1: direct_result}, binary_path=cod_path)
     direct_metadata = _tail_validation_metadata_payload(capsys.readouterr().err)
 
-    assert direct_metadata["surface"]["severity"] == "clean"
-    assert direct_metadata["surface"]["merge_gate"] == "pass"
-    assert direct_metadata["surface"]["headline"] == "whole-tail validation clean"
+    assert direct_metadata["surface"]["severity"] == "acceptance_failed"
+    assert direct_metadata["surface"]["merge_gate"] is False
+    assert direct_metadata["surface"]["headline"] == "whole-tail acceptance failed across 1 functions; semantic tail checks clean"
 
 
 def test_tail_validation_baseline_helpers_round_trip(tmp_path, monkeypatch):

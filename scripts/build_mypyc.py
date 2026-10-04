@@ -25,6 +25,7 @@ from scripts.mypyc_build_cache import (  # noqa: E402
     import_smoke_attestation_matches,
     reconcile_mypyc_build_cache,
     run_compiled_import_smoke,
+    stage_isolated_vex_extension,
     sync_isolated_package_sources,
     write_import_smoke_attestation,
 )
@@ -224,11 +225,19 @@ def _isolated_package_sources() -> dict[str, Path]:
 
 
 def _prepare_isolated_package() -> None:
-    """Make the isolated output a regular importable package tree."""
+    """Make the isolated output a regular importable package tree.
+
+    Source synchronization runs before bundle staging so the staged manifest
+    is always a fresh byte copy bound to the current copied lifter source. A
+    missing or stale verified Cython build leaves no usable bundle and the
+    import smoke then fails closed through the normal backend error.
+    """
+    output_root = REPO_ROOT / MYPYC_LIB_DIR
     sync_isolated_package_sources(
-        output_root=REPO_ROOT / MYPYC_LIB_DIR,
+        output_root=output_root,
         package_sources=_isolated_package_sources(),
     )
+    stage_isolated_vex_extension(repo_root=REPO_ROOT, artifact_root=output_root)
 
 
 def _import_smoke_identity(modules: Iterable[str]) -> str:

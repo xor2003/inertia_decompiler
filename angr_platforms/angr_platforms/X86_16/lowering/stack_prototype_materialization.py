@@ -31,7 +31,7 @@ from angr.sim_type import (
     SimTypePointer,
     SimTypeShort,
 )
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimStackVariable, SimVariable
 
 from ..annotations import ANNOTATION_KEY, stack_layout_annotation_specs_8616
 from ..calling_convention_compat import collect_wide_stack_argument_width_evidence_8616
@@ -1462,7 +1462,7 @@ def materialize_annotated_stack_prototype_8616(
         from .positive_bp_arguments import materialize_positive_bp_arguments_8616
 
         return bool(materialize_positive_bp_arguments_8616(project, codegen))
-    arch = cast(_ProjectArch8616, project).arch
+    arch = cast(_ArchBytes8616 | None, cast(_ProjectArch8616, project).arch)
     typed_func = cast(_PrototypeFunction8616, func)
     authoritative_prototype = authoritative_function_prototype_8616(
         project,
@@ -1475,7 +1475,7 @@ def materialize_annotated_stack_prototype_8616(
         codegen, typed_cfunc, current_args, current_arg_names
     )
     entry_ctx = _AnnotatedEntryCtx8616(
-        codegen=codegen,
+        codegen=typed_codegen,
         arch=arch,
         current_surfaces_by_offset=current_surfaces_by_offset,
         current_args=tuple(current_args),
@@ -1649,12 +1649,12 @@ def _current_arg_surfaces_8616(
 class _AnnotatedEntryCtx8616:
     """Read-only annotation context shared by per-entry materialization."""
 
-    codegen: object
-    arch: object
+    codegen: _StackPrototypeCodegen8616
+    arch: _ArchBytes8616 | None
     current_surfaces_by_offset: Mapping[int, tuple[SimType, str | None]]
-    current_args: tuple[object, ...]
-    current_arg_names: tuple[object, ...]
-    annotated_names: tuple[object, ...]
+    current_args: tuple[SimType, ...]
+    current_arg_names: tuple[str | None, ...]
+    annotated_names: tuple[str | None, ...]
     normalized_header_widths: tuple[int, ...]
     annotated_object_widths: Mapping[int, int]
 
@@ -1664,7 +1664,7 @@ class _AnnotatedEntryResult8616:
     """One materialized annotated entry shared back to the materializer."""
 
     cvar: structured_c.CVariable | None
-    variable: object
+    variable: SimVariable | None
     arg_type: SimType
     name: str
     width: int

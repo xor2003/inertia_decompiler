@@ -93,3 +93,27 @@ def test_register_name_normalization_does_not_retain_a_stale_alias():
     state.observe(IRInstr("MOV", upper, (IRValue(MemSpace.CONST, const=0x1234, size=2),)))
     state.observe(IRInstr("MOV", lower, (IRValue(MemSpace.REG, name="bx", size=2),)))
     assert state.constant(upper) is None
+
+
+@pytest.mark.parametrize("prefix,expected", [
+    ("b4 12 b0 34", 0x1234),
+    ("b8 cd ab b0 34", 0xAB34),
+    ("b8 cd ab b4 12", 0x12CD),
+])
+def test_sibling_byte_constants_reach_stack_restore_fact(prefix: str, expected: int) -> None:
+    """Native partial writes must retain untouched proven bytes in Alias facts."""
+    artifact = _lift_function(bytes.fromhex(prefix + " 50 5b c3"))
+    restored = build_x86_16_stack_register_restore_artifact_8616(
+        artifact, tracked_registers=frozenset({"ax", "bx"}),
+    )
+    facts = [fact for fact in restored.facts
+             if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN]
+    assert len(facts) == 1
+    assert facts[0].saved_register == "ax"
+    assert facts[0].restore_register == "bx"
+    assert facts[0].constant_value == expected
+    assert restored.summary["raw_fact_count"] == 1
+    assert restored.summary["normalized_fact_count"] == 1
+    assert restored.summary["classified_fact_count"] == 1
+    assert restored.summary["materialized_count"] == 1
+    assert restored.summary["failure_count"] == 0

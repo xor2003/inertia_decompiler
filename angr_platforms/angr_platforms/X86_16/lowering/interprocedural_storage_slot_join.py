@@ -22,6 +22,7 @@ from .interprocedural_storage_contracts import (
     StorageTrialFailureKind8616,
     StorageTrialRole8616,
     StorageTrialSignedness8616,
+    StorageTrialValueClass8616,
 )
 
 __all__ = ["join_storage_slot_contracts_8616", "ordered_storage_trials_8616"]
@@ -97,6 +98,9 @@ def _slot_from_pieces_8616(
     pieces: tuple[StorageTrial8616, ...],
 ) -> tuple[StorageSlotContract8616 | None, StorageTrialFailureKind8616 | None]:
     """Build one slot only when all physical pieces agree on typed meaning."""
+    if not pieces:
+        return None, StorageTrialFailureKind8616.INCOMPLETE_TRIAL
+    first_piece = pieces[0]
     if role is not StorageTrialRole8616.INPUT and len(pieces) > 1:
         provenances = {item.provenance for item in pieces}
         if len(provenances) != 1 or None in provenances:
@@ -107,13 +111,23 @@ def _slot_from_pieces_8616(
     value_classes = {item.value_class for item in pieces}
     if len(value_classes) != 1:
         return None, StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
+    pointee_widths = {item.pointee_width_bytes for item in pieces}
+    if len(pointee_widths) != 1:
+        return None, StorageTrialFailureKind8616.POINTEE_WIDTH_CONFLICT
+    pointee_width_bytes = next(iter(pointee_widths))
+    if (
+        pointee_width_bytes is not None
+        and first_piece.value_class is not StorageTrialValueClass8616.POINTER
+    ):
+        return None, StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
     return (
         StorageSlotContract8616(
             role=role,
-            logical_index=pieces[0].logical_index,
+            logical_index=first_piece.logical_index,
             pieces=tuple(item.storage for item in pieces),
             signedness=signedness,
-            value_class=pieces[0].value_class,
+            value_class=first_piece.value_class,
+            pointee_width_bytes=pointee_width_bytes,
         ),
         None,
     )
@@ -161,6 +175,8 @@ def _join_one_site_8616(
             return StorageTrialFailureKind8616.SIGNEDNESS_CONFLICT
         if left.value_class is not right.value_class:
             return StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
+        if left.pointee_width_bytes != right.pointee_width_bytes:
+            return StorageTrialFailureKind8616.POINTEE_WIDTH_CONFLICT
         joined[index] = replace(left, signedness=signedness)
     return None
 

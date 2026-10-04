@@ -160,16 +160,28 @@ def rebind_stack_aggregate_views_8616(
 ) -> StackAggregateViewRebindReport8616:
     """Unify caller-proven aggregate views without reinterpreting other storage.
 
-    The caller must already establish one frame partition and apply its array
-    type to every candidate. Preserve reference-site tags while replacing the
-    variable identity, then retire only those consumed alias declarations.
+    The caller establishes one frame partition and types its full-width views.
+    A narrower view is included only when the coordinate owner explicitly
+    recorded its exact variable identity as an alias of this canonical object.
+    Preserve reference-site tags and retire only consumed alias declarations.
     """
     boundary = cast(_AggregateViewBoundary8616, codegen)
+    projection = stack_variable_coordinate_registry_8616(codegen).for_variable(canonical.variable)
+    proven_aliases = (
+        projection.equivalent_variables
+        if projection is not None and projection.variable is canonical.variable
+        else ()
+    )
     aliases = {
         id(candidate.variable): candidate.variable
         for candidate in candidates
         if candidate.variable is not canonical.variable
     }
+    aliases.update(
+        (id(variable), variable)
+        for variable in proven_aliases
+        if variable is not canonical.variable
+    )
     replaced: set[int] = set()
     consumed: set[int] = set()
 

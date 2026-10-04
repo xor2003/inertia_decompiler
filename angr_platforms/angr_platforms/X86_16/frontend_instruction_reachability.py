@@ -13,11 +13,18 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Protocol, cast
 
+from angr.errors import AngrError, SimEngineError
+from pyvex.errors import PyVEXError
+
 from .frontend_block_inventory import (
     DecodedBlockRequest8616,
     DecodedBlockStatus8616,
     collect_decoded_block_evidence_8616,
     decoded_block_instructions_8616,
+)
+from .frontend_block_partition import (
+    FrontendBlockPartitionArtifact8616,
+    partition_decoded_blocks_8616,
 )
 from .frontend_capstone_decode import DirectCapstoneBlock8616
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
@@ -93,6 +100,9 @@ class InstructionReachabilityEvidence8616:
     materialized_count: int
     failure_count: int
     blocks: tuple[object, ...] = dataclass_field(default=(), compare=False, repr=False)
+    block_partition: FrontendBlockPartitionArtifact8616 | None = dataclass_field(
+        default=None, compare=False, repr=False,
+    )
 
     @property
     def complete(self) -> bool:
@@ -212,7 +222,9 @@ def _visit_reachable_block_8616(
             block_addr,
             opt_level=0,
         )
-    except Exception:  # angr exposes several backend-specific decode failures.
+    except (AngrError, SimEngineError, PyVEXError, RuntimeError, ValueError, KeyError):
+        # Engine decode failures are SimError, not AngrError. Preserve the
+        # missing-byte obligation in the census, including cached failures.
         unresolved.add(block_addr)
         return ()
     block = decoded.block
@@ -238,7 +250,7 @@ def _visit_reachable_block_8616(
     if successor_unresolved:
         unresolved.add(block_addr)
     successor_edges.update((block_addr, successor) for successor in successors)
-    return successors
+    return tuple(sorted(successors))
 
 
 def collect_instruction_reachability_8616(
@@ -282,19 +294,27 @@ def collect_instruction_reachability_8616(
             if successor not in visited:
                 queue.append(successor)
 
+    partition = partition_decoded_blocks_8616(
+        tuple(reachable_blocks[address] for address in sorted(reachable_blocks)),
+        tuple(sorted(successor_edges)),
+        region_start=region_start,
+        region_end=region_end,
+    )
+    unresolved.update(fact.block_addr for fact in partition.facts if fact.failure is not None)
     failure_count = len(unresolved)
     classified_count = len(visited)
     evidence = InstructionReachabilityEvidence8616(
         reachable_block_addrs=tuple(sorted(visited)),
         reachable_instruction_addrs=tuple(sorted(reachable_instructions)),
         unresolved_block_addrs=tuple(sorted(unresolved)),
-        successor_edges=tuple(sorted(successor_edges)),
+        successor_edges=partition.successor_edges,
         raw_fact_count=classified_count,
         normalized_fact_count=classified_count,
         classified_fact_count=classified_count,
         materialized_count=classified_count - failure_count,
         failure_count=failure_count,
-        blocks=tuple(reachable_blocks[address] for address in sorted(reachable_blocks)),
+        blocks=partition.blocks,
+        block_partition=partition,
     )
     cache[cache_key] = evidence
     return evidence

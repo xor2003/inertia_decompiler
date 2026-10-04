@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 
 import inertia_decompiler.cache as recovery_cache
@@ -143,7 +144,13 @@ def test_fast_catalog_prefers_complete_pre_entry_source_evidence(monkeypatch):
     assert function_discovery._source_region_catalog_evidence_8616(project) == evidence
 
 
-def test_source_catalog_retries_only_failed_classified_entries(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "recoverable_error",
+    [function_discovery._AnalysisTimeout, function_discovery.FuturesTimeoutError, KeyError],
+)
+def test_source_catalog_retries_only_failed_classified_entries(
+    monkeypatch, tmp_path, recoverable_error
+):
     binary = tmp_path / "sample.exe"
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
@@ -152,7 +159,7 @@ def test_source_catalog_retries_only_failed_classified_entries(monkeypatch, tmp_
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=0x200,
+                max_addr=0x1200,
             )
         ),
     )
@@ -164,7 +171,7 @@ def test_source_catalog_retries_only_failed_classified_entries(monkeypatch, tmp_
         attempts[candidate_addr] = attempts.get(candidate_addr, 0) + 1
         exact_regions[candidate_addr] = exact_region
         if candidate_addr == 0x1050 and attempts[candidate_addr] == 1:
-            raise function_discovery._AnalysisTimeout
+            raise recoverable_error
         function = SimpleNamespace(addr=candidate_addr)
         recovered_functions[candidate_addr] = function
         return SimpleNamespace(), function
@@ -191,6 +198,71 @@ def test_source_catalog_retries_only_failed_classified_entries(monkeypatch, tmp_
     )
     assert evidence.complete is True
     assert evidence.failed_addrs == ()
+
+
+def test_source_catalog_does_not_silence_unexpected_candidate_error(monkeypatch, tmp_path):
+    binary = tmp_path / "sample.exe"
+    binary.write_bytes(b"MZ")
+    project = SimpleNamespace(
+        entry=0x1100,
+        loader=SimpleNamespace(
+            main_object=SimpleNamespace(binary=binary, linked_base=0x1000, max_addr=0x1200)
+        ),
+    )
+
+    def recover_candidate(_project, **_kwargs):
+        raise RuntimeError("candidate defect")
+
+    monkeypatch.setattr(function_discovery, "_recover_candidate_with_timeout", recover_candidate)
+
+    with pytest.raises(RuntimeError, match="candidate defect"):
+        function_discovery._recover_pre_entry_source_catalog_8616(
+            project,
+            source_seeds=[0x1000],
+            timeout=10,
+            per_function_timeout=2,
+        )
+
+
+@pytest.mark.parametrize(
+    "recoverable_error",
+    [function_discovery._AnalysisTimeout, function_discovery.FuturesTimeoutError, KeyError],
+)
+def test_cached_candidate_refuses_only_known_recovery_errors(monkeypatch, recoverable_error):
+    def recover_candidate(_project, **_kwargs):
+        raise recoverable_error
+
+    monkeypatch.setattr(function_discovery, "_recover_candidate_with_timeout", recover_candidate)
+
+    assert function_discovery._recover_cached_pair_once_8616(
+        SimpleNamespace(entry=0x1100),
+        0x1000,
+        image_end=0x1200,
+        metadata=None,
+        region_span=0x100,
+        candidate_timeout=2,
+        binary_path="sample.exe",
+        linked_base=0x1000,
+    ) is None
+
+
+def test_cached_candidate_does_not_silence_unexpected_error(monkeypatch):
+    def recover_candidate(_project, **_kwargs):
+        raise RuntimeError("cached candidate defect")
+
+    monkeypatch.setattr(function_discovery, "_recover_candidate_with_timeout", recover_candidate)
+
+    with pytest.raises(RuntimeError, match="cached candidate defect"):
+        function_discovery._recover_cached_pair_once_8616(
+            SimpleNamespace(entry=0x1100),
+            0x1000,
+            image_end=0x1200,
+            metadata=None,
+            region_span=0x100,
+            candidate_timeout=2,
+            binary_path="sample.exe",
+            linked_base=0x1000,
+        )
 
 
 def test_binary_padding_entry_aliases_cover_nop_run_before_prologue():
@@ -404,7 +476,7 @@ def test_source_catalog_records_padding_alias_caller_return_evidence(monkeypatch
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(image) - 1,
+                max_addr=0x1000 + len(image) - 1,
             ),
         ),
     )

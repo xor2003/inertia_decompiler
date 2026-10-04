@@ -1438,50 +1438,6 @@ class _SharedBodyBuilder8616:
         return _combine_condition_outcomes_8616(materialized, taken, fallthrough, self.codegen)
 
 
-def _lower_shared_body_wide_8616(
-    codegen: object,
-    result: CExpression,
-    consumed_conditions: tuple[ConditionIR, ...],
-) -> CExpression | None:
-    """Lower call-output fields and require a proven wide call-return chain."""
-    lowering = lower_call_output_stack_fields_in_condition_8616(codegen, result, consumed_conditions)
-    try:
-        wide_lowering = lower_wide_call_return_condition_chain_8616(
-            codegen,
-            lowering.expression,
-            consumed_conditions,
-        )
-    except Exception:
-        if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") == "1":
-            log.exception("wide call-return condition lowering failed")
-        raise
-    _debug_condition_chain_8616(
-        "shared-body-expression-lowered",
-        expression_tree=_condition_debug_tree_8616(wide_lowering.expression),
-        lowering_stats=lowering.stats,
-        wide_lowering_stats=wide_lowering.stats,
-    )
-    wide_stats = wide_lowering.stats
-    if (
-        wide_stats.raw_fact_count != 1
-        or wide_stats.normalized_fact_count != 1
-        or wide_stats.classified_fact_count != 1
-        or wide_stats.materialized_count != 1
-        or wide_stats.failure_count != 0
-    ):
-        _debug_condition_chain_8616(
-            "shared-body-wide-proof-refused",
-            wide_lowering_stats=wide_stats,
-        )
-        return None
-    if wide_lowering.consumed_call is not None:
-        prune_materialized_wide_condition_call_carrier_8616(
-            codegen,
-            wide_lowering.consumed_call,
-        )
-    return wide_lowering.expression
-
-
 def _materialize_cfg_shared_body_condition_chain_expr_8616(
     project: object,
     codegen: object,
@@ -1534,7 +1490,41 @@ def _materialize_cfg_shared_body_condition_chain_expr_8616(
         consumed_sources=tuple(condition.src_insn for condition in consumed_conditions),
         expression_tree=_condition_debug_tree_8616(result),
     )
-    return _lower_shared_body_wide_8616(codegen, result, tuple(consumed_conditions))
+    # The CFG shape is owned here; the typed DX:AX join remains Lowering-owned.
+    consumed = tuple(consumed_conditions)
+    lowering = lower_call_output_stack_fields_in_condition_8616(codegen, result, consumed)
+    try:
+        wide_lowering = lower_wide_call_return_condition_chain_8616(
+            codegen,
+            lowering.expression,
+            consumed,
+        )
+    except Exception:
+        if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") == "1":
+            log.exception("wide call-return condition lowering failed")
+        raise
+    _debug_condition_chain_8616(
+        "shared-body-expression-lowered",
+        expression_tree=_condition_debug_tree_8616(wide_lowering.expression),
+        lowering_stats=lowering.stats,
+        wide_lowering_stats=wide_lowering.stats,
+    )
+    wide_stats = wide_lowering.stats
+    if (
+        wide_stats.raw_fact_count != 1
+        or wide_stats.normalized_fact_count != 1
+        or wide_stats.classified_fact_count != 1
+        or wide_stats.materialized_count != 1
+        or wide_stats.failure_count != 0
+    ):
+        _debug_condition_chain_8616(
+            "shared-body-wide-proof-refused",
+            wide_lowering_stats=wide_stats,
+        )
+        return None
+    if wide_lowering.consumed_call is not None:
+        prune_materialized_wide_condition_call_carrier_8616(codegen, wide_lowering.consumed_call)
+    return wide_lowering.expression
 
 
 def _shared_body_target_8616(

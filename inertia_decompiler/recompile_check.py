@@ -340,6 +340,7 @@ def _probe_kvikdos_execution_8616(
 def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileCheckResult:
     """Require an executable DOS toolchain before checking the emitted C."""
     def _impl() -> RecompileCheckResult:
+        """Keep compiler intermediate files on the case's writable DOS drive."""
         kvikdos = _resolve_kvikdos_path()
         if kvikdos is None:
             compile_payload = _compile_input_payload_8616(c_text, target=target)
@@ -394,6 +395,9 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
             "--path-dos=e:\\BIN",
             "--env=INCLUDE=E:\\INCLUDE",
             "--env=LIB=E:\\LIB",
+            # Host TMP is not a DOS path, and the compiler tree may be read-only.
+            # C: is the per-check writable case mount, not the compiler volume.
+            "--env=TMP=C:\\",
             "--prog=e:\\BIN\\CL.EXE",
             r"e:\BIN\CL.EXE",
             "/nologo",

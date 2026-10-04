@@ -124,17 +124,21 @@ def normalize_indexed_guard_relation_8616(
     condition: ConditionIR,
     identity: IndexedInductionSourceIdentity8616,
 ) -> tuple[IndexedLoopGuardRelation8616, object] | None:
-    """Normalize only unsigned ``index < bound``/``index >= bound`` forms."""
+    """Normalize strict bound forms while preserving comparison signedness."""
     if _condition_value_matches_8616(condition.lhs, identity):
         relation = {
             "ult": IndexedLoopGuardRelation8616.UNSIGNED_LT,
             "uge": IndexedLoopGuardRelation8616.UNSIGNED_GE,
+            "slt": IndexedLoopGuardRelation8616.SIGNED_LT,
+            "sge": IndexedLoopGuardRelation8616.SIGNED_GE,
         }.get(condition.op, IndexedLoopGuardRelation8616.OTHER)
         return relation, condition.rhs
     if _condition_value_matches_8616(condition.rhs, identity):
         relation = {
             "ugt": IndexedLoopGuardRelation8616.UNSIGNED_LT,
             "ule": IndexedLoopGuardRelation8616.UNSIGNED_GE,
+            "sgt": IndexedLoopGuardRelation8616.SIGNED_LT,
+            "sle": IndexedLoopGuardRelation8616.SIGNED_GE,
         }.get(condition.op, IndexedLoopGuardRelation8616.OTHER)
         return relation, condition.lhs
     return None

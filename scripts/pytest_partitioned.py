@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import tempfile
 import time
 from collections import Counter
@@ -57,6 +56,7 @@ else:
     from pytest_source_state import source_tree_snapshot
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
+DEFAULT_WORKER_COUNT: int = 3
 
 
 class PytestOutcome(StrEnum):
@@ -337,11 +337,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--inventory-json", type=Path, required=True)
     parser.add_argument("--history-json", type=Path)
     parser.add_argument("--summary-json", type=Path, required=True)
-    parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 1) - 1))
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKER_COUNT)
     parser.add_argument(
         "--heavy-workers",
         type=int,
-        default=default_heavy_worker_count(max(1, (os.cpu_count() or 1) - 1)),
+        default=default_heavy_worker_count(DEFAULT_WORKER_COUNT),
     )
     parser.add_argument("--heavy-shards", type=int, default=16)
     parser.add_argument("--max-rss-mib", type=int, default=2048)

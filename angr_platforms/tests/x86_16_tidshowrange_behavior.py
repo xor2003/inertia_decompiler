@@ -125,6 +125,18 @@ int main(void) {
 """
 
 
+def _sanitized_execution_command(executable: Path) -> list[str]:
+    """Hide host-wide loader injections that prevent ASan from starting first."""
+    command = [str(executable)]
+    preload_file = Path("/etc/ld.so.preload")
+    if preload_file.is_file() and preload_file.read_text(encoding="utf-8").strip():
+        return [
+            "bwrap", "--ro-bind", "/", "/", "--ro-bind", "/dev/null", str(preload_file),
+            "--dev", "/dev", "--proc", "/proc", "--", *command,
+        ]
+    return command
+
+
 def assert_tidshowrange_behavior(generated_c: str, tmp_path: Path) -> None:
     """Check unchanged generated C across all five cases and 180 input combinations."""
     executable = tmp_path / "tidshowrange-behavior"
@@ -135,5 +147,8 @@ def assert_tidshowrange_behavior(generated_c: str, tmp_path: Path) -> None:
         input=_PRELUDE + generated_c + _RUNTIME, capture_output=True, text=True, check=False, timeout=30,
     )
     assert compiled.returncode == 0, f"TIDShowRange compilation failed: {compiled.stderr}"
-    executed = subprocess.run([str(executable)], capture_output=True, text=True, check=False, timeout=5)
+    executed = subprocess.run(
+        _sanitized_execution_command(executable), capture_output=True, text=True,
+        check=False, timeout=5,
+    )
     assert executed.returncode == 0, f"TIDShowRange behavior failed: {executed.stderr}"

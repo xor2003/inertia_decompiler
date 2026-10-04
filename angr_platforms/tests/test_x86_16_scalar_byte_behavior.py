@@ -14,6 +14,7 @@ _PRELUDE = """
 #include <stdint.h>
 #include <stdio.h>
 unsigned long inertia_esi, inertia_edi;
+uint16_t inertia_si, inertia_di;
 """
 _HARNESS = r"""
 int main(void)
@@ -25,12 +26,16 @@ int main(void)
     for (unsigned b = 0; b < 256; ++b) {
         inertia_esi = seeds[s];
         inertia_edi = seeds[d];
+        inertia_si = (uint16_t)seeds[s];
+        inertia_di = (uint16_t)seeds[d];
         uint8_t expected = (uint8_t)(a + b);
         uint8_t actual = (uint8_t)add_sc((signed char)a, (unsigned char)b);
-        if (actual != expected || inertia_esi != seeds[s] || inertia_edi != seeds[d]) {
+        if (actual != expected || inertia_esi != seeds[s] || inertia_edi != seeds[d]
+            || inertia_si != (uint16_t)seeds[s] || inertia_di != (uint16_t)seeds[d]) {
             fprintf(stderr, "byte-add mismatch: a=%u b=%u expected=%u actual=%u "
-                    "esi=%08lx/%08lx edi=%08lx/%08lx\n", a, b, expected, actual,
-                    inertia_esi, seeds[s], inertia_edi, seeds[d]);
+                    "esi=%08lx/%08lx edi=%08lx/%08lx si=%04x/%04x di=%04x/%04x\n",
+                    a, b, expected, actual, inertia_esi, seeds[s], inertia_edi, seeds[d],
+                    inertia_si, (uint16_t)seeds[s], inertia_di, (uint16_t)seeds[d]);
             return 1;
         }
     }
@@ -81,7 +86,9 @@ def test_byte_add_oracle_accepts_valid_abi_storage(tmp_path: Path, setup: str) -
     "inertia_esi &= 65535; return a + b;",
     "inertia_edi ^= 1; return a + b;",
     "inertia_edi &= 65535; return a + b;",
-], ids=["subtract", "constant", "lost-sign-bit", "si-low", "si-high", "di-low", "di-high"])
+    "inertia_si ^= 1; return a + b;",
+    "inertia_di ^= 1; return a + b;",
+], ids=["subtract", "constant", "lost-sign-bit", "esi-low", "esi-high", "edi-low", "edi-high", "si", "di"])
 def test_byte_add_oracle_rejects_corruption(tmp_path: Path, body: str) -> None:
     with pytest.raises(AssertionError, match="byte-add execution failed"):
         assert_scalar_byte_add_behavior(_function(body), tmp_path)

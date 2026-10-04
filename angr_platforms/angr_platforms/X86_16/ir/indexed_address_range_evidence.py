@@ -184,11 +184,17 @@ def _validate_guard_loop_and_access_8616(
             IndexedLoopRangeFailureKind8616.GUARD_UNPROVEN,
             "typed loop guard or its exact site is absent",
         )
-    if not guard.proves_strict_unsigned_continue:
+    signed_bound_proven = (
+        candidate.upper_bound is not None
+        and guard.proves_positive_signed_bound(
+            candidate.upper_bound, candidate.source.index_value.size, candidate.induction_source,
+        )
+    )
+    if not guard.proves_strict_unsigned_continue and not signed_bound_proven:
         return _failure_8616(
             candidate,
-            IndexedLoopRangeFailureKind8616.GUARD_NOT_STRICT_UNSIGNED,
-            "continued edge is not a strict unsigned upper-bound guard",
+            IndexedLoopRangeFailureKind8616.GUARD_NOT_STRICT_BOUND,
+            "continued edge lacks a strict unsigned or positive signed bound proof",
         )
     loop = candidate.natural_loop
     if loop is None or not loop.blocks or not loop.single_entry:
@@ -284,6 +290,14 @@ def _validate_candidate_8616(
     assert step is not None and step_site is not None and step_write is not None
     assert upper_bound is not None and guard_site is not None and guard is not None
     assert access_site is not None and loop is not None
+    census = candidate.induction_write_census
+    if census is None or not census.matches_lifetime(
+        function_addr, canonical, init_write, step_write, loop.blocks, loop.header_block_addr,
+    ):
+        return _failure_8616(
+            candidate, IndexedLoopRangeFailureKind8616.INDUCTION_MUTATION_UNPROVEN,
+            "exact induction lifetime census is absent, incomplete or mismatched",
+        )
     fact = IndexedLoopRangeFact8616(
         source,
         canonical,
@@ -298,6 +312,7 @@ def _validate_candidate_8616(
         guard,
         init_write,
         step_write,
+        census,
     )
     if not fact.complete:
         return _failure_8616(

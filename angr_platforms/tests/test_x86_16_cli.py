@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import inspect
 import io
+import itertools
 import os
 import subprocess
 import sys
@@ -939,6 +940,60 @@ def _fake_stable_tail_validation() -> dict[str, object]:
             "postprocess": {"status": "stable", "changed": False},
         }
     }
+
+
+_CLI_MOCK_EXE_BASE = 0x10000
+_CLI_MOCK_EXE_IMAGE = b"\x90" * 0x400
+
+
+def _mock_cli_exe_main_object(binary: object) -> SimpleNamespace:
+    """Return a ``main_object`` loader double honoring the CLE memory contract.
+
+    ``max_addr`` is the absolute inclusive top of the loaded image and
+    ``memory.load`` is keyed relative to ``linked_base`` — the contract
+    ``cli_function_discovery`` reads through
+    ``_x86_16_image_relative_extent_8616``. Reads outside the backed image
+    raise ``KeyError``, matching ``Clemory.load``.
+    """
+    image = _CLI_MOCK_EXE_IMAGE
+
+    def _load(offset: int, size: int) -> bytes:
+        end = offset + size
+        if offset < 0 or size < 0 or end > len(image):
+            raise KeyError(offset)
+        return image[offset:end]
+
+    return SimpleNamespace(
+        binary=binary,
+        linked_base=_CLI_MOCK_EXE_BASE,
+        max_addr=_CLI_MOCK_EXE_BASE + len(image) - 1,
+        memory=SimpleNamespace(load=_load),
+    )
+
+
+def _mock_cli_exe_loader(binary: object) -> SimpleNamespace:
+    """Return a ``loader`` double honoring the CLE memory contract.
+
+    Wraps :func:`_mock_cli_exe_main_object` and adds the loader-wide
+    ``memory.load`` used by slice/asm fallback lanes. Unlike the main object's
+    Clemory (keyed relative to ``linked_base``), the loader Clemory is keyed by
+    absolute virtual addresses, so backed bytes live at
+    ``linked_base + offset``.
+    """
+    main_object = _mock_cli_exe_main_object(binary)
+    base = main_object.linked_base
+    image = _CLI_MOCK_EXE_IMAGE
+
+    def _load(addr: int, size: int) -> bytes:
+        end = addr + size
+        if size < 0 or not (base <= addr and end <= base + len(image)):
+            raise KeyError(addr)
+        return image[addr - base : end - base]
+
+    return SimpleNamespace(
+        main_object=main_object,
+        memory=SimpleNamespace(load=_load),
+    )
 
 
 def test_emit_function_timing_summary_orders_slowest_first(capsys):
@@ -2019,7 +2074,7 @@ def test_recover_direct_addr_function_prefers_candidate_recovery_for_x86_16(monk
     project = SimpleNamespace(
         entry=0x11423,
         arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x4000)),
+        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x14000)),
     )
     expected_cfg = SimpleNamespace()
     expected_func = SimpleNamespace(addr=0x1196F)
@@ -2103,7 +2158,7 @@ def test_recover_direct_addr_function_rebases_interior_addr_to_sidecar_entry(mon
     project = SimpleNamespace(
         entry=0x11423,
         arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x4000)),
+        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x14000)),
     )
     lst_metadata = LSTMetadata(data_labels={}, code_labels={}, absolute_addrs=True)
     expected_cfg = SimpleNamespace()
@@ -2987,7 +3042,7 @@ def test_rank_exe_function_seeds_respects_known_code_windows(monkeypatch):
         _inertia_lst_metadata=metadata,
         loader=SimpleNamespace(
             main_object=SimpleNamespace(
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 linked_base=0x1000,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
                 mz_segment_spans=(),
@@ -3032,7 +3087,7 @@ def test_rank_exe_function_seeds_excludes_signature_matched_library_labels(monke
         _inertia_lst_metadata=metadata,
         loader=SimpleNamespace(
             main_object=SimpleNamespace(
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 linked_base=0x1000,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: bytes(code)),
                 mz_segment_spans=(),
@@ -3066,7 +3121,7 @@ def test_rank_exe_function_seeds_prioritizes_entry_window_call_targets(monkeypat
         entry=entry,
         loader=SimpleNamespace(
             main_object=SimpleNamespace(
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 linked_base=0x1000,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: bytes(code)),
                 mz_segment_spans=(),
@@ -3105,7 +3160,7 @@ def test_rank_exe_function_seeds_uses_far_call_relocation_targets(monkeypatch):
         entry=entry,
         loader=SimpleNamespace(
             main_object=SimpleNamespace(
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 linked_base=0x1000,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: bytes(code)),
                 mz_segment_spans=(),
@@ -3139,7 +3194,7 @@ def test_rank_exe_function_seeds_keeps_direct_call_target_without_frame_prologue
         arch=Arch86_16(),
         loader=SimpleNamespace(
             main_object=SimpleNamespace(
-                max_addr=len(code) - 1,
+                max_addr=base + len(code) - 1,
                 linked_base=base,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: bytes(code)),
                 mz_segment_spans=(),
@@ -3170,7 +3225,7 @@ def test_rank_exe_function_seeds_keeps_unconfirmed_near_call_only_labels_low_pri
         arch=Arch86_16(),
         loader=SimpleNamespace(
             main_object=SimpleNamespace(
-                max_addr=len(code) - 1,
+                max_addr=base + len(code) - 1,
                 linked_base=base,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: bytes(code)),
                 mz_segment_spans=(),
@@ -3214,7 +3269,7 @@ def test_rank_exe_function_seeds_uses_recovery_labels_when_visible_catalog_is_em
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -3253,7 +3308,7 @@ def test_discover_ranked_binary_offsets_auto_merges_conservative_rizin_seeds(mon
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
             )
         ),
     )
@@ -3321,7 +3376,7 @@ def test_discover_ranked_binary_offsets_auto_falls_back_to_angr_when_rizin_unava
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
             )
         ),
     )
@@ -3390,7 +3445,7 @@ def test_rank_exe_function_seeds_prefers_bounded_metadata_spans_over_tiny_entry_
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -3418,7 +3473,7 @@ def test_recover_seeded_exe_functions_reuses_existing_project_before_rebuild(mon
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -3456,7 +3511,7 @@ def test_recover_seeded_exe_functions_keeps_ranked_seeds_ahead_of_neighbor_follo
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -3508,7 +3563,7 @@ def test_recover_seeded_exe_functions_includes_prologue_scan_candidates(monkeypa
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=base,
-                max_addr=len(code) - 1,
+                max_addr=base + len(code) - 1,
                 memory=SimpleNamespace(load=_load),
             )
         ),
@@ -3561,7 +3616,7 @@ def test_recover_seeded_exe_functions_scans_tiny_entry_body_for_direct_calls(mon
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=base,
-                max_addr=len(code) - 1,
+                max_addr=base + len(code) - 1,
                 memory=SimpleNamespace(
                     load=lambda addr, size, **_kwargs: bytes(code[addr - base : addr - base + size])
                 ),
@@ -3664,7 +3719,7 @@ def test_recover_seeded_exe_functions_queues_gap_candidates_before_wrapper_follo
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x10000,
-                max_addr=0x600,
+                max_addr=0x10600,
             )
         ),
     )
@@ -8058,7 +8113,7 @@ def test_rank_exe_function_seeds_uses_persistent_cache(monkeypatch, tmp_path):
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -8115,7 +8170,7 @@ def test_rank_exe_function_seeds_cache_key_changes_when_recovery_metadata_change
                 main_object=SimpleNamespace(
                     binary=binary,
                     linked_base=0x1000,
-                    max_addr=len(code) - 1,
+                    max_addr=0x1000 + len(code) - 1,
                     memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
                 )
             ),
@@ -8147,10 +8202,8 @@ def test_main_uses_cached_exe_catalog_addresses_before_cfg(monkeypatch, tmp_path
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pair = (SimpleNamespace(), SimpleNamespace(addr=0x10010, name="sub_10010", project=project))
 
@@ -8209,7 +8262,7 @@ def test_recover_cached_function_pairs_gives_pre_entry_candidates_more_time(monk
         entry=0x11423,
         arch=SimpleNamespace(name="86_16"),
         loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=CLI_PATH, linked_base=0x1000, max_addr=0x600),
+            main_object=SimpleNamespace(binary=CLI_PATH, linked_base=0x1000, max_addr=0x1600),
         ),
     )
     seen_timeouts: list[tuple[int, int]] = []
@@ -8248,10 +8301,8 @@ def test_main_supplements_cached_exe_catalog_before_display_slice(monkeypatch, t
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     runtime_pair = (SimpleNamespace(), SimpleNamespace(addr=0x11440, name="runtime_shell", project=project))
     helper_pair = (SimpleNamespace(), SimpleNamespace(addr=0x114CD, name="runtime_init", project=project))
@@ -8323,10 +8374,8 @@ def test_main_prefers_fast_exe_catalog_before_cfg(monkeypatch, tmp_path, capsys)
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
     body_function = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
@@ -8392,10 +8441,8 @@ def test_main_emits_tail_validation_summary_and_metadata_to_stderr(monkeypatch, 
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
 
@@ -8493,10 +8540,8 @@ def test_main_emits_tail_validation_stderr_for_direct_exe_by_default(monkeypatch
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
 
@@ -8564,10 +8609,8 @@ def test_main_emits_uncollected_tail_validation_for_direct_nonoptimized_fallback
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
         _inertia_last_tail_validation_snapshot={
             "structuring": {"changed": False, "mode": "live_out", "verdict": "stale stable"},
             "postprocess": {"changed": False, "mode": "live_out", "verdict": "stale stable"},
@@ -8610,10 +8653,8 @@ def test_main_renders_direct_nonoptimized_outcome_payload_instead_of_repr(monkey
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
 
     def _fake_timeout(fn, **kwargs):
@@ -8652,7 +8693,7 @@ def test_main_emits_current_run_tail_validation_for_direct_nonoptimized_fallback
         entry=0x11423,
         arch=SimpleNamespace(name="86_16"),
         loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
+            main_object=_mock_cli_exe_main_object(binary),
             memory=SimpleNamespace(load=lambda _start, size: b"\x90" * size),
         ),
     )
@@ -8793,10 +8834,8 @@ def test_main_aggregate_uses_sidecar_fallback_tail_validation_snapshot(monkeypat
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
     metadata = LSTMetadata(
@@ -8861,10 +8900,8 @@ def test_main_direct_path_uses_trivial_sidecar_fallback_tail_validation_snapshot
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace()
     func = SimpleNamespace(
@@ -8935,10 +8972,8 @@ def test_main_direct_timeout_is_terminal_even_with_partial_payload(monkeypatch, 
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace()
     func = SimpleNamespace(
@@ -9004,10 +9039,8 @@ def test_main_direct_decompile_outer_timeout_becomes_terminal(monkeypatch, tmp_p
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace()
     func = SimpleNamespace(
@@ -9049,10 +9082,8 @@ def test_main_direct_source_quality_blocker_allows_fallback_paths(monkeypatch, t
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace()
     func = SimpleNamespace(
@@ -9122,10 +9153,8 @@ def test_main_direct_timeout_reports_nonoptimized_failure_before_string_fallback
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace()
     func = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
@@ -9179,10 +9208,8 @@ def test_main_aggregate_partial_timeout_uses_result_tail_validation(monkeypatch,
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
         _inertia_last_tail_validation_snapshot={
             "structuring": {"changed": True, "mode": "live_out", "verdict": "stale changed"},
             "postprocess": {"changed": True, "mode": "live_out", "verdict": "stale changed"},
@@ -9241,10 +9268,8 @@ def test_main_direct_sidecar_bounded_asm_fallback_does_not_reuse_stale_project_s
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
         _inertia_last_tail_validation_snapshot={
             "structuring": {"changed": False, "mode": "live_out", "verdict": "stale stable"},
             "postprocess": {"changed": False, "mode": "live_out", "verdict": "stale stable"},
@@ -9293,10 +9318,8 @@ def test_main_aggregate_asm_fallback_does_not_reuse_stale_project_snapshot(monke
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
         _inertia_last_tail_validation_snapshot={
             "structuring": {"changed": False, "mode": "live_out", "verdict": "stale stable"},
             "postprocess": {"changed": False, "mode": "live_out", "verdict": "stale stable"},
@@ -9356,10 +9379,8 @@ def test_main_reports_uncapped_seeded_function_count(monkeypatch, tmp_path, caps
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -9414,10 +9435,8 @@ def test_main_reports_uncapped_cached_function_count(monkeypatch, tmp_path, caps
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pairs = [
         (
@@ -9480,10 +9499,8 @@ def test_main_decompiles_all_functions_by_default_without_sidecar(monkeypatch, t
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pairs = [
         (SimpleNamespace(), SimpleNamespace(addr=0x10000 + i * 0x10, name=f"sub_{i:04x}", project=project))
@@ -9552,10 +9569,8 @@ def test_main_does_not_auto_cap_noninteractive_stdout_without_sidecar(monkeypatc
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pairs = [
         (SimpleNamespace(), SimpleNamespace(addr=0x10000 + i * 0x10, name=f"sub_{i:04x}", project=project))
@@ -9618,10 +9633,8 @@ def test_main_reports_pure_recovery_mode_and_attempt_states(monkeypatch, tmp_pat
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pairs = [
         (SimpleNamespace(), SimpleNamespace(addr=0x10010, name="sub_10010", project=project)),
@@ -9698,10 +9711,8 @@ def test_main_uses_ranked_binary_placeholders_when_upfront_catalog_is_empty(monk
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
 
     monkeypatch.setenv("INERTIA_ENABLE_RANKED_EXE_DISCOVERY", "1")
@@ -9773,10 +9784,8 @@ def test_main_prefers_quickly_recoverable_ranked_binary_preview_items(monkeypatc
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
 
     monkeypatch.setattr(decompile, "_build_project", lambda *_args, **_kwargs: project)
@@ -9833,10 +9842,8 @@ def test_main_selected_count_reflects_supplemented_hidden_sidecar_display(monkey
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="flair_pat+flair_sig",
@@ -9893,10 +9900,8 @@ def test_main_hidden_sidecar_fills_display_slots_from_ranked_preview(monkeypatch
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="flair_pat+flair_sig",
@@ -9985,10 +9990,8 @@ def test_main_hidden_sidecar_defaults_to_all_ranked_functions(monkeypatch, tmp_p
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="flair_pat+flair_sig",
@@ -10060,10 +10063,8 @@ def test_main_serial_whole_binary_path_does_not_wrap_function_work_items_in_exec
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pairs = [
         (SimpleNamespace(), SimpleNamespace(addr=0x10010, name="sub_10010", project=project)),
@@ -10120,10 +10121,8 @@ def test_main_full_pure_binary_uses_parallel_clean_process_lane_by_default(
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_pairs = [
         (SimpleNamespace(), SimpleNamespace(addr=0x10010, name="sub_10010", project=project)),
@@ -10237,10 +10236,8 @@ def test_main_hidden_sidecar_prefers_ranked_preview_over_non_entry_seeded_pairs(
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="flair_pat+flair_sig",
@@ -10304,10 +10301,8 @@ def test_main_hidden_sidecar_disables_isolated_retry_in_capped_serial_lane(monke
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="flair_pat+flair_sig",
@@ -10363,10 +10358,8 @@ def test_main_hidden_sidecar_uses_ranked_preview_before_seed_catalog(monkeypatch
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="flair_pat+flair_sig",
@@ -10591,10 +10584,8 @@ def test_main_reports_sidecar_debug_assisted_recovery_mode(monkeypatch, tmp_path
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         source_format="codeview_nb00",
@@ -10655,8 +10646,8 @@ def test_main_limits_sidecar_catalog_preview_for_responsiveness(monkeypatch, tmp
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400)),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(
         code_labels={0x10000 + i * 0x10: f"proc_{i}" for i in range(30)},
@@ -10754,7 +10745,7 @@ def test_rank_exe_function_seeds_tolerates_timed_out_entry_probe(monkeypatch, tm
             main_object=SimpleNamespace(
                 binary=binary,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -10779,10 +10770,8 @@ def test_main_falls_back_after_fast_exe_catalog_timeout(monkeypatch, tmp_path, c
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     recovered_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -10834,10 +10823,8 @@ def test_main_streaming_timeout_reports_nonoptimized_skip_without_unvalidated_st
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     recovered_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -10895,10 +10882,8 @@ def test_main_streaming_timeout_reports_nonoptimized_failure_without_unvalidated
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     recovered_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -10960,10 +10945,8 @@ def test_main_falls_back_to_partial_timeout_before_asm_when_available(monkeypatc
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     recovered_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -11016,10 +10999,8 @@ def test_main_uses_seed_recovery_when_only_hidden_signature_labels_exist(monkeyp
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     recovered_cfg = SimpleNamespace(functions={})
     recovered_function = SimpleNamespace(addr=0x10010, name="main", project=project)
@@ -11075,10 +11056,8 @@ def test_main_serial_function_timeout_does_not_stall_whole_run(monkeypatch, tmp_
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
     body_function = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
@@ -11238,7 +11217,7 @@ def test_run_function_work_item_uses_fork_lane_for_force_isolated_project(monkey
     project = SimpleNamespace(
         entry=0x11423,
         arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x400)),
+        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x10400)),
         analyses=SimpleNamespace(),
     )
     function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -12167,10 +12146,8 @@ def test_main_parallel_keeps_timeout_after_deadline(monkeypatch, tmp_path, capsy
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x11423, name="_start", project=project)
 
@@ -12208,7 +12185,7 @@ def test_main_parallel_keeps_timeout_after_deadline(monkeypatch, tmp_path, capsy
         def shutdown(self, wait=True, cancel_futures=True):
             return None
 
-    monotonic_values = iter([0.0] + [5.0] * 16)
+    monotonic_values = itertools.count(0.0, 5.0)
 
     monkeypatch.setattr(decompile, "_build_project", lambda *_args, **_kwargs: project)
     monkeypatch.setattr(decompile, "_load_lst_metadata", lambda *_args, **_kwargs: None)
@@ -12242,10 +12219,8 @@ def test_main_parallel_does_not_promote_late_partial_after_deadline(monkeypatch,
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x11423, name="_start", project=project)
 
@@ -12283,7 +12258,7 @@ def test_main_parallel_does_not_promote_late_partial_after_deadline(monkeypatch,
         def shutdown(self, wait=True, cancel_futures=True):
             return None
 
-    monotonic_values = iter([0.0] + [5.0] * 16)
+    monotonic_values = itertools.count(0.0, 5.0)
 
     monkeypatch.setattr(decompile, "_build_project", lambda *_args, **_kwargs: project)
     monkeypatch.setattr(decompile, "_load_lst_metadata", lambda *_args, **_kwargs: None)
@@ -12318,10 +12293,8 @@ def test_main_parallel_promotes_done_future_at_deadline(monkeypatch, tmp_path, c
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x11423, name="_start", project=project)
 
@@ -12360,7 +12333,7 @@ def test_main_parallel_promotes_done_future_at_deadline(monkeypatch, tmp_path, c
         def shutdown(self, wait=True, cancel_futures=True):
             return None
 
-    monotonic_values = iter([0.0] + [5.0] * 16)
+    monotonic_values = itertools.count(0.0, 5.0)
 
     monkeypatch.setattr(decompile, "_build_project", lambda *_args, **_kwargs: project)
     monkeypatch.setattr(decompile, "_load_lst_metadata", lambda *_args, **_kwargs: None)
@@ -12446,14 +12419,12 @@ def test_main_parallel_promotes_future_completed_during_late_collection(monkeypa
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     function = SimpleNamespace(addr=0x11423, name="_start", project=project)
 
-    monotonic_values = iter([0.0] + [5.0] * 16)
+    monotonic_values = itertools.count(0.0, 5.0)
     _LATE_EXECUTOR_STATE.update({"future": None, "wait_count": 0})
 
     monkeypatch.setattr(decompile, "_build_project", lambda *_args, **_kwargs: project)
@@ -12613,7 +12584,7 @@ def test_recover_seeded_exe_functions_skips_seeds_inside_recovered_ranges(monkey
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x10000,
-                max_addr=len(code) - 1,
+                max_addr=0x10000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -12970,10 +12941,8 @@ def test_main_defers_exe_limit_until_after_seed_ranking(monkeypatch, tmp_path, c
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
     runtime_function = SimpleNamespace(addr=0x114CD, name="runtime_init", project=project)
@@ -13034,10 +13003,8 @@ def test_main_reranks_merged_seeded_pairs_before_max_function_slice(monkeypatch,
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project, blocks=(SimpleNamespace(size=0x20),))
@@ -13100,10 +13067,8 @@ def test_main_reranks_nontruncated_seeded_body_before_runtime_shell(monkeypatch,
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     cfg = SimpleNamespace(functions={})
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project, blocks=(SimpleNamespace(size=0x20),))
@@ -13162,10 +13127,8 @@ def test_main_defers_exe_limit_until_after_seed_ranking_with_recovery_only_sidec
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(data_labels={}, code_labels={0x11423: "_startup_sig"})
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
@@ -13228,10 +13191,8 @@ def test_main_helper_free_small_cap_exe_uses_serial_workers_with_hidden_seed_met
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     entry_function = SimpleNamespace(addr=0x11423, name="_start", project=project)
     body_function = SimpleNamespace(addr=0x10010, name="sub_10010", project=project)
@@ -13312,10 +13273,8 @@ def test_main_uses_default_signature_catalog_when_not_explicit(monkeypatch, tmp_
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     default_catalog = tmp_path / "repo_signature_catalog.pat"
     seen: dict[str, object] = {}
@@ -13353,10 +13312,8 @@ def test_main_hidden_seed_metadata_gives_seed_catalog_more_time(monkeypatch, tmp
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(
         entry=0x11423,
-        arch=SimpleNamespace(name="86_16"),
-        loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=binary, linked_base=0x10000, max_addr=0x400),
-        ),
+        arch=Arch86_16(),
+        loader=_mock_cli_exe_loader(binary),
     )
     metadata = LSTMetadata(data_labels={}, code_labels={})
     seen_timeouts: list[tuple[str, int]] = []
@@ -13417,7 +13374,7 @@ def test_recover_seeded_exe_functions_prefers_largest_bounded_recovery(monkeypat
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x1000,
-                max_addr=len(code) - 1,
+                max_addr=0x1000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -13464,7 +13421,7 @@ def test_supplement_cached_seeded_recovery_adds_pre_entry_body_function(monkeypa
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x1000,
-                max_addr=0x600,
+                max_addr=0x1600,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: b"\x90" * 0x600),
             )
         ),
@@ -13524,7 +13481,7 @@ def test_supplement_cached_seeded_recovery_prioritizes_linear_body_targets_for_t
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x10000,
-                max_addr=0x600,
+                max_addr=0x10600,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: b"\x90" * 0x600),
             )
         ),
@@ -13600,7 +13557,7 @@ def test_recover_seeded_exe_functions_cached_supplement_timeout_uses_cached_reco
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x1000,
-                max_addr=0x600,
+                max_addr=0x1600,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: b"\x90" * 0x600),
             )
         ),
@@ -13641,7 +13598,7 @@ def test_recover_seeded_exe_functions_gives_cached_supplement_more_budget(monkey
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x1000,
-                max_addr=0x600,
+                max_addr=0x1600,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: b"\x90" * 0x600),
             )
         ),
@@ -13687,7 +13644,7 @@ def test_recover_seeded_exe_functions_prioritizes_linear_body_targets_for_trunca
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x10000,
-                max_addr=len(code) - 1,
+                max_addr=0x10000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -13745,7 +13702,7 @@ def test_recover_seeded_exe_functions_stops_after_limit_without_return_addrs(mon
             main_object=SimpleNamespace(
                 binary=CLI_PATH,
                 linked_base=0x10000,
-                max_addr=len(code) - 1,
+                max_addr=0x10000 + len(code) - 1,
                 memory=SimpleNamespace(load=lambda *_args, **_kwargs: code),
             )
         ),
@@ -15509,7 +15466,7 @@ def test_supplement_functions_from_prologue_scan_adds_confirmed_recoveries(monke
         entry=0x1500,
         arch=SimpleNamespace(name="86_16"),
         loader=SimpleNamespace(
-            main_object=SimpleNamespace(max_addr=len(code) - 1, linked_base=0x1000, memory=_Memory())
+            main_object=SimpleNamespace(max_addr=0x1000 + len(code) - 1, linked_base=0x1000, memory=_Memory())
         ),
     )
 
@@ -15624,7 +15581,9 @@ def test_decompile_cli_reports_monoprin_partial_validation_without_source_fallba
     assert "return" in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_can_extract_and_name_cod_procedure(tmp_path):
+    """Validate extracted C through the native MS C DOS recompilation lane."""
     from test_x86_16_changeweather_behavior import assert_changeweather_behavior
 
     result = _run_decompile_proc(

@@ -1,6 +1,6 @@
 """Behavioral observations for rebuilt tiny MS C pointer functions.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: retain the original pointer fixture's checks without importing
 compiler/decompiler machinery into lightweight oracle regression tests.
 """

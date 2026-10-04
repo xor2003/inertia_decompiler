@@ -87,26 +87,32 @@ class SourceTreeSnapshot:
         return not self.unstable_paths and not other.unstable_paths and self == other
 
 
-def _source_paths(root: Path) -> tuple[Path, ...]:
-    """Return deterministic profile-relevant source and configuration paths."""
+def _source_paths(root: Path, included_roots: tuple[str, ...] | None = None) -> tuple[Path, ...]:
+    """Return deterministic source paths within the requested relative roots."""
     paths: list[Path] = []
-    for directory, directory_names, file_names in os.walk(root):
-        directory_names[:] = sorted(name for name in directory_names if name not in _IGNORED_DIRECTORY_NAMES)
-        directory_path = Path(directory)
-        for file_name in sorted(file_names):
-            path = directory_path / file_name
-            if file_name in _SOURCE_NAMES or path.suffix.lower() in _SOURCE_SUFFIXES:
-                paths.append(path)
-    return tuple(sorted(paths, key=lambda path: path.relative_to(root).as_posix()))
+    selected_roots = (root,) if included_roots is None else tuple(root / relative for relative in included_roots)
+    for selected_root in selected_roots:
+        if selected_root.is_file():
+            if selected_root.name in _SOURCE_NAMES or selected_root.suffix.lower() in _SOURCE_SUFFIXES:
+                paths.append(selected_root)
+            continue
+        for directory, directory_names, file_names in os.walk(selected_root):
+            directory_names[:] = sorted(name for name in directory_names if name not in _IGNORED_DIRECTORY_NAMES)
+            directory_path = Path(directory)
+            for file_name in sorted(file_names):
+                path = directory_path / file_name
+                if file_name in _SOURCE_NAMES or path.suffix.lower() in _SOURCE_SUFFIXES:
+                    paths.append(path)
+    return tuple(sorted(set(paths), key=lambda path: path.relative_to(root).as_posix()))
 
 
-def source_tree_snapshot(root: Path) -> SourceTreeSnapshot:
-    """Hash relevant source content and metadata, refusing torn observations."""
+def source_tree_snapshot(root: Path, *, included_roots: tuple[str, ...] | None = None) -> SourceTreeSnapshot:
+    """Hash selected source content and metadata, refusing torn observations."""
     digest = hashlib.sha256()
     file_count = 0
     byte_count = 0
     unstable_paths: list[str] = []
-    for path in _source_paths(root):
+    for path in _source_paths(root, included_roots):
         relative_path = path.relative_to(root).as_posix()
         try:
             before = path.stat()

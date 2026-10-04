@@ -790,7 +790,7 @@ def _bind_type_to_arch_8616(type_: StructuredAstValue, arch: StructuredAstValue)
         return type_
 
 
-def _rebind_unified_local_types_8616(unified_locals: dict, arch: StructuredAstValue) -> None:
+def _rebind_unified_local_types_8616(unified_locals: dict[object, object], arch: StructuredAstValue) -> None:
     """Rebind vartypes inside the unified-local map, dropping stale entries."""
     for variable, entries in list(unified_locals.items()):
         if not isinstance(entries, set):
@@ -1291,7 +1291,7 @@ def _materialize_terminal_arg_from_prototype_8616(
     width: int,
     prototype: StructuredAstValue,
     prototype_arg_map: dict[int, tuple[StructuredAstValue, str | None]],
-    arg_list: list,
+    arg_list: list[StructuredAstValue],
     variables_in_use: StructuredAstValue,
     project_arch: StructuredAstValue,
 ) -> StructuredAstValue:
@@ -3268,23 +3268,23 @@ def _global_cvar_8616(
 class _GlobalByteSumMatch8616:
     """Matched instruction-window evidence for the global byte sum loop."""
 
-    word_global: tuple
+    word_global: tuple[StructuredAstValue, ...]
     total_disp: int
     i_disp: int
     limit: int
     exit_addr: int
     mov_global: StructuredAstValue
     mov_al: StructuredAstValue
-    byte_global: tuple
+    byte_global: tuple[StructuredAstValue, ...]
 
 
-def _global_byte_sum_fail_8616(stats: dict) -> None:
+def _global_byte_sum_fail_8616(stats: dict[str, StructuredAstValue]) -> None:
     stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
 
 
 def _global_byte_sum_init_window_8616(
     insns: tuple[StructuredAstValue, ...], init_idx: int
-) -> tuple[tuple, int, int] | None:
+) -> tuple[tuple[StructuredAstValue, ...], int, int, StructuredAstValue] | None:
     """Match the three-instruction init window; returns (word_global, total_disp, i_disp)."""
     mov_global = insns[init_idx]
     if str(getattr(mov_global, "mnemonic", "")).lower() != "mov":
@@ -3318,7 +3318,7 @@ def _global_byte_sum_loop_match_8616(
     insns: tuple[StructuredAstValue, ...],
     index_by_addr: dict[int, int],
     init_idx: int,
-    stats: dict,
+    stats: dict[str, StructuredAstValue],
 ) -> _GlobalByteSumMatch8616 | None:
     """Match the mov/cmp/jl/body instruction window for the byte sum loop."""
     window = _global_byte_sum_init_window_8616(insns, init_idx)
@@ -3387,9 +3387,9 @@ def _global_byte_sum_body_match_8616(
     body_idx: int,
     inc_idx: int,
     i_disp: int,
-    total_slot: tuple,
-    stats: dict,
-) -> tuple[StructuredAstValue, tuple] | None:
+    total_slot: tuple[StructuredAstValue, ...],
+    stats: dict[str, StructuredAstValue],
+) -> tuple[StructuredAstValue, tuple[StructuredAstValue, ...]] | None:
     """Match the five-instruction accumulation body; returns (mov_al, byte_global)."""
     mov_bx = insns[body_idx]
     mov_bx_ops = _boundary_tuple_8616(getattr(mov_bx, "operands", ()) or ())
@@ -3458,8 +3458,8 @@ def _emit_global_byte_sum_loop_8616(
     match: _GlobalByteSumMatch8616,
     total_expr: StructuredAstValue,
     i_expr: StructuredAstValue,
-    cod_direct_refs: dict,
-    cod_indexed_refs: dict,
+    cod_direct_refs: dict[int, _CODGlobalNameRef8616],
+    cod_indexed_refs: dict[int, _CODGlobalNameRef8616],
 ) -> None:
     """Emit the recovered global byte sum for-loop into the function body."""
     word_addr = int(match.word_global[0]) & 0xFFFF
@@ -3892,7 +3892,7 @@ def _canonical_stack_cvar_at_offset_8616(cfunc: StructuredAstValue, offset: int)
 
 
 def _replace_stack_variable_entry_8616(
-    table: dict, variable: SimStackVariable, offset: int, value: StructuredAstValue
+    table: dict[object, StructuredAstValue], variable: SimStackVariable, offset: int, value: StructuredAstValue
 ) -> None:
     """Drop stale stack entries at the same offset and install the canonical one."""
     for existing_variable in tuple(table.keys()):
@@ -3941,8 +3941,8 @@ def _stack_arg_prototype_8616(
 
 def _stack_arg_target_index_8616(
     project: StructuredAstValue,
-    args: list,
-    arg_names: list,
+    args: list[StructuredAstValue],
+    arg_names: list[str],
     disp: int,
     first_argument_bp_offset: int,
     arg_type: StructuredAstValue,
@@ -3972,11 +3972,11 @@ def _build_desired_stack_args_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     cfunc: StructuredAstValue,
-    args: list,
-    arg_names: list,
+    args: list[StructuredAstValue],
+    arg_names: list[str],
     disp: int,
     first_argument_bp_offset: int,
-) -> tuple[list, StructuredAstValue]:
+) -> tuple[list[StructuredAstValue], StructuredAstValue]:
     """Build the desired CVariable arg list; returns (args, target_cvar)."""
     desired_args: list[CVariable] = []
     func_addr = getattr(cfunc, "addr", None)
@@ -4026,8 +4026,8 @@ def _publish_stack_arg_prototype_8616(
     codegen: StructuredAstValue,
     cfunc: StructuredAstValue,
     prototype: StructuredAstValue,
-    args: list,
-    arg_names: list,
+    args: list[StructuredAstValue],
+    arg_names: list[str],
     word_type: StructuredAstValue,
     first_argument_bp_offset: int,
 ) -> None:
@@ -5702,7 +5702,7 @@ class _VoidTailCallGuardRun8616:
     project: StructuredAstValue
     codegen: StructuredAstValue
     stats: dict[str, int]
-    proofs: list
+    proofs: list[StructuredAstValue]
     has_explicit_void_return: bool
     debug: StructuredAstValue
     log: StructuredAstValue
@@ -5759,7 +5759,7 @@ class _VoidTailCallGuardRun8616:
     def _guard_arm(
         self,
         block: StructuredAstValue,
-        statements: list,
+        statements: list[StructuredAstValue],
         index: int,
         stmt: CIfElse,
         cond: StructuredAstValue,
@@ -5790,7 +5790,7 @@ class _VoidTailCallGuardRun8616:
 
     def _match_unique_proof(
         self,
-        cond_keys: frozenset,
+        cond_keys: frozenset[str],
         call_arg_fps: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Return the single matched proof, recording refusals; None when unmatched."""
@@ -5825,7 +5825,7 @@ class _VoidTailCallGuardRun8616:
     def _apply_guard_materialization(
         self,
         block: StructuredAstValue,
-        statements: list,
+        statements: list[StructuredAstValue],
         index: int,
         stmt: CIfElse,
         matched_proof: StructuredAstValue,
@@ -5873,7 +5873,7 @@ class _VoidTailCallGuardRun8616:
     def _tail_call_arm(
         self,
         block: StructuredAstValue,
-        statements: list,
+        statements: list[StructuredAstValue],
         index: int,
         stmt: CIfElse,
         cond: StructuredAstValue,
@@ -6205,7 +6205,7 @@ def _collect_surplus_guard_candidates_8616(
     root: StructuredAstValue,
     debug: StructuredAstValue,
     log: StructuredAstValue,
-) -> tuple[list, int, int]:
+) -> tuple[list[StructuredAstValue], int, int]:
     """Collect eligible surplus guards; returns (candidates, refused_shape, refused_branch_backed)."""
     candidates: list[
         tuple[
@@ -6247,7 +6247,7 @@ def _collect_surplus_guard_candidates_8616(
     return candidates, refused_shape, refused_branch_backed
 
 
-def _surplus_guard_kind_counts_8616(candidates: list, prune_budget: int) -> tuple[int, int, int]:
+def _surplus_guard_kind_counts_8616(candidates: list[StructuredAstValue], prune_budget: int) -> tuple[int, int, int]:
     """Count the pruned candidates by guard kind."""
     pruned_noop = sum(
         1
@@ -6267,7 +6267,7 @@ def _surplus_guard_kind_counts_8616(candidates: list, prune_budget: int) -> tupl
     return pruned_noop, pruned_empty_return, collapsed_identical_arms
 
 
-def _apply_surplus_guard_prune_8616(candidates: list, prune_budget: int) -> int:
+def _apply_surplus_guard_prune_8616(candidates: list[StructuredAstValue], prune_budget: int) -> int:
     """Rewrite each candidate block with its replacements; returns the pruned count."""
     prune_by_block: dict[
         int,
@@ -6299,7 +6299,7 @@ def _record_surplus_guard_prune_8616(
     branch_count: int,
     total_if_nodes: int,
     surplus: int,
-    candidates: list,
+    candidates: list[StructuredAstValue],
     pruned: int,
     pruned_noop: int,
     pruned_empty_return: int,
@@ -6510,7 +6510,7 @@ def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, co
 
 
 
-def _debug_duplicate_empty_prune_refusal_8616(log: StructuredAstValue, statements: list, values: tuple) -> None:
+def _debug_duplicate_empty_prune_refusal_8616(log: StructuredAstValue, statements: list[StructuredAstValue], values: tuple[StructuredAstValue, ...]) -> None:
     """Dump the nearby statement shapes when the duplicate-empty prune refuses."""
     nearby = []
     for index, stmt in enumerate(statements[: min(len(statements), 12)]):
@@ -6557,7 +6557,7 @@ def _cfg_derived_return_chain_values_8616(
 
 def _duplicate_empty_prune_values_8616(
     project: StructuredAstValue, codegen: StructuredAstValue, log: StructuredAstValue, debug: StructuredAstValue
-) -> tuple | None:
+) -> tuple[StructuredAstValue, ...] | None:
     """Resolve the return-chain value tuple for the duplicate-empty prune, or refuse."""
     has_materialized_return_chain = _codegen_has_materialized_return_chain_8616(codegen)
     values = _boundary_tuple_8616(
@@ -7075,7 +7075,7 @@ def _record_terminal_ax_materialization_8616(
 
 def _terminal_ax_return_surface_8616(
     codegen: StructuredAstValue, cfunc: StructuredAstValue
-) -> tuple[StructuredAstValue, StructuredAstValue, list, list] | None:
+) -> tuple[StructuredAstValue, StructuredAstValue, list[StructuredAstValue], list[StructuredAstValue]] | None:
     """Return (root, statements, return_nodes, unsupported_return_nodes), or None."""
     root = getattr(cfunc, "statements", None) or getattr(cfunc, "body", None)
     if root is None:
@@ -7101,7 +7101,7 @@ def _terminal_ax_return_surface_8616(
     return root, statements, return_nodes, unsupported_return_nodes
 
 
-def _terminal_ax_wide_gate_8616(codegen: StructuredAstValue, return_nodes: list) -> bool:
+def _terminal_ax_wide_gate_8616(codegen: StructuredAstValue, return_nodes: list[StructuredAstValue]) -> bool:
     """Return True when a wide-composition return refuses the fallback."""
     wide_return_nodes = [
         node
@@ -7169,7 +7169,7 @@ def _apply_terminal_ax_replacement_8616(
     cfunc: StructuredAstValue,
     codegen: StructuredAstValue,
     statements: StructuredAstValue,
-    unsupported_return_nodes: list,
+    unsupported_return_nodes: list[StructuredAstValue],
     retval: StructuredAstValue,
 ) -> bool:
     """Apply the unsupported-AIL-return or append-terminal-return replacement."""
@@ -8902,7 +8902,7 @@ def _snapshot_codegen_inertia_metadata_8616(codegen: StructuredAstValue) -> dict
 
 
 def _metadata_snapshot_tuple_8616(
-    value: tuple, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+    value: tuple[StructuredAstValue, ...], value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
 ) -> StructuredAstValue:
     if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
         return tuple(value)
@@ -8912,7 +8912,7 @@ def _metadata_snapshot_tuple_8616(
 
 
 def _metadata_snapshot_list_8616(
-    value: list, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+    value: list[StructuredAstValue], value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
 ) -> StructuredAstValue:
     cloned_list: list[StructuredAstValue] = []
     memo[value_id] = cloned_list
@@ -8924,7 +8924,7 @@ def _metadata_snapshot_list_8616(
 
 
 def _metadata_snapshot_dict_8616(
-    value: dict, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+    value: dict[object, StructuredAstValue], value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
 ) -> StructuredAstValue:
     cloned_dict: dict[StructuredAstValue, StructuredAstValue] = {}
     memo[value_id] = cloned_dict
@@ -10976,6 +10976,7 @@ class _PostprocessPassRun8616:
         self.requires_snapshot = self.preflight.requires_snapshot
         self.return_chain_expected = _return_chain_expected_counts_8616(self.codegen)
         self.cycle_before = self.transaction_state.known_cycle_path
+        return None
 
 
     def _snapshot_setup_8616(self) -> bool | None:
@@ -11008,6 +11009,7 @@ class _PostprocessPassRun8616:
             if self.is_optimization_pass
             else None
         )
+        return None
 
 
     def _execute_step_8616(self) -> bool | None:
@@ -11130,6 +11132,7 @@ class _PostprocessPassRun8616:
             self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
             return True
         self.transaction_state.record_cycle_path(self.cycle_after)
+        return None
 
 
     def _return_chain_gate_8616(self) -> bool | None:
@@ -11153,6 +11156,7 @@ class _PostprocessPassRun8616:
                 rejected.append(self.pass_name)
                 self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
                 return True
+        return None
 
 
     def _misreport_invalidate_8616(self) -> None:
@@ -11212,6 +11216,7 @@ class _PostprocessPassRun8616:
                 rejected.append(self.pass_name)
                 self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
                 return True
+        return None
 
 
     def _validation_gate_8616(self) -> bool | None:
@@ -12242,7 +12247,7 @@ def _repair_missing_cnode_codegen_metadata_8616(root: StructuredAstValue, codege
 
 
 def _terminal_ax_returns_delta_ok_8616(
-    codegen: StructuredAstValue, delta: dict, expected_returns: StructuredAstValue
+    codegen: StructuredAstValue, delta: dict[str, StructuredAstValue], expected_returns: StructuredAstValue
 ) -> bool:
     """Return whether the returns delta only adds evidenced terminal AX returns."""
     returns_delta = delta.get("returns")
@@ -12328,7 +12333,7 @@ def _surplus_empty_guard_census_8616(codegen: StructuredAstValue) -> tuple[int, 
     )
     if not (counts_ok and census_ok):
         return None
-    return pruned, branch_count, total_if_count
+    return int(pruned), cast(int, branch_count), cast(int, total_if_count)
 
 
 def _is_proven_surplus_empty_guard_cleanup_delta_8616(
@@ -12409,7 +12414,7 @@ def _is_default_scalar_void_return_classification_delta_8616(
     return True
 
 
-def _write_delta_adds_only_8616(write_delta: dict, added_token_ok: StructuredAstValue) -> bool:
+def _write_delta_adds_only_8616(write_delta: dict[str, StructuredAstValue], added_token_ok: StructuredAstValue) -> bool:
     """Return True when a write delta removes nothing and all added tokens satisfy the predicate."""
     removed = _boundary_tuple_8616(write_delta.get("removed") or ())
     added = _boundary_tuple_8616(write_delta.get("added") or ())
@@ -12568,8 +12573,8 @@ def _callsite_expected_target_tokens_8616(project: StructuredAstValue, function:
 def _accept_callsite_helper_delta_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
-    added: tuple,
-    removed: tuple,
+    added: tuple[str, ...],
+    removed: tuple[str, ...],
 ) -> bool:
     """Accept helper-call deltas justified by direct callsite evidence."""
     expected_targets = _callsite_expected_target_tokens_8616(project, function)
@@ -12803,7 +12808,7 @@ def _is_virtual_carrier_segmented_write_delta_token_8616(token: StructuredAstVal
     return not any(marker in token for marker in ("reg:", "stack_slot:", "global:", "call:"))
 
 
-def _jcc_rebinding_condition_tokens_8616(condition_delta: StructuredAstValue) -> tuple | None:
+def _jcc_rebinding_condition_tokens_8616(condition_delta: StructuredAstValue) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
     """Return (added, removed) condition tokens when the delta has the rebinding shape."""
     if not isinstance(condition_delta, dict):
         return None
@@ -12824,7 +12829,7 @@ def _jcc_rebinding_condition_tokens_8616(condition_delta: StructuredAstValue) ->
 
 
 def _jcc_rebinding_control_delta_ok_8616(
-    control_delta: dict, added_conditions: tuple, removed_conditions: tuple
+    control_delta: dict[str, StructuredAstValue], added_conditions: tuple[str, ...], removed_conditions: tuple[str, ...]
 ) -> bool:
     """Return True when control-flow deltas are only the rebound if-effects."""
     added_control = _boundary_tuple_8616(control_delta.get("added") or ())
@@ -12836,7 +12841,7 @@ def _jcc_rebinding_control_delta_ok_8616(
     return not (set(removed_control) - expected_removed)
 
 
-def _segmented_delta_all_virtual_carriers_8616(segmented_delta: dict) -> bool:
+def _segmented_delta_all_virtual_carriers_8616(segmented_delta: dict[str, StructuredAstValue]) -> bool:
     """Return True when every segmented-write token is a virtual carrier."""
     segmented_tokens = _boundary_tuple_8616(segmented_delta.get("added") or ()) + _boundary_tuple_8616(
         segmented_delta.get("removed") or ()
@@ -13166,7 +13171,7 @@ def _control_flow_delta_is_covered_by_direct_global_update_evidence_8616(
     return saw_token and saw_added_evidence
 
 
-def _direct_global_memory_tokens_checked_count_8616(delta: dict, spans: StructuredAstValue) -> int | None:
+def _direct_global_memory_tokens_checked_count_8616(delta: dict[str, StructuredAstValue], spans: StructuredAstValue) -> int | None:
     """Return checked token count, or None on a rejected token."""
     checked = 0
     for field_name in ("global_writes", "segmented_writes"):
@@ -13183,7 +13188,7 @@ def _direct_global_memory_tokens_checked_count_8616(delta: dict, spans: Structur
 
 
 def _direct_global_return_delta_ok_8616(
-    delta: dict, touched_fields: StructuredAstValue, spans: StructuredAstValue
+    delta: dict[str, StructuredAstValue], touched_fields: StructuredAstValue, spans: StructuredAstValue
 ) -> bool | None:
     """Return True when checked, False on rejection, None when the field is absent."""
     return_delta = delta.get("returns")
@@ -13199,7 +13204,7 @@ def _direct_global_return_delta_ok_8616(
     return None
 
 
-def _direct_global_register_delta_ok_8616(delta: dict, touched_fields: StructuredAstValue) -> bool | None:
+def _direct_global_register_delta_ok_8616(delta: dict[str, StructuredAstValue], touched_fields: StructuredAstValue) -> bool | None:
     """Return True when checked, False on rejection, None when the field is absent."""
     register_delta = delta.get("register_writes")
     if isinstance(register_delta, dict):
@@ -13214,7 +13219,7 @@ def _direct_global_register_delta_ok_8616(delta: dict, touched_fields: Structure
 
 
 def _direct_global_control_delta_ok_8616(
-    delta: dict, touched_fields: StructuredAstValue, spans: StructuredAstValue
+    delta: dict[str, StructuredAstValue], touched_fields: StructuredAstValue, spans: StructuredAstValue
 ) -> bool | None:
     """Return True when checked, False on rejection, None when the field is absent."""
     control_flow_delta = delta.get("control_flow_effects")
@@ -13310,7 +13315,7 @@ def _global_byte_sum_loop_evidence_tokens_8616(
     return index_token, total_token, limit
 
 
-def _global_byte_sum_delta_body_ok_8616(delta: dict, index_token: str, total_token: str, limit: int) -> bool:
+def _global_byte_sum_delta_body_ok_8616(delta: dict[str, StructuredAstValue], index_token: str, total_token: str, limit: int) -> bool:
     touched_fields = _validation_delta_touched_fields_8616(delta)
     if not touched_fields or touched_fields - {"stack_writes", "control_flow_effects"}:
         return False
@@ -13404,7 +13409,7 @@ def _segmented_global_salvage_spans_8616(
 
 
 def _segmented_global_memory_tokens_evidence_8616(
-    delta: dict, spans: StructuredAstValue, debug: bool
+    delta: dict[str, StructuredAstValue], spans: StructuredAstValue, debug: bool
 ) -> bool | None:
     """Return True when evidence tokens were checked, False on refusal, None when absent."""
     checked = False
@@ -13559,7 +13564,7 @@ def _control_delta_matches_stack_update_evidence_8616(
 
 
 def _stack_offset_condition_delta_8616(
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
 ) -> tuple[tuple[StructuredAstValue, ...], tuple[StructuredAstValue, ...]] | None:
     """Return (added, removed) condition tokens, or None on a rejected delta."""
     condition_delta = delta.get("conditions")
@@ -13582,7 +13587,7 @@ def _stack_offset_condition_delta_8616(
 
 
 def _stack_offset_control_delta_ok_8616(
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
     added_conditions: tuple[StructuredAstValue, ...],
     removed_conditions: tuple[StructuredAstValue, ...],
     evidence_markers: StructuredAstValue,
@@ -13622,7 +13627,7 @@ def _stack_offset_control_delta_ok_8616(
     )
 
 
-def _stack_offset_delta_tokens_8616(delta: dict) -> list[str] | None:
+def _stack_offset_delta_tokens_8616(delta: dict[str, StructuredAstValue]) -> list[str] | None:
     """Return all added/removed tokens, or None when a non-string token appears."""
     tokens: list[str] = []
     for field_name in ("segmented_writes", "stack_writes", "conditions", "control_flow_effects"):
@@ -13638,7 +13643,7 @@ def _stack_offset_delta_tokens_8616(delta: dict) -> list[str] | None:
     return tokens
 
 
-def _added_indexed_segmented_write_ok_8616(delta: dict) -> bool:
+def _added_indexed_segmented_write_ok_8616(delta: dict[str, StructuredAstValue]) -> bool:
     segmented_delta = delta.get("segmented_writes")
     if not isinstance(segmented_delta, dict):
         return False
@@ -13893,7 +13898,7 @@ def _direct_stack_move_immediate_function_pointer_offsets_8616(codegen: Structur
 
 
 def _stack_move_update_delta_accepted_8616(
-    validation: dict,
+    validation: dict[str, StructuredAstValue],
     evidence_offsets: StructuredAstValue,
     allow_indexed: bool = False,
 ) -> bool:
@@ -13923,8 +13928,8 @@ def _stack_move_update_delta_accepted_8616(
 
 def _stack_move_global_delta_accepted_8616(
     codegen: StructuredAstValue,
-    validation: dict,
-    delta: dict,
+    validation: dict[str, StructuredAstValue],
+    delta: dict[str, StructuredAstValue],
     global_materialized: bool,
     global_spans: StructuredAstValue,
 ) -> bool:
@@ -14002,8 +14007,8 @@ def _is_direct_stack_move_and_global_update_materialization_delta_8616(
 
 def _stack_move_precision_conditions_ok_8616(
     codegen: StructuredAstValue,
-    delta: dict,
-    touched_fields: set,
+    delta: dict[str, StructuredAstValue],
+    touched_fields: set[str],
 ) -> tuple[bool, tuple[str, ...]]:
     """Return whether removed conditions are Cmp tokens over proven offsets."""
     if "conditions" not in touched_fields:
@@ -14029,9 +14034,9 @@ def _stack_move_precision_conditions_ok_8616(
 
 
 def _stack_move_precision_globals_ok_8616(
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
     global_spans: StructuredAstValue,
-    touched_fields: set,
+    touched_fields: set[str],
 ) -> tuple[bool, bool]:
     """Return whether global tokens match direct-global evidence; (ok, checked)."""
     global_delta = delta.get("global_writes")
@@ -14052,9 +14057,9 @@ def _stack_move_precision_globals_ok_8616(
 
 
 def _stack_move_precision_control_ok_8616(
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
     global_spans: StructuredAstValue,
-    touched_fields: set,
+    touched_fields: set[str],
     removed_conditions: tuple[str, ...],
 ) -> tuple[bool, bool]:
     """Return whether control deltas are covered by direct-global evidence."""
@@ -14464,7 +14469,7 @@ def _jcc_condition_delta_is_evidenced_8616(
 def _normalized_delta_token_set_8616(
     field_delta: StructuredAstValue,
     key: str,
-    normalize: Callable,
+    normalize: Callable[[str], str | None],
 ) -> set[str] | None:
     """Normalize one added/removed token set, or None on an unparseable token."""
     result: set[str] = set()
@@ -14606,8 +14611,8 @@ def _jcc_condition_field_deltas_ok_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     function: StructuredAstValue,
-    validation: dict,
-    delta: dict,
+    validation: dict[str, StructuredAstValue],
+    delta: dict[str, StructuredAstValue],
 ) -> bool:
     """Return whether all non-condition field deltas are proven benign."""
     return (
@@ -14657,7 +14662,7 @@ def _jcc_helper_delta_ok_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     function: StructuredAstValue,
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
 ) -> bool:
     """Return whether added/removed helper calls are evidenced."""
     helper_delta = delta.get("helper_calls")
@@ -14684,7 +14689,7 @@ def _jcc_helper_delta_ok_8616(
     return not added_helpers or helper_evidenced
 
 
-def _jcc_register_delta_ok_8616(delta: dict) -> bool:
+def _jcc_register_delta_ok_8616(delta: dict[str, StructuredAstValue]) -> bool:
     """Return whether register-write deltas only remove proven removable writes."""
     register_delta = delta.get("register_writes")
     if not isinstance(register_delta, dict):
@@ -14698,7 +14703,7 @@ def _jcc_register_delta_ok_8616(delta: dict) -> bool:
     )
 
 
-def _jcc_global_delta_ok_8616(delta: dict, validation: dict) -> bool:
+def _jcc_global_delta_ok_8616(delta: dict[str, StructuredAstValue], validation: dict[str, StructuredAstValue]) -> bool:
     """Return whether global-write deltas only add adjacent high-byte precision."""
     global_delta = delta.get("global_writes")
     if not isinstance(global_delta, dict):
@@ -14714,8 +14719,8 @@ def _jcc_global_delta_ok_8616(delta: dict, validation: dict) -> bool:
 
 def _jcc_stack_delta_ok_8616(
     codegen: StructuredAstValue,
-    validation: dict,
-    delta: dict,
+    validation: dict[str, StructuredAstValue],
+    delta: dict[str, StructuredAstValue],
 ) -> bool:
     """Return whether stack-write deltas are covered by direct stack evidence."""
     stack_delta = delta.get("stack_writes")
@@ -14725,7 +14730,7 @@ def _jcc_stack_delta_ok_8616(
         set(_direct_stack_move_evidence_offsets_8616(codegen))
         | set(_direct_stack_update_evidence_offsets_8616(codegen))
     )
-    return validation_stack_write_delta_offsets_are_evidenced_8616(validation, evidence_offsets)
+    return bool(validation_stack_write_delta_offsets_are_evidenced_8616(validation, evidence_offsets))
 
 
 def _is_jcc_condition_materialization_validation_delta_8616(
@@ -15018,8 +15023,8 @@ def _callsite_arg_materialization_evidence_8616(codegen: StructuredAstValue) -> 
 
 def _callsite_global_writes_delta_ok_8616(
     codegen: StructuredAstValue,
-    delta: dict,
-    validation: dict,
+    delta: dict[str, StructuredAstValue],
+    validation: dict[str, StructuredAstValue],
 ) -> bool:
     """Return whether added global writes are only adjacent high-byte precision."""
     global_delta = delta.get("global_writes")
@@ -15041,9 +15046,9 @@ def _callsite_global_writes_delta_ok_8616(
 
 def _callsite_global_precision_delta_8616(
     codegen: StructuredAstValue,
-    delta: dict,
-    validation: dict,
-    touched_fields: set,
+    delta: dict[str, StructuredAstValue],
+    validation: dict[str, StructuredAstValue],
+    touched_fields: set[str],
 ) -> bool | None:
     """Classify global/segmented-only precision deltas; None when not applicable."""
     if not touched_fields or not touched_fields <= {"global_writes", "segmented_writes"}:
@@ -15119,9 +15124,9 @@ def _callsite_return_token_pair_ok_8616(
 
 def _callsite_return_global_delta_ok_8616(
     codegen: StructuredAstValue,
-    delta: dict,
-    validation: dict,
-    touched_fields: set,
+    delta: dict[str, StructuredAstValue],
+    validation: dict[str, StructuredAstValue],
+    touched_fields: set[str],
 ) -> bool:
     """Check the returns/global-writes field gates for callsite arg deltas."""
     if not touched_fields or touched_fields - {"returns", "global_writes"}:
@@ -15379,7 +15384,7 @@ def _return_chain_returns_delta_ok_8616(
 
 def _return_chain_tail_deltas_ok_8616(
     codegen: StructuredAstValue,
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
 ) -> bool:
     """Return whether condition/control/segmented deltas match the chain evidence."""
     materialized_condition_fps = _boundary_set_8616(
@@ -15392,8 +15397,8 @@ def _return_chain_tail_deltas_ok_8616(
 
 
 def _return_chain_condition_control_deltas_ok_8616(
-    delta: dict,
-    materialized_condition_fps: set,
+    delta: dict[str, StructuredAstValue],
+    materialized_condition_fps: set[str],
 ) -> bool:
     """Return whether conditions/control deltas only touch materialized chain conditions."""
     condition_delta = delta.get("conditions")
@@ -15412,7 +15417,7 @@ def _return_chain_condition_control_deltas_ok_8616(
 
 def _return_chain_segmented_delta_ok_8616(
     codegen: StructuredAstValue,
-    delta: dict,
+    delta: dict[str, StructuredAstValue],
 ) -> bool:
     """Return whether the segmented-writes delta is explained by callsite cleanup."""
     segmented_delta = delta.get("segmented_writes")
@@ -15601,8 +15606,8 @@ def _cfg_return_expr_reject_8616(
 def _check_return_chain_returns_delta_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    returns_delta: dict,
-    expected_returns: set,
+    returns_delta: dict[str, StructuredAstValue],
+    expected_returns: set[str],
     full_return_chain_materialized: bool,
 ) -> bool:
     """Return whether the returns delta only reflects proven selector returns."""
@@ -15646,12 +15651,12 @@ def _check_return_chain_returns_delta_8616(
 def _check_full_return_chain_deltas_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    delta: dict,
-    validation: dict,
+    delta: dict[str, StructuredAstValue],
+    validation: dict[str, StructuredAstValue],
     returns_delta: StructuredAstValue,
-    touched_fields: set,
-    allowed_fields: set,
-    expected_returns: set,
+    touched_fields: set[str],
+    allowed_fields: set[str],
+    expected_returns: set[str],
 ) -> bool:
     """Check segmented/condition/control/helper deltas for a full selector return chain."""
     _reject = _cfg_return_expr_reject_8616(codegen)
@@ -15780,14 +15785,16 @@ def _is_cfg_return_expr_chain_materialization_delta_8616(
         for expression in multi_arm_return_expressions
         if isinstance(expression, CExpression)
     )
-    if "returns" in touched_fields and not _check_return_chain_returns_delta_8616(
-        project,
-        codegen,
-        returns_delta,
-        expected_returns,
-        full_return_chain_materialized,
-    ):
-        return False
+    if "returns" in touched_fields:
+        assert isinstance(returns_delta, dict)
+        if not _check_return_chain_returns_delta_8616(
+            project,
+            codegen,
+            returns_delta,
+            expected_returns,
+            full_return_chain_materialized,
+        ):
+            return False
     if full_return_chain_materialized:
         return _check_full_return_chain_deltas_8616(
             project,
@@ -15805,7 +15812,7 @@ def _is_cfg_return_expr_chain_materialization_delta_8616(
 
 def _mask_accumulator_conditions_delta_ok_8616(
     delta: dict[str, StructuredAstValue],
-    expected_conditions: set,
+    expected_conditions: set[str],
 ) -> bool:
     """Return whether the conditions delta only touches proven accumulator conditions."""
     condition_delta = delta.get("conditions")
@@ -15822,7 +15829,7 @@ def _mask_accumulator_conditions_delta_ok_8616(
 
 def _mask_accumulator_control_delta_ok_8616(
     delta: dict[str, StructuredAstValue],
-    expected_conditions: set,
+    expected_conditions: set[str],
 ) -> bool:
     """Return whether the control-flow delta only touches accumulator branches."""
     control_delta = delta.get("control_flow_effects")
@@ -17298,7 +17305,7 @@ def _build_postprocess_validation_8616(
     postprocess_exception: StructuredAstValue,
     before_collect_elapsed: float,
     after_collect_elapsed: float,
-) -> tuple[dict, dict, int, bool]:
+) -> tuple[dict[str, StructuredAstValue], dict[str, StructuredAstValue], int, bool]:
     """Build the cached postprocess validation result with forced-failure marks."""
     owner = getattr(function, "info", None) if function is not None else None
     validation_started = time.perf_counter()
@@ -17372,7 +17379,7 @@ def _record_postprocess_run_info_8616(
     core_elapsed: float,
     postprocess_elapsed: float,
     validation_timings: StructuredAstValue,
-    validation: dict,
+    validation: dict[str, StructuredAstValue],
 ) -> StructuredAstValue:
     """Record per-function postprocess timings and failure fields; return info owner."""
     snapshot_function_info = None
@@ -17426,7 +17433,7 @@ def _record_postprocess_run_info_8616(
 def _persist_postprocess_validation_8616(
     self: StructuredAstValue,
     snapshot_function_info: StructuredAstValue,
-    validation: dict,
+    validation: dict[str, StructuredAstValue],
     func_addr: StructuredAstValue,
     func_name: StructuredAstValue,
 ) -> None:
@@ -17457,7 +17464,7 @@ def _persist_postprocess_validation_8616(
 def _finalize_failed_postprocess_validation_8616(
     self: StructuredAstValue,
     *,
-    validation: dict,
+    validation: dict[str, StructuredAstValue],
     log: StructuredAstValue,
     validation_mode: str,
     function: StructuredAstValue,
@@ -17504,7 +17511,7 @@ def _finalize_failed_postprocess_validation_8616(
             validation["verdict"],
         )
         self.project._inertia_decompiler_stage = "postprocess_failed"
-        return
+        return True
     _should_return = _handle_failed_postprocess_validation_8616(
         self,
         validation=validation,
@@ -17789,7 +17796,7 @@ def _postprocess_validation_accept_arms_8616(
     *,
     function: StructuredAstValue,
     validation: dict[str, StructuredAstValue],
-) -> tuple:
+) -> tuple[StructuredAstValue, ...]:
     """Return the ordered uniform validation-delta acceptance arms.
 
     Each entry is ``(predicate, log_message, counter_attr)``; the first arm whose

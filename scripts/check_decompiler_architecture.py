@@ -377,6 +377,9 @@ _CLI_ALLOWED_X86_16_IMPORTS = frozenset(
         # CLI only invokes the idempotent Types/Lowering consumer after angr
         # regeneration; binary fact classification remains outside the CLI.
         "angr_platforms.X86_16.lowering.function_pointer_parameters",
+        # CLI consumes only Lowering-owned wrapper identity for call accounting;
+        # pointer classification and materialization remain owned by Lowering.
+        "angr_platforms.X86_16.lowering.near_pointer_argument_values",
         "angr_platforms.X86_16.lowering.real_mode_linear",
         # CLI invokes this Types/Lowering consumer before decompilation;
         # caller-use proof and return-type ownership remain outside the CLI.
@@ -1334,6 +1337,7 @@ _PIPELINE_TIER_CONTRACT = {
 }
 
 _PROMOTED_TYPED_FILES = (
+    "angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_logical_input_contracts.py",
     "angr_platforms/angr_platforms/X86_16/alias/condition_register_definition.py",
     "angr_platforms/angr_platforms/X86_16/structuring/condition_register_expression.py",
     "angr_platforms/angr_platforms/X86_16/structuring/loop_break_topology.py",
@@ -1369,6 +1373,10 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/stack_value_use.py",
     "angr_platforms/angr_platforms/X86_16/ir/register_live_in.py",
     "angr_platforms/angr_platforms/X86_16/ir/constant_flow.py",
+    "angr_platforms/angr_platforms/X86_16/ir/scalar_value_projection.py",
+    "angr_platforms/angr_platforms/X86_16/widening/entry_stack_word_bits.py",
+    "angr_platforms/angr_platforms/X86_16/widening/entry_stack_word_value_contracts.py",
+    "angr_platforms/angr_platforms/X86_16/widening/entry_stack_word_values.py",
     "angr_platforms/angr_platforms/X86_16/ir/instruction_origin.py",
     "angr_platforms/angr_platforms/X86_16/lowering/segmented_load_origins.py",
     "monkeytype_config.py",
@@ -1410,6 +1418,10 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/alias/stack_lowering.py",
     "angr_platforms/angr_platforms/X86_16/alias/segment_stack_fragments.py",
     "angr_platforms/angr_platforms/X86_16/alias/stack_pointer_snapshots.py",
+    "angr_platforms/angr_platforms/X86_16/alias/entry_stack_byte_contracts.py",
+    "angr_platforms/angr_platforms/X86_16/alias/entry_stack_bytes.py",
+    "angr_platforms/angr_platforms/X86_16/alias/entry_stack_pointer_snapshots.py",
+    "angr_platforms/angr_platforms/X86_16/ir/vex_operation_membership.py",
     "angr_platforms/angr_platforms/X86_16/alias/segment_stack_restore.py",
     "angr_platforms/angr_platforms/X86_16/alias/logical_stack_memory_projection.py",
     "angr_platforms/angr_platforms/X86_16/alias/stack_memory_access_projection.py",
@@ -1474,6 +1486,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/ir/logical_memory_register_transfer_contracts.py",
     "angr_platforms/angr_platforms/X86_16/ir/logical_memory_value_trace.py",
     "angr_platforms/angr_platforms/X86_16/ir/logical_memory_write_value.py",
+    "angr_platforms/angr_platforms/X86_16/ir/logical_word_read_reaching_value.py",
     "angr_platforms/angr_platforms/X86_16/ir/regs.py",
     "angr_platforms/angr_platforms/X86_16/ir/scalar_definitions.py",
     "angr_platforms/angr_platforms/X86_16/ir/scalar_affine_contracts.py",
@@ -1975,9 +1988,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/flag_dead_definitions.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/simplify.py",
-    "angr_platforms/angr_platforms/X86_16/postprocess/value_flow.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/const_prop.py",
-    "angr_platforms/angr_platforms/X86_16/postprocess/optimization/copy_prop.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_local_array_reads.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_value_identity.py",
@@ -2000,6 +2011,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/semantics/return_effect_operands.py",
     "angr_platforms/angr_platforms/X86_16/semantics/call_contracts.py",
     "angr_platforms/angr_platforms/X86_16/semantics/call_register_effects.py",
+    "angr_platforms/angr_platforms/X86_16/semantics/direct_ret_call_effect.py",
     "angr_platforms/angr_platforms/X86_16/semantics/call_return_frame_effects.py",
     "angr_platforms/angr_platforms/X86_16/semantics/call_return_segment.py",
     "angr_platforms/angr_platforms/X86_16/semantics/call_return_frame_projections.py",
@@ -2268,6 +2280,7 @@ _PROMOTED_TYPED_FILES = (
     "inertia_decompiler/cli_stack_locals.py",
     "inertia_decompiler/cli_storage_objects.py",
     "inertia_decompiler/cli_string_timeout_fallback.py",
+    "inertia_decompiler/cli_terminal_status.py",
     "inertia_decompiler/cli_timeout.py",
     "inertia_decompiler/cli_output.py",
     "inertia_decompiler/cli_word_loads.py",
@@ -2287,7 +2300,6 @@ _PROMOTED_TYPED_FILES = (
     "inertia_decompiler/library_function_classifier.py",
     "inertia_decompiler/debug_dos.py",
     "inertia_decompiler/debugger_gdb.py",
-    "inertia_decompiler/debugger_tui.py",
     "inertia_decompiler/signature_matching_policy.py",
     "inertia_decompiler/msc51_local_hash.py",
     "inertia_decompiler/non_optimized_fallback.py",
@@ -2405,6 +2417,14 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/validation_observable_compaction.py",
     "angr_platforms/angr_platforms/X86_16/validation_pointer_parameter_output_contracts.py",
     "angr_platforms/angr_platforms/X86_16/validation_pointer_parameter_outputs.py",
+    "angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use.py",
+    "angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use_contracts.py",
+    "angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use_flow.py",
+    "angr_platforms/angr_platforms/X86_16/ir/stack_argument_scaled_return.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/far_return_pointer_census.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/far_return_pointer_use.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/far_return_pointer_use_contracts.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/far_return_expression_binding.py",
 )
 
 _INERTIA_TYPED_PROMOTION_DEBT_FILES = ()
@@ -2686,6 +2706,7 @@ _OWNERSHIP_MANIFEST_REQUIRED_RULES = {
         "angr_platforms/angr_platforms/X86_16/lowering/call_return_frame.py",
         "angr_platforms/angr_platforms/X86_16/alias/partial_register_address_break.py",
         "angr_platforms/angr_platforms/X86_16/semantics/call_register_effects.py",
+        "angr_platforms/angr_platforms/X86_16/semantics/direct_ret_call_effect.py",
         "angr_platforms/angr_platforms/X86_16/semantics/call_return_frame_effects.py",
         "angr_platforms/angr_platforms/X86_16/semantics/call_return_segment.py",
         "angr_platforms/angr_platforms/X86_16/semantics/call_output_contracts.py",
@@ -2719,6 +2740,7 @@ _OWNERSHIP_MANIFEST_REQUIRED_RULES = {
         "angr_platforms/angr_platforms/X86_16/ir/logical_memory_register_transfer_contracts.py",
         "angr_platforms/angr_platforms/X86_16/ir/logical_memory_value_trace.py",
         "angr_platforms/angr_platforms/X86_16/ir/logical_memory_write_value.py",
+        "angr_platforms/angr_platforms/X86_16/ir/logical_word_read_reaching_value.py",
         "angr_platforms/angr_platforms/X86_16/ir/ssa_function.py",
         "angr_platforms/angr_platforms/X86_16/ir/ssa_memory.py",
         "angr_platforms/angr_platforms/X86_16/ir/ssa_memory_contracts.py",
@@ -2908,6 +2930,8 @@ _OWNERSHIP_MANIFEST_REQUIRED_TESTS = {
         "angr_platforms/tests/test_x86_16_call_outputs.py",
         "angr_platforms/tests/test_x86_16_call_stack_effects.py",
         "angr_platforms/tests/test_x86_16_call_stack_allocation_proof.py",
+        "angr_platforms/tests/test_x86_16_call_target_ssa_binding.py",
+        "angr_platforms/tests/test_x86_16_call_target_evidence_retention.py",
         "angr_platforms/tests/test_x86_16_partial_register_address_break.py",
     ),
     "x86-16-ir-condition-cache-relift": (
@@ -2927,6 +2951,7 @@ _OWNERSHIP_MANIFEST_REQUIRED_TESTS = {
         "angr_platforms/tests/test_x86_16_vex_memory_access_fidelity.py",
         "angr_platforms/tests/test_x86_16_interprocedural_storage_return_pointer_stack.py",
         "angr_platforms/tests/test_x86_16_logical_memory_write_value.py",
+        "angr_platforms/tests/test_x86_16_logical_word_read_reaching_value.py",
         "angr_platforms/tests/test_x86_16_carry_borrow_cfg.py",
         "angr_platforms/tests/test_x86_16_carry_borrow_sources.py",
         "angr_platforms/tests/test_x86_16_carry_borrow_stack_storage.py",
@@ -8248,9 +8273,6 @@ def _understand_config_violations_8616(understand_config_path: Path, config_text
     return violations
 
 
-    return tuple(violations)
-
-
 def _check_status_reporting_not_source_backed(path: Path) -> tuple[ArchitectureViolation, ...]:
     """Reject stale source-backed acceptance wording in status reporting."""
 
@@ -10341,7 +10363,7 @@ def check_decompiler_architecture(
     violations.extend(_check_postprocess_narrowed_fields_use_dot(root / "decompiler_postprocess.py"))
     violations.extend(_check_postprocess_stack_identity_dot_access(root / "decompiler_postprocess.py"))
     violations.extend(_check_structuring_diagnostics_stats_dot_access(root / "structuring_diagnostics.py"))
-    for optimization_name in ("copy_prop.py", "dead_setup.py", "trivial_copy.py"):
+    for optimization_name in ("dead_setup.py", "trivial_copy.py"):
         violations.extend(
             _check_postprocess_optimization_narrowed_fields_use_dot(
                 root / "postprocess" / "optimization" / optimization_name

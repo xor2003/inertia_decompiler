@@ -44,6 +44,7 @@ from angr_platforms.X86_16.lowering.interprocedural_storage_simtypes import (
 from angr_platforms.X86_16.lowering.interprocedural_storage_solver import (
     resolve_program_storage_trials_8616,
 )
+from x86_16_native_call_fixtures import retain_native_call_index_8616
 
 CALLER_ADDR = 0x1000
 CALLSITE_ADDR = 0x1000
@@ -72,7 +73,7 @@ def _project(
     caller_code: bytes,
     caller_blocks: set[int],
     callee_code: bytes = bytes.fromhex("b80100c3"),
-) -> tuple[SimpleNamespace, SimpleNamespace]:
+) -> tuple[angr.Project, SimpleNamespace]:
     """Build one real-lifter caller/callee project with exact boundaries."""
     padding = bytes(CALLEE_ADDR - CALLER_ADDR - len(caller_code))
     lifted = angr.Project(
@@ -88,6 +89,7 @@ def _project(
     caller = SimpleNamespace(
         addr=CALLER_ADDR,
         block_addrs_set=caller_blocks,
+        blocks=tuple(lifted.factory.block(address, opt_level=0) for address in sorted(caller_blocks)),
         info={},
     )
     callee = SimpleNamespace(
@@ -95,11 +97,9 @@ def _project(
         block_addrs_set={CALLEE_ADDR},
         info={},
     )
-    project = SimpleNamespace(
-        factory=lifted.factory,
-        kb=SimpleNamespace(functions=_Functions8616((caller, callee))),
-    )
-    return project, callee
+    lifted.kb.functions = _Functions8616((caller, callee))
+    retain_native_call_index_8616(lifted, CALLER_ADDR, CALLER_ADDR + len(caller_code))
+    return lifted, callee
 
 
 def _inputs() -> FunctionInputStorageTrialCollection8616:
@@ -157,7 +157,7 @@ def _evidence(
 
 
 def _collect(
-    project: SimpleNamespace,
+    project: angr.Project,
     callee: SimpleNamespace,
     evidence: CallerReturnUseEvidence8616,
 ) -> FunctionReturnStorageTrialCollection8616:

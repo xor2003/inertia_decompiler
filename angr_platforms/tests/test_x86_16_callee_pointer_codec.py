@@ -41,6 +41,14 @@ def test_callee_pointer_codec_round_trips_exact_registry() -> None:
     }
 
 
+def test_callee_pointer_codec_reads_older_record_without_index_ambiguity() -> None:
+    evidence = _evidence()
+    record = callee_pointer_argument_evidence_record_8616(evidence)
+    del record["ambiguous_indexed_stack_offsets"]
+
+    assert callee_pointer_argument_evidence_from_record_8616(record) == evidence
+
+
 def test_callee_pointer_registry_records_validated_snapshot() -> None:
     project = SimpleNamespace()
     evidence = _evidence()

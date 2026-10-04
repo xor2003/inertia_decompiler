@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from angr_platforms.X86_16.alias.terminal_memory_outputs import (
@@ -18,7 +19,7 @@ from angr_platforms.X86_16.ir.condition_ir import ConditionIR, ConditionOp
 from angr_platforms.X86_16.ir.function_ssa_registry import FunctionSSAArtifactStage8616
 from angr_platforms.X86_16.ir.ssa import SSABlock
 from angr_platforms.X86_16.ir.ssa_function import SSAFunctionArtifact
-from angr_platforms.X86_16.lowering import interprocedural_storage_live_out
+from angr_platforms.X86_16.lowering import interprocedural_storage_live_out, interprocedural_storage_live_out_flow
 from angr_platforms.X86_16.lowering.interprocedural_storage_contracts import (
     CallsiteStorageTrials8616,
     StorageTrialRole8616,
@@ -35,6 +36,7 @@ from angr_platforms.X86_16.lowering.interprocedural_storage_live_out_contracts i
 from angr_platforms.X86_16.lowering.interprocedural_storage_live_out_flow import (
     materialize_memory_live_out_candidate_8616,
 )
+from angr_platforms.X86_16.lowering.interprocedural_storage_return_defs import CallOutputDefinitionResult8616
 from angr_platforms.X86_16.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,
     TerminalMemoryOutputEvidence8616,
@@ -357,7 +359,8 @@ def test_call_target_mismatch_is_typed_conflict() -> None:
     assert result.definition_failure is not None
 
 
-def test_function_collection_connects_terminal_store_to_caller_live_out(monkeypatch) -> None:
+def test_function_collection_connects_terminal_store_to_caller_live_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The definition proof receives the same project as caller SSA collection."""
     caller = _artifact(_call(), _load())
     callee = SSAFunctionArtifact(
         function_addr=CALLEE,
@@ -380,6 +383,19 @@ def test_function_collection_connects_terminal_store_to_caller_live_out(monkeypa
             CALLEE: FunctionSSAArtifactStage8616.SEMANTIC,
         },
     )
+    resolve = interprocedural_storage_live_out_flow.resolve_storage_call_output_definitions_8616
+    observed_projects: list[object] = []
+
+    def resolve_with_project(*args: Any, **kwargs: Any) -> CallOutputDefinitionResult8616:
+        """Observe real definition resolution without substituting its verdict."""
+        assert kwargs.get("project") is project
+        observed_projects.append(project)
+        return resolve(*args, **kwargs)
+
+    monkeypatch.setattr(
+        interprocedural_storage_live_out_flow,
+        "resolve_storage_call_output_definitions_8616", resolve_with_project,
+    )
     monkeypatch.setattr(
         interprocedural_storage_live_out,
         "collect_typed_condition_artifacts_8616",
@@ -392,6 +408,7 @@ def test_function_collection_connects_terminal_store_to_caller_live_out(monkeypa
     )
 
     assert collection.complete is True
+    assert observed_projects == [project]
     assert collection.stats.raw_fact_count == collection.stats.materialized_count == 1
     assert len(collection.callsites) == 1
     assert collection.callsites[0].trials[0].role is StorageTrialRole8616.LIVE_OUT

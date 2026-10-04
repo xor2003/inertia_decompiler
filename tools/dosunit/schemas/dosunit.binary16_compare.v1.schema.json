@@ -1,0 +1,443 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dosunit.binary16_compare.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "proof",
+    "requested_functions",
+    "inputs",
+    "provenance",
+    "input_domain",
+    "backend"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dosunit.binary16_compare.v1"
+    },
+    "id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "proved",
+        "conditional",
+        "counterexample",
+        "unknown",
+        "unsupported",
+        "unmapped"
+      ]
+    },
+    "requested_functions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "required": [
+        "oracle",
+        "candidate"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "oracle",
+        "candidate"
+      ]
+    },
+    "input_domain": {
+      "type": "object"
+    },
+    "proof": {
+      "type": "object",
+      "required": [
+        "schema",
+        "contract",
+        "status",
+        "verdicts"
+      ]
+    },
+    "lowering": {
+      "type": "object"
+    },
+    "backend": {
+      "type": "object"
+    },
+    "recursive_joint": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "schema",
+            "attempted",
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "schema": {
+              "const": "dosunit.binary16_compare.recursive_joint.v1"
+            },
+            "attempted": {
+              "type": "boolean"
+            },
+            "status": {
+              "enum": [
+                "proved",
+                "conditional",
+                "unknown"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assumptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "remaining_requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "root": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proposal_hash": {
+              "type": "string"
+            },
+            "model_hash": {
+              "type": "string"
+            },
+            "domain_scope": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "entry_linear",
+                    "root_linear",
+                    "ss",
+                    "cs",
+                    "sp_alignment",
+                    "initialized_loaded_relation",
+                    "arbitrary_entry_states_proved",
+                    "original_sha256",
+                    "candidate_sha256",
+                    "snapshot_hashes",
+                    "domain_model_hash",
+                    "scalar_model_hash",
+                    "proposal_hash"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "initialized_mz_image"
+                    },
+                    "entry_linear": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1048575
+                      }
+                    },
+                    "root_linear": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1048575
+                    },
+                    "ss": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    "cs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    "sp_alignment": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "initialized_loaded_relation": {
+                      "const": true
+                    },
+                    "arbitrary_entry_states_proved": {
+                      "const": false
+                    },
+                    "snapshot_hashes": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "original_sha256": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "candidate_sha256": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "domain_model_hash": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "scalar_model_hash": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "proposal_hash": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "counters": {
+              "type": "object",
+              "required": [
+                "raw_fact_count",
+                "normalized_fact_count",
+                "classified_fact_count",
+                "materialized_count",
+                "failure_count"
+              ],
+              "properties": {
+                "raw_fact_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "normalized_fact_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "classified_fact_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "materialized_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failure_count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "attempted": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "status": {
+                    "const": "unknown"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "attempted": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "members",
+                  "assumptions",
+                  "remaining_requirements",
+                  "root",
+                  "proposal_hash",
+                  "model_hash",
+                  "domain_scope",
+                  "counters"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "proved",
+                      "conditional"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "domain_scope",
+                  "members",
+                  "assumptions",
+                  "root",
+                  "proposal_hash",
+                  "model_hash"
+                ],
+                "properties": {
+                  "attempted": {
+                    "const": true
+                  },
+                  "domain_scope": {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "entry_linear",
+                      "root_linear",
+                      "ss",
+                      "cs",
+                      "sp_alignment",
+                      "initialized_loaded_relation",
+                      "arbitrary_entry_states_proved",
+                      "original_sha256",
+                      "candidate_sha256",
+                      "snapshot_hashes",
+                      "domain_model_hash",
+                      "scalar_model_hash",
+                      "proposal_hash"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "initialized_mz_image"
+                      },
+                      "entry_linear": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1048575
+                        }
+                      },
+                      "root_linear": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1048575
+                      },
+                      "ss": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "cs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "sp_alignment": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "initialized_loaded_relation": {
+                        "const": true
+                      },
+                      "arbitrary_entry_states_proved": {
+                        "const": false
+                      },
+                      "snapshot_hashes": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "original_sha256": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "candidate_sha256": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "domain_model_hash": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "scalar_model_hash": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "proposal_hash": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "assumptions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "root": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "proposal_hash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "model_hash": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

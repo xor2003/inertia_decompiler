@@ -8,6 +8,7 @@ COMPILER_COVERAGE_TYPED_OWNERS := \
 	inertia_decompiler/metadata_evidence.py
 COMPILER_COVERAGE_REGRESSION_FILES := \
 	angr_platforms/tests/test_msc6_memory_model.py \
+	angr_platforms/tests/test_msc6_dos_tmp.py \
 	angr_platforms/tests/test_msc6_binary_recovery_policy.py \
 	angr_platforms/tests/test_near_pointer_argument_values.py \
 	angr_platforms/tests/test_default_signature_provenance.py \
@@ -56,8 +57,9 @@ compiler-coverage:
 		$(if $(strip $(RERUN_FAILED)),--rerun-failed "$(RERUN_FAILED)",)
 
 compiler-coverage-contracts:
-	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m pytest -n 7 -q --tb=short --no-header --durations=10 \
+	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m pytest -n $(PYTEST_WORKERS) -q --tb=short --no-header --durations=10 \
 		angr_platforms/tests/test_msc6_memory_model.py \
+		angr_platforms/tests/test_msc6_dos_tmp.py \
 		angr_platforms/tests/test_msc6_original_evidence.py \
 		angr_platforms/tests/test_compiler_coverage_csmith.py \
 		angr_platforms/tests/test_compiler_coverage_manifest.py \

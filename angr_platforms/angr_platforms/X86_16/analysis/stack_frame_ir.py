@@ -248,7 +248,7 @@ def _build_bp_coordinate_evidence_8616(artifact: IRFunctionArtifact) -> BPFrameC
     coordinate_blocks = (
         build_x86_16_block_local_ssa(entry_block),
         *(build_x86_16_block_local_ssa(block) for block in artifact.blocks
-          if block.addr != entry_block.addr and any(_bp_access_8616(item) for item in block.instrs)),
+          if block.addr != entry_block.addr),
     )
     if stack_coordinate_agreement_8616(coordinate_blocks) is StackCoordinateAgreement8616.CONFLICT:
         return BPFrameCoordinateEvidence8616(
@@ -256,7 +256,11 @@ def _build_bp_coordinate_evidence_8616(artifact: IRFunctionArtifact) -> BPFrameC
             detail="captured BP accesses have contradictory frame coordinates",
             stats=FrameCoordinateStats8616(1, 1, 1, 0, 1),
         )
-    ssa_artifact = SSAFunctionArtifact(artifact.function_addr, coordinate_blocks)
+    # The scalar consumer requires a real entry-edge census. Keep all supplied
+    # blocks and their exact predecessors; an omitted map is not an empty CFG.
+    ssa_artifact = SSAFunctionArtifact(
+        artifact.function_addr, coordinate_blocks, predecessor_map=predecessors,
+    )
 
     bp_delta, bp_write_count = _reaching_bp_delta_8616(entry_block, ssa_artifact)
     raw_count = max(1, bp_write_count)

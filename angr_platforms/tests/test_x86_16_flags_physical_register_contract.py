@@ -12,6 +12,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CConstant,
     CDirtyExpression,
     CDoWhileLoop,
+    CForLoop,
     CFunctionCall,
     CIfElse,
     CStatements,
@@ -26,6 +27,7 @@ from angr_platforms.X86_16.decompiler_postprocess_flags import (
     _prune_overwritten_flag_assignments_8616,
     _prune_unused_flag_assignments_8616,
 )
+from angr_platforms.X86_16.postprocess.optimization.dce import _dead_code_elimination_8616
 
 
 class _Codegen:
@@ -128,6 +130,59 @@ def test_unused_flag_pruning_keeps_read_virtual_register_oident() -> None:
 
     assert changed is False
     assert root.statements == [write, branch]
+
+
+@pytest.mark.parametrize("header", ["initializer", "iterator"])
+@pytest.mark.parametrize("virtual", [False, True])
+@pytest.mark.parametrize("dce", [False, True])
+@pytest.mark.parametrize("as_assignment", [False, True])
+def test_unused_flag_pruning_preserves_for_loop_header_reads(
+    header: str, virtual: bool, dce: bool, as_assignment: bool,
+) -> None:
+    """A FLAGS consumer in either loop header keeps its existing definition."""
+    project = _project()
+    codegen = _Codegen(project)
+    offset, size = project.arch.registers["flags"]
+    flags = (
+        _register_vvar(project, codegen, "flags", 12)
+        if virtual else CVariable(SimRegisterVariable(offset, size, ident="ir_1"), codegen=codegen)
+    )
+    write = CAssignment(flags, _constant(codegen, 0), codegen=codegen)
+    read = CBinaryOp("And", flags, _constant(codegen, 0x400), codegen=codegen)
+    body = CStatements([], codegen=codegen)
+    if as_assignment:
+        di_offset, di_size = project.arch.registers["di"]
+        destination = CVariable(SimRegisterVariable(di_offset, di_size, ident="ir_output"), codegen=codegen)
+        read = CAssignment(destination, read, codegen=codegen)
+        body.statements = [CFunctionCall("observe", None, [destination], codegen=codegen)]
+    loop = CForLoop(
+        read if header == "initializer" else None,
+        _constant(codegen, 1),
+        read if header == "iterator" else None,
+        body,
+        codegen=codegen,
+    )
+    root = _install_statements(codegen, [write, loop])
+
+    changed = _dead_code_elimination_8616(codegen) if dce else _prune_unused_flag_assignments_8616(project, codegen)
+    assert changed is False
+    assert root.statements == [write, loop]
+
+
+def test_unused_flag_pruning_preserves_shared_read_after_write_target_visit() -> None:
+    """Visiting a shared CVariable as an LHS does not consume its read occurrence."""
+    project = _project()
+    codegen = _Codegen(project)
+    offset, size = project.arch.registers["flags"]
+    flags = CVariable(SimRegisterVariable(offset, size, ident="ir_shared"), codegen=codegen)
+    first = CAssignment(flags, _constant(codegen, 0), codegen=codegen)
+    condition = CBinaryOp("And", flags, _constant(codegen, 0x400), codegen=codegen)
+    branch = CIfElse([(condition, CStatements([], codegen=codegen))], codegen=codegen)
+    last = CAssignment(flags, _constant(codegen, 0x400), codegen=codegen)
+    root = _install_statements(codegen, [first, branch, last])
+
+    assert _prune_unused_flag_assignments_8616(project, codegen) is False
+    assert root.statements == [first, branch, last]
 
 
 def test_overwritten_flag_pruning_recognizes_virtual_register_oident() -> None:

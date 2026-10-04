@@ -1,3 +1,5 @@
+import pytest
+from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
 from angr_platforms.X86_16.regs import reg16_t, reg32_t, sgreg_t
 from angr_platforms.X86_16.stack_helpers import (
     branch_rel8,
@@ -78,6 +80,7 @@ class _RegisterBank(dict):
 
 class _StackEmu:
     def __init__(self):
+        self.control_address_domain = ControlAddressDomain.LOADER_LINEAR
         gpreg_pairs = (
             (reg16_t.AX, 0x1111),
             (reg16_t.CX, 0x2222),
@@ -373,16 +376,92 @@ def test_stack_helpers_enter_and_leave_manage_the_frame_pointer():
 
 def test_stack_helpers_compute_near_return_ip_from_instruction_size():
     emu = _StackEmu()
+    emu.lifter_instruction.addr = (0x1234 << 4) + 0x0100
 
     assert near_return_ip16(emu, 3) == 0x0103
 
 
-def test_stack_helpers_compute_relative_targets_from_current_ip_and_eip():
+def test_control_coordinate_domain_is_part_of_frontend_cache_identity():
+    """Native and loader lifting of identical bytes cannot share cached IR."""
+    from angr_platforms.X86_16.arch_86_16 import Arch86_16
+
+    loader = Arch86_16()
+    native = Arch86_16(control_address_domain=ControlAddressDomain.ARCHITECTURAL_OFFSET)
+    assert loader.lifting_semantics_key_8616() != native.lifting_semantics_key_8616()
+
+
+def test_native_return_offset_uses_declared_architectural_instruction_address():
+    """Native IP is already an offset even when CS is nonzero."""
+    emu = _StackEmu()
+    emu.control_address_domain = ControlAddressDomain.ARCHITECTURAL_OFFSET
+    emu.lifter_instruction.addr = 0xFFFF
+    assert near_return_ip16(emu, 3) == 2
+
+
+@pytest.mark.parametrize("code,width", [(bytes.fromhex("e80000"), 2), (bytes.fromhex("66e800000000"), 4)])
+def test_near_call_and_return_coordinates_match_independent_guest(code, width):
+    """Decoded loader addresses save offsets and RET rejoins the CS base."""
+    from unicorn import UC_ARCH_X86, UC_MODE_16, Uc
+    from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_IP, UC_X86_REG_SP, UC_X86_REG_SS
+
+    guest = Uc(UC_ARCH_X86, UC_MODE_16)
+    guest.mem_map(0, 0x100000)
+    guest.reg_write(UC_X86_REG_CS, 0x1234)
+    guest.reg_write(UC_X86_REG_SS, 0x2000)
+    guest.reg_write(UC_X86_REG_SP, 0x1000)
+    linear = (0x1234 << 4) + 0x0100
+    ret = b"\xc3" if width == 2 else b"\x66\xc3"
+    guest.mem_write(linear, code + ret)
+    guest.emu_start(linear, 0x100000, count=1)
+    stack_offset = 0x1000 - width
+    saved = int.from_bytes(guest.mem_read((0x2000 << 4) + stack_offset, width), "little")
+    assert saved == 0x0100 + len(code)
+    assert guest.reg_read(UC_X86_REG_SP) == stack_offset
+
+    emu = _StackEmu()
+    emu.lifter_instruction.addr = linear
+    emu.gpregs[reg32_t.EIP] = linear
+    if width == 2:
+        emit_near_call16(emu, linear + len(code), instruction_size=len(code))
+    else:
+        from angr_platforms.X86_16.stack_helpers import near_return_eip32
+
+        emit_near_call32(emu, linear + len(code), near_return_eip32(emu, len(code)))
+    assert emu.memory[(sgreg_t.SS, stack_offset)] == saved
+
+    guest.emu_start(linear + len(code), 0x100000, count=1)
+    if width == 2:
+        assert return_near16(emu) == saved
+    else:
+        assert return_near32(emu) == saved
+    assert emu.irsb.next == (0x1234 << 4) + guest.reg_read(UC_X86_REG_IP)
+    assert emu.get_gpreg(reg16_t.SP) == guest.reg_read(UC_X86_REG_SP) == 0x1000
+
+
+def test_stack_helpers_compute_relative_targets_from_decoded_addresses():
     emu = _StackEmu()
     emu.gpregs[reg32_t.EIP] = 0x1000
 
     assert near_relative_target16(emu, 4, 3) == 0x0107
-    assert near_relative_target32(emu, 8, 5) == 0x100D
+    # EIP storage does not supply the decoded instruction's loader address.
+    assert near_relative_target32(emu, 8, 5) == 0x010D
+
+
+def test_indirect_near_call_saves_architectural_ip_from_decoded_address():
+    """The generic instruction path uses the same saved-IP contract."""
+    from types import SimpleNamespace
+
+    from angr_platforms.X86_16.instr16 import Instr16
+
+    emu = _StackEmu()
+    emu.lifter_instruction.addr = (0x1234 << 4) + 0x0100
+    emu.gpregs[reg16_t.IP] = emu.lifter_instruction.addr & 0xFFFF
+    instruction = SimpleNamespace(
+        emu=emu, instr=SimpleNamespace(size=2), get_rm16=lambda: 0x0200,
+        _active_stack_emulator=lambda: emu,
+    )
+    Instr16.call_rm16(instruction)
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x0102
 
 
 def test_stack_helpers_push_all16_preserves_original_sp_slot():
@@ -433,7 +512,7 @@ def test_stack_helpers_return_near16_sets_ip_and_ret_jumpkind():
     assert return_near16(emu) == 0x3456
     assert emu.get_gpreg(reg16_t.IP) == 0x3456
     assert emu.get_gpreg(reg16_t.SP) == 0x1000
-    assert emu.irsb.next == 0x3456
+    assert emu.irsb.next == (0x1234 << 4) + 0x3456
     assert emu.irsb.jumpkind == "Ijk_Ret"
 
 
@@ -450,6 +529,7 @@ def test_stack_helpers_return_near16_applies_extra_stack_adjust():
 
 def test_stack_helpers_emit_near_call_and_jump_set_control_transfer_edges():
     emu = _StackEmu()
+    emu.lifter_instruction.addr = (0x1234 << 4) + 0x0100
     emu.gpregs[reg32_t.EIP] = 0x1000
 
     emit_near_call16(emu, 0x2222, instruction_size=3)
@@ -465,7 +545,7 @@ def test_stack_helpers_emit_near_call_and_jump_set_control_transfer_edges():
     emu.gpregs[reg32_t.ESP] = 0x2000
     emit_near_call32(emu, 0x2000)
     assert emu.get_gpreg(reg32_t.EIP) == 0x2000
-    assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x1000
+    assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x0100
     assert emu.irsb.jumpkind == "Ijk_Call"
 
     emit_near_jump32(emu, 0x3000)
@@ -554,7 +634,7 @@ def test_stack_helpers_return_near32_sets_eip_and_ret_jumpkind():
 
     assert return_near32(emu) == 0x12345678
     assert emu.get_gpreg(reg32_t.ESP) == 0x2000
-    assert emu.irsb.next == 0x12345678
+    assert emu.irsb.next == (0x1234 << 4) + 0x12345678
     assert emu.irsb.jumpkind == "Ijk_Ret"
 
 
@@ -578,8 +658,9 @@ def test_stack_helpers_far_call_wraps_linear_target_at_one_megabyte():
     assert emu.irsb.next == 0x0FFEF
 
 
-def test_stack_helpers_far_call_symbolic_segment_keeps_offset_target():
+def test_stack_helpers_native_far_call_uses_architectural_offset():
     emu = _StackEmu()
+    emu.control_address_domain = ControlAddressDomain.ARCHITECTURAL_OFFSET
     symbolic_segment = object()
 
     emit_far_call16(emu, symbolic_segment, 0x02C8, 0x0105)
@@ -604,3 +685,32 @@ def test_stack_helpers_far_linear_target_resolution_contract():
     assert far_linear_target_8616(0, 0) == 0
     assert far_linear_target_8616(object(), 0x02C8) is None
     assert far_linear_target_8616(0x100E, object()) is None
+
+
+def test_loader_far_call_retains_symbolic_segment_in_control_target():
+    """A symbolic segment contributes its base instead of disappearing."""
+    from pyvex.lifting.util.vex_helper import Type
+
+    class Coordinate:
+        def __init__(self, value):
+            self.value = value
+
+        def cast_to(self, ty):
+            bits = {Type.int_8: 8, Type.int_16: 16, Type.int_32: 32}[ty]
+            return Coordinate(self.value & ((1 << bits) - 1))
+
+        def __lshift__(self, other):
+            return Coordinate(self.value << other.value)
+
+        def __add__(self, other):
+            return Coordinate(self.value + other.value)
+
+        def __and__(self, other):
+            return Coordinate(self.value & other.value)
+
+    emu = _StackEmu()
+    emu.constant = lambda value, ty: Coordinate(value).cast_to(ty)
+    # The frame is explicit here so fake expression arithmetic is confined
+    # to the composed control target rather than stack-address arithmetic.
+    emit_far_jump16(emu, Coordinate(0x1234), Coordinate(0x5678))
+    assert emu.irsb.next.value == (0x1234 << 4) + 0x5678

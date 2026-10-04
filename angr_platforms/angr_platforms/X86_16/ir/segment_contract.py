@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, cast
 
+from ..frontend_boundary_transport import capture_function_boundary_8616, restore_function_boundary_8616
+from ..frontend_function_boundary import ExactFunctionRangeBoundary8616, mapped_entry_function_boundary_8616
 from .core import (
     IRAddress,
     IRAtom,
@@ -27,6 +29,9 @@ from .core import (
     MemSpace,
     SegmentOrigin,
 )
+from .function_ssa_registry import function_boundary_at_address_8616
+from .ir_boundary_cfg import IRBoundaryCoverageResult8616, prove_ir_boundary_coverage_8616
+from .segment_effect_closure import SegmentEffectClosureResult8616, prove_segment_effect_closure_8616
 from .segment_state import SegmentRegisterState, SegmentStateArtifact, SegmentValueKind8616
 
 __all__ = [
@@ -151,6 +156,18 @@ class SegmentFunctionContract:
     clobbered_registers: tuple[str, ...] = ()
     restored_registers: tuple[str, ...] = ()
     summary: dict[str, int] = field(default_factory=dict)
+    effect_closure: SegmentEffectClosureResult8616 | None = None
+
+    @property
+    def effects_complete(self) -> bool:
+        """Authorize effects only from retained closure and its exact clobber projection."""
+        proof = self.effect_closure
+        return bool(
+            proof is not None
+            and proof.complete
+            and proof.coverage.artifact.function_addr == self.function_addr
+            and self.clobbered_registers == _exit_clobbers(proof.coverage.artifact, proof.state)
+        )
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -163,6 +180,8 @@ class SegmentFunctionContract:
             "clobbered_registers": list(self.clobbered_registers),
             "restored_registers": list(self.restored_registers),
             "summary": dict(self.summary),
+            "effects_complete": self.effects_complete,
+            "effect_callsite_addrs": [] if self.effect_closure is None else list(self.effect_closure.callsite_addrs),
         }
 
 
@@ -249,10 +268,17 @@ def _exit_clobbers(
     artifact: IRFunctionArtifact,
     segment_state: SegmentStateArtifact,
 ) -> tuple[str, ...]:
-    """Return registers whose physical identity is not preserved at every exit."""
+    """Check terminal blocks and every edge leaving the function artifact.
+
+    A block may both continue internally and escape externally. Its outgoing
+    state must participate even if another internal path restores a register.
+    """
     block_addrs = {block.addr for block in artifact.blocks}
     exit_addrs = tuple(
-        block.addr for block in artifact.blocks if not any(successor in block_addrs for successor in block.successor_addrs)
+        block.addr
+        for block in artifact.blocks
+        if not block.successor_addrs
+        or any(successor not in block_addrs for successor in block.successor_addrs)
     )
     entry = segment_state.entry_states.get(artifact.function_addr, {})
     return tuple(
@@ -326,6 +352,8 @@ class _SegmentFactScan8616:
 def build_x86_16_segment_function_contract(
     artifact: IRFunctionArtifact,
     segment_state: SegmentStateArtifact,
+    *,
+    coverage: IRBoundaryCoverageResult8616 | None = None,
 ) -> SegmentFunctionContract:
     """Build an exact function-local segment contract from typed IR facts."""
     scan = _SegmentFactScan8616()
@@ -360,6 +388,7 @@ def build_x86_16_segment_function_contract(
         instruction_states=tuple(instruction_states),
         clobbered_registers=clobbered,
         restored_registers=restored,
+        effect_closure=None if coverage is None else prove_segment_effect_closure_8616(coverage, segment_state),
         summary={
             "raw_fact_count": len(facts),
             "normalized_fact_count": len(facts),
@@ -383,5 +412,16 @@ def apply_x86_16_segment_function_contract(project: object, codegen: object) -> 
         return False
     if not isinstance(artifact, IRFunctionArtifact) or not isinstance(segment_state, SegmentStateArtifact):
         return False
-    boundary._inertia_segment_function_contract = build_x86_16_segment_function_contract(artifact, segment_state)
+    function = function_boundary_at_address_8616(project, artifact.function_addr)
+    exact = function if isinstance(function, ExactFunctionRangeBoundary8616) else None
+    if exact is None and function is not None:
+        witness = capture_function_boundary_8616(project, function)
+        if witness is not None:
+            exact = restore_function_boundary_8616(project, witness)
+    if function is None:
+        exact = mapped_entry_function_boundary_8616(project, artifact.function_addr)
+    coverage = None if exact is None else prove_ir_boundary_coverage_8616(project, exact, artifact)
+    boundary._inertia_segment_function_contract = build_x86_16_segment_function_contract(
+        artifact, segment_state, coverage=coverage,
+    )
     return False

@@ -20,6 +20,53 @@ from inertia_decompiler.telemetry import (
 )
 
 
+def test_failed_span_retains_bounded_reason_without_replacing_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A timed failure must retain its cause in compact traces and propagate unchanged."""
+    reset_telemetry_for_tests()
+    monkeypatch.setenv("INERTIA_OTEL_SPANS", "1")
+    monkeypatch.setenv("INERTIA_OTEL_MIN_MS", "0")
+    assert configure_telemetry_from_env()
+    failure = RuntimeError("missing frame evidence\n" + "x" * 1000)
+    try:
+        with pytest.raises(RuntimeError) as raised, span("test.failure", function="0x1000"):
+            raise failure
+        assert raised.value is failure
+        attributes = build_compact_summary()["errors"][0][2]
+        assert attributes["exception"] == "RuntimeError"
+        message = attributes["exception_message"]
+        assert message.startswith("missing frame evidence")
+        assert len(message) <= telemetry._MAX_ATTR_TEXT
+        assert message.endswith("~")
+        assert "exception_message=missing_frame_evidence" in build_agent_trace_text()
+        assert "exception_message=missing_frame_evidence" in build_agent_slow_trace_text()
+    finally:
+        reset_telemetry_for_tests()
+
+
+def test_pipeline_failure_retains_bounded_typed_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Distinct typed registry refusals must survive the generic exception message."""
+    reset_telemetry_for_tests()
+    monkeypatch.setenv("INERTIA_OTEL_SPANS", "1")
+    monkeypatch.setenv("INERTIA_OTEL_MIN_MS", "0")
+    assert configure_telemetry_from_env()
+    failure = cli_core.PipelineHardError(
+        "Semantics raw IR conflicts with retained evidence",
+        layer="semantics",
+        details={"failure": "artifact_refused", "extra": "x" * 1000},
+    )
+    try:
+        with pytest.raises(cli_core.PipelineHardError) as raised, span("test.pipeline.failure"):
+            raise failure
+        assert raised.value is failure
+        attributes = build_compact_summary()["errors"][0][2]
+        assert attributes["exception_layer"] == "semantics"
+        assert "artifact_refused" in attributes["exception_details"]
+        assert len(attributes["exception_details"]) <= telemetry._MAX_ATTR_TEXT
+        assert "exception_details=" in build_agent_trace_text()
+    finally:
+        reset_telemetry_for_tests()
+
+
 def test_compact_telemetry_summary_records_decorator_and_nested_spans(monkeypatch):
     reset_telemetry_for_tests()
     monkeypatch.setenv("INERTIA_OTEL_SPANS", "1")

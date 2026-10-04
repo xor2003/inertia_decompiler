@@ -30,15 +30,78 @@ They do not relax its architecture or function-fix acceptance contract.
 - Add linters or enable additional checks when they reliably prevent observed
   defects. Keep configuration shared between direct invocations and Make, test
   enforcement, and report existing debt without hiding or weakening findings.
-- Use `PYTHON_JIT=1` for Python commands. Run pytest with `-n 7`, short tracebacks,
-  and duration reporting so the slowest tests are visible on every run.
+- Use `PYTHON_JIT=1` and nice 10 for Python commands. Run pytest with up to six
+  workers, short tracebacks, and duration reporting so the slowest tests are
+  visible on every run. The user-authorized aggregate test limit is independent
+  of linter and decompiler pools; concurrent pytest jobs share those six slots.
+  Partitioned suites use at most six concurrent serial pytest processes;
+  retain their lower heavy/exclusive limits instead of nesting xdist pools.
+  The small `decompiler-contracts` precheck caps its pool at two (one for a
+  serial request); measured interpreter startup outweighed six-worker gains.
+  The wall-budgeted comparator admission stage defaults to two workers (one
+  for a serial request), while `PYTEST_WORKERS=6` still governs later suites.
+  `COMPARATOR_PYTEST_WORKERS` explicitly overrides this independent pool.
+  This avoids observed contention-induced refusals; proof budgets never increase.
+  `test-pipeline-fast` waits for contracts and then fail-fast comparator
+  admission before launching the broad suite, including under parallel Make.
+  Every standalone pipeline tier also runs `binary-budgeted` before the unit
+  pool. This phase caps transitive-call proofs at two workers (one when
+  requested); six concurrent copies reproduced deadline refusals. Keep these
+  controls out of the broad unit inventory, without raising proof timeouts.
+  The unit and relational lanes print failed node IDs, phases and existing
+  tracebacks immediately through `scripts.pytest_live_failures`; final pytest
+  summaries and exit codes remain authoritative. Its subprocess integration
+  checks run serially to avoid nesting an xdist pool inside the six-worker pool.
+  Use `make ... PYTEST_WORKERS=6` to select six workers in both Make's focused
+  tests and the curated pipeline, or pass `scripts/test_pipeline.py
+  --pytest-workers 6` directly. The pipeline accepts 1-6 and defaults to three;
+  `--msc6-workers` controls external compiler constructs, not pytest workers.
 - Pass the selected project interpreter to Pyright, for example
   `.venv/bin/pyright --pythonpath .venv/bin/python`; the executable's location
   alone does not ensure it resolves dependencies from that environment.
 - Prefer the existing parallel Make linter targets. Avoid overlapping broad test
   gates or concurrent tools writing the same mutable cache.
+- Batch related test nodes in one pytest invocation. Start a fresh interpreter
+  per case only when its isolation contract requires it; repeated native imports
+  have cost about 20 seconds per otherwise trivial case in this workspace.
+- Finish source-writing linters and native builds before provenance-sensitive
+  comparator tests. Keep semantic sources and generated artifacts frozen until
+  those tests finish: even a comment edit can intentionally invalidate a proof.
+  Preserve a rejected run's evidence, then rerun on the stable tree; do not
+  relax freshness checks or increase proof budgets to mask the race. Use fewer
+  test workers when shared-host contention consumes wall-clock proof budgets.
 - Avoid adding to files already over 350 lines where practical. Extract a focused
   owner when warranted, but do not turn a small fix into a size-only refactor.
+
+### Linter Cadence
+
+Use explicit owned paths, not the entire shared dirty tree. A development
+iteration is a coherent edit plus its focused regression, not each keystroke.
+
+| When | Checks |
+| --- | --- |
+| Python edit iteration | `make lint-iteration FILES="path.py test_path.py"`: Ruff autofix, then the type/doc/owned-access ratchet. Includes new and unpromoted files. Run the relevant focused regression. |
+| Completed implementation or changed interfaces | Scoped MyPy (`mypy-files`); inspect skipped-file notices and check new owners directly with shared configuration. Add scoped Pyright for inference, third-party boundaries, or its existing diagnostics; disable watch mode. |
+| CLI or layer-boundary import changes | Run `architecture-check-fast` before native or xdist tests; scoped lint/type checks do not validate the architecture import policy. |
+| Compiled Python/Cython changes | Applicable mypyc/Cython build and smoke tests after source stabilizes, before proof tests. No rebuild for unrelated Python or documentation edits. |
+| Module removal, moves, import/entry-point changes | Basta unused-file scan; Vulture for dead-code changes. These need repository context, not a per-edit loop. |
+| Complexity refactors | Scoped Lizard when its metric is relevant; Ruff already checks configured complexity rules every iteration. |
+| Documentation-only edits | Review links/content and applicable context checks; no Python linters or compiler smoke. |
+| Semantic integration / PR checkpoint | Existing `quality-dev`, `quality-fast`, `quality-hard` and pipeline obligations still apply at their documented checkpoints. Repository-wide typing/dead-code/complexity scans remain integration checks. |
+
+Example (Python processes inherit nice 10 and the configured JIT setting):
+
+```sh
+rtk proxy nice -n 10 make lint-iteration PYTHON=./.venv/bin/python FILES="tools/dosunit/owner.py angr_platforms/tests/test_owner.py"
+```
+
+Do not run broad MyPy, Pyright, mypyc, Vulture, Basta, or Lizard after every
+small edit. Do not rerun an unchanged successful check merely to report it;
+rerun when its inputs or dependencies change, a failure remains, or an
+integration gate requires it. Finish Ruff autofixes before parallel read-only
+checks and freeze semantic sources before proof tests. Keep full diagnostics
+in logs; report scope, exit status, counts and actionable failures only.
+`lint-iteration` is an inner-loop check, not semantic or full-plan acceptance.
 
 ### Clear Code
 
@@ -86,6 +149,11 @@ They do not relax its architecture or function-fix acceptance contract.
   worker. Parent counters do not observe forked/clean-worker state. Direct-address
   probes may require both `INERTIA_OTEL_PROFILE_IN_PROCESS=1` and
   `INERTIA_DIRECT_ADDR_FORCE_THREAD=1`; these are diagnostic settings, not defaults.
+- For stack sampling, match the existing worker: use
+  `INERTIA_FORK_STACK_DUMP_SEC` for fork children and
+  `INERTIA_THREAD_STACK_DUMP_SEC` for daemon threads. Verify actual samples;
+  an empty log from the wrong switch is not evidence of an idle worker.
+  Prefer the matching sampler over changing worker mode for observation.
 - Also verify that a diagnostic run did not return a cached function. For a
   bounded in-process probe, use a temporary cache namespace/directory instead of
   deleting shared caches; confirm actual stage observations before interpreting

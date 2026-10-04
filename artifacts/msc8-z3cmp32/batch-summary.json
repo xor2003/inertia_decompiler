@@ -1,0 +1,46 @@
+{
+  "targets": {
+    "C13216": {
+      "passed": 9,
+      "failed": 15,
+      "refused": 984,
+      "total": 1008
+    },
+    "C1XX3216": {
+      "passed": 21,
+      "failed": 32,
+      "refused": 1957,
+      "total": 2010
+    },
+    "C23216": {
+      "passed": 7,
+      "failed": 6,
+      "refused": 1285,
+      "total": 1298
+    },
+    "C33216": {
+      "passed": 1,
+      "failed": 3,
+      "refused": 585,
+      "total": 589
+    },
+    "CL": {
+      "passed": 0,
+      "failed": 1,
+      "refused": 258,
+      "total": 259
+    },
+    "LINK": {
+      "passed": 5,
+      "failed": 80,
+      "refused": 736,
+      "total": 821
+    }
+  },
+  "summary": {
+    "total": 5985,
+    "passed": 43,
+    "failed": 137,
+    "refused": 5805
+  }
+}

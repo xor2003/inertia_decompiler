@@ -178,6 +178,40 @@ def test_msc_recompile_rejects_nonzero_exit_without_diagnostic_keyword(
     assert result.outcome is RecompileCheckOutcome.FAILED
 
 
+@pytest.mark.parametrize("inherited_tmp", ["/tmp", "E:\\READONLY"])
+def test_msc_intermediate_files_use_writable_case_drive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, inherited_tmp: str,
+) -> None:
+    """An inherited host/compiler-tree TMP cannot select writable DOS storage."""
+    kvikdos = tmp_path / "kvikdos"
+    compiler_root = tmp_path / "msc51"
+    (compiler_root / "BIN").mkdir(parents=True)
+    monkeypatch.setenv("TMP", inherited_tmp)
+    monkeypatch.setattr(recompile_check, "_resolve_kvikdos_path", lambda: kvikdos)
+    monkeypatch.setattr(recompile_check, "_resolve_msc51_root", lambda: compiler_root)
+    commands: list[tuple[str, ...]] = []
+
+    def run(command: tuple[str, ...], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Model the observed C1043 refusal unless TMP names the writable drive."""
+        if command[-1] == "--kvm-check":
+            return _completed_process(0)
+        commands.append(command)
+        if "--env=TMP=C:\\" not in command:
+            return _completed_process(4, stdout="fatal error C1043: cannot open compiler intermediate file\n")
+        return _completed_process(0)
+
+    monkeypatch.setattr(recompile_check.subprocess, "run", run)
+    payload = "int demo(void) { return 0; }\n"
+    result = check_c_recompiles_8616(payload, target="msc-dos")
+
+    assert result.passed, result.stdout + result.stderr
+    assert len(commands) == 1
+    assert "--env=TMP=C:\\" in commands[0]
+    assert commands[0][1].startswith("--mount=c:")
+    assert commands[0][2] == f"--mount=e:{compiler_root}/"
+    assert result.checked_payload == payload
+
+
 def test_msc_compile_payload_uses_dos_header_aggregate_definitions() -> None:
     payload = recompile_check._compile_input_payload_8616(
         "typedef union REGS {\n"

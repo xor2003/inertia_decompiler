@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
+from typing import Any
 
 _TDINFO_MAGIC = 0x52FB
 _PAGE_SIZE = 512
@@ -496,7 +497,7 @@ def parse_tdinfo_exe(path: Path, *, load_base_linear: int = 0) -> TDInfoEXEInfo 
     return parse_tdinfo_exe_bytes(path.read_bytes(), load_base_linear=load_base_linear)
 
 
-def _tdinfo_header_layout_8616(data: bytes) -> tuple | None:
+def _tdinfo_header_layout_8616(data: bytes) -> tuple[TDInfoHeader, int, int, int, TDInfoTableLayout] | None:
     """Decode the TDINFO header layout, or None when absent/truncated."""
     if len(data) < 0x40 or data[:2] != b"MZ":
         return None
@@ -1497,7 +1498,7 @@ _TDINFO_RANGED_BUILTIN_TYPE_IDS = {0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0
 # preamble slots but are never referenced by C++ members in this corpus.
 # ``label``/``pword`` (ids 0x24/0x2A) are protected-mode control-flow and
 # far-pointer builtins emitted by BC2-era libraries.
-TDINFO_BUILTIN_TYPE_NAMES = {
+TDINFO_BUILTIN_TYPE_NAMES: dict[int, str] = {
     0x00: "void",
     0x04: "signed char",
     0x05: "int",
@@ -2238,7 +2239,7 @@ def _tdinfo_owner_name_from_methods(method_names: list[str]) -> str:
 def _tdinfo_close_member_list(
     records: tuple[_TDInfoStreamRecord, ...],
     index: int,
-    current: list[dict],
+    current: list[dict[str, Any]],
     pending_methods: list[str],
     pending_block_ordinal: int | None,
     first_ordinal: int,
@@ -2289,7 +2290,7 @@ def _tdinfo_member_lists_from_stream(
     resolve to a unique descriptor.
     """
     lists: list[TDInfoMemberList] = []
-    current: list[dict] = []
+    current: list[dict[str, Any]] = []
     pending_methods: list[str] = []
     pending_block_ordinal: int | None = None
     pending_ext: int | None = None
@@ -2357,7 +2358,7 @@ def _tdinfo_member_lists_from_stream(
 
 
 def _tdinfo_materialize_members(
-    entries: list[dict],
+    entries: list[dict[str, Any]],
     size_candidates_of: Callable[[int, int], tuple[int, ...]],
     *,
     trailer_size: int | None,
@@ -2389,7 +2390,7 @@ def _tdinfo_materialize_members(
 
 def _tdinfo_offset_transitions(
     states: dict[int, tuple[int, tuple[int, ...]]],
-    entry: dict,
+    entry: dict[str, Any],
     size_candidates_of: Callable[[int, int], tuple[int, ...]],
     trailer_size: int | None,
 ) -> dict[int, tuple[int, tuple[int, ...]]]:
@@ -2415,7 +2416,7 @@ def _tdinfo_offset_transitions(
 
 
 def _tdinfo_solve_member_offsets(
-    entries: list[dict],
+    entries: list[dict[str, Any]],
     size_candidates_of: Callable[[int, int], tuple[int, ...]],
     trailer_size: int | None,
 ) -> list[int] | None:

@@ -8,6 +8,7 @@ environment or replace any generated function body.
 import shutil
 import subprocess
 
+import pytest
 from test_x86_16_cod_regressions import COD_DIR, _run_cod_proc
 
 _HARNESS = r"""
@@ -44,6 +45,7 @@ int main(void)
 """
 
 
+@pytest.mark.requires_kvm
 def test_cod_envsize_reads_environment_mcb_and_preserves_selector(tmp_path):
     compiler = shutil.which("gcc")
     assert compiler is not None, "generated-C behavioral gate requires gcc"

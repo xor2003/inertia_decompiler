@@ -63,6 +63,7 @@ DEFAULT_KVIKDOS: Path = Path("/home/xor/kvikdos/kvikdos")
 DEFAULT_MSC6_ROOT: Path = Path("/home/xor/inertia_player/dos_compilers/Microsoft C v6ax")
 DEFAULT_DECOMPILE: Path = REPO_ROOT / "decompile.py"
 DEFAULT_BATCH_DECOMPILE_PROCS: Path = REPO_ROOT / "scripts" / "batch_decompile_procs.py"
+MSC6_BATCH_MAX_WORKERS: int = 4
 DEFAULT_DECOMPILE_SKIP: tuple[str, ...] = ()
 HARNESS_SUCCESS_EXIT_CODE = 255
 DECOMPILE_MAX_FUNCTIONS_DEFAULT = 0
@@ -1334,6 +1335,9 @@ def _compile_and_link_unlocked(
         "--path-dos=e:\\BIN",
         "--env=INCLUDE=E:\\INCLUDE",
         "--env=LIB=E:\\LIB",
+        # Host TMP is not a DOS path, and the compiler tree may be read-only.
+        # C: is the writable per-run mount holding compiler intermediates.
+        "--env=TMP=C:\\",
         "--prog=e:\\BIN\\CL.EXE",
         "e:\\BIN\\CL.EXE",
         "/Ic:\\",
@@ -1368,6 +1372,9 @@ def _compile_and_link_unlocked(
             "--path-dos=e:\\BIN",
             "--env=INCLUDE=E:\\INCLUDE",
             "--env=LIB=E:\\LIB",
+            # Host TMP is not a DOS path, and the compiler tree may be read-only.
+            # C: is the writable per-run mount holding compiler intermediates.
+            "--env=TMP=C:\\",
             "--prog=e:\\BIN\\CL.EXE",
             "e:\\BIN\\CL.EXE",
             "/Ic:\\",
@@ -2357,6 +2364,8 @@ def _batch_decompile_command(
         "--rizin-timeout",
         str(options.decompile_rizin_timeout),
     ]
+    selected_jobs = len(binary_targets) if binary_targets is not None else len(fallback_functions)
+    cmd.extend(["--workers", str(min(MSC6_BATCH_MAX_WORKERS, max(1, selected_jobs)))])
     if binary_targets is None:
         for function_name in fallback_functions:
             cmd.extend(["--proc", function_name])

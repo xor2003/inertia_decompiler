@@ -5,9 +5,11 @@ from __future__ import annotations
 import pytest
 from angr.sim_type import (
     SimStruct,
+    SimTypeBottom,
     SimTypeChar,
     SimTypeFunction,
     SimTypeLong,
+    SimTypePointer,
     SimTypeShort,
 )
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
@@ -16,6 +18,10 @@ from angr_platforms.X86_16.ir import (
     IRAddress,
     MemSpace,
     SegmentOrigin,
+)
+from angr_platforms.X86_16.lowering.far_pointer_type import (
+    SimTypeFarPointer16_8616,
+    far_pointer_type_8616,
 )
 from angr_platforms.X86_16.lowering.interprocedural_storage_contracts import (
     FunctionStorageContract8616,
@@ -129,6 +135,7 @@ def test_scalar_slot_maps_exact_width_and_signedness(
 
     assert result.accepted
     assert isinstance(result.sim_type, expected_class)
+    assert isinstance(result.sim_type, (SimTypeChar, SimTypeShort, SimTypeLong))
     assert result.sim_type.signed is expected_signed
     assert result.c_type == expected_c
 
@@ -238,3 +245,218 @@ def test_split_dx_ax_output_maps_to_one_unsigned_long() -> None:
     assert isinstance(result.sim_type, SimTypeLong)
     assert result.sim_type.signed is False
     assert result.c_type == "unsigned long"
+
+
+def _dx_ax_pointer_return_slot(
+    *, pointee_width_bytes: int | None = None
+) -> StorageSlotContract8616:
+    """Build the proven DX:AX register pair classified as a pointer result."""
+    return StorageSlotContract8616(
+        role=StorageTrialRole8616.RETURN,
+        logical_index=0,
+        pieces=(_identity(2, register="ax"), _identity(2, register="dx")),
+        signedness=StorageTrialSignedness8616.NOT_APPLICABLE,
+        value_class=StorageTrialValueClass8616.POINTER,
+        pointee_width_bytes=pointee_width_bytes,
+    )
+
+
+def test_dx_ax_pointer_return_refuses_without_independent_pointee() -> None:
+    """Caller-dereference width alone can never authorize a far pointer."""
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(pointee_width_bytes=2),)),
+        Arch86_16(),
+    )
+
+    assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+    assert projected.failures == (
+        StorageSimTypeFailureKind8616.POINTEE_FAMILY_UNPROVEN,
+    )
+    assert projected.sim_type is None and projected.c_type is None
+
+
+def test_dx_ax_pointer_return_projects_far_pointer_from_proven_pointee() -> None:
+    """An independently proven pointee family publishes the 32-bit far type."""
+    arch = Arch86_16()
+    pointee = SimTypeShort(False).with_arch(arch)
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(pointee_width_bytes=2),)),
+        arch,
+        proven_far_pointee=pointee,
+    )
+
+    assert projected.accepted
+    assert isinstance(projected.sim_type, SimTypeFarPointer16_8616)
+    assert projected.sim_type.size == 32
+    assert projected.sim_type.pts_to == pointee
+    assert projected.sim_type._arch is arch
+    assert projected.c_type == "unsigned short *"
+
+
+def test_dx_ax_pointer_return_refuses_conflicting_dereference_width() -> None:
+    """A proven word family cannot publish when callers observed bytes."""
+    arch = Arch86_16()
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(pointee_width_bytes=1),)),
+        arch,
+        proven_far_pointee=SimTypeShort(False).with_arch(arch),
+    )
+
+    assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+    assert projected.failures == (
+        StorageSimTypeFailureKind8616.POINTEE_WIDTH_CONFLICT,
+    )
+
+
+def test_dx_ax_pointer_return_refuses_empty_pointee_family() -> None:
+    """A bottom pointee carries no family proof and must still refuse."""
+    arch = Arch86_16()
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(),)),
+        arch,
+        proven_far_pointee=SimTypeBottom(label="void").with_arch(arch),
+    )
+
+    assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+    assert projected.failures == (
+        StorageSimTypeFailureKind8616.POINTEE_FAMILY_UNPROVEN,
+    )
+
+
+def test_dx_ax_pointer_return_refuses_existing_near_pointer() -> None:
+    """A published near return type contradicts a proven far result."""
+    arch = Arch86_16()
+    near = near_pointer_type_8616(SimTypeShort(False).with_arch(arch), arch)
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(),)),
+        arch,
+        existing_type=near,
+        proven_far_pointee=SimTypeShort(False).with_arch(arch),
+    )
+
+    assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+    assert projected.failures == (
+        StorageSimTypeFailureKind8616.POINTER_WIDTH_CONFLICT,
+    )
+
+
+def test_dx_ax_pointer_return_retains_existing_far_pointee() -> None:
+    """The same independently proven family retains a concrete far pointee."""
+    arch = Arch86_16()
+    item_type = SimStruct(
+        {"value": SimTypeShort(False).with_arch(arch)}, name="Item"
+    ).with_arch(arch)
+    existing = far_pointer_type_8616(item_type, arch)
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(),)),
+        arch,
+        existing_type=existing,
+        proven_far_pointee=item_type,
+    )
+
+    assert projected.accepted
+    assert isinstance(projected.sim_type, SimTypeFarPointer16_8616)
+    assert projected.sim_type.pts_to == item_type
+    assert projected.c_type == "struct Item *"
+
+
+def test_dx_ax_pointer_return_refuses_generic_32_bit_pointer() -> None:
+    """A generic host-width pointer is not proof of the DOS FAR ABI."""
+    arch = Arch86_16()
+    arch.bits = 32  # The loaded DOS project uses angr's 32-bit address view.
+    pointee = SimTypeShort(False).with_arch(arch)
+    generic = SimTypePointer(pointee).with_arch(arch)
+    assert generic.size == 32
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(),)),
+        arch,
+        existing_type=generic,
+        proven_far_pointee=pointee,
+    )
+
+    assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+    assert projected.sim_type is None
+    assert projected.failures == (
+        StorageSimTypeFailureKind8616.POINTER_ABI_CONFLICT,
+    )
+
+
+def test_dx_ax_pointer_return_refuses_equal_width_different_pointee_family() -> None:
+    """A word-sized struct and a word scalar are distinct C contracts."""
+    arch = Arch86_16()
+    item_type = SimStruct(
+        {"value": SimTypeShort(False).with_arch(arch)}, name="Item"
+    ).with_arch(arch)
+    existing = far_pointer_type_8616(item_type, arch)
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(_dx_ax_pointer_return_slot(),)),
+        arch,
+        existing_type=existing,
+        proven_far_pointee=SimTypeShort(False).with_arch(arch),
+    )
+
+    assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+    assert projected.sim_type is None
+    assert projected.failures == (
+        StorageSimTypeFailureKind8616.POINTEE_FAMILY_CONFLICT,
+    )
+
+
+def test_four_byte_pointer_slot_without_dx_ax_pair_refuses_width() -> None:
+    """Far publication requires the exact DX:AX pair, not any 4-byte slot."""
+    arch = Arch86_16()
+    stack_pair = StorageSlotContract8616(
+        role=StorageTrialRole8616.RETURN,
+        logical_index=0,
+        pieces=(_identity(2, offset=-2), _identity(2, offset=-4)),
+        signedness=StorageTrialSignedness8616.NOT_APPLICABLE,
+        value_class=StorageTrialValueClass8616.POINTER,
+    )
+    input_pair = StorageSlotContract8616(
+        role=StorageTrialRole8616.INPUT,
+        logical_index=0,
+        pieces=(_identity(2, offset=6), _identity(2, offset=8)),
+        signedness=StorageTrialSignedness8616.NOT_APPLICABLE,
+        value_class=StorageTrialValueClass8616.POINTER,
+    )
+
+    for slot in (stack_pair, input_pair):
+        projected = storage_slot_simtype_8616(
+            slot,
+            arch,
+            proven_far_pointee=SimTypeShort(False).with_arch(arch),
+        )
+        assert projected.verdict is StorageSimTypeVerdict8616.REFUSED
+        assert projected.failures == (
+            StorageSimTypeFailureKind8616.UNSUPPORTED_WIDTH,
+        )
+
+
+def test_proven_far_pointee_does_not_alter_near_pointer_return() -> None:
+    """The far-pointee input is only consumed by the proven DX:AX shape."""
+    arch = Arch86_16()
+    slot = StorageSlotContract8616(
+        role=StorageTrialRole8616.RETURN,
+        logical_index=0,
+        pieces=(_identity(2, register="ax"),),
+        signedness=StorageTrialSignedness8616.NOT_APPLICABLE,
+        value_class=StorageTrialValueClass8616.POINTER,
+        pointee_width_bytes=1,
+    )
+
+    projected = storage_contract_return_type_8616(
+        _contract(outputs=(slot,)),
+        arch,
+        proven_far_pointee=SimTypeShort(False).with_arch(arch),
+    )
+
+    assert projected.accepted
+    assert isinstance(projected.sim_type, SimTypeNearPointer16_8616)
+    assert projected.c_type == "char *"

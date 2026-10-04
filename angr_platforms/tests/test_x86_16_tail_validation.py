@@ -1657,7 +1657,7 @@ def test_tail_validation_compare_classifies_switch_helper_structuring_precision(
     assert "switch_helper_structuring" in diff["precision_improvements"]
 
 
-def test_tail_validation_compare_classifies_switch_decision_tree_without_helper_delta():
+def test_tail_validation_compare_keeps_switch_return_delta_without_helper_evidence():
     before_conditions = (
         "CmpGE(stack_slot:SS:BP+0x4:size2,const:1)",
         "CmpGT(Add(stack_slot:SS:BP+0x4:size2,const:-1),const:1)",
@@ -1700,8 +1700,14 @@ def test_tail_validation_compare_classifies_switch_decision_tree_without_helper_
 
     diff = compare_x86_16_tail_validation_summaries(before, after)
 
-    assert diff["changed"] is False
-    assert "switch_helper_structuring" in diff["precision_improvements"]
+    # The summaries provide no callee/layout theorem relating the removed
+    # dereference to the new arithmetic. At argument=3 and loaded_word=16,
+    # every possible before return (2, 11) differs from every after return
+    # (65534, 23, 6). A switch-shaped guard tree cannot discharge that delta.
+    assert diff["changed"] is True
+    assert diff["delta"]["returns"]["added"]
+    assert diff["delta"]["returns"]["removed"]
+    assert "switch_helper_structuring" not in diff["precision_improvements"]
 
 
 def test_tail_validation_compare_classifies_switch_decision_tree_condition_only_delta():

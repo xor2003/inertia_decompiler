@@ -25,7 +25,11 @@ type ScalarDefinitionIndex8616 = dict[
 
 @dataclass(frozen=True, slots=True)
 class ScalarDefinition8616:
-    """One exact scalar SSA definition and its block-local location."""
+    """One exact scalar SSA definition and its block-local location.
+
+    A CALL target is an input use, never a defining operation. Explicit output
+    instructions retain their own records; this index does not infer effects.
+    """
 
     block_addr: int
     instr_index: int
@@ -33,11 +37,12 @@ class ScalarDefinition8616:
 
     @property
     def complete(self) -> bool:
-        """Return whether this record identifies one scalar definition."""
+        """Require a defining operation, not merely a nonempty CALL target."""
         return bool(
             self.block_addr >= 0
             and self.instr_index >= 0
             and self.instruction.dst is not None
+            and self.instruction.op != "CALL"
         )
 
 
@@ -66,11 +71,16 @@ def scalar_definition_key_8616(value: IRValue) -> ScalarDefinitionKey8616:
 def build_scalar_definition_index_8616(
     artifact: IRFunctionArtifact | SSAFunctionArtifact,
 ) -> ScalarDefinitionIndex8616:
-    """Index exact typed-IR or SSA scalar definitions without hiding conflicts."""
+    """Index true raw/SSA definitions, excluding input-only CALL targets.
+
+    Target reads never create a competing producer or change immutable captured
+    values. All actual definitions remain visible, including their conflicts.
+    This exclusion proves neither register nor memory preservation across CALL.
+    """
     grouped: dict[ScalarDefinitionKey8616, list[ScalarDefinition8616]] = {}
     for block in artifact.blocks:
         for instr_index, instruction in enumerate(block.instrs):
-            if instruction.dst is None:
+            if instruction.dst is None or instruction.op == "CALL":
                 continue
             key = scalar_definition_key_8616(instruction.dst)
             grouped.setdefault(key, []).append(

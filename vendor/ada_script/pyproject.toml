@@ -1,0 +1,34 @@
+[tool.ruff]
+line-length = 100
+exclude = [
+  "venv",
+  "__pycache__",
+  ".pytest_cache",
+  ".ruff_cache",
+  "*.db",
+]
+
+[tool.pyright]
+include = [
+  "ada.py",
+  "database.py",
+  "emulation_analyzer.py",
+  "idc_engine.py",
+  "mz_parser.py",
+  "output_generator.py",
+  "utils.py",
+]
+exclude = [
+  "venv",
+  "__pycache__",
+  ".pytest_cache",
+  ".ruff_cache",
+  "test",
+]
+venvPath = "."
+venv = "venv"
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+
+[tool.radon]
+exclude = "venv,__pycache__,.pytest_cache,.ruff_cache"

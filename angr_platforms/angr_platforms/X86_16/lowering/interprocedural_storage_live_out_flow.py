@@ -18,6 +18,7 @@ from ..alias.terminal_memory_outputs import TerminalMemoryAliasEvidence8616
 from ..ir import IRValue
 from ..ir.condition_ir import ConditionIR
 from ..ir.ssa_function import SSAFunctionArtifact
+from ..semantics.call_target_evidence_8616 import resolve_call_target_evidence_8616
 from ..semantics.terminal_memory_output_contracts import TerminalMemoryOutputDisposition8616
 from ..widening.terminal_memory_output_views import (
     TerminalMemoryOutputViewFact8616,
@@ -62,6 +63,8 @@ def collect_callsite_memory_live_out_8616(
     site: CallsiteStorageTrials8616,
     targets: tuple[int, ...],
     conditions: tuple[ConditionIR, ...],
+    *,
+    project: object | None = None,
 ) -> FunctionMemoryLiveOutCollection8616:
     """Collect all direct memory views for one exact caller, atomically refusing conflicts."""
     facts: list[MemoryLiveOutUseFact8616] = []
@@ -84,6 +87,7 @@ def collect_callsite_memory_live_out_8616(
             candidate = materialize_memory_live_out_candidate_8616(
                 artifact, output_view, site.caller_addr, site.callee_addr,
                 site.callsite_addr, targets, conditions,
+                project=project,
             )
             if not candidate.activated:
                 continue
@@ -203,6 +207,8 @@ def materialize_memory_live_out_candidate_8616(
     callsite_addr: int,
     accepted_target_addrs: tuple[int, ...],
     conditions: tuple[ConditionIR, ...],
+    *,
+    project: object | None = None,
 ) -> MemoryLiveOutCandidateResult8616:
     """Materialize one activated direct-memory output candidate or refuse."""
     alias_output = output_view.alias_output
@@ -226,6 +232,10 @@ def materialize_memory_live_out_candidate_8616(
         return MemoryLiveOutCandidateResult8616(False)
     if not storage.is_exact:
         raise RuntimeError("Widening published an inexact direct-memory view")
+    evidence = (
+        None if project is None
+        else resolve_call_target_evidence_8616(project, caller_addr)
+    )
     definitions = resolve_storage_call_output_definitions_8616(
         artifact,
         caller_addr,
@@ -233,6 +243,9 @@ def materialize_memory_live_out_candidate_8616(
         callee_addr,
         accepted_target_addrs,
         (storage,),
+        project=project,
+        callsite_index=evidence.callsite_index if evidence is not None and evidence.complete else None,
+        projection=evidence.projection if evidence is not None and evidence.complete else None,
     )
     if not definitions.complete:
         conflict = definitions.verdict is CallOutputDefinitionVerdict8616.CONFLICT

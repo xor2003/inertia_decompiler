@@ -161,3 +161,36 @@ def test_apply_segment_contract_attaches_owned_typed_artifact() -> None:
 
     assert changed is False
     assert codegen._inertia_segment_function_contract.function_addr == 0x3000
+
+
+def test_segment_contract_keeps_clobber_on_external_branch() -> None:
+    """An internal restoring path cannot hide a second escaping edge."""
+    artifact = IRFunctionArtifact(
+        function_addr=0x4000,
+        blocks=(
+            IRBlock(
+                addr=0x4000,
+                instrs=(
+                    IRInstr("MOV", IRValue(MemSpace.REG, name="ax", size=2),
+                            (IRValue(MemSpace.REG, name="ds", size=2),), addr=0x4000),
+                    IRInstr("MOV", IRValue(MemSpace.REG, name="ds", size=2),
+                            (IRValue(MemSpace.CONST, const=0xB800, size=2),), addr=0x4002),
+                ),
+                successor_addrs=(0x4010, 0x5000),
+            ),
+            IRBlock(
+                addr=0x4010,
+                instrs=(IRInstr(
+                    "MOV", IRValue(MemSpace.REG, name="ds", size=2),
+                    (IRValue(MemSpace.REG, name="ax", size=2),), addr=0x4010,
+                ),),
+            ),
+        ),
+    )
+    state = build_x86_16_segment_state_artifact(artifact, build_x86_16_function_ssa(artifact))
+    # Supply a proven restoring-path state to isolate exit enumeration from
+    # the local solver's inability to carry the saved AX across blocks.
+    state.exit_states[0x4010]["ds"] = state.entry_states[0x4000]["ds"]
+    contract = build_x86_16_segment_function_contract(artifact, state)
+    assert "ds" in contract.clobbered_registers
+    assert "ds" not in contract.restored_registers

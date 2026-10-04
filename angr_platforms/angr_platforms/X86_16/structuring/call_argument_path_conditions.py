@@ -11,6 +11,7 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, cast
@@ -29,6 +30,7 @@ __all__ = [
     "CallArgumentPathConditionResult8616",
     "CallArgumentPathConditionStatus8616",
     "materialize_call_argument_path_expressions_8616",
+    "materialize_call_argument_typed_path_expression_8616",
 ]
 
 
@@ -240,15 +242,17 @@ def _materialize_path_expression_8616(
     project: object,
     codegen: object,
     node: _PathNode8616,
-    values: dict[int, int],
+    expressions: Mapping[int, CExpression],
 ) -> CExpression | None:
-    """Materialize a value expression on the proven call-executing domain."""
+    """Select caller-supplied typed leaves on the proven call-executing domain."""
     if isinstance(node, _PathLeaf8616):
-        return CConstant(values[node.predecessor_addr], SimTypeShort(False), codegen=codegen)
+        return expressions[node.predecessor_addr]
     if node is _NoCallPath8616.VALUE:
         return None
-    taken = _materialize_path_expression_8616(project, codegen, node.taken, values)
-    fallthrough = _materialize_path_expression_8616(project, codegen, node.fallthrough, values)
+    taken = _materialize_path_expression_8616(project, codegen, node.taken, expressions)
+    fallthrough = _materialize_path_expression_8616(
+        project, codegen, node.fallthrough, expressions
+    )
     if taken is None:
         return fallthrough
     if fallthrough is None:
@@ -285,11 +289,13 @@ def materialize_call_argument_path_expressions_8616(
         )
     expressions: list[CExpression] = []
     for value_index, _physical_lane in enumerate(varying_lanes):
-        values = {
-            predecessor: lane_values[value_index]
+        typed_leaves = {
+            predecessor: CConstant(
+                lane_values[value_index], SimTypeShort(False), codegen=codegen
+            )
             for predecessor, lane_values in values_by_predecessor.items()
         }
-        expression = _materialize_path_expression_8616(project, codegen, tree, values)
+        expression = _materialize_path_expression_8616(project, codegen, tree, typed_leaves)
         if expression is None:
             return CallArgumentPathConditionResult8616(
                 CallArgumentPathConditionStatus8616.REFUSED_CONDITION
@@ -298,4 +304,44 @@ def materialize_call_argument_path_expressions_8616(
     return CallArgumentPathConditionResult8616(
         CallArgumentPathConditionStatus8616.MATERIALIZED,
         tuple(expressions),
+    )
+
+
+def materialize_call_argument_typed_path_expression_8616(
+    project: object,
+    codegen: object,
+    summary: CallsiteSummary8616,
+    expressions_by_predecessor: dict[int, CExpression],
+) -> CallArgumentPathConditionResult8616:
+    """Select already-typed predecessor values with one exact ConditionIR tree.
+
+    The caller owns each value's proof and type. Structuring proves only that
+    the CFG and typed conditions select those values on every call path.
+    """
+    successors = condition_chain_successors_8616(project, codegen)
+    trace_predecessors = frozenset(expressions_by_predecessor)
+    if _call_block_predecessors_8616(summary, successors) != trace_predecessors:
+        return CallArgumentPathConditionResult8616(
+            CallArgumentPathConditionStatus8616.REFUSED_TOPOLOGY
+        )
+    conditions = _conditions_by_block_8616(codegen)
+    tree = (
+        _select_path_tree_8616(conditions, trace_predecessors, successors)
+        if conditions is not None
+        else None
+    )
+    if tree is None:
+        return CallArgumentPathConditionResult8616(
+            CallArgumentPathConditionStatus8616.REFUSED_CONDITION
+        )
+    expression = _materialize_path_expression_8616(
+        project, codegen, tree, expressions_by_predecessor
+    )
+    if expression is None:
+        return CallArgumentPathConditionResult8616(
+            CallArgumentPathConditionStatus8616.REFUSED_CONDITION
+        )
+    return CallArgumentPathConditionResult8616(
+        CallArgumentPathConditionStatus8616.MATERIALIZED,
+        (expression,),
     )

@@ -171,6 +171,7 @@ def _runtime_decompile_output_8616(
 
 
 @pytest.mark.skipif(not CMP16_EXE.is_file(), reason="CMP16 example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_cmp16_rel_i16_keeps_recovered_signature_and_avoids_implicit_arg_placeholders(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -232,6 +233,7 @@ def test_msc6_cmp16_main_preserves_all_guarded_return_chain_values() -> None:
 
 
 @pytest.mark.skipif(not SIMPLE_EXE.is_file(), reason="SIMPLE example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_simple_switch_fold_direct_output_uses_source_argument_identity(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -254,6 +256,7 @@ def test_msc6_simple_switch_fold_direct_output_uses_source_argument_identity(
 
 
 @pytest.mark.skipif(not TYPES_EXE.is_file(), reason="TYPES example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_scalar_add_sc_keeps_byte_width_through_cli_regeneration(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
     tmp_path: Path,
@@ -266,18 +269,21 @@ def test_msc6_scalar_add_sc_keeps_byte_width_through_cli_regeneration(
 
     emitted_body = _extract_emitted_function_8616(combined, "add_sc")
     assert emitted_body, combined
-    assert re.search(
+    signature = re.search(
         r"\b(?:signed |unsigned )?char add_sc\("
-        r"(?:signed |unsigned )?char a, (?:signed |unsigned )?char b\)",
+        r"(?:signed |unsigned )?char (\w+), (?:signed |unsigned )?char (\w+)\)",
         emitted_body,
-    ), emitted_body
+    )
+    assert signature is not None, emitted_body
+    first, second = map(re.escape, signature.groups())
     assert not re.search(r"\b(?:short|int) add_sc\(", emitted_body), emitted_body
-    assert "return b + a;" in emitted_body or "return a + b;" in emitted_body
+    assert re.search(rf"return (?:{first} \+ {second}|{second} \+ {first});", emitted_body), emitted_body
     # TYPES.COD saves SI/DI; their proven byte locals are not failed recovery.
     assert_scalar_byte_add_behavior(emitted_body, tmp_path)
 
 
 @pytest.mark.skipif(not TYPES_EXE.is_file(), reason="TYPES example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_scalar_sub_ss_keeps_straight_line_subtraction(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -288,13 +294,20 @@ def test_msc6_scalar_sub_ss_keeps_straight_line_subtraction(
 
     emitted_body = _extract_emitted_function_8616(combined, "sub_ss")
     assert emitted_body, combined
-    assert "return a - b;" in emitted_body
+    signature = re.search(
+        r"\b(?:unsigned )?short sub_ss\((?:unsigned )?short (\w+), (?:unsigned )?short (\w+)\)",
+        emitted_body,
+    )
+    assert signature is not None, emitted_body
+    first, second = map(re.escape, signature.groups())
+    assert re.search(rf"return {first} - {second};", emitted_body), emitted_body
     assert "if (" not in emitted_body
     assert "stack_base" not in emitted_body
     assert not re.search(r"\b(?:ax|ir_[0-9]+|vvar_[0-9]+)\s*=", emitted_body), emitted_body
 
 
 @pytest.mark.skipif(not TYPES_EXE.is_file(), reason="TYPES example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_scalar_sub_ulong_emits_consistent_wide_signature_without_probe_artifacts(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -306,11 +319,15 @@ def test_msc6_scalar_sub_ulong_emits_consistent_wide_signature_without_probe_art
 
     emitted_body = _extract_emitted_function_8616(combined, "sub_ulong")
     assert emitted_body, combined
-    assert re.search(
-        r"\b(?:long sub_ulong\(long a, long b\)|unsigned long sub_ulong\(unsigned long a, unsigned long b\))",
+    signature = re.search(
+        r"\b(?P<type>(?:unsigned )?long) sub_ulong\("
+        r"(?P=type) (?P<first>\w+), (?P=type) (?P<second>\w+)\)",
         emitted_body,
     )
-    assert "return a - b;" in emitted_body
+    assert signature is not None, emitted_body
+    first = re.escape(signature.group("first"))
+    second = re.escape(signature.group("second"))
+    assert re.search(rf"return {first} - {second};", emitted_body), emitted_body
     assert "sub_105ba" not in emitted_body
     assert "aNchkstk" not in emitted_body
     assert "a = &" not in emitted_body
@@ -355,6 +372,7 @@ def test_msc6_scalar_sub_ulong_emits_consistent_wide_signature_without_probe_art
         ("in_window_i16", ("return 0;", "return 1;")),
     ],
 )
+@pytest.mark.requires_kvm
 def test_msc6_cmp16_all_helper_functions_pass_tail_validation_and_msc_recompile(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
     function_name: str,
@@ -378,6 +396,7 @@ def test_msc6_cmp16_all_helper_functions_pass_tail_validation_and_msc_recompile(
 
 
 @pytest.mark.skipif(not FPTR_EXE.is_file(), reason="FPTR example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_fptr_select_and_apply_materializes_branch_function_pointer_targets(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -405,6 +424,7 @@ def test_msc6_fptr_select_and_apply_materializes_branch_function_pointer_targets
         ("dec_one", "return value - 1;"),
     ],
 )
+@pytest.mark.requires_kvm
 def test_msc6_fptr_leaf_functions_materialize_terminal_ax_returns(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
     function_name: str,
@@ -420,6 +440,7 @@ def test_msc6_fptr_leaf_functions_materialize_terminal_ax_returns(
 
 
 @pytest.mark.skipif(not FPTR_EXE.is_file(), reason="FPTR example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_fptr_apply_twice_consumes_stack_probe_call_artifacts(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -443,6 +464,7 @@ def test_msc6_fptr_apply_twice_consumes_stack_probe_call_artifacts(
 
 
 @pytest.mark.skipif(not LOOPS_EXE.is_file(), reason="LOOPS example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_loops_nested_materializes_stack_counter_loop(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -463,6 +485,7 @@ def test_msc6_loops_nested_materializes_stack_counter_loop(
 
 
 @pytest.mark.skipif(not POINT_EXE.is_file(), reason="POINT example binary is not available in this workspace.")
+@pytest.mark.requires_kvm
 def test_msc6_pointer_swap_preserves_loaded_temp_across_pointer_store(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
 ) -> None:
@@ -482,6 +505,7 @@ def test_msc6_pointer_swap_preserves_loaded_temp_across_pointer_store(
 @pytest.mark.skipif(not KVIKDOS_PATH.is_file(), reason="kvikdos is not available in this workspace.")
 @pytest.mark.skipif(not MSC6_ROOT.is_dir(), reason="MS C 6 root is not available in this workspace.")
 @pytest.mark.parametrize(("example_name", "exe_path"), MSC6_RUNTIME_EXAMPLES)
+@pytest.mark.requires_kvm
 def test_msc6_rebuilt_comparison_executable_runs_success_sentinel(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
     example_name: str,

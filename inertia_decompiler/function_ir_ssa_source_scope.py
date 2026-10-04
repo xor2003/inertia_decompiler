@@ -98,6 +98,9 @@ def function_ir_ssa_cache_source_files_8616(root: Path) -> tuple[Path, ...]:
         *(x86_root / "semantics" / name for name in _SEMANTICS_OWNER_NAMES_8616),
         x86_root / "pipeline" / "errors.py",
         root / "pyvex_compat.py",
+        root / "angr_platforms/__init__.py",
+        root / "angr_platforms/angr_platforms/__init__.py",
+        root / "angr_platforms/angr_platforms/import_identity.py",
     }
     discovered.update((x86_root / "ir").rglob("*.py"))
     return tuple(sorted(path for path in discovered if path.is_file()))

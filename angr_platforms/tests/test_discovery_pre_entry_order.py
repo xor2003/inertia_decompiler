@@ -16,7 +16,7 @@ def test_ranked_helpers_survive_on_both_sides_of_main(monkeypatch, helper_offset
     project = SimpleNamespace(
         arch=SimpleNamespace(name="86_16"), entry=base + entry_offset,
         loader=SimpleNamespace(main_object=SimpleNamespace(
-            linked_base=base, max_addr=len(data) - 1,
+            linked_base=base, max_addr=base + len(data) - 1,
             memory=SimpleNamespace(load=lambda offset, size: bytes(data[offset:offset + size])),
         )),
     )
@@ -34,7 +34,7 @@ def test_unranked_framed_body_is_not_admitted(monkeypatch):
     project = SimpleNamespace(
         arch=SimpleNamespace(name="86_16"), entry=0x10020,
         loader=SimpleNamespace(main_object=SimpleNamespace(
-            linked_base=0x10000, max_addr=len(data) - 1,
+            linked_base=0x10000, max_addr=0x10000 + len(data) - 1,
             memory=SimpleNamespace(load=lambda offset, size: data[offset:offset + size]),
         )),
     )

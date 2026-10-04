@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+from .condition_fingerprint_syntax import split_condition_fingerprint_arguments_8616
+
 __all__ = (
     "is_proven_full_width_mask_8616",
     "normalize_condition_full_width_masks_8616",
@@ -140,19 +142,5 @@ def _split_call_8616(value: str) -> tuple[str, str] | None:
 
 
 def _split_args_8616(value: str) -> tuple[str, ...]:
-    parts: list[str] = []
-    current: list[str] = []
-    depth = 0
-    for character in value:
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-        if character == "," and depth == 0:
-            parts.append("".join(current).strip())
-            current = []
-        else:
-            current.append(character)
-    if current:
-        parts.append("".join(current).strip())
-    return tuple(parts)
+    """Project the shared fingerprint parser into the immutable mask contract."""
+    return tuple(split_condition_fingerprint_arguments_8616(value))

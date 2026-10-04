@@ -102,3 +102,13 @@ def test_structured_report_precedence_and_malformed_evidence(payload: str, expec
     output = (f"@@INERTIA_TAIL_VALIDATION@@ {payload}\n"
               "[tail-validation] whole-tail validation clean across 1 functions\n")
     assert build_acceptance_scorecard("main", output).validation_verdict == expected
+
+
+@pytest.mark.parametrize("metadata", [False, True])
+def test_final_acceptance_failure_overrides_clean_semantic_headline(metadata: bool) -> None:
+    """Final acceptance rejection stays failed in text and structured projections."""
+    output = "[tail-validation] whole-tail validation clean across 1 functions\n"
+    output += "[tail-validation] whole-tail acceptance failed across 1 functions; semantic tail checks clean\n"
+    if metadata:
+        output += '@@INERTIA_TAIL_VALIDATION@@ {"surface":{"severity":"acceptance_failed","merge_gate":false,"acceptance_validation_failed":true}}\n'
+    assert build_acceptance_scorecard("main", output).validation_verdict == "failed"

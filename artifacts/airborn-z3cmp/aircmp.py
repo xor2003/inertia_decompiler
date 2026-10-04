@@ -39,14 +39,14 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 VEXTEST = Path("/home/xor/vextest")
 sys.path.insert(0, str(VEXTEST))
 
 import angr  # noqa: E402
-from angr.errors import SimError  # noqa: E402
 import pyvex  # noqa: E402
+
 from tools.dosunit import straightline_ssa as S  # noqa: E402
 from tools.dosunit.model import DosUnitError  # noqa: E402
 
@@ -186,9 +186,8 @@ def _fold_node(e: S.SsaExpr) -> S.SsaExpr:
         # x - x == 0, x ^ x == 0 (structural equality, incl. reloaded canaries)
         if e.op in {"sub", "xor"} and _same_expr(e.args[0], e.args[1]):
             return E("const", e.width, value=0)
-    if e.op in {"eq", "ne", "ult", "ule", "slt", "sle"} and len(e.args) == 2:
-        if _same_expr(e.args[0], e.args[1]):
-            return E("const", 1, value=1 if e.op in {"eq", "ule", "sle"} else 0)
+    if e.op in {"eq", "ne", "ult", "ule", "slt", "sle"} and len(e.args) == 2 and _same_expr(e.args[0], e.args[1]):
+        return E("const", 1, value=1 if e.op in {"eq", "ule", "sle"} else 0)
     if e.op == "not":
         a = e.args[0]
         if a.op == "const":
@@ -427,7 +426,7 @@ class LowerCtx:
         self.exits: list[tuple[S.SsaExpr, S.SsaExpr]] = []
         self.cur_stk: dict[int, S.SsaExpr] = {}         # stack writes in current block
         self.unmapped: list[str] = []
-        self.error: Optional[S.LowerFailure] = None
+        self.error: S.LowerFailure | None = None
         self.is_stack_base = "esp" if cfg.arch == "i386" else "rsp"
         self.is_frame_base = "ebp" if cfg.arch == "i386" else "rbp"
         self._hostunk: dict[int, str] = {}
@@ -1893,7 +1892,7 @@ def _port_helper_kind(name: str) -> str:
     return "uf"
 
 
-def _funcat_map(cfg: "SideConfig") -> dict[int, str]:
+def _funcat_map(cfg: SideConfig) -> dict[int, str]:
     """guest linear addr -> port fn name, built from (sub|loc)_<off> syms.
 
     ``func_at`` keys are ``0x1a20 + (file_off - 0x10000)`` i.e. ``off -
@@ -1913,7 +1912,7 @@ def _funcat_map(cfg: "SideConfig") -> dict[int, str]:
     return fm
 
 
-def _funcat_tag(cfg: "SideConfig", name: str) -> int:
+def _funcat_tag(cfg: SideConfig, name: str) -> int:
     for tag, nm in cfg.funcat_rev.items():
         if nm == name:
             return tag
@@ -1922,7 +1921,7 @@ def _funcat_tag(cfg: "SideConfig", name: str) -> int:
     return tag
 
 
-def _enum_jpt(cfg: "SideConfig", e: S.SsaExpr, limit: int = 48,
+def _enum_jpt(cfg: SideConfig, e: S.SsaExpr, limit: int = 48,
               valid=None):
     """Find a sym-indexed 16/32-bit load inside ``e`` sitting on a known
     jump table, and return ``(load_node, [unique entry values])``.
@@ -1961,7 +1960,7 @@ def _enum_jpt(cfg: "SideConfig", e: S.SsaExpr, limit: int = 48,
                 s2 += 1
                 if m.op == "const":
                     if (is_data and not cfg.m2c and cfg.img_addr
-                            and 0x1A20 <= m.value
+                            and m.value >= 0x1A20
                             and m.value - 0x1A20 < cfg.img_size):
                         cands.append((n, "img", m.value, limit))
                     elif (not is_data and m.value in cfg.addr2name):
@@ -3027,8 +3026,8 @@ def compare_function(name: str, oracle_cfg: SideConfig, cand_cfg: SideConfig,
     # (Must run before neq0 normalization, which wraps `input` ops.)
     unmodeled = []
     for k in list(cm):
-        if k.startswith("f_") and (cm[k].op == "input" and cm[k].name == k
-                                   or om[k].op == "input" and om[k].name == k):
+        if k.startswith("f_") and ((cm[k].op == "input" and cm[k].name == k)
+                                   or (om[k].op == "input" and om[k].name == k)):
             unmodeled.append(k)
             del om[k]
             del cm[k]

@@ -6,6 +6,7 @@ import io
 from types import SimpleNamespace
 
 import angr
+from angr_platforms.X86_16.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.caller_return_use_contracts import (
     CallerReturnUseEvidence8616,
@@ -13,6 +14,8 @@ from angr_platforms.X86_16.caller_return_use_contracts import (
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
+from angr_platforms.X86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
+from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from angr_platforms.X86_16.ir import IRValue, MemSpace
 from angr_platforms.X86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from angr_platforms.X86_16.lowering.interprocedural_storage_collection_contracts import (
@@ -81,7 +84,7 @@ class _Functions8616:
         return self._function if addr == self._function.addr else None
 
 
-def _project_and_function() -> tuple[SimpleNamespace, SimpleNamespace]:
+def _project_and_function() -> tuple[angr.Project, SimpleNamespace]:
     """Lift `call self; ret` with exact SSA and post-call CFG boundaries."""
     lifted = angr.Project(
         io.BytesIO(bytes.fromhex("e8fdffc3")),
@@ -99,11 +102,16 @@ def _project_and_function() -> tuple[SimpleNamespace, SimpleNamespace]:
         graph=_Graph8616(),
         info={},
     )
-    project = SimpleNamespace(
-        factory=lifted.factory,
-        kb=SimpleNamespace(functions=_Functions8616(function)),
+    # Only the function inventory is a fixture; native bytes, loader, arch and
+    # project identity remain those of the real source-backed project.
+    lifted.kb.functions = _Functions8616(function)
+    boundary = exact_function_range_boundary_8616(lifted, FUNCTION_ADDR, RETURN_ADDR + 1)
+    assert boundary is not None
+    build_boundary_direct_callsite_index_8616(
+        boundary,
+        direct_target_resolver=lambda instruction: resolve_direct_call_target_from_instruction_8616(lifted, instruction),
     )
-    return project, function
+    return lifted, function
 
 
 def _fact(*, witness: int = RETURN_ADDR) -> CallerReturnUseFact8616:
@@ -340,3 +348,26 @@ def test_direct_and_passthrough_evidence_at_one_callsite_conflicts() -> None:
 
     assert result.contract is None
     assert result.failures == (StorageTrialFailureKind8616.CALLSITE_SET_CONFLICT,)
+
+
+def test_symbolic_passthrough_refuses_without_retained_decoded_census() -> None:
+    """A symbolic CALL cannot borrow an unretained target from the CFG."""
+    project, _function = _project_and_function()
+    del project._inertia_decoded_callsite_indexes_8616
+    result = materialize_return_passthrough_trial_8616(
+        project, FUNCTION_ADDR, _fact(), (FUNCTION_ADDR,),
+    )
+    assert not result.complete
+    assert result.trial is None
+    assert result.failure is ReturnPassThroughTrialFailure8616.CALL_TARGET_UNKNOWN
+
+
+def test_symbolic_passthrough_refuses_an_unrelated_admitted_callee() -> None:
+    """Native self-call evidence cannot discharge another callee relation."""
+    project, _function = _project_and_function()
+    result = materialize_return_passthrough_trial_8616(
+        project, FUNCTION_ADDR + 0x100, _fact(), (FUNCTION_ADDR + 0x100,),
+    )
+    assert not result.complete
+    assert result.trial is None
+    assert result.failure is ReturnPassThroughTrialFailure8616.CALL_TARGET_UNKNOWN

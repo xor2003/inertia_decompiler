@@ -4976,8 +4976,8 @@ def test_materialize_callsite_stack_arguments_consumes_repeated_value_carrier_as
     assert len(wrapped.statements) == 1
     assert isinstance(wrapped.statements[0], CExpressionStatement)
     assert len(wrapped.statements[0].expr.args) == 2
-    assert wrapped.statements[0].expr.args[0].callee_target == "SEG_PTR"
-    assert wrapped.statements[0].expr.args[1].callee_target == "SEG_PTR"
+    assert wrapped.statements[0].expr.args[0].callee_target == "NEAR_ARG_PTR"
+    assert wrapped.statements[0].expr.args[1].callee_target == "NEAR_ARG_PTR"
     first_offset = wrapped.statements[0].expr.args[0].args[1]
     second_offset = wrapped.statements[0].expr.args[1].args[1]
     assert any(getattr(node, "value", None) == 0x0B4C for node in _iter_c_nodes_deep_8616(first_offset))
@@ -6322,8 +6322,8 @@ def test_materialize_callsite_stack_arguments_normalizes_bp_slot_values_and_poin
     final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
     assert len(final_stmt.expr.args) == 2
-    assert final_stmt.expr.args[0].callee_target == "SEG_PTR"
-    assert final_stmt.expr.args[1].callee_target == "SEG_PTR"
+    assert final_stmt.expr.args[0].callee_target == "NEAR_ARG_PTR"
+    assert final_stmt.expr.args[1].callee_target == "NEAR_ARG_PTR"
     offset_expr = final_stmt.expr.args[1].args[1]
     assert not any(
         _match_bp_stack_load_8616(node, project) is not None for node in _iter_c_nodes_deep_8616(offset_expr)
@@ -6469,7 +6469,7 @@ def test_materialize_callsite_stack_arguments_types_strcpy_immediate_as_ds_point
     assert len(call.args) == 2
     source_arg = call.args[1]
     assert isinstance(source_arg, CFunctionCall)
-    assert source_arg.callee_target == "SEG_PTR"
+    assert source_arg.callee_target == "NEAR_ARG_PTR"
     assert source_arg.args[1].value == 354
     assert codegen._inertia_callsite_materialization_stats.pointer_arg_materialized_count >= 1
 

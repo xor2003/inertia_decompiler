@@ -134,6 +134,7 @@ def test_aggregate_replay_rebinds_proven_views_but_keeps_unrelated_storage():
     byte = SimTypeChar(False)
     canonical, array = _stack_cvar(codegen, -20, 16, "array", SimTypeFixedSizeArray(byte, 16))
     alias, view = _stack_cvar(codegen, -20, 2, "carrier", byte)
+    unproven, unproven_view = _stack_cvar(codegen, -20, 1, "unproven", byte)
     unrelated, other = _stack_cvar(codegen, -30, 2, "other", byte)
     record_stack_variable_coordinate_projection_8616(
         codegen, variable=canonical, cvar=array,
@@ -141,13 +142,15 @@ def test_aggregate_replay_rebinds_proven_views_but_keeps_unrelated_storage():
     )
     record_stack_variable_coordinate_alias_8616(codegen, bp_offset=-18, size=16, variable=alias)
     reference = CUnaryOp("Reference", view, codegen=codegen)
-    codegen.cfunc.statements = CStatements([reference, other], codegen=codegen)
+    codegen.cfunc.statements = CStatements([reference, unproven_view, other], codegen=codegen)
     fact = StackAggregateObjectFact8616(-18, 16, 1, 18, 1, 2, (-18,), -2, 2)
 
     assert _materialize_fact(codegen, fact)[0]
 
     assert reference.operand.variable is canonical
-    assert codegen.cfunc.statements.statements[1] is other
+    assert codegen.cfunc.statements.statements[1] is unproven_view
+    assert codegen.cfunc.statements.statements[2] is other
     assert alias not in codegen.cfunc.variables_in_use
+    assert unproven in codegen.cfunc.variables_in_use
     assert unrelated in codegen.cfunc.variables_in_use
     assert not _materialize_fact(codegen, fact)[1]

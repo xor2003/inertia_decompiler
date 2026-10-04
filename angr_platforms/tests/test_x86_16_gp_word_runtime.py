@@ -129,6 +129,7 @@ def _client_body():
     )
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
     not build.DEFAULT_KVIKDOS.is_file() or not build.DEFAULT_MSC6_ROOT.is_dir(),
     reason="external DOS runtime gate requires kvikdos and MS C 6",

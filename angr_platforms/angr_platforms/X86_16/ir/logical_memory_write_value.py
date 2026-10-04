@@ -1,7 +1,7 @@
 """Prove values written by exact logical word memory accesses.
 
 Layer: IR.
-Responsibility: prove zero and old-word-plus-one values for exact logical word WRITE slices and proof sites.
+Responsibility: prove immediate and old-word-plus-one values for exact logical word WRITE slices and proof sites.
 Owns typed Value, Address, Condition, instruction facts, and lossless normalization.
 Do not perform alias-state ownership, widening, lowering/materialization,
 structuring, rewrite, postprocess, or CLI/reporting work here.
@@ -9,13 +9,17 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from . import logical_memory_contracts as logical
 from . import scalar_definitions as scalar_defs
 from .core import IRAddress, IRValue, MemSpace
 from .indexed_address_contracts import IndexedAddressDefinitionSite8616
+from .logical_constant_word_receipt import (
+    LogicalConstantWordReceipt8616,
+    prove_logical_constant_word_write_8616,
+)
 from .logical_memory_value_trace import LogicalMemoryValueTrace8616, trace_logical_word_load_8616
 from .ssa import SSABlock
 from .ssa_function import SSAFunctionArtifact
@@ -30,6 +34,8 @@ __all__ = [
 class LogicalWordWriteValueKind8616(StrEnum):
     """Bounded logical word values proven by this prerequisite."""
     CONSTANT_ZERO = "constant_zero"
+    CONSTANT_WORD = "constant_word"
+    REPLAYED_CONSTANT_WORD = "replayed_constant_word"
     OLD_LOGICAL_WORD_PLUS_ONE = "old_logical_word_plus_one"
 
 
@@ -59,6 +65,9 @@ class LogicalWordWriteLaneProof8616:
     execution_slice: logical.IRMemoryExecutionSlice8616
     stored_value: IRValue
     proof_sites: _ProofSites8616
+    source_constant_root: int | None = None
+    extracted_word: bool = False
+    shifted_high: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +79,17 @@ class LogicalWordWriteValueFact8616:
     lanes: tuple[LogicalWordWriteLaneProof8616, LogicalWordWriteLaneProof8616]
     source_expression_site: IndexedAddressDefinitionSite8616 | None = None
     source_trace: LogicalMemoryValueTrace8616 | None = None
+    constant_receipt: LogicalConstantWordReceipt8616 | None = None
+
+    @property
+    def is_constant(self) -> bool:
+        """Classify constant value kinds; callers must separately prove completeness."""
+        return self.kind in {_Kind.CONSTANT_ZERO, _Kind.CONSTANT_WORD, _Kind.REPLAYED_CONSTANT_WORD}
+
+    @property
+    def proves_constant_zero(self) -> bool:
+        """Consume either immediate or replayed evidence for the zero value."""
+        return self.is_constant and self.constant == 0 and self.complete
 
     @property
     def complete(self) -> bool:
@@ -80,10 +100,35 @@ class LogicalWordWriteValueFact8616:
         base = base and all(lane.stored_value.size == 1 and all(site.complete for site in lane.proof_sites)
                             for lane in self.lanes)
         zero = self.constant == 0 and self.source_expression_site is None and self.source_trace is None
+        low, high = self.lanes
+        receipt = self.constant_receipt
+        if self.kind is _Kind.REPLAYED_CONSTANT_WORD:
+            sources = None if receipt is None else receipt.stored_values
+            return bool(
+                base and type(self.constant) is int and receipt is not None
+                and receipt.matches_access(self.access) and sources is not None
+                and self.constant == receipt.constant
+                and low.stored_value is sources[0] and high.stored_value is sources[1]
+                and self.source_expression_site is None and self.source_trace is None
+            )
+        if receipt is not None or type(self.constant) is not int:
+            return False
+        constant_word = (
+            0 < self.constant <= 0xFFFF
+            and self.source_expression_site is None
+            and self.source_trace is None
+            and low.source_constant_root == self.constant
+            and high.source_constant_root == self.constant
+            and low.extracted_word
+            and not low.shifted_high
+            and high.extracted_word
+            and high.shifted_high
+        )
         site, trace = self.source_expression_site, self.source_trace
         old_plus_one = bool(self.constant == 1 and site is not None and site.complete and trace is not None
                             and trace.complete and trace.source == self.access.address)
         return base and ((self.kind is _Kind.CONSTANT_ZERO and zero)
+                         or (self.kind is _Kind.CONSTANT_WORD and constant_word)
                          or (self.kind is _Kind.OLD_LOGICAL_WORD_PLUS_ONE and old_plus_one))
 
 
@@ -93,6 +138,7 @@ class LogicalWordWriteValueRefusal8616:
     access: logical.IRLogicalMemoryAccess8616 | None
     failure: LogicalWordWriteValueFailureKind8616
     proof_sites: _ProofSites8616 = ()
+    constant_receipt: LogicalConstantWordReceipt8616 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +198,7 @@ def _trace_lane_8616(
     execution_slice: logical.IRMemoryExecutionSlice8616,
     definitions: scalar_defs.ScalarDefinitionIndex8616,
 ) -> _LaneTrace8616:
-    """Trace one STORE byte to a constant or one word ADD definition."""
+    """Trace one STORE byte to its 16-bit constant root or word ADD definition."""
     index = execution_slice.instr_index
     _require_8616(0 <= index < len(block.instrs), _Failure.STORE_VALUE_MISSING)
     store = block.instrs[index]
@@ -199,7 +245,14 @@ def _trace_lane_8616(
                 continue
         raise _TraceFailure8616(_Failure.UNKNOWN_EXPRESSION, tuple(sites))
     _require_8616(current.const is not None, _Failure.UNKNOWN_EXPRESSION, tuple(sites))
-    proof = LogicalWordWriteLaneProof8616(execution_slice, stored, tuple(sites))
+    proof = LogicalWordWriteLaneProof8616(
+        execution_slice,
+        stored,
+        tuple(sites),
+        source_constant_root=current.const,
+        extracted_word=saw_extract,
+        shifted_high=saw_shift,
+    )
     return _LaneTrace8616(proof, current.const, None, saw_extract, saw_shift)
 
 
@@ -318,10 +371,47 @@ def _trace_access_8616(
         pair = (lanes[0], lanes[1])
         if tuple(lane.constant for lane in pair) == (0, 0):
             return LogicalWordWriteValueFact8616(access, _Kind.CONSTANT_ZERO, 0, (pair[0].proof, pair[1].proof))
+        low, high = pair
+        immediate_word = (
+            low.root is None
+            and high.root is None
+            and isinstance(low.constant, int)
+            and 0 < low.constant <= 0xFFFF
+            and high.constant == low.constant
+            and low.saw_extract
+            and not low.saw_shift
+            and high.saw_extract
+            and high.saw_shift
+        )
+        if immediate_word and isinstance(low.constant, int):
+            return LogicalWordWriteValueFact8616(
+                access, _Kind.CONSTANT_WORD, low.constant, (low.proof, high.proof)
+            )
         return _trace_increment_8616(access, pair, definitions, logical_memory)
     except _TraceFailure8616 as failure:
         sites = tuple(site for lane in lanes for site in lane.proof.proof_sites)
         return LogicalWordWriteValueRefusal8616(access, failure.failure, (*sites, *failure.sites))
+
+
+def _close_word_write_8616(
+    artifact: SSAFunctionArtifact, access: logical.IRLogicalMemoryAccess8616,
+    blocks: dict[int, SSABlock], definitions: scalar_defs.ScalarDefinitionIndex8616,
+    memory: logical.IRLogicalMemoryArtifact8616,
+) -> LogicalWordWriteValueFact8616 | LogicalWordWriteValueRefusal8616:
+    """Keep atomic update proofs strict; replay exact values at the refused boundary."""
+    outcome = _trace_access_8616(access, blocks, definitions, memory)
+    if not isinstance(outcome, LogicalWordWriteValueRefusal8616) or outcome.failure is not _Failure.MIXED_INSTRUCTION:
+        return outcome
+    receipt = prove_logical_constant_word_write_8616(artifact, access)
+    sources = receipt.stored_values
+    if not receipt.complete or sources is None:
+        return replace(outcome, constant_receipt=receipt)
+    assert receipt.constant is not None
+    lanes = (LogicalWordWriteLaneProof8616(access.execution_slices[0], sources[0], ()),
+             LogicalWordWriteLaneProof8616(access.execution_slices[1], sources[1], ()))
+    return LogicalWordWriteValueFact8616(
+        access, _Kind.REPLAYED_CONSTANT_WORD, receipt.constant, lanes, constant_receipt=receipt,
+    )
 
 
 def trace_logical_word_write_values_8616(artifact: SSAFunctionArtifact) -> LogicalWordWriteValueArtifact8616:
@@ -339,7 +429,8 @@ def trace_logical_word_write_values_8616(artifact: SSAFunctionArtifact) -> Logic
         grouped.setdefault(block.addr, []).append(block)
     blocks = {address: items[0] for address, items in grouped.items() if len(items) == 1}
     definitions = scalar_defs.build_scalar_definition_index_8616(artifact)
-    outcomes = tuple(_trace_access_8616(access, blocks, definitions, logical_memory) for access in candidates)
+    outcomes = tuple(_close_word_write_8616(artifact, access, blocks, definitions, logical_memory)
+                     for access in candidates)
     facts = tuple(item for item in outcomes if isinstance(item, LogicalWordWriteValueFact8616))
     refusals = tuple(item for item in outcomes if isinstance(item, LogicalWordWriteValueRefusal8616))
     count = len(candidates)

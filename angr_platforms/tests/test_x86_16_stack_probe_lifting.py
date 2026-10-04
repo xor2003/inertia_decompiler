@@ -9,7 +9,7 @@ from angr_platforms.X86_16.arch_86_16 import Arch86_16
 
 
 def _probe_block(allocation_size: int) -> tuple[object, Arch86_16]:
-    """Lift ``mov ax, size; call probe`` with a binary-proven probe target."""
+    """Lift ``mov ax, size; call probe`` with a registered probe target."""
     arch = Arch86_16()
     arch._inertia_stack_probe_helper_targets_8616 = frozenset({0x1010})
     code = bytes((0xB8, allocation_size & 0xFF, allocation_size >> 8, 0xE8, 0x0A, 0x00))
@@ -39,19 +39,19 @@ def _put_offsets_at_call(block: object) -> tuple[int, ...]:
     return tuple(offsets)
 
 
-def test_zero_size_probe_does_not_emit_identity_stack_pointer_write() -> None:
-    """Keep a proven zero allocation from creating a cross-block SP SSA cycle."""
+def test_zero_size_probe_retains_native_call_frame() -> None:
+    """Zero helper allocation does not eliminate the CALL's return-address push."""
     block, arch = _probe_block(0)
 
     offsets = _put_offsets_at_call(block)
 
-    assert arch.registers["cx"][0] in offsets
-    assert arch.registers["bx"][0] in offsets
-    assert arch.registers["sp"][0] not in offsets
+    assert offsets == (arch.registers["sp"][0],)
+    assert block.vex.jumpkind == "Ijk_Call"
 
 
 def test_nonzero_probe_retains_stack_pointer_effect() -> None:
-    """Do not erase a proven nonzero stack allocation."""
+    """The helper's input size cannot replace native CALL frame effects."""
     block, arch = _probe_block(2)
 
     assert arch.registers["sp"][0] in _put_offsets_at_call(block)
+    assert block.vex.jumpkind == "Ijk_Call"

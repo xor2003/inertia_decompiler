@@ -3,6 +3,8 @@
 Layer: Types/Lowering.
 Responsibility: verify exact C argument storage, join existing pointer pointees,
 and build mutation-free prototype application results before transaction commit.
+Refuse pointer retyping of unlowered numeric argument arithmetic; interface
+storage classes alone do not prove byte-offset address representation.
 Consumes alias, widening, and typed facts through accepted interprocedural
 storage contracts and their ``SimType`` projection. It does not mutate codegen
 or function metadata.
@@ -13,12 +15,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeBottom, SimTypeFunction, SimTypePointer
 from angr.sim_variable import SimStackVariable
 from archinfo import Arch
 
+from ..c_ast_utils import _iter_c_nodes_deep_8616
 from .interprocedural_storage_contracts import (
     FunctionStorageContract8616,
     StorageIdentityKind8616,
@@ -166,12 +170,12 @@ def storage_prototype_with_types_8616(
 ) -> SimTypeFunction:
     """Rebuild one projection while preserving only non-semantic name metadata."""
     names = tuple(original.arg_names or ())
-    return SimTypeFunction(
+    return cast(SimTypeFunction, SimTypeFunction(
         argument_types,
         return_type,
         arg_names=names if len(names) == len(argument_types) else None,
         variadic=original.variadic,
-    ).with_arch(arch)
+    ).with_arch(arch))
 
 
 def _prototype_inputs_aligned_8616(
@@ -248,7 +252,42 @@ def preflight_storage_prototype_types_8616(
     )
     if return_result.verdict is StorageSimTypeVerdict8616.REFUSED:
         return FunctionStoragePrototypeTypes8616(None, failures=return_result.failures)
+    if not _pointer_retyping_preserves_arithmetic_8616(codegen, cvars, tuple(argument_types)):
+        return FunctionStoragePrototypeTypes8616(
+            None, failures=(StorageSimTypeFailureKind8616.POINTER_ARITHMETIC_UNPROVEN,),
+        )
     return FunctionStoragePrototypeTypes8616(
         tuple(argument_types),
         proven_return=return_result.sim_type,
     )
+
+
+def _pointer_retyping_preserves_arithmetic_8616(
+    codegen: object, cvars: tuple[structured_c.CVariable, ...],
+    argument_types: tuple[SimType, ...],
+) -> bool:
+    """Refuse type-only promotion that reinterprets retained numeric operations.
+
+    Accepted interface evidence proves storage/type classes, not an address
+    expression. Numeric byte-offset arithmetic must be lowered with independent
+    representation and segment proof before the pointer type is committed.
+    Header-only third-party declaration surfaces have no body to reinterpret.
+    """
+    promoted = tuple(cvar for cvar, target in zip(cvars, argument_types, strict=True)
+                     if isinstance(target, SimTypePointer) and cvar.variable_type != target)
+    if not promoted:
+        return True
+    # Dynamic angr/codegen compatibility boundary: declaration-only surfaces.
+    cfunc = getattr(codegen, "cfunc", None)
+    # Dynamic angr/codegen compatibility boundary: an optional declaration body.
+    body = getattr(cfunc, "statements", None)
+    arithmetic = {"Add", "Sub", "Mul", "Div", "Mod", "And", "Or", "Xor", "Shl", "Shr", "Sar"}
+    for node in _iter_c_nodes_deep_8616(body):
+        if not isinstance(node, structured_c.CBinaryOp) or node.op not in arithmetic:
+            continue
+        for leaf in _iter_c_nodes_deep_8616(node):
+            if isinstance(leaf, structured_c.CVariable) and any(
+                leaf is cvar or leaf.variable is cvar.variable for cvar in promoted
+            ):
+                return False
+    return True

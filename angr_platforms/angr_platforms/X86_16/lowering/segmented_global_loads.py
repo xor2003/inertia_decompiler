@@ -1121,8 +1121,8 @@ class _NamedSegGlobalLoadRun8616:
     codegen: CodegenBoundary8616
     cfunc: object
     stats: SegmentedGlobalLoadStats8616
-    evidence_by_offset: dict[int, object]
-    direct_by_offset: dict[tuple[int, int], object]
+    evidence_by_offset: dict[int, NamedGlobalEvidence8616]
+    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616]
     anonymous_by_offset: dict[object, object]
     zero_test_evidence: object
     dirty_assignments: object
@@ -1314,7 +1314,7 @@ class _NamedSegGlobalLoadRun8616:
                 return byte_expr
         return self._helper_evidence_expr_8616(node, offset, helper.width)
 
-    def _helper_call_offset_8616(self, node: object) -> tuple | None:
+    def _helper_call_offset_8616(self, node: object) -> tuple[tuple[object, ...], int] | None:
         """Parse the helper call offset, recording the refusal reason on failure."""
         args = tuple(node.args or ())
         if len(args) != 2:
@@ -1704,7 +1704,11 @@ def _direct_store_evidence_maps_8616(
     direct_updates: tuple[DirectGlobalUpdateEvidence8616, ...],
     direct_boolean_stores: tuple[DirectGlobalBooleanStoreEvidence8616, ...],
     direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
-) -> tuple[dict, dict, dict]:
+) -> tuple[
+        dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+        dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
+        dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]],
+    ]:
     """Index update/boolean/call-return store evidence by (offset, width)."""
     direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]] = {}
     for update_evidence in direct_updates:
@@ -1729,7 +1733,7 @@ def _direct_store_evidence_maps_8616(
 def _rewrite_direct_global_assignment_lhs_8616(
     nodes: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict,
+    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
     stats: SegmentedGlobalLoadStats8616,
 ) -> bool:
     """Rewrite assignment destinations that match proven direct-store refs."""
@@ -1768,10 +1772,10 @@ def _rewrite_direct_global_assignment_lhs_8616(
 def _materialize_direct_global_stores_in_root_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict,
-    direct_update_by_offset: dict,
-    direct_boolean_by_offset: dict,
-    direct_call_return_by_offset: dict,
+    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
+    direct_call_return_by_offset: dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]],
     direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
     stats: SegmentedGlobalLoadStats8616,
 ) -> bool:
@@ -1832,9 +1836,9 @@ def _materialize_direct_global_stores_in_root_8616(
 def _materialize_direct_global_stores_in_root_session_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict,
-    direct_update_by_offset: dict,
-    direct_boolean_by_offset: dict,
+    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
     direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
     stats: SegmentedGlobalLoadStats8616,
 ) -> bool:
@@ -2201,12 +2205,12 @@ class _AnonymousDirectStoreRun8616:
 
     def _process_byte_pair_8616(
         self,
-        statements: list,
+        statements: list[object],
         index: int,
         statement: object,
         assignment: object,
         identity: object,
-        candidates: tuple,
+        candidates: tuple[object, ...],
     ) -> bool:
         """Merge a proven adjacent byte-pair store into one word store."""
         high_statement = statements[index + 1]
@@ -7588,7 +7592,7 @@ def _indexed_stride_address_expr_8616(
 
 
 def _indexed_expr_segment_helper_arm_8616(
-    ctx: _IndexedGlobalExprCtx8616, args: tuple, segment_helper: object
+    ctx: _IndexedGlobalExprCtx8616, args: tuple[object, ...], segment_helper: object
 ) -> object | None:
     """Materialize a segment-load helper call into an indexed global value."""
     if segment_helper.width == 1:
@@ -7617,7 +7621,7 @@ def _indexed_expr_segment_helper_arm_8616(
 
 
 def _indexed_expr_segment_pointer_arm_8616(
-    ctx: _IndexedGlobalExprCtx8616, args: tuple
+    ctx: _IndexedGlobalExprCtx8616, args: tuple[object, ...]
 ) -> object | None:
     """Materialize a segment-pointer helper call into an indexed global address."""
     direct_offset = _constant_int_8616(args[1])
@@ -7673,7 +7677,7 @@ def _indexed_expr_segment_pointer_arm_8616(
 
 
 def _indexed_expr_memory_helper_arm_8616(
-    ctx: _IndexedGlobalExprCtx8616, args: tuple, memory_helper: object
+    ctx: _IndexedGlobalExprCtx8616, args: tuple[object, ...], memory_helper: object
 ) -> object | None:
     """Materialize a memory-pointer helper call into an indexed global value."""
     matched = _match_indexed_pointer_expr_8616(args[0], memory_helper.width, copies=ctx.copies)
@@ -7773,7 +7777,7 @@ def _indexed_byte_pair_load_materialized_8616(
 def _indexed_helper_access_allowed_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    helper_args: tuple,
+    helper_args: tuple[object, ...],
     segment_helper: object,
     access_kind: SegmentAccessKind,
 ) -> bool:
@@ -9934,7 +9938,7 @@ class _StackTypePromotionRun8616:
                         indexed_variable.size = max(int(indexed_variable.size or 0), self.width)
             self.promote_cvar(cvar)
 
-    def promote_unified_locals(self) -> dict | None:
+    def promote_unified_locals(self) -> dict[object, object] | None:
         """Promote unified local entries; returns the index for debug use."""
 
         # Dynamic boundary: angr CFunction unification metadata is optional across codegen versions.

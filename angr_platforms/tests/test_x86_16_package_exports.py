@@ -886,6 +886,9 @@ def test_x86_16_bootstrap_module_description():
     assert bootstrap.describe_x86_16_bootstrap() == (
         "apply_x86_16_calling_convention_compatibility",
         "apply_x86_16_compatibility",
+        "register_native_direct_jump_resolver_8616",
+        "register_native_direct_call_resolver_8616",
+        "register_native_direct_job_adapter_8616",
         "apply_remainder_compatibility_8616",
         "apply_stack_reference_compatibility_8616",
         "apply_x86_16_decompiler_return_compatibility",

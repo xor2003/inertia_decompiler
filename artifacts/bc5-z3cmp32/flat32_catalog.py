@@ -4,13 +4,27 @@ Responsibility: turn verified binary/sidecar symbol metadata into flat32 catalog
 """
 from __future__ import annotations
 
+import fcntl
+import hashlib
+import json
+import os
 import re
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import angr
+
+_LISTING_CACHE_VERSION = 1
+
+
+def _listing_entries_digest(entries: object) -> str:
+    """Detect accidental cache-content changes without reparsing the listing."""
+    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -38,6 +52,72 @@ def lst_functions(path: Path) -> dict[str, tuple[int, int]]:
                 functions[name] = opened[1], int(address, 16)
                 opened = None
     return functions
+
+
+def _cached_listing[ListingValue](
+    path: Path,
+    cache_dir: Path,
+    kind: str,
+    parser: Callable[[Path], dict[str, ListingValue]],
+    decode: Callable[[object], dict[str, ListingValue] | None],
+) -> dict[str, ListingValue]:
+    """Share parsed listing metadata across shards with content-based invalidation."""
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"lst-v{_LISTING_CACHE_VERSION}-{kind}-{digest}.json"
+    lock_path = cache_path.with_suffix(".lock")
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            try:
+                payload = json.loads(cache_path.read_text())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                payload = None
+            if isinstance(payload, dict) and payload.get("digest") == digest and payload.get("kind") == kind:
+                entries = payload.get("entries")
+                if payload.get("entries_sha256") == _listing_entries_digest(entries):
+                    decoded = decode(entries)
+                    if decoded is not None:
+                        return decoded
+            result = parser(path)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                raise RuntimeError(f"listing changed while parsing: {path}")
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=cache_dir, prefix=f"{cache_path.name}.", delete=False
+            ) as temporary:
+                json.dump(
+                    {"digest": digest, "kind": kind, "entries_sha256": _listing_entries_digest(result),
+                     "entries": result},
+                    temporary, sort_keys=True,
+                )
+                temporary_path = Path(temporary.name)
+            try:
+                os.replace(temporary_path, cache_path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+            return result
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def _decode_cached_functions(entries: object) -> dict[str, tuple[int, int]] | None:
+    """Reject malformed cached function bounds before using them for scans."""
+    if not isinstance(entries, dict):
+        return None
+    if not all(
+        isinstance(name, str)
+        and isinstance(bounds, list)
+        and len(bounds) == 2
+        and all(type(address) is int for address in bounds)
+        for name, bounds in entries.items()
+    ):
+        return None
+    return {name: (bounds[0], bounds[1]) for name, bounds in entries.items()}
+
+
+def cached_lst_functions(path: Path, cache_dir: Path) -> dict[str, tuple[int, int]]:
+    """Load function bounds from a validated cache or parse the listing."""
+    return _cached_listing(path, cache_dir, "functions", lst_functions, _decode_cached_functions)
 
 
 def nm_symbols(path: Path) -> dict[str, Symbol]:
@@ -114,12 +194,37 @@ def lst_data_symbols(path: Path) -> dict[str, int]:
     plain = re.compile(
         r"(?:\.data|\.rdata|\.bss|DATA):([0-9A-Fa-f]+)\s+([A-Za-z_]\w*)\s"
     )
+    directives = frozenset({"db", "dw", "dd", "dq", "dt", "df", "dp"})
     with path.open(errors="replace") as stream:
         for line in stream:
-            match = directive.match(line) or plain.match(line)
+            if line.startswith(("CODE:", ".text:")):
+                # Code lines dominate IDA listings. Only a label followed by a
+                # data directive can contribute to this map.
+                fields = line.split(None, 3)
+                if len(fields) < 3 or fields[2] not in directives:
+                    continue
+                match = directive.match(line)
+            elif line.startswith(("DATA:", ".data:", ".rdata:", ".bss:")):
+                match = directive.match(line) or plain.match(line)
+            else:
+                continue
             if match:
                 symbols[match[2]] = int(match[1], 16)
     return symbols
+
+
+def _decode_cached_data_symbols(entries: object) -> dict[str, int] | None:
+    """Reject malformed cached data addresses before relocation matching."""
+    if not isinstance(entries, dict):
+        return None
+    if not all(isinstance(name, str) and type(address) is int for name, address in entries.items()):
+        return None
+    return entries
+
+
+def cached_lst_data_symbols(path: Path, cache_dir: Path) -> dict[str, int]:
+    """Load data labels from a validated cache or parse the listing."""
+    return _cached_listing(path, cache_dir, "data", lst_data_symbols, _decode_cached_data_symbols)
 
 
 def global_map(
@@ -147,5 +252,3 @@ def global_map(
             raise ValueError(f"conflicting data aliases at {mapped:#x}")
         normalization[mapped] = original
     return normalization
-
-

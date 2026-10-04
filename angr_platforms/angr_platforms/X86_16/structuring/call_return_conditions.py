@@ -111,7 +111,7 @@ class _CallReturnProject8616(Protocol):
 class _CallReturnCFunction8616(Protocol):
     """Structured function root owned by angr codegen."""
 
-    statements: object
+    statements: CStatements
 
 
 class _CallReturnCodegen8616(Protocol):
@@ -723,10 +723,10 @@ def _condition_indexes_8616(
 class _CallReturnConditionRun8616:
     """Mutable run state for the call-return condition pass."""
 
-    project: object
-    codegen: object
+    project: _CallReturnProject8616
+    codegen: _CallReturnCodegen8616
     typed_project: _CallReturnProject8616
-    root: object
+    root: CStatements
     inventory: dict[int, CallsiteSummary8616]
     condition_by_key: dict[tuple[int, int], ConditionIR]
     conditions_by_block: dict[int, ConditionIR]
@@ -1105,8 +1105,8 @@ def materialize_call_return_conditions_8616(project: object, codegen: object) ->
     ):
         raise TypeError("call-return store bridge carrier must contain typed records")
     run = _CallReturnConditionRun8616(
-        project=project,
-        codegen=codegen,
+        project=typed_project,
+        codegen=typed_codegen,
         typed_project=typed_project,
         root=root,
         inventory=inventory,

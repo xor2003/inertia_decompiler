@@ -3,6 +3,8 @@
 Layer: Alias.
 Responsibility: track stack byte identity through typed IR stores, loads, and
 lossless byte composition, then emit restore-source relations for IR consumers.
+An explicit SS-selector write invalidates saved memory bytes; values already
+loaded into temporaries retain their independently captured bit provenance.
 Owns storage identity. Do not perform lowering, structuring, rewrite,
 postprocess, or CLI/reporting work here. Never infer restoration from opcode
 names, rendered assembly, or C shape.
@@ -98,15 +100,33 @@ class SegmentStackRestoreFact8616:
 
 @dataclass(frozen=True, slots=True)
 class SegmentStackRestoreArtifact8616:
-    """Alias-proved stack restoration facts and IR restore relations."""
+    """Alias-proved stack restoration facts and IR restore relations.
+
+    The artifact and each emitted ``SegmentRestoreSource`` retain the exact
+    in-process IR object they were proved from. General-register facts retain
+    this binding even when no segment restore relation is emitted. Serialized
+    ``source_function_addr`` is diagnostic only; it never authorizes lineage.
+    """
 
     facts: tuple[SegmentStackRestoreFact8616, ...] = ()
     restore_sources: tuple[SegmentRestoreSource, ...] = ()
     summary: dict[str, int] = field(default_factory=dict)
+    source_artifact: IRFunctionArtifact | None = field(default=None, compare=False, repr=False)
+
+    def is_bound_to(self, artifact: IRFunctionArtifact) -> bool:
+        """Require the exact retained IR object, never merely equal addresses.
+
+        This establishes provenance only, not whole-function preservation or
+        binary CFG closure. Manually constructed unbound facts remain unbound.
+        """
+        return self.source_artifact is artifact
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
         return {
+            "source_function_addr": (
+                None if self.source_artifact is None else self.source_artifact.function_addr
+            ),
             "facts": [fact.to_dict() for fact in self.facts],
             "restore_sources": [
                 {
@@ -115,6 +135,11 @@ class SegmentStackRestoreArtifact8616:
                     "restore_register": source.restore_register,
                     "saved_instruction_addr": source.saved_instruction_addr,
                     "saved_register": source.saved_register,
+                    "source_function_addr": (
+                        None
+                        if source.source_artifact is None
+                        else source.source_artifact.function_addr
+                    ),
                 }
                 for source in self.restore_sources
             ],
@@ -147,8 +172,10 @@ def _track_value_fragments_8616(
     sp_delta: int | None,
     bp_delta: int | None,
     tracked_registers: frozenset[str],
+    *,
+    instruction_addr: int,
 ) -> None:
-    """Record exact stack-fragment identities produced by one instruction."""
+    """Record fragments at the exact address selected by the transfer owner."""
     if instruction.op == "LOAD" and isinstance(instruction.dst, IRValue) and instruction.args:
         address = instruction.args[0]
         if isinstance(address, IRAddress) and instruction.dst.name is not None:
@@ -168,7 +195,7 @@ def _track_value_fragments_8616(
                 value,
                 register_value_fragments_8616(
                     value,
-                    instruction.addr,
+                    instruction_addr,
                     values,
                     tracked_registers=tracked_registers,
                     constant_value=None if constants is None else constants.constant(value),
@@ -195,8 +222,10 @@ def _restore_fact_for_write_8616(
     instruction: IRInstr,
     values: dict[str | int, SegmentStackFragments8616],
     tracked_registers: frozenset[str],
+    *,
+    instruction_addr: int,
 ) -> SegmentStackRestoreFact8616 | None:
-    """Classify one tracked-register write as a proven or refused restore."""
+    """Classify a register write at the transfer owner's known address."""
     dst = instruction.dst
     if not (
         isinstance(dst, IRValue)
@@ -207,7 +236,7 @@ def _restore_fact_for_write_8616(
     source = instruction.args[0] if instruction.args else None
     fragments = register_value_fragments_8616(
         source,
-        instruction.addr,
+        instruction_addr,
         values,
         tracked_registers=tracked_registers,
     )
@@ -216,7 +245,7 @@ def _restore_fact_for_write_8616(
         saved_register, saved_addr, stack_offsets = complete
         saved_constant = complete_stack_constant_8616(fragments)
         return SegmentStackRestoreFact8616(
-            block_addr, instruction.addr, dst.name, saved_addr, saved_register,
+            block_addr, instruction_addr, dst.name, saved_addr, saved_register,
             stack_offsets, SegmentStackRestoreVerdict8616.PROVEN,
             constant_value=None if saved_constant is None else saved_constant[0],
         )
@@ -226,7 +255,7 @@ def _restore_fact_for_write_8616(
         constant_value, saved_addr, stack_offsets = constant
         return SegmentStackRestoreFact8616(
             block_addr,
-            instruction.addr,
+            instruction_addr,
             dst.name,
             saved_addr,
             None,
@@ -236,7 +265,7 @@ def _restore_fact_for_write_8616(
         )
     if isinstance(source, IRValue) and source.space is MemSpace.TMP and source.name is not None:
         return SegmentStackRestoreFact8616(
-            block_addr, instruction.addr, dst.name, None, None, (),
+            block_addr, instruction_addr, dst.name, None, None, (),
             SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE,
         )
     return None
@@ -284,7 +313,14 @@ def _transfer_block(
     machine_instruction_addr: int | None = None
     instruction_entry_state = entry_state
     for instruction in instructions:
-        if instruction.addr is None:
+        instruction_addr = instruction.addr
+        destination = instruction.dst
+        changes_stack_selector = (
+            destination is not None and destination.space is MemSpace.REG and destination.name == "ss"
+        )
+        if instruction_addr is None:
+            if changes_stack_selector:
+                stack_bytes.clear()
             continue
         if constants is not None:
             constants.observe(instruction)
@@ -301,12 +337,18 @@ def _transfer_block(
             sp_delta,
             bp_delta,
             tracked_registers,
+            instruction_addr=instruction_addr,
         )
+        if changes_stack_selector:
+            # Entry-SP offsets alone cannot equate two SS memory selectors.
+            # Captured LOAD values remain valid; only live storage is invalidated.
+            stack_bytes.clear()
         restore_fact = _restore_fact_for_write_8616(
             block_addr,
             instruction,
             values,
             tracked_registers,
+            instruction_addr=instruction_addr,
         )
         if restore_fact is not None:
             facts.append(restore_fact)
@@ -356,6 +398,35 @@ def _solve_stack_states(
     return {addr: exit_states.get(addr, unknown) for addr in blocks_by_addr}
 
 
+def _facts_for_block_8616(
+    block_addr: int,
+    instructions: tuple[IRInstr, ...],
+    entry_state: _SegmentStackAliasState8616,
+    tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
+    *,
+    allow_constant_values: bool = False,
+) -> list[SegmentStackRestoreFact8616]:
+    """Prove block-local stack bytes without publishing an arbitrary SP origin.
+
+    An unknown incoming SP forbids cross-block byte identity, but an exact
+    store/load pair within this block can still use a relative coordinate.
+    The temporary coordinate starts with no inherited bytes and its exit state
+    is discarded; the must-state solver continues to publish unknown SP.
+    """
+    fact_entry = (
+        entry_state
+        if entry_state.sp_delta is not None
+        else _stack_state(0, {}, None)
+    )
+    return _transfer_block(
+        block_addr,
+        instructions,
+        fact_entry,
+        tracked_registers,
+        allow_constant_values=allow_constant_values,
+    )[0]
+
+
 def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) -> SegmentStackRestoreArtifact8616:
     """Build conservative cross-block segment save/restore evidence from typed IR."""
     exit_states = _solve_stack_states(artifact)
@@ -369,7 +440,7 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
     facts = tuple(
         fact
         for block in artifact.blocks
-        for fact in _transfer_block(
+        for fact in _facts_for_block_8616(
             block.addr,
             block.instrs,
             _join_stack_states(
@@ -378,7 +449,7 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
                     + tuple(exit_states[pred] for pred in predecessors[block.addr])
                 
             ),
-        )[0]
+        )
     )
     proven = tuple(fact for fact in facts if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)
     restore_sources = tuple(
@@ -388,11 +459,13 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
             fact.restore_register,
             fact.saved_instruction_addr,
             fact.saved_register,
+            source_artifact=artifact,
         )
         for fact in proven
         if fact.saved_instruction_addr is not None and fact.saved_register is not None
     )
     return SegmentStackRestoreArtifact8616(
+        source_artifact=artifact,
         facts=facts,
         restore_sources=restore_sources,
         summary={
@@ -428,7 +501,7 @@ def build_x86_16_stack_register_restore_artifact_8616(
     facts = tuple(
         fact
         for block in artifact.blocks
-        for fact in _transfer_block(
+        for fact in _facts_for_block_8616(
             block.addr,
             block.instrs,
             _join_stack_states(
@@ -437,10 +510,11 @@ def build_x86_16_stack_register_restore_artifact_8616(
             ),
             tracked_registers,
             allow_constant_values=complete_ir,
-        )[0]
+        )
     )
     proven = tuple(fact for fact in facts if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)
     return SegmentStackRestoreArtifact8616(
+        source_artifact=artifact,
         facts=facts,
         summary={
             "raw_fact_count": len(facts),

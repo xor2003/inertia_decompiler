@@ -14,8 +14,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ..alias.domains import register_domain_for_name, register_view_for_name
-from ..ir import IRValue, MemSpace
+from ..ir import IRInstr, IRValue, MemSpace
 from ..ir.condition_ir import ConditionIR, ConditionOp
+from ..ir.scalar_instruction_effects import (
+    ScalarInstructionClobber8616,
+    ScalarInstructionEffectKind8616,
+    scalar_instruction_effect_8616,
+)
 from ..ir.ssa_function import SSAFunctionArtifact
 from .interprocedural_storage_contracts import (
     StorageIdentity8616,
@@ -148,7 +153,7 @@ def _transparent_branch_path_8616(
     branch_target: int,
     destination_addr: int,
 ) -> tuple[int, ...] | None:
-    """Prove a branch reaches a destination through empty single-edge blocks."""
+    """Prove a branch traverses only empty or exact transfer-only blocks."""
     if branch_target not in _successors_8616(artifact, source_addr):
         return None
     blocks = {block.addr: block for block in artifact.blocks}
@@ -158,14 +163,60 @@ def _transparent_branch_path_8616(
         if current in visited or len(visited) >= len(blocks):
             return None
         block = blocks.get(current)
-        if block is None or block.instrs or block.refusals:
+        if block is None or block.refusals:
             return None
         successors = _successors_8616(artifact, current)
         if len(successors) != 1:
             return None
+        if block.instrs and not _exact_jump_only_8616(block.instrs, successors[0]):
+            return None
         visited.append(current)
         current = successors[0]
     return tuple(visited)
+
+
+def _temporary_control_computation_8616(instruction: IRInstr, jump_addr: int | None) -> bool:
+    """Admit only pure temporary effects from the terminal instruction.
+
+    Faithful near jumps evaluate segmented coordinates before the explicit
+    JMP. Typed scalar closure must describe the whole write, its destination
+    must be temporary, and every operand must be a value rather than a
+    memory access. Register writes, loads, calls and unknown effects refuse.
+    """
+    effect = scalar_instruction_effect_8616(instruction)
+    return bool(
+        instruction.addr == jump_addr
+        and instruction.call_stack_effect is None
+        and instruction.dst is not None
+        and instruction.dst.space is MemSpace.TMP
+        and effect.kind is ScalarInstructionEffectKind8616.CLOSED_DESTINATION
+        and effect.clobber is ScalarInstructionClobber8616.NONE
+        and all(isinstance(arg, IRValue) and arg.space in {MemSpace.TMP, MemSpace.REG, MemSpace.CONST} for arg in instruction.args)
+    )
+
+
+def _exact_jump_only_8616(instructions: tuple[IRInstr, ...], successor: int) -> bool:
+    """Accept a literal JMP with only closed temporary coordinate effects."""
+    if not instructions:
+        return False
+    instruction = instructions[-1]
+    if not all(_temporary_control_computation_8616(item, instruction.addr) for item in instructions[:-1]):
+        return False
+    if (
+        instruction.op != "JMP"
+        or instruction.dst is not None
+        or instruction.call_stack_effect is not None
+        or len(instruction.args) != 1
+    ):
+        return False
+    target = instruction.args[0]
+    return (
+        isinstance(target, IRValue)
+        and target.space is MemSpace.CONST
+        and isinstance(target.const, int)
+        and not isinstance(target.const, bool)
+        and target.const == successor
+    )
 
 
 def _condition_edges_8616(condition: ConditionIR) -> tuple[int, int, int] | None:

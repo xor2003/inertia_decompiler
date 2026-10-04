@@ -818,7 +818,8 @@ def interrupt_service_name(call: InterruptCall, api_style: str = "pseudo") -> st
     names = _VECTOR_SERVICE_NAMES_8616.get(call.vector)
     if names is not None:
         return names[0] if api_style == "pseudo" else names[1]
-    return cast(str, get_interrupt_handler_class(call.vector).INT_NAME)
+    name: str = get_interrupt_handler_class(call.vector).INT_NAME
+    return name
 
 
 def dos_service_name(call: InterruptCall) -> str:

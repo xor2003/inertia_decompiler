@@ -19,9 +19,16 @@ from inertia_decompiler.cod_module_caller_evidence import record_cod_module_call
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _unavailable_isolated_body(_address: int, **_kwargs: object) -> SimpleNamespace:
+    """Expose no decoded body at the synthetic isolated target address."""
+    return SimpleNamespace(capstone=SimpleNamespace(insns=()))
+
+
 def test_carr_cod_module_proves_setgear_result_is_unused() -> None:
     metadata = extract_cod_proc_metadata(REPO_ROOT / "cod" / "f14" / "CARR.COD", "_SetGear")
-    evidence_owner = SimpleNamespace()
+    evidence_owner = SimpleNamespace(
+        factory=SimpleNamespace(block=_unavailable_isolated_body),
+    )
 
     evidence = record_cod_module_caller_return_use_evidence_8616(metadata, 0x1000, evidence_owner)
 

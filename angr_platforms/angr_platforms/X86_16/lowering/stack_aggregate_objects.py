@@ -246,10 +246,26 @@ def _reg_name(insn: object, reg_id: object) -> str | None:
 
 
 def _direct_call_target(insn: object) -> int | None:
-    """Return the immediate target of one direct call instruction."""
-    if getattr(insn, "id", None) != X86_INS_CALL:
+    """Return one decoded near or far direct call's mapped code address."""
+    instruction_id = getattr(insn, "id", None)
+    if instruction_id not in {X86_INS_CALL, X86_INS_LCALL}:
         return None
     operands = tuple(getattr(insn, "operands", ()) or ())
+    if instruction_id == X86_INS_LCALL:
+        if len(operands) != 2 or any(
+            getattr(operand, "type", None) != X86_OP_IMM for operand in operands
+        ):
+            return None
+        segment = getattr(operands[0], "imm", None)
+        offset = getattr(operands[1], "imm", None)
+        if (
+            not isinstance(segment, int)
+            or not isinstance(offset, int)
+            or not 0 <= segment <= 0xFFFF
+            or not 0 <= offset <= 0xFFFF
+        ):
+            return None
+        return (segment << 4) + offset
     if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_IMM:
         return None
     target = getattr(operands[0], "imm", None)
@@ -1053,6 +1069,16 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
     # on the current declaration surface.
     current_tracked_cvar = tracked_cvar if id(tracked_cvar) in seen_candidates else None
     aggregate_candidates = candidates_by_offset[fact.base_offset]
+    exact_width_candidates = [
+        candidate for candidate in aggregate_candidates
+        if isinstance(candidate.variable, SimStackVariable)
+        and candidate.variable.size == fact.byte_size
+    ]
+    if exact_width_candidates:
+        # An entry-SP coordinate can be shared by a full aggregate and a
+        # narrower saved-register view. The full-width object proves which
+        # candidate owns the array; keep the narrow view scalar.
+        aggregate_candidates[:] = exact_width_candidates
     if fact.element_width not in {1, 2, 4}:
         return False, False
     arch = getattr(getattr(codegen, "project", None), "arch", None)
@@ -1200,10 +1226,12 @@ def _persist_aggregate_frame_types_8616(
 ) -> bool:
     """Persist the array type on the partition and its candidate views."""
     changed = False
+    aggregate_variable_ids = {id(candidate.variable) for candidate in aggregate_candidates}
     for candidate_variable, candidate_cvar in variables_in_use.items():  # noqa: B007
         if (
             isinstance(candidate_variable, SimStackVariable)
             and candidate_variable.base == "bp"
+            and id(candidate_variable) in aggregate_variable_ids
             and machine_bp_offset_for_stack_variable_8616(codegen, candidate_variable)
             == fact.base_offset
         ):
@@ -1278,6 +1306,7 @@ def _rewrite_unified_partition_entries_8616(
                 replacement_type = (
                     array_type
                     if bp_offset == fact.base_offset
+                    and entry_cvar in candidates_by_offset[fact.base_offset]
                     else boundary_types.get(id(entry_cvar))
                 )
                 if replacement_type is None:

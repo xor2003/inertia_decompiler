@@ -853,8 +853,11 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
     def aam(self) -> None:
-        """Execute decoded ``AAM`` semantics through frontend emulator effects."""
+        """Retain AAM's zero-base divide error before changing AX or flags."""
         base = _vex_expr(self.emu.constant(self.instr.imm8 & 0xFF, Type.int_8))
+        if self.instr.imm8 & 0xFF == 0:
+            self._divide_error_if(base == self.emu.constant(0, Type.int_8))
+            return
         al = _vex_expr(self.emu.get_gpreg(reg8_t.AL))
         ah = al // base
         new_al = al % base
@@ -925,13 +928,13 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         return_interrupt16(self._active_stack_emulator())
 
     def in_al_imm8(self) -> None:
-        """Execute decoded ``IN_AL_IMM8`` semantics through frontend emulator effects."""
-        self.emu.set_gpreg(reg8_t.AL, self.emu.in_io8(self.instr.imm8))
+        """Use the unsigned 8-bit immediate port, independent of signed decoding."""
+        self.emu.set_gpreg(reg8_t.AL, self.emu.in_io8(self.instr.imm8 & 0xFF))
 
     def out_imm8_al(self) -> None:
-        """Execute decoded ``OUT_IMM8_AL`` semantics through frontend emulator effects."""
+        """Use the unsigned 8-bit immediate port, independent of signed decoding."""
         al = _vex_expr(self.emu.get_gpreg(reg8_t.AL))
-        self.emu.out_io8(self.instr.imm8, al)
+        self.emu.out_io8(self.instr.imm8 & 0xFF, al)
 
     def jmp(self) -> None:
         """Execute decoded ``JMP`` semantics through frontend emulator effects."""

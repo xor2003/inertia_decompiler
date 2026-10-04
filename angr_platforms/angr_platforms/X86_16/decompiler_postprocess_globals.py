@@ -121,7 +121,7 @@ def describe_word_global_constant_store_candidates_8616(
     return tuple(candidates)
 
 
-def _make_word_global_cached_8616(codegen: object, created: dict, addr: int) -> CVariable:
+def _make_word_global_cached_8616(codegen: object, created: dict[int, CVariable], addr: int) -> CVariable:
     """Return the cached word global CVariable for ``addr``, creating it once."""
     existing = created.get(addr)
     if existing is not None:
@@ -131,7 +131,7 @@ def _make_word_global_cached_8616(codegen: object, created: dict, addr: int) -> 
     return cvar
 
 
-def _coalesce_word_global_node_8616(node: object, codegen: object, created: dict, changed_addrs: set[int]) -> object:
+def _coalesce_word_global_node_8616(node: object, codegen: object, created: dict[int, CVariable], changed_addrs: set[int]) -> object:
     """Fold one Or/Add byte-pair global load into a word global."""
     if not isinstance(node, CBinaryOp) or node.op not in {"Or", "Add"}:
         return node
@@ -189,7 +189,7 @@ def _coalesce_word_global_constant_stores_8616(project: object, codegen: object)
 def _visit_word_global_stores_8616(node: object, project: object, codegen: object, changed_addrs: set[int]) -> None:
     """Visit one node, merging adjacent byte-constant global stores."""
     if isinstance(node, CStatements):
-        new_statements = []
+        new_statements: list[object] = []
         i = 0
         while i < len(node.statements):
             stmt = node.statements[i]
@@ -218,7 +218,7 @@ def _word_global_store_pair_step_8616(
     stmt: object,
     project: object,
     codegen: object,
-    new_statements: list,
+    new_statements: list[object],
     changed_addrs: set[int],
 ) -> int:
     """Merge a byte-pair store into one word store; return statements consumed."""
@@ -351,7 +351,7 @@ def _collect_used_variable_ids_8616(cfunc: object) -> set[int]:
     return used_variables
 
 
-def _drop_unused_named_variables_8616(variables_in_use: dict, used_variables: set[int]) -> bool:
+def _drop_unused_named_variables_8616(variables_in_use: dict[object, object], used_variables: set[int]) -> bool:
     """Delete unnamed ``g_`` variables absent from ``used_variables``."""
     changed = False
     for variable in list(variables_in_use):

@@ -188,7 +188,7 @@ def collect_terminal_stack_cleanup_evidence_8616(
         return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
 
     scan = _CleanupScan8616(project=project, block_addrs=block_addrs)
-    scan.follow(entry_addr, frozenset())
+    scan.follow(entry_addr)
     return TerminalStackCleanupEvidence8616(
         cleanup_amounts=frozenset(scan.amounts),
         raw_fact_count=scan.counts[0],
@@ -203,7 +203,7 @@ def collect_terminal_stack_cleanup_evidence_8616(
 
 @dataclass
 class _CleanupScan8616:
-    """Bounded entry-reachable path walker collecting cleanup evidence."""
+    """Bounded entry-reachable CFG walker collecting unique terminal facts."""
 
     project: object
     block_addrs: frozenset[int]
@@ -230,29 +230,38 @@ class _CleanupScan8616:
         self.counts[0] += 1
         self.counts[4] += 1
 
-    def follow(self, block_addr: int, path: frozenset[int]) -> None:
-        """Follow one bounded control-flow path to a return."""
-        if block_addr in path:
-            return
-        try:
-            insns = decoded_block_instructions_8616(cast(Any, self.project), block_addr, opt_level=0)
-        except (KeyError, SimEngineError, SimTranslationError, ValueError):
-            self.record_failure()
-            return
-        if not insns:
-            self.record_failure()
-            return
-        for insn in insns:
-            if self._follow_insn(insn, block_addr, path):
-                return
-        fallthrough = _fallthrough_8616(insns[-1])
-        if isinstance(fallthrough, int) and fallthrough in self.block_addrs:
-            self.follow(fallthrough, path | {block_addr})
+    def follow(self, entry_addr: int) -> None:
+        """Visit each reachable block once, including every distinct exit edge."""
+        pending = [entry_addr]
+        visited: set[int] = set()
+        while pending:
+            block_addr = pending.pop()
+            if block_addr in visited:
+                continue
+            visited.add(block_addr)
+            try:
+                insns = decoded_block_instructions_8616(
+                    cast(Any, self.project), block_addr, opt_level=0
+                )
+            except (KeyError, SimEngineError, SimTranslationError, ValueError):
+                self.record_failure()
+                continue
+            if not insns:
+                self.record_failure()
+                continue
+            if any(self._follow_insn(insn, pending) for insn in insns):
+                continue
+            self._enqueue_successor(_fallthrough_8616(insns[-1]), pending)
+
+    def _enqueue_successor(self, successor: int | None, pending: list[int]) -> None:
+        """Queue a mapped successor or retain an incomplete-edge refusal."""
+        if isinstance(successor, int) and successor in self.block_addrs:
+            pending.append(successor)
         else:
             self.record_failure()
 
-    def _follow_insn(self, insn: object, block_addr: int, path: frozenset[int]) -> bool:
-        """Handle one instruction; return True when the path was consumed."""
+    def _follow_insn(self, insn: object, pending: list[int]) -> bool:
+        """Handle one instruction; return True when its control edge was consumed."""
         mnemonic = _mnemonic_8616(insn)
         if mnemonic.startswith("ret") or mnemonic == "iret":
             cleanup = _return_cleanup_8616(insn)
@@ -267,18 +276,12 @@ class _CleanupScan8616:
                 self.record_failure()
             return True
         if mnemonic in {"jmp", "jmpw", "ljmp"}:
-            target = _direct_target_8616(insn)
-            if isinstance(target, int) and target in self.block_addrs:
-                self.follow(target, path | {block_addr})
-            else:
-                self.record_failure()
+            self._enqueue_successor(_direct_target_8616(insn), pending)
             return True
         if _is_conditional_branch_8616(mnemonic):
-            for successor in dict.fromkeys((_direct_target_8616(insn), _fallthrough_8616(insn))):
-                if isinstance(successor, int) and successor in self.block_addrs:
-                    self.follow(successor, path | {block_addr})
-                else:
-                    self.record_failure()
+            successors = tuple(dict.fromkeys((_direct_target_8616(insn), _fallthrough_8616(insn))))
+            for successor in reversed(successors):
+                self._enqueue_successor(successor, pending)
             return True
         return False
 

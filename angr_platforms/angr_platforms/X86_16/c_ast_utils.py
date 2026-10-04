@@ -222,8 +222,15 @@ def _safe_assign_cfunc_statements_8616(codegen: object, new_root: object, old_ro
 
 
 @lru_cache(maxsize=256)
-def _structured_slot_names_for_type_8616(value_type: type) -> tuple[str, ...]:
-    """Collect slots across the dynamic third-party angr C AST boundary."""
+def _structured_slot_names_for_type_8616(
+    value_type: type,
+    excluded_attrs: frozenset[str] = _STRUCTURED_NON_CHILD_ATTRS_8616,
+) -> tuple[str, ...]:
+    """Cache class layouts while retaining each consumer's field exclusions.
+
+    Only immutable class slot metadata is cached. Instance dictionaries and
+    child values are read on every traversal, including after AST mutations.
+    """
     attrs: list[str] = []
     if value_type is object:
         return ()
@@ -235,7 +242,7 @@ def _structured_slot_names_for_type_8616(value_type: type) -> tuple[str, ...]:
         if isinstance(slots, str):
             slots = (slots,)
         for slot in slots:
-            if isinstance(slot, str) and not slot.startswith("_") and slot not in _STRUCTURED_NON_CHILD_ATTRS_8616:
+            if isinstance(slot, str) and not slot.startswith("_") and slot not in excluded_attrs:
                 attrs.append(slot)
 
     seen = set()

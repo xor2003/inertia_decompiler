@@ -1,5 +1,7 @@
 """A null argument is not the address of byte zero in the data segment."""
 
+import shutil
+import subprocess
 from itertools import count
 from types import SimpleNamespace
 
@@ -10,6 +12,7 @@ from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.callsite_pointer_values import (
     consume_near_pointer_argument_value_8616,
 )
+from angr_platforms.X86_16.lowering.c_runtime_header import render_c_runtime_header_8616
 from angr_platforms.X86_16.lowering.near_pointer_argument_values import (
     materialize_near_pointer_argument_value_8616,
 )
@@ -21,6 +24,9 @@ def codegen():
     indices = count()
     return SimpleNamespace(
         project=SimpleNamespace(arch=Arch86_16()),
+        const_formats={},
+        show_casts=True,
+        cstyle_null_cmp=False,
         next_node_idx=lambda: next(indices),
         next_ident=lambda name: f"{name}_{next(indices)}",
         next_idx=lambda kind: next(indices),
@@ -52,7 +58,7 @@ def test_zero_pointer_argument_preserves_null(target, codegen):
     assert not wrapped
 
 
-@pytest.mark.parametrize("target,helper", [("portable-flat", "SEG_PTR"), ("ms-c-16", "MK_FP")])
+@pytest.mark.parametrize("target,helper", [("portable-flat", "NEAR_ARG_PTR"), ("ms-c-16", "NEAR_ARG_PTR")])
 def test_nonzero_pointer_argument_preserves_segment_and_offset(target, helper, codegen):
     value = CConstant(2, SimTypeShort(False), codegen=codegen)
     segment = CConstant(0x1234, SimTypeShort(False), codegen=codegen)
@@ -83,3 +89,44 @@ def test_address_zero_or_noninteger_zero_is_not_a_null_constant(kind, codegen):
     )
     assert wrapped
     assert isinstance(result, CFunctionCall)
+
+
+@pytest.mark.parametrize("offset", [0, 2, 65536])
+@pytest.mark.parametrize("optimization", ["-O0", "-O2"])
+def test_runtime_offset_conversion_preserves_null_and_single_evaluation(codegen, tmp_path, offset, optimization):
+    value = CFunctionCall("next_offset", None, [], codegen=codegen)
+    segment = CConstant(0x1234, SimTypeShort(False), codegen=codegen)
+    result, wrapped = materialize_near_pointer_argument_value_8616(value, segment, codegen=codegen, c_target="portable-flat")
+    assert wrapped
+    rendered = "".join(chunk for chunk, _ in result.c_repr_chunks(asexpr=True))
+    source = tmp_path / "near_argument.c"
+    source.write_text(render_c_runtime_header_8616("portable-flat") + f'''
+uint8_t inertia_memory[0x110000];
+static int calls;
+static uint32_t next_offset(void) {{ calls++; return {offset}UL; }}
+int main(void) {{
+    void *pointer = {rendered};
+    if (calls != 1) return 1;
+    if ((uint16_t){offset}UL == 0) return pointer != 0;
+    return pointer != SEG_PTR(0x1234, (uint16_t){offset}UL);
+}}
+''')
+    compiler = shutil.which("gcc")
+    assert compiler is not None
+    executable = tmp_path / "near_argument"
+    built = subprocess.run([compiler, "-std=c99", optimization, "-Wall", "-Werror", str(source), "-o", str(executable)], capture_output=True, text=True, check=False)
+    assert built.returncode == 0, built.stderr
+    run = subprocess.run([str(executable)], capture_output=True, text=True, check=False)
+    assert run.returncode == 0, (offset, optimization, run.stderr)
+
+
+def test_owned_conversion_replays_without_double_wrapping(codegen):
+    value = CConstant(2, SimTypeShort(False), codegen=codegen)
+    segment = CConstant(0x1234, SimTypeShort(False), codegen=codegen)
+    first, wrapped = materialize_near_pointer_argument_value_8616(value, segment, codegen=codegen, c_target="portable-flat")
+    assert wrapped
+    second, wrapped = materialize_near_pointer_argument_value_8616(first, segment, codegen=codegen, c_target="portable-flat")
+    assert second is first and not wrapped
+    first.tags.clear()
+    _, wrapped = materialize_near_pointer_argument_value_8616(first, segment, codegen=codegen, c_target="portable-flat")
+    assert wrapped  # A machine/helper name alone is not owned representation.

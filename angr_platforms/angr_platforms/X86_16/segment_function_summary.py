@@ -8,7 +8,7 @@ established local facts. Never infer aliases, types, C repairs, or memory models
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol, cast
 
@@ -137,6 +137,7 @@ class SegmentFunctionSummary8616:
     effective_clobbered_registers: tuple[str, ...] = ()
     unresolved_effect_sites: tuple[int, ...] = ()
     summary: dict[str, int] = field(default_factory=dict)
+    local_effects_complete: bool = False
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -148,6 +149,7 @@ class SegmentFunctionSummary8616:
             "effective_clobbered_registers": list(self.effective_clobbered_registers),
             "unresolved_effect_sites": list(self.unresolved_effect_sites),
             "summary": dict(self.summary),
+            "local_effects_complete": self.local_effects_complete,
         }
 
 
@@ -203,16 +205,41 @@ def build_x86_16_segment_control_transfers(function: object) -> tuple[SegmentCon
     return tuple(sorted((*(_transfer_from_seed(seed) for seed in seeds), *unresolved), key=lambda fact: fact.instruction_addr))
 
 
+def _local_effect_census_complete_8616(
+    contract: SegmentFunctionContract,
+    facts: tuple[SegmentControlTransferFact8616, ...],
+) -> bool:
+    """Require complete local effects and an exact nonduplicated call census."""
+    proof = contract.effect_closure
+    if not contract.effects_complete or proof is None:
+        return False
+    sites = tuple(sorted(fact.instruction_addr for fact in facts))
+    return bool(
+        sites == proof.callsite_addrs
+        and len(set(sites)) == len(sites)
+        and all(fact.kind is SegmentControlTransferKind8616.CALL for fact in facts)
+    )
+
+
 def _unknown_effect_functions(
     contracts: Mapping[int, SegmentFunctionContract],
     transfers: Mapping[int, tuple[SegmentControlTransferFact8616, ...]],
 ) -> set[int]:
     """Find functions whose transitive callee effects are incomplete."""
     unknown = {
+        addr for addr, contract in contracts.items()
+        if not _local_effect_census_complete_8616(contract, transfers.get(addr, ()))
+    }
+    unknown.update({
         function_addr
         for function_addr, facts in transfers.items()
-        if any(fact.target_addr not in contracts for fact in facts)
-    }
+        if any(
+            fact.verdict is not SegmentFactVerdict.PROVEN
+            or fact.target_addr not in contracts
+            or not _effect_projects_match_8616(contracts.get(function_addr), contracts.get(cast(int, fact.target_addr)))
+            for fact in facts
+        )
+    })
     changed = True
     while changed:
         changed = False
@@ -223,6 +250,20 @@ def _unknown_effect_functions(
                 unknown.add(function_addr)
                 changed = True
     return unknown
+
+
+def _effect_projects_match_8616(
+    caller: SegmentFunctionContract | None,
+    callee: SegmentFunctionContract | None,
+) -> bool:
+    """Forbid borrowing a target body's effects from another project."""
+    if caller is None or callee is None:
+        return False
+    caller_proof, callee_proof = caller.effect_closure, callee.effect_closure
+    return bool(
+        caller_proof is not None and callee_proof is not None
+        and caller_proof.coverage.boundary.project is callee_proof.coverage.boundary.project
+    )
 
 
 def _effective_clobbers(
@@ -255,6 +296,7 @@ def join_x86_16_segment_function_summaries(
     for function_addr in sorted(contracts):
         local = contracts[function_addr]
         function_transfers = transfers.get(function_addr, ())
+        local_complete = _local_effect_census_complete_8616(local, function_transfers)
         effects = tuple(
             SegmentCalleeEffectFact8616(
                 instruction_addr=fact.instruction_addr,
@@ -262,7 +304,11 @@ def join_x86_16_segment_function_summaries(
                 clobbered_registers=tuple(sorted(effective.get(cast(int, fact.target_addr), set()))),
                 verdict=(
                     SegmentFactVerdict.PROVEN
-                    if fact.target_addr in contracts and fact.target_addr not in unknown
+                    if fact.verdict is SegmentFactVerdict.PROVEN
+                    and local_complete
+                    and fact.target_addr in contracts
+                    and fact.target_addr not in unknown
+                    and _effect_projects_match_8616(local, contracts.get(cast(int, fact.target_addr)))
                     else SegmentFactVerdict.UNKNOWN_REFUSE
                 ),
             )
@@ -277,6 +323,7 @@ def join_x86_16_segment_function_summaries(
         summaries[function_addr] = SegmentFunctionSummary8616(
             function_addr=function_addr,
             local_contract=local,
+            local_effects_complete=local_complete,
             control_transfers=function_transfers,
             callee_effects=effects,
             effective_clobbered_registers=tuple(sorted(effective.get(function_addr, set()))),
@@ -284,15 +331,15 @@ def join_x86_16_segment_function_summaries(
                 fact.instruction_addr for fact in effects if fact.verdict is SegmentFactVerdict.UNKNOWN_REFUSE
             ),
             summary={
-                "raw_fact_count": local_raw + len(function_transfers) + len(effects),
-                "normalized_fact_count": local_raw + len(function_transfers) + len(effects),
-                "classified_fact_count": local_classified + transfer_classified + effect_classified,
-                "materialized_count": local_materialized + transfer_classified + effect_classified,
+                "raw_fact_count": local_raw + len(function_transfers) + len(effects) + 1,
+                "normalized_fact_count": local_raw + len(function_transfers) + len(effects) + 1,
+                "classified_fact_count": local_classified + transfer_classified + effect_classified + int(local_complete),
+                "materialized_count": local_materialized + transfer_classified + effect_classified + int(local_complete),
                 "failure_count": local_failures
                 + len(function_transfers)
                 - transfer_classified
                 + len(effects)
-                - effect_classified,
+                - effect_classified + int(not local_complete),
                 "control_transfer_count": len(function_transfers),
                 "callee_effect_count": len(effects),
             },
@@ -326,6 +373,11 @@ def apply_x86_16_segment_function_summary(project: object, codegen: object) -> b
         return False
     if not isinstance(local, SegmentFunctionContract):
         return False
+    proof = local.effect_closure
+    if proof is not None and proof.coverage.boundary.project is not project:
+        # A codegen-boundary contract may cross process/project boundaries;
+        # its diagnostics survive, but in-process effect authorization cannot.
+        local = replace(local, effect_closure=None)
     function = _function_for_contract(project, local.function_addr)
     if function is None:
         return False
@@ -336,6 +388,21 @@ def apply_x86_16_segment_function_summary(project: object, codegen: object) -> b
     except AttributeError:
         contracts = {}
         transfers = {}
+    contracts[local.function_addr] = local
+    from .segment_call_preservation_stage import (
+        SegmentCallPreservationRequest8616,
+        refresh_segment_call_preservation_state_8616,
+    )
+
+    requests = tuple(
+        SegmentCallPreservationRequest8616(fact.instruction_addr, fact.target_addr)
+        for fact in transfer_facts
+        if fact.kind is SegmentControlTransferKind8616.CALL
+        and fact.distance is SegmentControlTransferDistance8616.NEAR
+        and fact.verdict is SegmentFactVerdict.PROVEN
+        and type(fact.target_addr) is int
+    )
+    local = refresh_segment_call_preservation_state_8616(project, codegen, local, contracts, requests)
     contracts[local.function_addr] = local
     transfers[local.function_addr] = transfer_facts
     summaries = join_x86_16_segment_function_summaries(contracts, transfers)

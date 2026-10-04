@@ -70,6 +70,12 @@ python -m pip install -e ".[test]"
 
 The root `./decompile.py` wrapper re-execs through `./.venv/bin/python` when that virtualenv exists.
 
+The 16-bit VEX lifter uses a required
+[Cython build from the same Python source](reference/cython-vex.md).
+Build it with `PYTHON_JIT=1 .venv/bin/python scripts/build_cython_vex.py`.
+Normal startup rejects missing or stale builds. Select
+`INERTIA_VEX_BACKEND=python` only when explicitly requesting interpretation.
+
 ## DOS Game Reconstruction Workflow
 
 Use this order for C, assembly, and mixed DOS games:

@@ -520,6 +520,10 @@ def _entry_sp_offset_8616(
         )
     projection = registry.containing_entry_sp_range(offset, size)
     if projection is not None:
+        if raw_projection is not None and raw_projection is not projection:
+            # Distinct raw-BP storage competes with an entry-SP subview.
+            # A copied variable without exact identity cannot choose a domain.
+            return True, None
         return True, projection.bp_offset + offset - projection.entry_sp_offset
     return False, None
 

@@ -21,6 +21,7 @@ from .alu_helpers import (
     masked_shift_count,
     unary_operation,
 )
+from .control_coordinates import NearTargetDomain
 from .debug import ERROR, INFO
 from .emulator import Emulator
 from .exception import EXP_UD
@@ -848,13 +849,13 @@ class Instr32(InstrBase):
         leave32(self._active_stack_emulator())
 
     def in_eax_imm8(self) -> None:
-        """Execute decoded ``IN_EAX_IMM8`` semantics through frontend emulator effects."""
-        self.emu.set_gpreg(reg32_t.EAX, self.emu.in_io32(self.instr.imm8))
+        """Use the unsigned 8-bit immediate port, independent of signed decoding."""
+        self.emu.set_gpreg(reg32_t.EAX, self.emu.in_io32(self.instr.imm8 & 0xFF))
 
     def out_imm8_eax(self) -> None:
-        """Execute decoded ``OUT_IMM8_EAX`` semantics through frontend emulator effects."""
+        """Use the unsigned 8-bit immediate port, independent of signed decoding."""
         eax = self.emu.get_gpreg(reg32_t.EAX)
-        self.emu.out_io32(self.instr.imm8, eax)
+        self.emu.out_io32(self.instr.imm8 & 0xFF, eax)
 
     def call_rel32(self) -> None:
         """Execute decoded ``CALL_REL32`` semantics through frontend emulator effects."""
@@ -1733,12 +1734,13 @@ class Instr32(InstrBase):
         unary_operation(self.get_rm32, self.set_rm32, self.emu.update_eflags_dec, lambda value: value - 1)
 
     def call_rm32(self) -> None:
-        """Execute decoded ``CALL_RM32`` semantics through frontend emulator effects."""
+        """Push CS-relative return EIP and compose the architectural CALL operand."""
         rm32 = self.get_rm32()
         emit_near_call32(
             self._active_stack_emulator(),
             rm32,
             far_return_ip32(self._active_stack_emulator(), self.instr.size),
+            target_domain=NearTargetDomain.ARCHITECTURAL_OFFSET,
         )
 
     def callf_m16_32(self) -> None:
@@ -1757,9 +1759,10 @@ class Instr32(InstrBase):
         )
 
     def jmp_rm32(self) -> None:
-        """Execute decoded ``JMP_RM32`` semantics through frontend emulator effects."""
+        """Compose the decoded architectural EIP with CS without word truncation."""
         rm32 = self.get_rm32()
-        emit_near_jump32(self._active_stack_emulator(), rm32)
+        emit_near_jump32(self._active_stack_emulator(), rm32,
+                         target_domain=NearTargetDomain.ARCHITECTURAL_OFFSET)
 
     def jmpf_m16_32(self) -> None:
         """Execute decoded ``JMPF_M16_32`` semantics through frontend emulator effects."""

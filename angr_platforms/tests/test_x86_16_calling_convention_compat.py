@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import archinfo
@@ -12,7 +13,16 @@ from angr_platforms.X86_16.analysis_helpers import (
     seed_wide_stack_prototype_from_binary_address_8616,
 )
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.caller_return_use_contracts import (
+    AxValueView8616,
+    ByteReturnExtensionKind8616,
+    CallerReturnUseEvidence8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 from angr_platforms.X86_16.calling_convention_compat import (
+    _caller_sign_extends_byte_return_8616,
     _promote_wide_return_and_stack_args_8616,
     _set_function_prototype_8616,
     _terminal_byte_return_evidence_8616,
@@ -23,6 +33,66 @@ from angr_platforms.X86_16.calling_convention_compat import (
     apply_x86_16_wide_stack_prototype_evidence,
     apply_x86_16_wide_stack_prototype_evidence_at_address,
 )
+from angr_platforms.X86_16.callsite_summary import record_caller_return_use_evidence_8616
+
+
+@pytest.mark.parametrize(
+    ("extension", "expected_signed"),
+    [
+        (ByteReturnExtensionKind8616.ZERO_EXTEND_AL_TO_AX, False),
+        (ByteReturnExtensionKind8616.SIGN_EXTEND_AL_TO_AX, True),
+    ],
+)
+def test_byte_return_seed_uses_complete_caller_extension_proof(extension, expected_signed) -> None:
+    """A complete binary caller census determines byte return signedness."""
+    target_addr = 0x1002A
+    project = SimpleNamespace(kb=SimpleNamespace(functions=SimpleNamespace(values=lambda: ())))
+    function = SimpleNamespace(addr=target_addr, project=project)
+    fact = CallerReturnUseFact8616(
+        caller_addr=0x10176,
+        callsite_addr=0x101BC,
+        verdict=CallerReturnUseVerdict8616.USED,
+        kind=CallsiteReturnUseKind8616.VALUE,
+        witness_instruction_addr=0x101C1,
+        byte_extension=extension,
+        byte_extension_instruction_addr=0x101BF,
+        observed_value_view=AxValueView8616.AX,
+    )
+    evidence = CallerReturnUseEvidence8616(
+        target_addr=target_addr,
+        verdict=CallerReturnUseVerdict8616.USED,
+        raw_fact_count=1,
+        normalized_fact_count=1,
+        classified_fact_count=1,
+        materialized_count=1,
+        failure_count=0,
+        used_callsite_count=1,
+        unused_callsite_count=0,
+        callsite_addrs=(fact.callsite_addr,),
+        facts=(fact,),
+    )
+    record_caller_return_use_evidence_8616(project, target_addr, evidence)
+
+    assert _caller_sign_extends_byte_return_8616(project, function) is expected_signed
+
+    opposite = (
+        ByteReturnExtensionKind8616.SIGN_EXTEND_AL_TO_AX
+        if extension is ByteReturnExtensionKind8616.ZERO_EXTEND_AL_TO_AX
+        else ByteReturnExtensionKind8616.ZERO_EXTEND_AL_TO_AX
+    )
+    conflicting_fact = replace(fact, callsite_addr=0x101D0, byte_extension=opposite)
+    conflicting = replace(
+        evidence,
+        raw_fact_count=2,
+        normalized_fact_count=2,
+        classified_fact_count=2,
+        materialized_count=2,
+        used_callsite_count=2,
+        callsite_addrs=(fact.callsite_addr, conflicting_fact.callsite_addr),
+        facts=(fact, conflicting_fact),
+    )
+    record_caller_return_use_evidence_8616(project, target_addr, conflicting)
+    assert _caller_sign_extends_byte_return_8616(project, function) is None
 from angr_platforms.X86_16.lowering.terminal_call_return_types import (
     TerminalCallReturnTypeEvidence8616,
     TerminalCallReturnTypeResult8616,

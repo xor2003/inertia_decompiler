@@ -81,7 +81,11 @@ class DecompileRunRequest:
 
 @dataclass(frozen=True, slots=True)
 class DecompileRunResult:
-    """Evidence for one decompilation execution mode."""
+    """Evidence for one decompilation execution mode.
+
+    Diagnostics contain complete child streams. A failed gate retains their
+    directory and reports it; a successful gate cleans it and reports no path.
+    """
 
     mode: DecompileMode
     command: tuple[str, ...]
@@ -89,6 +93,7 @@ class DecompileRunResult:
     wall_seconds: float
     validation: ValidationStatus
     artifacts: tuple[FunctionArtifact, ...]
+    diagnostics_directory: Path | None = None
 
     @property
     def function_count(self) -> int:
@@ -200,6 +205,17 @@ def _execution_modes_are_equivalent(
     return not _iter_repo_extension_modules(repo_root)
 
 
+def _persist_run_streams_8616(
+    directory: Path,
+    stdout: str | bytes | None,
+    stderr: str | bytes | None,
+) -> None:
+    """Save complete streams, including raw bytes retained on timeout."""
+    for name, content in (("decompiler.stdout.log", stdout), ("decompiler.stderr.log", stderr)):
+        data = content if isinstance(content, bytes) else (content or "").encode("utf-8")
+        (directory / name).write_bytes(data)
+
+
 def _run_decompile(
     *,
     mode: DecompileMode,
@@ -232,17 +248,24 @@ def _run_decompile(
     else:
         context = contextlib.nullcontext()
 
-    with context:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=request.timeout_seconds,
-            check=False,
-            cwd=str(request.repo_root),
-        )
+    try:
+        with context:
+            proc = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=request.timeout_seconds,
+                check=False,
+                cwd=str(request.repo_root),
+            )
+    except subprocess.TimeoutExpired as error:
+        _persist_run_streams_8616(temp_dir, error.stdout, error.stderr)
+        raise
     wall_seconds = time.perf_counter() - start
+    # Keep the complete child evidence on disk, rather than retaining another
+    # copy in each result or forcing a failed decompilation to be repeated.
+    _persist_run_streams_8616(temp_dir, proc.stdout, proc.stderr)
 
     validation = _parse_validation_status(proc.stdout or "", proc.stderr or "")
     validation_uncollected = validation is ValidationStatus.UNCOLLECTED
@@ -258,6 +281,7 @@ def _run_decompile(
         wall_seconds=wall_seconds,
         validation=validation,
         artifacts=artifacts,
+        diagnostics_directory=temp_dir,
     )
 
 
@@ -377,6 +401,10 @@ def _build_json_report(
             "wall_seconds": baseline.wall_seconds,
             "validation": baseline.validation.value,
             "function_count": baseline.function_count,
+            "diagnostics_directory": (
+                str(baseline.diagnostics_directory)
+                if not passed and baseline.diagnostics_directory is not None else None
+            ),
             "quality": baseline.quality_aggregate,
             "function_artifacts": [
                 {
@@ -393,6 +421,10 @@ def _build_json_report(
             "wall_seconds": candidate.wall_seconds,
             "validation": candidate.validation.value,
             "function_count": candidate.function_count,
+            "diagnostics_directory": (
+                str(candidate.diagnostics_directory)
+                if not passed and candidate.diagnostics_directory is not None else None
+            ),
             "quality": candidate.quality_aggregate,
             "function_artifacts": [
                 {
@@ -473,11 +505,12 @@ def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, tupl
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Compare quality between two execution modes."""
+    """Compare modes, retaining failed-run evidence and cleaning successes."""
     args, decompiler_args = _parse_args(list(sys.argv[1:] if argv is None else argv))
 
     output_root = tempfile.mkdtemp(prefix="vextest-opt-guard-out-")
     output_root_path = Path(output_root)
+    cleanup_output = False
     try:
         run_request = DecompileRunRequest(
             binary_path=args.binary,
@@ -551,6 +584,7 @@ def main(argv: list[str] | None = None) -> int:
                 encoding="utf-8",
             )
 
+        cleanup_output = passed
         return 0 if passed else 1
     except subprocess.TimeoutExpired as ex:
         print(f"decompilation quality guard timed out: {ex}")
@@ -559,7 +593,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"quality guard failed to run: {ex}")
         return 3
     finally:
-        _remove_tempdir(output_root_path)
+        if cleanup_output:
+            _remove_tempdir(output_root_path)
+        else:
+            print(f"[diagnostics] retained failed run directory: {output_root_path}")
 
 
 if __name__ == "__main__":

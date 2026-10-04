@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
@@ -50,6 +50,8 @@ from scripts.compiler_coverage_cross_unit import (  # noqa: E402
     check_cross_unit_c,
 )
 from scripts.decompile_process_budget import focused_decompile_process_timeout  # noqa: E402
+
+MAX_BATCH_WORKERS: int = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +183,27 @@ def _run_one_job(args: argparse.Namespace, job: BatchDecompileJob) -> BatchProcR
     )
 
 
+def _record_interrupted_job(
+    args: argparse.Namespace,
+    job: BatchDecompileJob,
+    returncode: int,
+    detail: str,
+    *,
+    timed_out: bool,
+    wall_seconds: float,
+) -> BatchProcResult:
+    """Record a job whose child died or timed out, preserving its diagnostics."""
+    stderr_path = args.out_dir / f"{job.name}.stderr.txt"
+    with stderr_path.open("a", encoding="utf-8") as diagnostics, contextlib.redirect_stderr(diagnostics):
+        print(f"[batch-process] {detail}", file=diagnostics)
+        if timed_out:
+            emit_terminal_status(CliTerminalStatus.TIMEOUT)
+    return BatchProcResult(
+        job.name, returncode, str(args.out_dir / f"{job.name}.stdout.c"), str(stderr_path),
+        wall_seconds, job.argv,
+    )
+
+
 def _run_isolated_job(args: argparse.Namespace, job: BatchDecompileJob) -> BatchProcResult:
     """Contain hard exits and timed-out analysis state within one disposable job."""
     start = time.perf_counter()
@@ -192,37 +215,78 @@ def _run_isolated_job(args: argparse.Namespace, job: BatchDecompileJob) -> Batch
         if error.returncode == 0:
             # A clean exit without its result is transport failure, not success.
             raise
-        returncode = error.returncode
-        detail = str(error)
-        timed_out = False
+        return _record_interrupted_job(
+            args, job, error.returncode, str(error), timed_out=False, wall_seconds=time.perf_counter() - start
+        )
     except TimeoutError as error:
-        returncode = 3
-        detail = str(error)
-        timed_out = True
-    stderr_path = args.out_dir / f"{job.name}.stderr.txt"
-    with stderr_path.open("a", encoding="utf-8") as diagnostics, contextlib.redirect_stderr(diagnostics):
-        print(f"[batch-process] {detail}", file=diagnostics)
-        if timed_out:
-            emit_terminal_status(CliTerminalStatus.TIMEOUT)
-    return BatchProcResult(
-        job.name, returncode, str(args.out_dir / f"{job.name}.stdout.c"), str(stderr_path),
-        time.perf_counter() - start, job.argv,
+        return _record_interrupted_job(
+            args, job, 3, str(error), timed_out=True, wall_seconds=time.perf_counter() - start
+        )
+
+
+def _run_jobs_parallel(
+    args: argparse.Namespace,
+    jobs: list[BatchDecompileJob],
+    workers: int,
+) -> list[BatchProcResult]:
+    """Dispatch jobs through bounded fork children with ordered checkpoints."""
+    from scripts.batch_decompile_scheduler import (
+        JobEnd,
+        JobEndKind,
+        ScheduledJob,
+        run_jobs_bounded,
+    )
+
+    results: list[BatchProcResult | None] = [None] * len(jobs)
+
+    def _record_end(index: int, end: JobEnd[BatchProcResult]) -> None:
+        """Require one typed result before checkpointing a completed job."""
+        job = jobs[index]
+        if end.kind is JobEndKind.COMPLETED:
+            if not isinstance(end.value, BatchProcResult):
+                raise TypeError(f"completed batch job {job.name!r} has no typed result")
+            results[index] = end.value
+        else:
+            results[index] = _record_interrupted_job(
+                args,
+                job,
+                end.returncode if end.kind is JobEndKind.EXITED else 3,
+                end.detail,
+                timed_out=end.kind is JobEndKind.TIMED_OUT,
+                wall_seconds=end.wall_seconds,
+            )
+        _write_batch_report(args, [item for item in results if item is not None])
+
+    scheduled = [
+        ScheduledJob(
+            name=job.name,
+            work=partial(_run_one_job, args, job),
+            timeout=focused_decompile_process_timeout(job.timeout),
+        )
+        for job in jobs
+    ]
+    run_jobs_bounded(scheduled, workers=workers, on_end=_record_end)
+    completed = [item for item in results if item is not None]
+    if len(completed) != len(jobs):
+        raise RuntimeError(f"batch collected {len(completed)} of {len(jobs)} requested results")
+    return completed
+
+
+def _proc_job(args: argparse.Namespace, proc_name: str) -> BatchDecompileJob:
+    """Build the legacy same-binary focused proc job for one procedure name."""
+    return BatchDecompileJob(
+        name=proc_name,
+        binary=args.binary,
+        argv=_build_proc_argv(args, proc_name),
+        direct_in_process=bool(args.direct_in_process),
+        timeout=args.timeout,
     )
 
 
 def _run_one_proc(args: argparse.Namespace, proc_name: str) -> BatchProcResult:
     """Run one legacy same-binary focused proc job."""
 
-    return _run_isolated_job(
-        args,
-        BatchDecompileJob(
-            name=proc_name,
-            binary=args.binary,
-            argv=_build_proc_argv(args, proc_name),
-            direct_in_process=bool(args.direct_in_process),
-            timeout=args.timeout,
-        ),
-    )
+    return _run_isolated_job(args, _proc_job(args, proc_name))
 
 
 def _job_name(raw_job: dict[str, object]) -> str:
@@ -346,7 +410,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run direct-address focused jobs in-process instead of through the CLI fork lane.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=f"Disposable job processes allowed to run concurrently (1-{MAX_BATCH_WORKERS}).",
+    )
+    args = parser.parse_args(argv)
+    if not 1 <= args.workers <= MAX_BATCH_WORKERS:
+        parser.error(f"--workers must be between 1 and {MAX_BATCH_WORKERS}")
+    return args
 
 
 def _write_batch_report(
@@ -371,8 +444,20 @@ def _write_batch_report(
         temporary_path.unlink(missing_ok=True)
 
 
+def _refuse_colliding_job_names(jobs: Sequence[BatchDecompileJob]) -> None:
+    """Reject job names that would overwrite another job's streamed artifacts."""
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for job in jobs:
+        if job.name in seen:
+            duplicates.add(job.name)
+        seen.add(job.name)
+    if duplicates:
+        raise SystemExit(f"batch job names collide on shared artifacts: {', '.join(sorted(duplicates))}")
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run focused jobs, checkpointing their report before starting the next job."""
+    """Run focused jobs with bounded isolation and ordered report checkpoints."""
 
     args = _parse_args(argv)
     if args.job_file is None and (args.binary is None or not args.proc):
@@ -381,16 +466,17 @@ def main(argv: list[str] | None = None) -> int:
     results: list[BatchProcResult] = []
     _write_batch_report(args, results)
     jobs = _load_jobs(args.job_file) if args.job_file is not None else []
+    jobs = jobs or [_proc_job(args, proc_name) for proc_name in args.proc]
+    _refuse_colliding_job_names(jobs)
     # Resolve the lazy CLI implementation once, before forking any jobs. Only
     # imports are shared: analysis and its hard exits stay in disposable children.
     _ = decompiler_cli.main
-    if jobs:
+    workers = min(args.workers, len(jobs))
+    if workers > 1:
+        results = _run_jobs_parallel(args, jobs, workers)
+    else:
         for job in jobs:
             results.append(_run_isolated_job(args, job))
-            _write_batch_report(args, results)
-    else:
-        for proc_name in args.proc:
-            results.append(_run_one_proc(args, proc_name))
             _write_batch_report(args, results)
     failed_jobs = sum(1 for item in results if item.returncode != 0)
     cross_unit: CrossUnitResult | None = None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr_platforms.X86_16.ir import IRFunctionArtifact, vex_import
 from angr_platforms.X86_16.ir.function_ir_registry import (
     FunctionIRArtifactFailure8616,
@@ -75,6 +76,47 @@ def test_raw_ir_registry_refuses_conflicts_without_replacement() -> None:
     assert result.verdict is FunctionIRArtifactVerdict8616.UNKNOWN_REFUSE
     assert result.failure is FunctionIRArtifactFailure8616.ARTIFACT_CONFLICT
     assert registered_function_ir_artifact_8616(project, 0x1000).artifact is accepted
+
+
+def test_raw_ir_lookup_refuses_without_creating_registry() -> None:
+    project = _project()
+    before = dict(vars(project))
+
+    result = registered_function_ir_artifact_8616(project, 0x1000)
+
+    assert result.verdict is FunctionIRArtifactVerdict8616.UNKNOWN_REFUSE
+    assert result.failure is FunctionIRArtifactFailure8616.NOT_REGISTERED
+    assert result.artifact is None
+    assert vars(project) == before
+
+
+def test_raw_ir_lookup_miss_preserves_existing_registry() -> None:
+    project = _project()
+    artifact = IRFunctionArtifact(0x1000, (), summary={"marker": "raw"})
+    publish_function_ir_artifact_8616(project, artifact)
+    registry = project._inertia_function_ir_artifacts_8616
+    before = dict(registry)
+
+    result = registered_function_ir_artifact_8616(project, 0x2000)
+
+    assert result.verdict is FunctionIRArtifactVerdict8616.UNKNOWN_REFUSE
+    assert result.failure is FunctionIRArtifactFailure8616.NOT_REGISTERED
+    assert project._inertia_function_ir_artifacts_8616 is registry
+    assert registry == before
+    assert registry[0x1000] is artifact
+
+
+def test_raw_ir_lookup_rejects_malformed_registry() -> None:
+    project = _project()
+    malformed: object = [0x1000]
+    project._inertia_function_ir_artifacts_8616 = malformed
+
+    with pytest.raises(TypeError, match="must be a dict"):
+        registered_function_ir_artifact_8616(project, 0x1000)
+    with pytest.raises(TypeError, match="must be a dict"):
+        publish_function_ir_artifact_8616(project, IRFunctionArtifact(0x2000, ()))
+
+    assert project._inertia_function_ir_artifacts_8616 is malformed
 
 
 def test_registry_upgrades_ir_to_semantics_without_downgrade() -> None:
@@ -203,11 +245,13 @@ def test_semantic_lookup_caches_distinct_exact_functions(monkeypatch) -> None:
         *,
         ir_artifact: IRFunctionArtifact | None = None,
     ) -> tuple[object, object, SSAFunctionArtifact]:
-        assert ir_artifact is None
+        assert isinstance(ir_artifact, IRFunctionArtifact)
         function_addr = function.addr
+        assert ir_artifact.function_addr == function_addr
         built.append(function_addr)
-        ir = IRFunctionArtifact(function_addr, ())
-        return object(), SimpleNamespace(function=ir), _ssa(function_addr, "semantic")
+        effects = CallStackEffectArtifact8616(ir_artifact, (), CallStackEffectStats8616())
+        outputs = CallOutputArtifact8616(ir_artifact, (), CallOutputStats8616())
+        return effects, outputs, _ssa(function_addr, "semantic")
 
     monkeypatch.setattr(
         call_stack_effect_pipeline,
@@ -275,3 +319,41 @@ def test_main_semantics_path_publishes_its_exact_ssa(monkeypatch) -> None:
         is FunctionSSAArtifactStage8616.SEMANTIC
     )
     assert build_count == 1
+
+
+def test_main_semantics_refused_source_stops_before_build_or_publication(monkeypatch) -> None:
+    """Retained import refusals fail early with their exact source diagnostics."""
+    from angr_platforms.X86_16.ir import IRRefusal
+    from angr_platforms.X86_16.pipeline.errors import PipelineHardError
+
+    function_addr = 0x1000
+    project = _project(function_addr)
+    refusal = IRRefusal("unknown_effect", "instruction effects are incomplete", 0x1004)
+    raw_ir = IRFunctionArtifact(function_addr, (), refusals=(refusal,))
+    codegen = SimpleNamespace(
+        cfunc=SimpleNamespace(addr=function_addr),
+        _inertia_vex_ir_artifact=raw_ir,
+        _inertia_raw_vex_ir_artifact_8616=raw_ir,
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("refused source reached expensive build or artifact publication")
+
+    for name in (
+        "build_semantic_function_ssa_8616",
+        "publish_function_ir_artifact_8616",
+        "publish_function_ssa_artifact_8616",
+        "publish_call_semantic_projection_8616",
+    ):
+        monkeypatch.setattr(call_stack_effect_pipeline, name, forbidden)
+    before_project = dict(vars(project))
+    before_codegen = dict(vars(codegen))
+    with pytest.raises(PipelineHardError) as caught:
+        apply_x86_16_call_stack_effects_8616(project, codegen)
+    assert caught.value.details == {
+        "function_addr": function_addr,
+        "failure": FunctionIRArtifactFailure8616.ARTIFACT_REFUSED.value,
+        "refusals": [refusal.to_dict()],
+    }
+    assert vars(project) == before_project
+    assert vars(codegen) == before_codegen

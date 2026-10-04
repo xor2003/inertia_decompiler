@@ -1,6 +1,6 @@
 """Interpret existing MS C round-trip evidence without weakening its gates.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: classify one fresh legacy harness report into a typed outcome.
 This is execution evidence, not a claim of source-feature or binary coverage.
 """

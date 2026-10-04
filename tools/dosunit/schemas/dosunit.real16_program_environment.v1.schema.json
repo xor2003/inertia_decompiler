@@ -1,0 +1,999 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "dosunit.real16_program_environment.v1"
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "psp_segment": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "type": "string",
+              "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+            }
+          ]
+        },
+        "allocation_hex": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-fA-F]{2})*$",
+          "maxLength": 1310720
+        },
+        "registers": {
+          "type": "object",
+          "properties": {
+            "eax": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "ebx": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "ecx": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "edx": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "esi": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "edi": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "ebp": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "esp": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            },
+            "eflags": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                }
+              ]
+            }
+          },
+          "required": [
+            "eax",
+            "ebx",
+            "ecx",
+            "edx",
+            "esi",
+            "edi",
+            "ebp",
+            "esp",
+            "eflags"
+          ],
+          "additionalProperties": false
+        },
+        "fs": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "type": "string",
+              "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+            }
+          ]
+        },
+        "gs": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "type": "string",
+              "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+            }
+          ]
+        },
+        "input_files": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "files": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "handle": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 65535
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                          }
+                        ]
+                      },
+                      "bytes": {
+                        "type": "string",
+                        "pattern": "^(?:[0-9a-fA-F]{2})*$",
+                        "maxLength": 8388608
+                      },
+                      "cursor": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "handle",
+                      "bytes",
+                      "cursor"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "max_call_bytes": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "max_total_bytes": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4194304
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "files",
+                "max_call_bytes",
+                "max_total_bytes"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dos_version": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "major": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "minor": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "oem": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "serial24": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16777215
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "major",
+                "minor",
+                "oem",
+                "serial24"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_streams": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "handles": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  }
+                },
+                "max_call_bytes": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "max_total_bytes": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "handles",
+                "max_call_bytes",
+                "max_total_bytes"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dos_resize": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "profile",
+                "segment",
+                "mcb_hex"
+              ],
+              "properties": {
+                "profile": {
+                  "const": "kvikdos_single_tail"
+                },
+                "segment": {
+                  "const": 256
+                },
+                "mcb_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{32}$"
+                }
+              }
+            }
+          ]
+        },
+        "extra_memory": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "segment",
+              "offset",
+              "data_hex"
+            ],
+            "properties": {
+              "segment": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "data_hex": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 131072,
+                "pattern": "^(?:[0-9a-fA-F]{2})+$"
+              }
+            }
+          }
+        },
+        "dos_vectors": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dos_entry"
+              ],
+              "properties": {
+                "dos_entry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "segment",
+                    "offset"
+                  ],
+                  "properties": {
+                    "segment": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "dos_device_info": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "handles"
+              ],
+              "properties": {
+                "handles": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "handle",
+                      "information"
+                    ],
+                    "properties": {
+                      "handle": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "information": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "bios_video": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "columns",
+                "page",
+                "entry"
+              ],
+              "properties": {
+                "mode": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "columns": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "page": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "entry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "segment",
+                    "offset"
+                  ],
+                  "properties": {
+                    "segment": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                        }
+                      ]
+                    },
+                    "offset": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "bios_video_state": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "static_state",
+                "entry",
+                "dcc",
+                "colours",
+                "pages",
+                "scanline",
+                "misc",
+                "memory"
+              ],
+              "properties": {
+                "static_state": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "segment",
+                    "offset"
+                  ],
+                  "properties": {
+                    "segment": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                        }
+                      ]
+                    },
+                    "offset": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "entry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "segment",
+                    "offset"
+                  ],
+                  "properties": {
+                    "segment": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                        }
+                      ]
+                    },
+                    "offset": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "dcc": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "colours": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "pages": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 255
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "scanline": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "misc": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        1,
+                        33
+                      ]
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                },
+                "memory": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "rom": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "segment",
+                  "offset",
+                  "data_hex"
+                ],
+                "properties": {
+                  "segment": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  "data_hex": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 131072,
+                    "pattern": "^(?:[0-9a-fA-F]{2})+$"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "psp_segment",
+        "allocation_hex",
+        "registers",
+        "fs",
+        "gs"
+      ],
+      "additionalProperties": false
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "size": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          },
+          "oracle_address": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048575
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          },
+          "candidate_address": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048575
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "size",
+          "oracle_address",
+          "candidate_address"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "oracle_code_ranges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048575
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          },
+          "size": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "size"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "candidate_code_ranges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048575
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          },
+          "size": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0[xX][0-9a-fA-F]+|[0-9]+)$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "size"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "environment"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dosunit.real16_program_environment.v1",
+  "title": "Explicit initialized real16 process environment"
+}

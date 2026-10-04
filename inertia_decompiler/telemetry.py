@@ -579,8 +579,14 @@ def span(span_name: str, **attrs: object) -> Iterator[None]:
         with otel_cm:
             yield
     except BaseException as ex:
+        from angr_platforms.X86_16.pipeline.errors import PipelineHardError
+
         record.status = "error"
         record.attrs.setdefault("exception", type(ex).__name__)
+        record.attrs.setdefault("exception_message", _compact_attr(str(ex)))
+        if isinstance(ex, PipelineHardError):
+            record.attrs.setdefault("exception_layer", _compact_attr(ex.layer))
+            record.attrs.setdefault("exception_details", _compact_attr(ex.details))
         raise
     finally:
         record.end_ns = time.perf_counter_ns()
@@ -905,6 +911,7 @@ def _format_agent_attr_value(value: object) -> str:
 
 
 def _summary_attrs(attrs: dict[str, object]) -> dict[str, object]:
+    """Select bounded diagnostic attributes for compact span reports."""
     preferred = (
         "binary",
         "addr",
@@ -918,6 +925,9 @@ def _summary_attrs(attrs: dict[str, object]) -> dict[str, object]:
         "functions",
         "cache",
         "exception",
+        "exception_message",
+        "exception_layer",
+        "exception_details",
     )
     out: dict[str, object] = {}
     for key in preferred:

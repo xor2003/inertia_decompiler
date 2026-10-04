@@ -17,6 +17,10 @@ from ..caller_return_use_contracts import (
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
+from ..ir.logical_memory_contracts import (
+    IRMemoryAccessKind8616,
+    logical_memory_execution_address_matches_8616,
+)
 from ..ir.ssa_function import SSAFunctionArtifact
 from .interprocedural_storage_contracts import (
     StorageDefinitionKind8616,
@@ -29,12 +33,16 @@ from .interprocedural_storage_contracts import (
 from .interprocedural_storage_return_pointer_block import full_word_pointer_domain_8616
 from .interprocedural_storage_return_pointer_flow import scan_pointer_return_flow_8616
 from .interprocedural_storage_return_type_contracts import (
+    ReturnPointerUseEvidence8616,
     ReturnStorageTypeFailure8616,
     ReturnStorageTypeResult8616,
     ReturnStorageTypeVerdict8616,
 )
 
-__all__ = ["classify_pointer_return_storage_8616"]
+__all__ = [
+    "classify_pointer_return_storage_8616",
+    "proven_pointer_return_pointee_width_8616",
+]
 
 _CONFLICT_FAILURES_8616 = frozenset(
     {
@@ -143,3 +151,47 @@ def classify_pointer_return_storage_8616(
         else ReturnStorageTypeVerdict8616.UNKNOWN_REFUSE
     )
     return _refused_result_8616(failure, verdict=verdict, normalized=True)
+
+
+def proven_pointer_return_pointee_width_8616(
+    artifact: SSAFunctionArtifact,
+    pointer_use: ReturnPointerUseEvidence8616,
+) -> int | None:
+    """Map one byte-sliced SSA pointer use to a unique complete machine operand."""
+    logical = artifact.logical_memory
+    invalid_pointer_identity = (
+        not pointer_use.complete
+        or pointer_use.caller_addr != artifact.function_addr
+    )
+    invalid_logical_artifact = (
+        logical is None
+        or logical.function_addr != artifact.function_addr
+        or not logical.closed
+    )
+    if invalid_pointer_identity or invalid_logical_artifact:
+        return None
+    assert logical is not None
+    if (
+        any(
+            refusal.insn_addr == pointer_use.dereference_instruction_addr
+            for refusal in logical.refusals
+        )
+    ):
+        return None
+    matches = tuple(
+        access
+        for access in logical.accesses
+        if access.key.insn_addr == pointer_use.dereference_instruction_addr
+        and access.kind in {IRMemoryAccessKind8616.READ, IRMemoryAccessKind8616.WRITE}
+        and any(
+            logical_memory_execution_address_matches_8616(
+                pointer_use.address,
+                access.address,
+                execution_slice.source_byte_offset,
+                access.address_bits,
+            )
+            for execution_slice in access.execution_slices
+            if execution_slice.insn_addr == pointer_use.dereference_instruction_addr
+        )
+    )
+    return matches[0].address.size if len(matches) == 1 else None

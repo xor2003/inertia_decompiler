@@ -2794,7 +2794,7 @@ def _mov_reg_imm_setup_matches_push_source_8616(
     return False
 
 
-def _setup_shift_byte_variants_8616(variants: StructuredAstValue, op_name: str, op_value: int, reg: int, shift_modrm: dict) -> list[bytearray]:
+def _setup_shift_byte_variants_8616(variants: StructuredAstValue, op_name: str, op_value: int, reg: int, shift_modrm: dict[str, int]) -> list[bytearray]:
     """Build byte-pattern variants for one push-op family."""
     next_variants: list[bytearray] = []
     modrm = shift_modrm[op_name]
@@ -2855,7 +2855,6 @@ def _setup_op_byte_variants_8616(
 ) -> list[bytearray] | None:
     """Expand byte-pattern variants for one expression operation."""
     op_value &= 0xFFFF
-    next_variants: list[bytearray] = []
     shift_modrm = {
         CallsitePushExprOp8616.SHL.value: 0xE0,
         CallsitePushExprOp8616.SHR.value: 0xE8,
@@ -2870,7 +2869,6 @@ def _setup_op_byte_variants_8616(
     if op_name == CallsitePushExprOp8616.SUB.value:
         return _setup_sub_byte_variants_8616(variants, op_name, op_value, reg)
     return None
-    return next_variants
 
 
 def _setup_byte_variants_for_reg_8616(
@@ -2977,7 +2975,7 @@ def _direct_bp_push_instruction_matches_source_8616(
     return False
 
 
-def _collect_bp_offsets_nested_8616(current: tuple, offsets: set[int]) -> None:
+def _collect_bp_offsets_nested_8616(current: tuple[StructuredAstValue, ...], offsets: set[int]) -> None:
     """Accumulate BP offsets from the indexed/global/segmented push-source kinds."""
     source_kind = current[0]
     if source_kind == CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value:
@@ -3419,7 +3417,7 @@ def _cod_metadata_for_addr_8616(
     lst_metadata: StructuredAstValue,
     cod_path: StructuredAstValue,
     binary_path: StructuredAstValue,
-    cache: dict,
+    cache: dict[StructuredAstValue, StructuredAstValue],
     fallback_addr: int,
 ) -> StructuredAstValue | None:
     """Resolve COD proc metadata for one candidate address."""
@@ -4420,13 +4418,6 @@ def _next_source_call_name_for_summary_8616(
         return _scan_call_names_for_arg_count_8616(source_call_names, source_call_idx, summary_arg_count)
     if summary_is_stack_probe:
         return _scan_call_names_for_probe_8616(source_call_names, source_call_idx)
-    while source_call_idx < len(source_call_names):
-        candidate = source_call_names[source_call_idx]
-        if not _is_stack_probe_call_name_8616(candidate) or summary_has_stack_probe_shape:
-            return candidate, source_call_idx + 1
-        source_call_idx += 1
-    return None, source_call_idx
-
     while source_call_idx < len(source_call_names):
         candidate = source_call_names[source_call_idx]
         if not _is_stack_probe_call_name_8616(candidate) or summary_has_stack_probe_shape:
@@ -9569,7 +9560,6 @@ class _CallsiteStackArgsMaterializer8616:
         ):
             changed_local = True
         return changed_local
-        return changed_local
 
     def _final_return_call_pair_8616(
         self, statements: list[StructuredAstValue]
@@ -10086,7 +10076,7 @@ class _CallsiteStackArgsMaterializer8616:
         return pointer_expr
 
     def _direct_expr_extended_kinds_8616(self,
-        source: tuple,
+        source: tuple[StructuredAstValue, ...],
         source_kind: StructuredAstValue,
         source_value: StructuredAstValue,
         *,
@@ -10148,7 +10138,6 @@ class _CallsiteStackArgsMaterializer8616:
             arg_index=arg_index,
             materialize_pointer=materialize_pointer,
         )
-        return None
 
     def _direct_expr_bp_value_8616(self,
         source: StructuredAstValue,
@@ -16354,8 +16343,6 @@ class _CallsiteStackArgsMaterializer8616:
             return (True, skipped_carriers, skipped_value_assignments)
         return (False, skipped_carriers, skipped_value_assignments)
 
-        return (False, skipped_carriers, skipped_value_assignments)
-
 
     def _collect_backtracked_value_carrier_args(self,
         statements: list[StructuredAstValue],
@@ -19985,7 +19972,7 @@ class _CallsiteStackArgsMaterializer8616:
         push_sources: StructuredAstValue,
         source_offsets: StructuredAstValue,
         expr_sources: StructuredAstValue,
-        push_instruction_addrs: frozenset,
+        push_instruction_addrs: frozenset[int],
     ) -> bool:
         """Whether a trailing statement is a consumable pre-call push-alias artifact."""
         if self._statement_contains_call(candidate):
@@ -20359,7 +20346,7 @@ class _CallsiteStackArgsMaterializer8616:
         physical_push_count: int,
         push_sources: tuple[StructuredAstValue, ...],
         new_statements: list[StructuredAstValue],
-    ) -> dict | None:
+    ) -> dict[int, StructuredAstValue] | None:
         """Verify every consumed store matches a recorded PUSH; return source map or None."""
         if (
             len(consumed_rhs) > physical_push_count

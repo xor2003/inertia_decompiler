@@ -1,6 +1,6 @@
 """Load the explicit compiler coverage scope and candidate witnesses.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: reject ambiguous scope, duplicate IDs and invalid references.
 Admission is an obligation, never proof that a witness exercises the mechanism.
 """

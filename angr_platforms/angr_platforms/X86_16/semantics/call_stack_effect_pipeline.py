@@ -19,6 +19,11 @@ from ..callsite_summary_program import (
     build_callsite_summary_inventory_with_program_evidence_8616,
 )
 from ..ir import IRFunctionArtifact
+from ..ir.function_ir_registry import (
+    FunctionIRArtifactFailure8616,
+    FunctionIRArtifactVerdict8616,
+    publish_function_ir_artifact_8616,
+)
 from ..ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
     FunctionSSAArtifactResolution8616,
@@ -37,6 +42,9 @@ from .call_stack_allocation import collect_call_stack_allocation_proofs_8616
 from .call_stack_effects import (
     CallStackEffectArtifact8616,
     materialize_call_stack_effects_8616,
+)
+from .call_target_evidence_8616 import (
+    publish_call_semantic_projection_8616,
 )
 
 
@@ -155,9 +163,11 @@ def semantic_function_ssa_artifact_at_address_8616(
             None,
         )
     try:
-        _effects, outputs, function_ssa = build_semantic_function_ssa_8616(
+        raw_ir = build_x86_16_ir_function_artifact(project, function)
+        effects, outputs, function_ssa = build_semantic_function_ssa_8616(
             project,
             function,
+            ir_artifact=raw_ir,
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         return FunctionSSAArtifactResolution8616(
@@ -174,6 +184,38 @@ def semantic_function_ssa_artifact_at_address_8616(
             None,
             FunctionSSAArtifactFailure8616.IR_BUILD_REFUSED,
             registered.stage,
+        )
+    return _publish_resolved_semantic_8616(
+        project, raw_ir, effects, outputs, function_ssa
+    )
+
+
+def _publish_resolved_semantic_8616(
+    project: object,
+    raw_ir: IRFunctionArtifact,
+    effects: CallStackEffectArtifact8616,
+    outputs: CallOutputArtifact8616,
+    function_ssa: SSAFunctionArtifact,
+) -> FunctionSSAArtifactResolution8616:
+    """Publish raw IR, semantic SSA, and the coherent projection together."""
+    ir_publication = publish_function_ir_artifact_8616(project, raw_ir)
+    if ir_publication.verdict is not FunctionIRArtifactVerdict8616.PROVEN:
+        return FunctionSSAArtifactResolution8616(
+            raw_ir.function_addr,
+            FunctionSSAArtifactVerdict8616.UNKNOWN_REFUSE,
+            None,
+            FunctionSSAArtifactFailure8616.ARTIFACT_CONFLICT,
+            registered_function_ssa_artifact_8616(project, raw_ir.function_addr).stage,
+        )
+    projection = CallSemanticProjection8616(raw_ir, effects, outputs, function_ssa)
+    retained = publish_call_semantic_projection_8616(project, projection)
+    if not retained.complete:
+        return FunctionSSAArtifactResolution8616(
+            raw_ir.function_addr,
+            FunctionSSAArtifactVerdict8616.UNKNOWN_REFUSE,
+            None,
+            FunctionSSAArtifactFailure8616.ARTIFACT_CONFLICT,
+            registered_function_ssa_artifact_8616(project, raw_ir.function_addr).stage,
         )
     return publish_function_ssa_artifact_8616(
         project,
@@ -321,27 +363,38 @@ def _published_function_ssa_8616(
 
 
 def _publish_semantic_artifacts_8616(
+    project: object,
     boundary: _CodegenBoundary8616,
     source_ir: IRFunctionArtifact,
     effects: CallStackEffectArtifact8616,
     outputs: CallOutputArtifact8616,
     function_ssa: SSAFunctionArtifact,
 ) -> None:
-    """Publish all Semantics artifacts onto the codegen boundary."""
+    """Publish all Semantics artifacts onto codegen and the project."""
+    ir_publication = publish_function_ir_artifact_8616(project, source_ir)
+    if ir_publication.verdict is not FunctionIRArtifactVerdict8616.PROVEN:
+        raise PipelineHardError(
+            "Semantics raw IR conflicts with retained evidence",
+            layer="semantics",
+            details={"function_addr": source_ir.function_addr,
+                     "failure": None if ir_publication.failure is None else ir_publication.failure.value},
+        )
+    projection = CallSemanticProjection8616(source_ir, effects, outputs, function_ssa)
+    publication = publish_call_semantic_projection_8616(project, projection)
+    if not publication.complete:
+        raise PipelineHardError(
+            "Semantics call projection conflicts with retained evidence",
+            layer="semantics",
+            details={"function_addr": source_ir.function_addr,
+                     "failure": None if publication.failure is None else publication.failure.value},
+        )
     boundary._inertia_vex_ir_artifact = outputs.function
     boundary._inertia_vex_ir_summary = outputs.function.summary
     boundary._inertia_vex_ir_function_ssa = function_ssa
-    boundary._inertia_vex_ir_function_ssa_stage_8616 = (
-        FunctionSSAArtifactStage8616.SEMANTIC
-    )
+    boundary._inertia_vex_ir_function_ssa_stage_8616 = FunctionSSAArtifactStage8616.SEMANTIC
     boundary._inertia_call_stack_effect_artifact_8616 = effects
     boundary._inertia_call_output_artifact_8616 = outputs
-    boundary._inertia_call_semantic_projection_8616 = CallSemanticProjection8616(
-        source_ir,
-        effects,
-        outputs,
-        function_ssa,
-    )
+    boundary._inertia_call_semantic_projection_8616 = projection
 
 
 def _record_function_info_8616(
@@ -374,6 +427,18 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
     if proven is None:
         return False
     cfunc, raw_ir, source_ir = proven
+    if source_ir.refusals:
+        # Import already retained the failure; no derived publication can
+        # establish semantics for this source or erase its refusal evidence.
+        raise PipelineHardError(
+            "Semantics source IR contains retained refusals",
+            layer="semantics",
+            details={
+                "function_addr": source_ir.function_addr,
+                "failure": FunctionIRArtifactFailure8616.ARTIFACT_REFUSED.value,
+                "refusals": [refusal.to_dict() for refusal in source_ir.refusals],
+            },
+        )
     project_boundary = cast(_ProjectBoundary8616, project)
     try:
         function = project_boundary.kb.functions.function(addr=cfunc.addr, create=False)
@@ -389,7 +454,7 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
         ir_artifact=source_ir,
     )
     function_ssa = _published_function_ssa_8616(project, function_ssa, outputs, cfunc.addr)
-    _publish_semantic_artifacts_8616(boundary, source_ir, effects, outputs, function_ssa)
+    _publish_semantic_artifacts_8616(project, boundary, source_ir, effects, outputs, function_ssa)
     _record_function_info_8616(function, outputs, effects, function_ssa)
     return False
 

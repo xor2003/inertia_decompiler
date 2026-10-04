@@ -442,7 +442,6 @@ class _SidecarSliceFallback8616:
                 payload="sidecar slice timed wrapper failed: "
                 + (str(self.fork_error) if self.fork_error is not None else _describe_exception(ex)),
             )
-        return False, None
 
 def _try_decompile_sidecar_slice(
     project: angr.Project,
@@ -889,7 +888,6 @@ class _NonOptimizedSliceFallback8616:
             attempt_failures=tuple(self.retry_failures),
             verdict=self.outcome.verdict,
         )
-        return False, None
     def _fresh_project_retry_lane_8616(self) -> bool:
         """Attempt the fresh-project retry lane; return True when it produced output."""
         assert self.binary_path is not None
@@ -1272,7 +1270,6 @@ class _RuntimeHelperEmitter8616:
         if text is not None:
             return True, text
         return True, _try_emit_known_runtime_helper_c_tail_8616(normalized=self.normalized, lowered=self.lowered)
-        return False, None
 
 def _try_emit_known_runtime_helper_c(
     *,
@@ -1372,7 +1369,6 @@ class _RuntimeHelperTail8616:
         if text is not None:
             return True, text
         return True, _try_emit_known_runtime_helper_c_tail2_8616(normalized=self.normalized, lowered=self.lowered)
-        return False, None
 
 def _try_emit_known_runtime_helper_c_tail_8616(*, normalized: str, lowered: str) -> str | None:
     return typing.cast("str | None", _RuntimeHelperTail8616(normalized, lowered).run_8616())
@@ -1656,7 +1652,6 @@ class _RuntimeHelperTail2_8616:
         if text is not None:
             return True, text
         return True, None
-        return False, None
 
 def _try_emit_known_runtime_helper_c_tail2_8616(*, normalized: str, lowered: str) -> str | None:
     return typing.cast("str | None", _RuntimeHelperTail2_8616(normalized, lowered).run_8616())

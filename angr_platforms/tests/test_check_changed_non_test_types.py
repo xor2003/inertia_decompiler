@@ -865,3 +865,38 @@ def test_main_skips_test_files(monkeypatch, tmp_path):
     rc = check_changed_non_test_types.main([str(module)])
 
     assert rc == 0
+
+
+def test_gate_reads_changed_lines_once_per_file(monkeypatch, tmp_path):
+    """All rules share one visit, but a later invocation sees new file contents."""
+    path = tmp_path / "example.py"
+    path.write_text('"""Layer: Tooling.\nResponsibility: test fixture."""\nfrom __future__ import annotations\n')
+    original_changed = check_changed_non_test_types._changed_lines
+    original_parse = check_changed_non_test_types.ast.parse
+    counts = {"changed": 0, "parse": 0}
+
+    def changed(selected):
+        counts["changed"] += 1
+        return original_changed(selected)
+
+    def parse(source, filename="<unknown>", *args, **kwargs):
+        if filename == str(path):
+            counts["parse"] += 1
+        return original_parse(source, filename, *args, **kwargs)
+
+    monkeypatch.setattr(check_changed_non_test_types, "_changed_lines", changed)
+    monkeypatch.setattr(check_changed_non_test_types.ast, "parse", parse)
+    monkeypatch.setattr(check_changed_non_test_types, "_head_source", lambda selected: None)
+    assert check_changed_non_test_types.main([str(path)]) == 0
+    assert counts == {"changed": 1, "parse": 1}
+    path.write_text(path.read_text() + "def broken(value):\n    return value\n")
+    assert check_changed_non_test_types.main([str(path)]) == 1
+    assert counts == {"changed": 2, "parse": 2}
+
+
+def test_unchanged_module_is_not_parsed(monkeypatch, tmp_path):
+    """Unchanged files retain the ratchet's skip contract without parsing."""
+    path = tmp_path / "legacy.py"
+    path.write_text("invalid syntax here !")
+    monkeypatch.setattr(check_changed_non_test_types, "_changed_lines", lambda selected: set())
+    assert check_changed_non_test_types.main([str(path)]) == 0

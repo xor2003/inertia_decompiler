@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from scripts import test_pipeline
 
@@ -55,6 +59,11 @@ def test_unit_lane_promotes_pipeline_self_contract():
     assert "angr_platforms/tests/test_test_pipeline.py" in test_pipeline.FOCUSED_PYTEST_TARGETS
 
 
+def test_unit_lane_promotes_split_return_provenance_controls():
+    """Physical-return witness provenance and jump transparency run routinely."""
+    assert "angr_platforms/tests/test_x86_16_interprocedural_storage_return_split.py" in test_pipeline.FOCUSED_PYTEST_TARGETS
+
+
 def test_repository_ownership_manifest_runs_as_a_separate_hard_gate():
     assert "angr_platforms/tests/test_test_ownership_manifest.py" not in test_pipeline.FOCUSED_PYTEST_TARGETS
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
@@ -94,6 +103,19 @@ def test_unit_lane_promotes_segmented_runtime_and_cache_contracts():
     assert "angr_platforms/tests/test_x86_16_decompilation_cache_surface.py" in test_pipeline.FOCUSED_PYTEST_TARGETS
 
 
+@pytest.mark.parametrize("target", (
+    "angr_platforms/tests/test_x86_16_segment_state_call_boundary.py",
+    "angr_platforms/tests/test_x86_16_segment_state_call_outputs.py",
+    "angr_platforms/tests/test_x86_16_ir_constant_known_lanes.py",
+    "angr_platforms/tests/test_x86_16_ir_constant_flow_refusals.py",
+))
+def test_routine_lanes_promote_ir_register_state_contract(target: str) -> None:
+    """Keep register-state proofs and refusals in pipeline and both Make lists."""
+    assert test_pipeline.FOCUSED_PYTEST_TARGETS.count(target) == 1
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    assert makefile.count(f"\t{target} \\\n") == 2
+
+
 def test_unit_lane_promotes_ultradecompiler_borrow_contracts():
     assert "angr_platforms/tests/test_import_ultra_quickc_fixtures.py" in test_pipeline.FOCUSED_PYTEST_TARGETS
     assert "angr_platforms/tests/test_omf_pat_lidata.py" in test_pipeline.FOCUSED_PYTEST_TARGETS
@@ -109,16 +131,18 @@ def test_default_tier_keeps_full_msc6_tiny_pipeline():
     assert args.sortdemo_decompile_timeout == 360
     assert args.sortdemo_run_timeout == 2400
     assert test_pipeline._selected_lanes(args) == (
+        "binary-budgeted",
         "unit-focused",
+        "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
     )
 
 
-def test_fast_tier_runs_regular_local_unit_gate_only():
+def test_fast_tier_keeps_budgeted_proofs_and_regular_local_units():
     args = test_pipeline._parse_args(["--tier", "fast"])
 
-    assert test_pipeline._selected_lanes(args) == ("unit-focused",)
+    assert test_pipeline._selected_lanes(args) == ("binary-budgeted", "unit-focused")
 
 
 def test_unit_lane_excludes_broad_slow_corpus_pytest_targets():
@@ -134,11 +158,23 @@ def test_unit_lane_excludes_broad_slow_corpus_pytest_targets():
     assert forbidden_targets.isdisjoint(test_pipeline.FOCUSED_PYTEST_TARGETS)
 
 
+def test_near_pointer_native_runtime_is_default_execution_only():
+    """The new MS C/KVM representation control must not add a fast DOS dependency."""
+    target = "angr_platforms/tests/test_x86_16_near_pointer_native_runtime.py"
+    assert target not in test_pipeline.FOCUSED_PYTEST_TARGETS
+    assert test_pipeline.RELATIONAL_BINARY_PYTEST_TARGETS.count(target) == 1
+    for tier in ("default", "expanded"):
+        assert "binary-relational" in test_pipeline.PIPELINE_TIERS[tier]
+    assert "binary-relational" not in test_pipeline.PIPELINE_TIERS["fast"]
+
+
 def test_expanded_tier_adds_sidecar_free_and_sortdemo_status_lanes():
     args = test_pipeline._parse_args(["--tier", "expanded"])
 
     assert test_pipeline._selected_lanes(args) == (
+        "binary-budgeted",
         "unit-focused",
+        "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
         "sortd-sidecar-free",
@@ -149,31 +185,39 @@ def test_expanded_tier_adds_sidecar_free_and_sortdemo_status_lanes():
 def test_makefile_exposes_expanded_pipeline_targets():
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
+    assert "TEST_PIPELINE_LOCK ?= $(CURDIR)/.cache/locks/test-pipeline.lock" in makefile
     assert (
         "decompiler-check-expanded: architecture-check agent-context-check "
         "test-ownership-check pytest test-pipeline-expanded"
     ) in makefile
     assert (
         "\ntest-pipeline-expanded: decompiler-contracts\n"
-        '\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
+        '\tmkdir -p "$(dir $(TEST_PIPELINE_LOCK))"\n'
+        '\tflock "$(TEST_PIPELINE_LOCK)" $(PYTHON) '
         "scripts/test_pipeline.py --tier expanded --require-external"
     ) in makefile
 
 
-def test_makefile_exposes_fast_quality_target_with_linters():
+def test_makefile_exposes_fast_quality_target_with_linters() -> None:
+    """The fast gate retains contracts and admission before its broad pipeline."""
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert "quality-fast: linters type-ratchet-changed decompiler-check-fast" in makefile
     assert "\ntype-ratchet-changed:\n" in makefile
     assert "decompiler-check-fast: architecture-check-fast agent-context-check test-ownership-check test-pipeline-fast" in makefile
     assert (
-        '\ntest-pipeline: decompiler-contracts\n\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
+        '\ntest-pipeline: decompiler-contracts\n'
+        '\tmkdir -p "$(dir $(TEST_PIPELINE_LOCK))"\n'
+        '\tflock "$(TEST_PIPELINE_LOCK)" $(PYTHON) '
         "scripts/test_pipeline.py --require-external"
     ) in makefile
     assert (
-        '\ntest-pipeline-fast: decompiler-contracts\n\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
+        '\ntest-pipeline-fast: comparator-check-fast\n'
+        '\tmkdir -p "$(dir $(TEST_PIPELINE_LOCK))"\n'
+        '\tflock "$(TEST_PIPELINE_LOCK)" $(PYTHON) '
         "scripts/test_pipeline.py --tier fast --require-external"
     ) in makefile
+    assert "\ncomparator-check-fast: decompiler-contracts\n" in makefile
     assert "\narchitecture-check-fast:\n\t$(PYTHON) -m scripts.check_decompiler_architecture --startup-only" in makefile
     assert "\ntest-ownership-check:\n\t$(PYTHON) scripts/test_ownership_manifest.py --check" in makefile
 
@@ -261,6 +305,27 @@ def test_sortdemo_lane_budget_exceeds_its_internal_run_timeout():
     )
 
 
+@pytest.mark.parametrize(("workers", "expected"), [(1, 1), (3, 2), (6, 2)])
+def test_budgeted_binary_lane_caps_concurrency_without_losing_coverage(monkeypatch, workers, expected):
+    """All standard tiers retain the proofs outside the six-worker unit pool."""
+    commands = []
+
+    def capture(name, command):
+        commands.append(command)
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, command, 0.0, returncode=0)
+
+    monkeypatch.setattr(test_pipeline, "_run_command", capture)
+    result = test_pipeline._budgeted_binary_lane(workers)
+    target = "angr_platforms/tests/test_dosunit_transitive_callees.py"
+    assert result.status is test_pipeline.LaneStatus.PASSED
+    assert commands[0][commands[0].index("-n") + 1] == str(expected)
+    assert commands[0].count(target) == 1
+    assert target not in test_pipeline.FOCUSED_PYTEST_TARGETS
+    for lanes in test_pipeline.PIPELINE_TIERS.values():
+        assert lanes.count("binary-budgeted") == 1
+        assert lanes.index("binary-budgeted") < lanes.index("unit-focused")
+
+
 def test_unit_lane_reports_slow_pytest_durations(monkeypatch):
     captured: list[list[str]] = []
 
@@ -275,9 +340,38 @@ def test_unit_lane_reports_slow_pytest_durations(monkeypatch):
     assert result.status == test_pipeline.LaneStatus.PASSED
     assert captured
     assert "--durations=10" in captured[0]
-    assert captured[0][captured[0].index("-n") + 1] == "7"
+    assert captured[0][captured[0].index("-n") + 1] == "3"
     assert captured[0][captured[0].index("--dist") + 1] == "loadgroup"
     assert "--durations-min=1.0" in captured[0]
+
+
+@pytest.mark.parametrize("lane", ["unit-focused", "binary-relational"])
+@pytest.mark.parametrize("workers", [1, 6])
+def test_pipeline_forwards_selected_pytest_workers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lane: str, workers: int,
+) -> None:
+    """CLI worker selection reaches both pytest lanes without launching tests."""
+    commands: list[list[str]] = []
+
+    def capture(name: str, command: list[str]) -> test_pipeline.LaneResult:
+        commands.append(command)
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, command, 0.0, returncode=0)
+
+    monkeypatch.setattr(test_pipeline, "_run_command", capture)
+    assert test_pipeline.main([
+        "--lane", lane, "--pytest-workers", str(workers),
+        "--out", str(tmp_path / "report.json"),
+    ]) == 0
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("-n") + 1] == str(workers)
+
+
+@pytest.mark.parametrize("workers", ["0", "7"])
+def test_pipeline_rejects_out_of_budget_pytest_workers(workers: str) -> None:
+    """Invalid pool sizes refuse rather than silently oversubscribing."""
+    with pytest.raises(SystemExit) as error:
+        test_pipeline._parse_args(["--pytest-workers", workers])
+    assert error.value.code == 2
 
 
 def test_run_command_records_timed_out_status(monkeypatch):
@@ -909,10 +1003,10 @@ def test_pipeline_main_writes_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(
         test_pipeline,
         "_unit_lane",
-        lambda: test_pipeline.LaneResult(
+        lambda workers: test_pipeline.LaneResult(
             "unit-focused",
             test_pipeline.LaneStatus.PASSED,
-            ["pytest"],
+            ["pytest", "-n", str(workers)],
             0.1,
             returncode=0,
             budget_seconds=30.0,
@@ -934,10 +1028,10 @@ def test_pipeline_main_fails_when_lane_times_out(monkeypatch, tmp_path):
     monkeypatch.setattr(
         test_pipeline,
         "_unit_lane",
-        lambda: test_pipeline.LaneResult(
+        lambda workers: test_pipeline.LaneResult(
             "unit-focused",
             test_pipeline.LaneStatus.TIMED_OUT,
-            ["pytest"],
+            ["pytest", "-n", str(workers)],
             31.0,
             reason="timed out after 30 seconds",
         ),
@@ -950,3 +1044,151 @@ def test_pipeline_main_fails_when_lane_times_out(monkeypatch, tmp_path):
     assert summary["failed"] == 0
     assert summary["timed_out"] == 1
     assert summary["results"][0]["status"] == "timed_out"
+
+
+def test_relational_binary_lane_keeps_expensive_proofs_in_default_pipeline(monkeypatch):
+    """Real binary regressions run routinely without extending the fast unit lane."""
+    expected = {
+        "angr_platforms/tests/test_dosunit_signed_divmod.py",
+        "angr_platforms/tests/test_flat32_dependency_cache.py",
+        "angr_platforms/tests/test_flat32_loop_call_failure_report.py",
+        "angr_platforms/tests/test_ordered_io_native.py",
+        "angr_platforms/tests/test_ordered_io_native_extended.py",
+        "angr_platforms/tests/test_pe32_import_service.py",
+        "angr_platforms/tests/test_pe32_import_service_cli.py",
+        "angr_platforms/tests/test_pe32_import_service_schema.py",
+        "angr_platforms/tests/test_real16_indirect_call_composition.py",
+        "angr_platforms/tests/test_real16_indirect_call_multiarm.py",
+        "angr_platforms/tests/test_symbolic_terminal_configured_limits.py",
+        "angr_platforms/tests/test_symbolic_terminal_faults.py",
+        "angr_platforms/tests/test_symbolic_terminal_ivt_precision.py",
+        "angr_platforms/tests/test_symbolic_terminal_pe32_thunk_census.py",
+        "angr_platforms/tests/test_symbolic_terminal_service_census.py",
+        "angr_platforms/tests/test_symbolic_terminal_services.py",
+        "angr_platforms/tests/test_symbolic_terminal_signed_divmod.py",
+        "angr_platforms/tests/test_x86_16_immediate_port_vex.py",
+        "angr_platforms/tests/test_x86_16_native_helper_call_retention.py",
+        "angr_platforms/tests/test_binary_callee_repeat_intake.py",
+        "angr_platforms/tests/test_m4_exit_controls.py",
+        "angr_platforms/tests/test_m4_pe32_relations.py",
+        "angr_platforms/tests/test_flat32_loop_calls_public.py",
+        "angr_platforms/tests/test_replay_capture_cohorts.py",
+        "angr_platforms/tests/test_dosunit_kvikdos_strict_native.py",
+        "angr_platforms/tests/test_dosunit_kvikdos_worker_native.py",
+        "angr_platforms/tests/test_macro_step_admission.py",
+        "angr_platforms/tests/test_macro_step_return_state.py",
+        "angr_platforms/tests/test_macro_step_proof.py",
+        "angr_platforms/tests/test_macro_step_deadlines.py",
+        "angr_platforms/tests/test_macro_step_concat_exhaustion.py",
+        "angr_platforms/tests/test_flat32_macro_retry.py",
+        "angr_platforms/tests/test_flat32_term_budget.py",
+        "angr_platforms/tests/test_x86_16_clinic_binary_terminal_control.py",
+        "angr_platforms/tests/test_binary_callee_region_scan.py",
+        "angr_platforms/tests/test_binary_callee_region_intake.py",
+        "angr_platforms/tests/test_ssa_declared_scope.py",
+        "angr_platforms/tests/test_real16_program_replay.py",
+        "angr_platforms/tests/test_pe32_program_replay.py",
+        "angr_platforms/tests/test_pe32_program_cli.py",
+        "angr_platforms/tests/test_real16_program_output_integration.py",
+        "angr_platforms/tests/test_real16_program_input_integration.py",
+        "angr_platforms/tests/test_real16_program_file_copy.py",
+        "angr_platforms/tests/test_real16_program_cli.py",
+        "angr_platforms/tests/test_binary_callee_intake.py",
+        "angr_platforms/tests/test_binary_callee_intake_review.py",
+        "angr_platforms/tests/test_real16_uncatalogued_calls.py",
+        "angr_platforms/tests/test_recursive_call_continuation_binding.py",
+        "angr_platforms/tests/test_recursive_joint_actual_binary.py",
+        "angr_platforms/tests/test_flat32_pe32_recursive_joint.py",
+    "angr_platforms/tests/test_real16_recursive_public.py",
+        "angr_platforms/tests/test_pe32_recursive_public.py",
+        "angr_platforms/tests/test_symbolic_terminal.py",
+        "angr_platforms/tests/test_symbolic_terminal_cli.py",
+        "angr_platforms/tests/test_symbolic_terminal_read_permissions.py",
+        "angr_platforms/tests/test_symbolic_terminal_partial_pe_data.py",
+        "angr_platforms/tests/test_symbolic_terminal_output_coverage.py",
+        "angr_platforms/tests/test_real16_normal_outcome_scope.py",
+        "angr_platforms/tests/test_real16_bound_control_scope.py",
+        "angr_platforms/tests/test_real16_symbolic_call_control.py",
+        "angr_platforms/tests/test_real16_symbolic_successors.py",
+        "angr_platforms/tests/test_x86_16_relative_control_edge.py",
+        "angr_platforms/tests/test_x86_16_relative_condition_producers.py",
+        "angr_platforms/tests/test_real16_native_control_scope.py",
+        "angr_platforms/tests/test_real16_native_control_scope_edges.py",
+        "angr_platforms/tests/test_real16_region_control.py",
+        "angr_platforms/tests/test_real16_address_model_closure.py",
+        "angr_platforms/tests/test_real16_loader_arch.py",
+        "angr_platforms/tests/test_real16_direct_jmp_coordinates.py",
+        "angr_platforms/tests/test_direct_near_call_target_binding.py",
+        "angr_platforms/tests/test_segment_call_binding_regression.py",
+        "angr_platforms/tests/test_segment_nonleaf_native.py",
+        "angr_platforms/tests/test_nop_census_8616.py",
+        "angr_platforms/tests/test_nop_native_binding.py",
+        "angr_platforms/tests/test_nop_cache_cost.py",
+        "angr_platforms/tests/test_recursive_terminal_address_boundary.py",
+        "angr_platforms/tests/test_recursive_static_control_shifts.py",
+        "angr_platforms/tests/test_recursive_fetched_code_invariant.py",
+        "angr_platforms/tests/test_x86_16_near_pointer_native_runtime.py",
+        "angr_platforms/tests/test_real16_return_coordinates.py",
+        "angr_platforms/tests/test_real16_branch_regions.py",
+        "angr_platforms/tests/test_real16_rotation_regions.py",
+        "angr_platforms/tests/test_flat32_rotation_regions.py",
+        "angr_platforms/tests/test_rotation_concrete_replay.py",
+        "angr_platforms/tests/test_relational_branch_public32.py",
+        "angr_platforms/tests/test_relational_rotation_public32.py",
+        "angr_platforms/tests/test_relational_saved_public32.py",
+        "angr_platforms/tests/test_relational_saved_public16.py",
+    }
+    assert set(test_pipeline.RELATIONAL_BINARY_PYTEST_TARGETS) == expected
+    assert expected.isdisjoint(test_pipeline.FOCUSED_PYTEST_TARGETS)
+    for tier in ("default", "expanded"):
+        assert "binary-relational" in test_pipeline._selected_lanes(
+            test_pipeline._parse_args(["--tier", tier]))
+    assert "binary-relational" not in test_pipeline._selected_lanes(
+        test_pipeline._parse_args(["--tier", "fast"]))
+    calls = []
+    monkeypatch.setattr(test_pipeline, "_run_command", lambda name, command: calls.append((name, command)))
+    test_pipeline._relational_binary_lane()
+    assert len(calls) == 1
+    name, command = calls[0]
+    assert name == "binary-relational"
+    assert command[command.index("-n") + 1] == "3"
+    assert command[command.index("--dist") + 1] == "loadgroup"
+    assert "--tb=short" in command
+    assert expected <= set(command)
+
+
+def test_capture_cohort_collection_preserves_one_shared_fixture(tmp_path: Path) -> None:
+    """Keep four concrete assertions grouped without executing their costly fixture."""
+    cohort = "angr_platforms/tests/test_replay_capture_cohorts.py"
+    assert test_pipeline.RELATIONAL_BINARY_PYTEST_TARGETS.count(cohort) == 1
+    assert cohort not in test_pipeline.FOCUSED_PYTEST_TARGETS
+    for quick in ("test_flat32_loop_calls.py", "test_replay_capture_vectors.py"):
+        path = f"angr_platforms/tests/{quick}"
+        assert test_pipeline.FOCUSED_PYTEST_TARGETS.count(path) == 1
+        assert path not in test_pipeline.RELATIONAL_BINARY_PYTEST_TARGETS
+    receipt = tmp_path / "collection.json"
+    plugin = tmp_path / "capture_collection.py"
+    plugin.write_text(
+        "import json, os\n"
+        "from pathlib import Path\n"
+        "def pytest_collection_finish(session):\n"
+        "    rows = []\n"
+        "    for item in session.items:\n"
+        "        groups = [m.kwargs.get('name', m.args[0] if m.args else None) "
+        "for m in item.iter_markers('xdist_group')]\n"
+        "        fixture = item._fixtureinfo.name2fixturedefs['receipts'][-1]\n"
+        "        rows.append({'name': item.name, 'groups': groups, 'scope': fixture.scope})\n"
+        "    Path(os.environ['CAPTURE_COLLECTION_RECEIPT']).write_text(json.dumps(rows))\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(REPO_ROOT), env.get("PYTHONPATH", "")))
+    env["CAPTURE_COLLECTION_RECEIPT"] = str(receipt)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-o", "addopts=", "--collect-only",
+         "-p", "capture_collection", cohort],
+        cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = json.loads(receipt.read_text())
+    assert len(rows) == 4 and len({row["name"] for row in rows}) == 4
+    assert all(row["groups"] == ["replay_capture_cohorts"] and row["scope"] == "session" for row in rows)

@@ -18,10 +18,10 @@ from typing import Protocol, cast
 from .frontend_caller_entry_identity import CallerEntryIdentity8616, prove_caller_entry_identity_8616
 from .frontend_direct_callsite_index import (
     DecodedDirectCallsiteIndex8616,
+    DirectCallTargetResolver8616,
     build_decoded_direct_callsite_index_8616,
 )
 
-type DirectCallTargetResolver8616 = Callable[[object], int | None]
 type InstructionAddressResolver8616 = Callable[[object], int | None]
 
 

@@ -1,4 +1,9 @@
-import importlib.util, sys, logging, traceback, time
+import importlib.util
+import logging
+import sys
+import time
+import traceback
+
 logging.disable(logging.CRITICAL)
 spec = importlib.util.spec_from_file_location("aircmp", "/home/xor/vextest/artifacts/airborn-z3cmp/aircmp.py")
 m = importlib.util.module_from_spec(spec); sys.modules["aircmp"]=m; spec.loader.exec_module(m)

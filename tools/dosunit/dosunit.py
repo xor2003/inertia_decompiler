@@ -1,4 +1,11 @@
-from __future__ import annotations  # noqa: D100
+"""Public DOS and flat32 binary comparison commands.
+
+Layer: dosunit CLI orchestration.
+Responsibility: dispatch typed comparison and execution owners and report their
+explicit results without introducing recovered program semantics.
+"""
+
+from __future__ import annotations
 
 import argparse
 import os
@@ -13,10 +20,15 @@ from tools.dosunit.complexity import analyze_function_complexity
 from tools.dosunit.data_compare import compare_loaded_data_images
 from tools.dosunit.discovery import discover_functions
 from tools.dosunit.failure_report import render_failure_report
+from tools.dosunit.flat32_replay_cli import add_replay_parser
 from tools.dosunit.generate import generate_vectors
 from tools.dosunit.libdosbox_import import import_libdosbox_trace
 from tools.dosunit.mapping import make_mapping_document
 from tools.dosunit.model import DosUnitError, load_json, write_json
+from tools.dosunit.pe32_program_cli import add_pe_program_parser
+from tools.dosunit.real16_binary_compare import add_binary16_parser
+from tools.dosunit.real16_program_cli import add_program16_parser
+from tools.dosunit.real16_replay_cli import add_replay16_parser
 from tools.dosunit.region_effects import compare_region_effect_documents, summarize_region_effects
 from tools.dosunit.runner import compare_vectors, record_oracle, summarize_results
 from tools.dosunit.straightline_ssa import (
@@ -26,6 +38,7 @@ from tools.dosunit.straightline_ssa import (
     compare_ssa_documents,
     lower_straightline_ssa_document,
 )
+from tools.dosunit.symbolic_terminal_cli import add_terminal_parsers
 from tools.dosunit.vectors import select_vectors
 
 DEFAULT_SSA_MAX_BLOCKS_PER_FUNCTION = 1000
@@ -179,7 +192,11 @@ def cmd_complexity(args: argparse.Namespace) -> int:  # noqa: D103
     return 0
 
 
-def cmd_ssa(args: argparse.Namespace) -> int:  # noqa: D103
+def cmd_ssa(args: argparse.Namespace) -> int:
+    """Lower binary IR and seal the exact input and semantic source identity."""
+    from tools.dosunit.ssa_provenance import begin_lowering, seal_lowering
+
+    identity = begin_lowering(Path(args.exe))
     _start_rss_watchdog(args.max_rss_mb, "ssa")
     catalog = load_json(Path(args.functions))
     output_regs = tuple(args.output_reg or ABI_OUTPUT_REGS[args.abi])
@@ -197,14 +214,22 @@ def cmd_ssa(args: argparse.Namespace) -> int:  # noqa: D103
         max_lift_block_ms=args.max_lift_block_ms,
         max_function_ms=args.max_function_ms,
     )
+    seal_lowering(document, Path(args.exe), identity)
     write_json(Path(args.out), document)
     return 0
 
 
-def cmd_compare_ssa(args: argparse.Namespace) -> int:  # noqa: D103
+def cmd_compare_ssa(args: argparse.Namespace) -> int:
+    """Compare SSA evidence while retaining checked binary artifact provenance."""
     _start_rss_watchdog(args.max_rss_mb, "compare-ssa")
     oracle = load_json(Path(args.oracle_ssa))
     candidate = load_json(Path(args.candidate_ssa))
+    from tools.dosunit.ssa_provenance import checked_provenance
+
+    provenance = {"oracle": checked_provenance(oracle), "candidate": checked_provenance(candidate)}
+    for side, source in (("oracle", oracle), ("candidate", candidate)):
+        if "provenance" in source and not provenance[side]["complete"]:
+            raise DosUnitError(f"{side} SSA artifact is stale; lower the current binary again")
     oracle_index = (
         oracle
         if args.oracle_index_ssa == args.oracle_ssa
@@ -237,6 +262,7 @@ def cmd_compare_ssa(args: argparse.Namespace) -> int:  # noqa: D103
     )
     document["oracle_ssa"] = str(Path(args.oracle_ssa))
     document["candidate_ssa"] = str(Path(args.candidate_ssa))
+    document["artifact_provenance"] = provenance
     write_json(Path(args.out), document)
     summary = document.get("summary", {})
     return 0 if summary.get("failed") == 0 and summary.get("refused") == 0 else 1
@@ -1004,7 +1030,8 @@ def _parse_cli_int(value: str, *, field: str) -> int:
         raise DosUnitError(f"{field} must be an integer or hex string") from ex
 
 
-def build_parser(*, prog: str = "dosunit") -> argparse.ArgumentParser:  # noqa: D103
+def build_parser(*, prog: str = "dosunit") -> argparse.ArgumentParser:
+    """Build the shared command surface for dosunit and z3func."""
     def subparser_factory(*args: Any, **kwargs: Any) -> argparse.ArgumentParser:  # noqa: ANN401
         kwargs.setdefault("formatter_class", argparse.ArgumentDefaultsHelpFormatter)
         return argparse.ArgumentParser(*args, **kwargs)
@@ -1412,10 +1439,17 @@ def build_parser(*, prog: str = "dosunit") -> argparse.ArgumentParser:  # noqa: 
     report.add_argument("--out")
     report.set_defaults(func=cmd_report_failures)
 
+    add_replay_parser(subparsers)
+    add_replay16_parser(subparsers)
+    add_program16_parser(subparsers)
+    add_pe_program_parser(subparsers)
+    add_terminal_parsers(subparsers)
+    add_binary16_parser(subparsers)
     return parser
 
 
-def main(argv: list[str] | None = None, *, prog: str = "dosunit") -> int:  # noqa: D103
+def main(argv: list[str] | None = None, *, prog: str = "dosunit") -> int:
+    """Dispatch one command and preserve explicit boundary error diagnostics."""
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
     try:

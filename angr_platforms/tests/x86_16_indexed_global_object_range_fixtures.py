@@ -24,6 +24,7 @@ from angr_platforms.X86_16.ir.condition_ir import ConditionIR
 from angr_platforms.X86_16.ir.core import (
     AddressStatus,
     IRAddress,
+    IRInstr,
     IRValue,
     MemSpace,
     SegmentOrigin,
@@ -46,6 +47,11 @@ from angr_platforms.X86_16.ir.indexed_address_range_contracts import (
 )
 from angr_platforms.X86_16.ir.indexed_address_range_evidence import (
     collect_indexed_loop_range_evidence_8616,
+)
+from angr_platforms.X86_16.ir.indexed_induction_write_census import (
+    IndexedInductionEffect8616,
+    IndexedInductionEffectVerdict8616,
+    IndexedInductionWriteCensus8616,
 )
 from angr_platforms.X86_16.ir.logical_memory_contracts import (
     IRLogicalMemoryAccess8616,
@@ -241,6 +247,22 @@ def indexed_range_candidate_8616(
         0x148,
         LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE,
     )
+    # These synthetic tests supply a closed two-write lifetime; binary-backed
+    # tests independently cover producer discovery and unclassified effects.
+    lanes = tuple(lane.execution_slice for write in (init_write, step_write)
+                  for lane in write.lanes)
+    effects = tuple(IndexedInductionEffect8616(
+        lane.block_addr, lane.instr_index,
+        IRInstr("STORE", None, (lane.address, IRValue(MemSpace.CONST, const=0, size=1)),
+                size=1, addr=lane.insn_addr),
+        IndexedInductionEffectVerdict8616.ACCOUNTED,
+    ) for lane in lanes)
+    region = (FUNCTION_ADDR, LOOP_HEADER, LOOP_LATCH)
+    census = IndexedInductionWriteCensus8616(
+        identity, lanes, tuple((effect.block_addr, effect.instr_index) for effect in effects),
+        effects, region, region, (), LOOP_HEADER, (LOOP_HEADER, LOOP_LATCH),
+        FUNCTION_ADDR, True, FUNCTION_ADDR,
+    )
     return IndexedLoopRangeCandidate8616(
         fact,
         identity,
@@ -287,6 +309,7 @@ def indexed_range_candidate_8616(
         ),
         init_write,
         step_write,
+        census,
     )
 
 

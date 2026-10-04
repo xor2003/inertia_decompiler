@@ -147,10 +147,25 @@ def test_sortd_ir_build_reuses_complete_frontend_condition_capture(
         info={},
     )
 
-    def unexpected_relift(*_args: object) -> None:
-        raise AssertionError("complete frontend capture must avoid exact-byte relift")
+    from angr_platforms.X86_16.ir.condition_cache_relift import (
+        ConditionCacheReliftArtifact8616,
+        ConditionReliftBlock8616,
+    )
 
-    monkeypatch.setattr(owner, "relift_function_condition_cache_8616", unexpected_relift)
+    original_relift = owner.relift_function_condition_cache_8616
+
+    def checked_relift(
+        current_project: object,
+        blocks: tuple[ConditionReliftBlock8616, ...],
+        expected_condition_blocks: frozenset[int],
+    ) -> ConditionCacheReliftArtifact8616 | None:
+        """Forbid relifting captured Sleep blocks; preserve nested callee recovery."""
+        assert SLEEP_BLOCK_ADDRS.isdisjoint(block.address for block in blocks), (
+            "complete frontend capture must avoid exact-byte relift"
+        )
+        return original_relift(current_project, blocks, expected_condition_blocks)
+
+    monkeypatch.setattr(owner, "relift_function_condition_cache_8616", checked_relift)
     artifact = build_x86_16_ir_function_artifact(project, function)
 
     assert artifact.condition_evidence is not None

@@ -9,6 +9,7 @@ from angr_platforms.X86_16.alias.segment_stack_fragments import (
 )
 from angr_platforms.X86_16.alias.segment_stack_restore import (
     SegmentStackRestoreVerdict8616,
+    _solve_stack_states,
     build_x86_16_segment_stack_restore_artifact,
     build_x86_16_stack_register_restore_artifact_8616,
 )
@@ -168,6 +169,73 @@ def test_real_vex_push_pop_restores_ds_through_exact_stack_bytes() -> None:
     assert "ds" not in contract.clobbered_registers
 
 
+def test_unknown_incoming_sp_keeps_local_ss_to_ds_byte_proof() -> None:
+    """A relative proof in one block must not publish its arbitrary SP origin."""
+    artifact = _lift_function(bytes.fromhex("89 c4 eb 00 16 1f c3"))
+
+    assert _solve_stack_states(artifact)[0x1004].sp_delta is None
+    restoration = build_x86_16_segment_stack_restore_artifact(artifact)
+
+    assert restoration.summary["materialized_count"] == 1
+    assert restoration.summary["failure_count"] == 0
+    assert restoration.summary["cross_block_restore_count"] == 0
+    assert len(restoration.facts) == 1
+    fact = restoration.facts[0]
+    assert fact.verdict is SegmentStackRestoreVerdict8616.PROVEN
+    assert fact.saved_instruction_addr == 0x1004
+    assert fact.restore_instruction_addr == 0x1005
+    assert fact.saved_register == "ss"
+    assert fact.restore_register == "ds"
+    assert fact.stack_offsets == (-2, -1)
+
+    state = build_x86_16_segment_state_artifact(
+        artifact,
+        function_ssa=build_x86_16_function_ssa(artifact),
+        restore_sources=restoration.restore_sources,
+    )
+    copied = state.state_after_instruction(0x1005, "ds")
+    assert copied is not None and copied.origin is SegmentOrigin.PROVEN
+    assert copied.value_kind is SegmentValueKind8616.STACK_RESTORE
+    assert copied.source == "ss"
+
+
+def test_unknown_incoming_sp_refuses_local_pair_after_sp_clobber() -> None:
+    """An unproved SP write breaks the local relative coordinate."""
+    artifact = _lift_function(bytes.fromhex("89 c4 eb 00 16 89 c4 1f c3"))
+
+    restoration = build_x86_16_segment_stack_restore_artifact(artifact)
+
+    assert restoration.restore_sources == ()
+    assert restoration.summary["materialized_count"] == 0
+    assert restoration.summary["failure_count"] == 1
+    assert restoration.facts[0].verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+
+
+def test_unknown_incoming_sp_refuses_uncertain_ss_store() -> None:
+    """An SS store through unknown BX may overwrite the locally saved bytes."""
+    artifact = _lift_function(bytes.fromhex("89 c4 eb 00 16 36 89 07 1f c3"))
+
+    restoration = build_x86_16_segment_stack_restore_artifact(artifact)
+
+    assert restoration.restore_sources == ()
+    assert restoration.summary["materialized_count"] == 0
+    assert restoration.summary["failure_count"] == 1
+    assert restoration.facts[0].verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+
+
+def test_unknown_incoming_sp_relative_proof_does_not_cross_blocks() -> None:
+    """The arbitrary local coordinate cannot reach a successor POP block."""
+    artifact = _lift_function(bytes.fromhex("89 c4 eb 00 16 eb 00 1f c3"))
+
+    assert _solve_stack_states(artifact)[0x1004].sp_delta is None
+    restoration = build_x86_16_segment_stack_restore_artifact(artifact)
+
+    assert restoration.restore_sources == ()
+    assert restoration.summary["materialized_count"] == 0
+    assert restoration.summary["failure_count"] == 1
+    assert restoration.facts[0].verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+
+
 def test_real_vex_push_pop_restores_ax_through_exact_stack_bytes() -> None:
     """The generic Alias owner proves a mid-function AX save/restore pair."""
     artifact = _lift_function(bytes.fromhex("50 b8 00 00 58 c3"))
@@ -190,6 +258,24 @@ def test_real_vex_push_pop_restores_ax_through_exact_stack_bytes() -> None:
     assert fact.saved_register == "ax"
     assert fact.restore_register == "ax"
     assert fact.stack_offsets == (-2, -1)
+
+
+def test_unknown_incoming_sp_keeps_local_gp_stack_restore() -> None:
+    """The generic register builder shares the same nonescaping local proof."""
+    artifact = _lift_function(bytes.fromhex("89 c4 eb 00 50 58 c3"))
+
+    restoration = build_x86_16_stack_register_restore_artifact_8616(
+        artifact,
+        tracked_registers=frozenset({"ax"}),
+    )
+
+    assert _solve_stack_states(artifact, frozenset({"ax"}))[0x1004].sp_delta is None
+    assert restoration.summary["materialized_count"] == 1
+    assert restoration.summary["failure_count"] == 0
+    assert restoration.summary["cross_block_restore_count"] == 0
+    assert restoration.facts[0].saved_register == "ax"
+    assert restoration.facts[0].restore_register == "ax"
+    assert restoration.facts[0].stack_offsets == (-2, -1)
 
 
 def test_real_vex_push_immediate_transfers_exact_constant_to_ds() -> None:

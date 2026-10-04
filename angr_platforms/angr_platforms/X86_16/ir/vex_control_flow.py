@@ -1,7 +1,7 @@
 """Import terminal VEX control flow into typed x86-16 IR instructions.
 
 Layer: IR.
-Responsibility: preserve explicit calls, returns, and instruction addresses from
+Responsibility: preserve explicit calls, returns, jumps, and instruction addresses from
 the third-party VEX block boundary. This module does not classify call
 semantics or materialize C.
 Owns typed Value, Address, Condition, instruction facts, and lossless normalization.
@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, Protocol, cast
 
 from .core import IRInstr, IRValue, MemSpace
+from .instruction_origin import vex_block_next_origin_8616
 
 __all__ = ["terminal_control_flow_instr_8616", "terminal_ret_instruction_addrs_8616"]
 
@@ -71,6 +72,10 @@ def terminal_control_flow_instr_8616(
     instruction_addr: int | None,
     *,
     resolve_target: Callable[[object], IRValue] | None = None,
+    retain_boring_transfer: bool = False,
+    proven_target: int | None = None,
+    block_addr: int | None = None,
+    statement_count: int | None = None,
 ) -> IRInstr | None:
     """Preserve calls and returns independently of resolving their destinations.
 
@@ -78,28 +83,53 @@ def terminal_control_flow_instr_8616(
     load, while register and stack effects remain in the preceding typed IR.
     Dropping an indirect CALL would leave its return-address push without the
     call boundary needed by stack-state consumers. Unknown targets stay explicit.
+    The block importer opts into Boring transfer retention only when decoded
+    native bytes prove the final machine instruction is a real unconditional
+    near jump; coordinate arithmetic it emits is an instruction effect, never
+    a reason to drop the transfer. ``proven_target`` carries a loader-linear
+    destination proven by the importer's terminal-jump evidence for a
+    symbolic ``next``; it is used only on the retained-jump path and never
+    overrides a literal VEX constant.
+
+    When ``block_addr`` and ``statement_count`` are supplied, the retained
+    terminal instruction is stamped with block-``next`` source provenance so
+    consumers can bind a symbolic control operand to this exact block's
+    imported ``next`` expression.
     """
     try:
         boundary = cast(_VexBlock8616, vex)
         jumpkind = str(boundary.jumpkind)
+        origin = (
+            vex_block_next_origin_8616(
+                boundary.next,
+                block_addr=block_addr,
+                statement_count=statement_count,
+            )
+            if block_addr is not None and statement_count is not None
+            else None
+        )
         if jumpkind == "Ijk_Ret":
-            return IRInstr(op="RET", dst=None, args=(), addr=instruction_addr)
+            return IRInstr(op="RET", dst=None, args=(), addr=instruction_addr, origin=origin)
         target = _constant_target_8616(boundary.next)
     except AttributeError:
         return None
-    if jumpkind != "Ijk_Call":
+    retain_jump = retain_boring_transfer and jumpkind == "Ijk_Boring"
+    if jumpkind != "Ijk_Call" and not retain_jump:
         return None
     if target is not None:
         target_value = IRValue(MemSpace.CONST, const=target, size=4)
+    elif retain_jump and proven_target is not None:
+        target_value = IRValue(MemSpace.CONST, const=proven_target, size=4)
     elif resolve_target is not None:
         target_value = resolve_target(boundary.next)
     else:
         target_value = IRValue(MemSpace.UNKNOWN)
     return IRInstr(
-        op="CALL",
+        op="JMP" if retain_jump else "CALL",
         dst=None,
         args=(target_value,),
         addr=instruction_addr,
+        origin=origin,
     )
 
 

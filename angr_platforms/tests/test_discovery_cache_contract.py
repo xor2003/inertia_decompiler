@@ -140,7 +140,7 @@ def test_cached_function_recovery_reemits_exact_discovery_evidence(monkeypatch, 
     project = SimpleNamespace(
         entry=0x1100,
         loader=SimpleNamespace(
-            main_object=SimpleNamespace(binary=str(binary), linked_base=0x1000, max_addr=0x200),
+            main_object=SimpleNamespace(binary=str(binary), linked_base=0x1000, max_addr=0x1200),
         ),
         _inertia_source_region_catalog_evidence=evidence,
     )

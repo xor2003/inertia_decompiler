@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from ..alias.domains import AX, DomainKey
 from ..caller_return_use_contracts import CallerReturnUseFact8616
 from ..ir import IRValue
-from ..ir.ssa_function import SSABlock, SSAFunctionArtifact, SSAPhiNode
+from ..ir.ssa import SSABlock
+from ..ir.ssa_function import SSAFunctionArtifact, SSAPhiNode
 from ..widening.stack_word_register_transfers import StackWordStorageVersion8616
 from .interprocedural_storage_return_pointer_block import (
     PointerBlockScan8616,

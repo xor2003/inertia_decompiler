@@ -10,10 +10,15 @@ postprocess, or CLI/reporting work here. Never infer stack identity here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from .core import IRBlock, IRInstr, IRValue, MemSpace, SegmentOrigin
+from .core import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace, SegmentOrigin
+
+if TYPE_CHECKING:
+    from .real16_invocation_domain import Real16InvocationDomain8616
+    from .segment_call_preservation import SegmentCallPreservationResult8616
 
 __all__ = [
     "SEGMENT_REGISTERS",
@@ -23,6 +28,7 @@ __all__ = [
     "SegmentRestoreSource",
     "SegmentValueKind8616",
     "architectural_live_in_state",
+    "call_boundary_segment_state",
     "join_register_states",
     "transfer_block_with_instruction_states",
     "unknown_segment_state",
@@ -38,6 +44,7 @@ class SegmentValueKind8616(StrEnum):
 
     UNKNOWN = "unknown"
     ARCHITECTURAL_LIVE_IN = "architectural_live_in"
+    CALL_ENTRY_RELATION = "call_entry_relation"
     MERGED_PROVEN = "merged_proven"
     MERGED = "merged"
     STACK_RESTORE = "stack_restore"
@@ -45,6 +52,7 @@ class SegmentValueKind8616(StrEnum):
     SEGMENT_COPY = "segment_copy"
     REGISTER_COPY = "register_copy"
     UNKNOWN_WRITE = "unknown_write"
+    CALL_BOUNDARY = "call_boundary"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,18 +92,73 @@ class SegmentRegisterState:
 
 @dataclass(frozen=True, slots=True)
 class SegmentRestoreSource:
-    """Alias-proved relation from one segment write to an earlier segment read."""
+    """Alias-proved relation from one segment write to an earlier segment read.
+
+    ``source_artifact`` is the exact in-process ``IRFunctionArtifact`` object
+    the Alias proof consumed when establishing this relation. It is local
+    object identity only: excluded from equality and ``repr``, dropped by
+    diagnostic serialization, and never reconstructed from serialized fields.
+    Legacy constructions without it remain valid for this module's
+    intra-function segment-state transfer, but an unbound source cannot
+    authorize a cross-function lineage proof.
+    """
 
     block_addr: int
     restore_instruction_addr: int
     restore_register: str
     saved_instruction_addr: int
     saved_register: str
+    source_artifact: IRFunctionArtifact | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 def unknown_segment_state(register: str) -> SegmentRegisterState:
     """Return the lattice unknown state for one register."""
     return SegmentRegisterState(register, SegmentValueKind8616.UNKNOWN, None, SegmentOrigin.UNKNOWN)
+
+
+def call_boundary_segment_state(register: str) -> SegmentRegisterState:
+    """Return the typed refusal state for one segment register at a CALL exit."""
+    return SegmentRegisterState(register, SegmentValueKind8616.CALL_BOUNDARY, None, SegmentOrigin.UNKNOWN)
+
+
+def _drop_unproved_call_boundary_identities(
+    state: dict[str, SegmentRegisterState],
+    preserved_registers: frozenset[str] = frozenset(),
+) -> None:
+    """Drop every identity that lacks a proof of preservation across a CALL.
+
+    Only separately bound preservation evidence can retain a segment identity.
+    General-register proxies are always dropped. ``call_stack_effect`` proves
+    BP/SP storage only, not segments; a known target is not a callee model.
+    """
+    for register in tuple(state):
+        if register in SEGMENT_REGISTER_SET:
+            if register not in preserved_registers:
+                state[register] = call_boundary_segment_state(register)
+        else:
+            del state[register]
+
+
+def call_preservation_at_instruction_8616(
+    artifact: IRFunctionArtifact | None,
+    block: IRBlock,
+    instruction: IRInstr,
+    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+) -> SegmentCallPreservationResult8616 | None:
+    """Select one complete exact-call proof bound to this identical raw body."""
+    candidates = tuple(
+        proof for proof in proofs
+        if proof.caller.artifact is artifact and proof.callsite_addr == instruction.addr
+    )
+    if len(candidates) != 1 or artifact is None:
+        return None
+    if instruction.op != "CALL" or not any(candidate is block for candidate in artifact.blocks):
+        return None
+    proof = candidates[0]
+    return proof if proof.complete_for(invocation_scope) else None
 
 
 def architectural_live_in_state(register: str) -> SegmentRegisterState:
@@ -193,12 +256,23 @@ def transfer_block_with_instruction_states(
     entry_state: dict[str, SegmentRegisterState],
     restore_sources: tuple[SegmentRestoreSource, ...] = (),
     saved_instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] | None = None,
+    *,
+    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
+    source_artifact: IRFunctionArtifact | None = None,
+    invocation_scope: Real16InvocationDomain8616 | None = None,
 ) -> tuple[
     dict[str, SegmentRegisterState],
     dict[InstructionStateKey, dict[str, SegmentRegisterState]],
     dict[InstructionStateKey, dict[str, SegmentRegisterState]],
 ]:
-    """Transfer one block and retain exact before/after instruction states."""
+    """Transfer one block and retain exact before/after instruction states.
+
+    A typed CALL without complete bound evidence is an unmodeled boundary: the state
+    recorded at the CALL's instruction entry keeps the proven pre-call
+    identities (still valid for the call's own argument reads), while the
+    recorded exit and all later states drop every segment and general-register
+    proxy identity lacking an explicit preservation proof.
+    """
     state = dict(entry_state)
     instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
     instruction_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
@@ -208,6 +282,18 @@ def transfer_block_with_instruction_states(
         instruction_key = instr.addr if isinstance(instr, IRInstr) and isinstance(instr.addr, int) else (block.addr, instruction_index)
         instruction_entries.setdefault(instruction_key, _visible_segment_states(state))
         if not isinstance(instr, IRInstr):
+            instruction_exits[instruction_key] = _visible_segment_states(state)
+            continue
+        if instr.op == "CALL":
+            # Both reads consume the same validation snapshot. Close the scope
+            # before state updates so later CALLs recheck retained evidence.
+            from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+            with segment_call_dependency_traversal_scope_8616():
+                proof = call_preservation_at_instruction_8616(source_artifact, block, instr, call_preservations, invocation_scope)
+                preserved = frozenset() if proof is None else frozenset(proof.preserved_registers_for(invocation_scope))
+            _drop_unproved_call_boundary_identities(state, preserved)
+            # CALL args describe the target, not an assigned output value.
             instruction_exits[instruction_key] = _visible_segment_states(state)
             continue
         dst = instr.dst

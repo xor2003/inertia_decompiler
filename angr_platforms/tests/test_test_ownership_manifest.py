@@ -160,13 +160,23 @@ def test_selects_validation_semantic_failure_tests_for_owner_file():
     )
 
 
-def test_selects_indexed_address_owner_for_ir_core():
+def test_selects_indexed_address_owner_for_ir_core() -> None:
+    """Keep all IR storage, scalar-effect and indexed-address owners enrolled."""
     selected = test_ownership_manifest.select_tests_for_files(
         ("angr_platforms/angr_platforms/X86_16/ir/core.py",)
     )
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_ir_instruction_origin.py",
+        "angr_platforms/tests/test_x86_16_entry_stack_bytes.py",
+        "angr_platforms/tests/test_x86_16_entry_stack_byte_refusals.py",
+        "angr_platforms/tests/test_x86_16_entry_stack_pointer_snapshots.py",
+        "angr_platforms/tests/test_x86_16_scalar_value_projection.py",
+        "angr_platforms/tests/test_x86_16_ir_constant_known_lanes.py",
+        "angr_platforms/tests/test_x86_16_ir_constant_flow_refusals.py",
+        "angr_platforms/tests/test_x86_16_stack_restore_constants.py",
+        "angr_platforms/tests/test_x86_16_scalar_instruction_effects.py",
+        "angr_platforms/tests/test_x86_16_scalar_instruction_effects_emitter.py",
         "angr_platforms/tests/test_x86_16_indexed_address_copies.py::"
         "test_main_path_publishes_ir_and_alias_copy_evidence_atomically",
         "angr_platforms/tests/test_x86_16_indexed_address_aliases.py::"
@@ -224,16 +234,20 @@ def test_specific_rule_takes_precedence_over_layer_fallback():
     )
 
 
-def test_selects_tail_validation_family_tests_for_related_modules():
+def test_selects_tail_validation_family_tests_for_related_modules() -> None:
+    """Pin both exact-generation controls alongside all validation families."""
     selected = test_ownership_manifest.select_tests_for_files(
         ("angr_platforms/angr_platforms/X86_16/tail_validation_fingerprint.py",)
     )
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_tail_validation.py",
+        "angr_platforms/tests/test_x86_16_validation_goto_target_identity.py",
         "angr_platforms/tests/test_x86_16_tail_validation_alias_cycles.py",
         "angr_platforms/tests/test_x86_16_validation_owned_condition_precision.py",
         "angr_platforms/tests/test_x86_16_tail_validation_fingerprint.py",
+        "angr_platforms/tests/test_x86_16_tail_validation_generation_atoms.py",
+        "angr_platforms/tests/test_x86_16_tail_validation_generation_equality.py",
         "angr_platforms/tests/test_x86_16_tail_validation_routing.py",
     )
 
@@ -335,7 +349,8 @@ def test_selects_partial_register_regressions_for_ir_live_in_analysis():
     assert "angr_platforms/tests/test_x86_16_gp_register_state.py" in selected
 
 
-def test_selects_cli_direct_fallback_focused_tests_for_legacy_cli_file():
+def test_selects_cli_direct_fallback_focused_tests_for_legacy_cli_file() -> None:
+    """Pin direct recovery, final worker evidence and loader-boundary coverage."""
     selected = test_ownership_manifest.select_tests_for_files(
         (
             "inertia_decompiler/cli_core.py",
@@ -348,6 +363,7 @@ def test_selects_cli_direct_fallback_focused_tests_for_legacy_cli_file():
         "angr_platforms/tests/test_architecture_import_attestation.py",
         "angr_platforms/tests/test_decompiler_architecture_check.py",
         "angr_platforms/tests/test_serial_clean_worker_cache.py",
+        "angr_platforms/tests/test_cli_direct_caller_return_snapshot.py",
         "angr_platforms/tests/test_segment_program_layout_reporting.py",
         "angr_platforms/tests/test_project_callee_callsite_transport.py",
         "angr_platforms/tests/test_serial_clean_worker_callsite_evidence.py",
@@ -357,6 +373,13 @@ def test_selects_cli_direct_fallback_focused_tests_for_legacy_cli_file():
         "angr_platforms/tests/test_x86_16_cli.py::"
         "test_serial_clean_worker_evidence_protocol_refuses_unknown_schema",
         "angr_platforms/tests/test_direct_request_cache.py",
+        "angr_platforms/tests/test_x86_16_image_extent_projection.py",
+        "angr_platforms/tests/test_cli_loader_memory_boundary.py",
+        "angr_platforms/tests/test_cli_shared_future_collection.py",
+        "angr_platforms/tests/test_cli_ranked_task_queue.py",
+        "angr_platforms/tests/test_cli_core_isolated_recovery.py",
+        "angr_platforms/tests/test_cli_function_discovery_regions.py",
+        "angr_platforms/tests/test_discovery_pre_entry_order.py",
         "angr_platforms/tests/test_x86_16_cli.py::"
         "test_direct_addr_project_local_fallback_addr_uses_rebased_function_addr",
         "angr_platforms/tests/test_x86_16_cli.py::"

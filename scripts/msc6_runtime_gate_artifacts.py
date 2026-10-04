@@ -27,6 +27,14 @@ from scripts.pytest_source_state import source_tree_snapshot
 _CACHE_SCHEMA = 1
 _SEMANTIC_ENV_PREFIX = "INERTIA_"
 _NON_SEMANTIC_ENV_NAMES = frozenset({"INERTIA_MSC_RUNTIME_DECOMPILE_WORKERS"})
+_RUNTIME_SOURCE_ROOTS: tuple[str, ...] = (
+    "decompile.py",
+    "inertia_decompiler",
+    "angr_platforms/__init__.py",
+    "angr_platforms/angr_platforms",
+    "scripts",
+    "tools",
+)
 
 
 def retain_focused_output(stem: Path, stdout: str, stderr: str) -> dict[str, str]:
@@ -100,7 +108,7 @@ def _digest_path(digest: _Digest, label: str, path: Path) -> None:
 
 def _cache_key(inputs: MSC6RuntimeGateInputs) -> str | None:
     """Return an exact stable key, or refuse caching during source mutation."""
-    source = source_tree_snapshot(inputs.repo_root)
+    source = source_tree_snapshot(inputs.repo_root, included_roots=_RUNTIME_SOURCE_ROOTS)
     if source.unstable_paths:
         return None
     digest = hashlib.sha256()

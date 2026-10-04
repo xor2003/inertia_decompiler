@@ -7,36 +7,49 @@ The accepted proof surfaces are complete leaves and closed matched integer CFGs.
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path("/home/xor/vextest")))
+# Resolve shared proof owners from this checkout, including frozen snapshots.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import angr
 import archinfo
 import pyvex
 
 from tools.dosunit import straightline_ssa as S
-
-GPRS: tuple[str, ...] = ("eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi")
-REG_NAMES: tuple[str, ...] = (
-    *GPRS,
-    "cc_op",
-    "cc_dep1",
-    "cc_dep2",
-    "cc_ndep",
-    "d",
-    "eip",
-    "cs",
-    "ds",
-    "es",
-    "fs",
-    "gs",
-    "ss",
+from tools.dosunit.flat32_lifting import (
+    _FLAT32_GPRS as GPRS,
 )
-ARCH = archinfo.ArchX86()
-REG32: dict[int, tuple[str, int]] = {ARCH.registers[name][0]: (name, ARCH.registers[name][1] * 8) for name in REG_NAMES}
+from tools.dosunit.flat32_lifting import (
+    _FLAT32_REG_NAMES as REG_NAMES,
+)
+from tools.dosunit.flat32_lifting import (
+    _FLAT32_REGS as REG32,
+)
+from tools.dosunit.flat32_lifting import (
+    _flat32_lower_expr as lower_expr,
+)
+from tools.dosunit.flat32_lifting import (
+    _flat32_read_register as read_register,
+)
+from tools.dosunit.flat32_lifting import (
+    _flat32_register_access,
+)
+from tools.dosunit.flat32_lifting import (
+    _flat32_write_register as write_register,
+)
+from tools.dosunit.flat32_lifting import (
+    _flat32_write_target as write_target,
+)
+from tools.dosunit.flat32_pe_loader import InclusivePE
+from tools.dosunit.model import stable_id
+
+ARCH: archinfo.ArchX86 = archinfo.ArchX86()
+
+register_access: Callable[[int, int | None], tuple[str, int, int] | None] = _flat32_register_access
+
 # GCC may freely clobber ecx/edx; callers observe the explicitly chosen contract.
 OUTPUT_REGS: tuple[str, ...] = (
     "eax",
@@ -55,91 +68,27 @@ OUTPUT_REGS: tuple[str, ...] = (
     "gs",
     "ss",
 )
-_ORIGINAL_LOWER = S._lower_expr
 _ORIGINAL_FINISH = S._finish_irsb_lowering
 _ORIGINAL_QUICK = S._quick_compare_functions
 CONTROL_TARGETS: dict[int, int] | None = None
 
 
-def load32(exe_path: Path) -> angr.Project:
-    """Force PE for MZ images, retaining CLE's actual linked and mapped bases."""
+def load32(exe_path: Path, *, perform_relocations: bool = True) -> angr.Project:
+    """Retain the inclusive PE end before applying optional loader relocations."""
     with Path(exe_path).open("rb") as stream:
         magic = stream.read(4)
     backend = "pe" if magic[:2] == b"MZ" else "elf"
-    project = angr.Project(str(exe_path), auto_load_libs=False, main_opts={"backend": backend})
+    if backend == "pe":
+        project = angr.Project(
+            str(exe_path), auto_load_libs=False,
+            main_opts={"backend": InclusivePE, "max_mapped_bytes": 64 * 1024 * 1024},
+            load_options={"perform_relocations": perform_relocations},
+        )
+    else:
+        project = angr.Project(str(exe_path), auto_load_libs=False, main_opts={"backend": backend})
     if project.arch.name != "X86":
         raise ValueError(f"expected i386, found {project.arch.name}: {exe_path}")
     return project
-
-
-def register_access(offset: int, width: int | None) -> tuple[str, int, int] | None:
-    """Resolve full, low-word, low-byte and legacy high-byte guest registers."""
-    for base, (name, bits) in REG32.items():
-        if offset == base and (width is None or width == bits):
-            return name, bits, 0
-        if name in GPRS and offset == base and width in (8, 16):
-            return name, bits, 0
-        if name in GPRS[:4] and offset == base + 1 and width in (None, 8):
-            return name, bits, 8
-    return None
-
-
-def read_register(
-    versions: dict[str, S.SsaExpr], offset: int, width: int, *, source: str
-) -> S.SsaExpr | S.LowerFailure:
-    """Read a partial register without dropping the enclosing register's width."""
-    access = register_access(offset, width)
-    if access is None:
-        return S.LowerFailure("unsupported_ir", f"{source}: unsupported register {offset}:{width}")
-    name, bits, shift = access
-    value = versions.get(name, S.SsaExpr("input", bits, name=name))
-    if shift:
-        value = S.SsaExpr("lshr", bits, (value, S.SsaExpr("const", bits, value=shift)))
-    return S._coerce_width(value, width)
-
-
-def write_target(offset: int, width: int | None) -> tuple[str, int] | None:
-    """Make partial writes depend on their full enclosing register for liveness."""
-    access = register_access(offset, width)
-    return None if access is None else access[:2]
-
-
-def write_register(versions: dict[str, S.SsaExpr], offset: int, value: S.SsaExpr) -> S.LowerFailure | None:
-    """Preserve upper bits for i386 byte/word writes, including AH/CH/DH/BH."""
-    access = register_access(offset, value.width)
-    if access is None:
-        return S.LowerFailure("unsupported_ir", f"unsupported register write {offset}:{value.width}")
-    name, bits, shift = access
-    if value.width == bits:
-        versions[name] = value
-        return None
-    previous = versions.get(name, S.SsaExpr("input", bits, name=name))
-    mask = ((1 << bits) - 1) ^ (((1 << value.width) - 1) << shift)
-    kept = S.SsaExpr("and", bits, (previous, S.SsaExpr("const", bits, value=mask)))
-    inserted = S._coerce_width(value, bits)
-    if shift:
-        inserted = S.SsaExpr("shl", bits, (inserted, S.SsaExpr("const", bits, value=shift)))
-    versions[name] = S.SsaExpr("or", bits, (kept, inserted))
-    return None
-
-
-def lower_expr(expr: pyvex.expr.IRExpr, **kwargs: Any) -> S.SsaExpr | S.LowerFailure:  # noqa: ANN401
-    # kwargs crosses the private VEX lowering API; all values are forwarded unchanged.
-    """Abstract the known pure lazy-flag helpers; refuse all other CCalls."""
-    if isinstance(expr, pyvex.expr.Const) and not isinstance(expr.con.value, int):
-        return S.LowerFailure("unsupported_ir", "floating-point constants are outside the integer proof model")
-    if not isinstance(expr, pyvex.expr.CCall):
-        return _ORIGINAL_LOWER(expr, **kwargs)
-    arities = {"x86g_calculate_condition": 5, "x86g_calculate_eflags_c": 4, "x86g_calculate_eflags_all": 4}
-    if len(expr.args) != arities.get(expr.cee.name):
-        return S.LowerFailure("unsupported_ir", f"unsupported CCall: {expr.cee.name}")
-    args: list[S.SsaExpr] = []
-    for argument in expr.args:
-        lowered = lower_expr(argument, **kwargs)
-        if isinstance(lowered, S.LowerFailure):
-            return lowered
-        args.append(lowered)
-    return S.SsaExpr(f"summary_{expr.cee.name}", expr.result_size(kwargs["tyenv"]), tuple(args))
 
 
 def declared_bounds_only(*, project: angr.Project, function_base: int, successor: int) -> bool:
@@ -182,7 +131,9 @@ def finish_lowering(
             address = S.SsaExpr("const", 32, value=CONTROL_TARGETS[address.value])
         elif irsb.jumpkind != "Ijk_Ret":
             return S.LowerFailure("call_boundary", "only direct CFG edges and near returns are admitted")
-        for guard, destination in reversed(state.exits):
+        for guard, destination, jumpkind in reversed(state.exits):
+            if jumpkind != "Ijk_Boring":
+                return S.LowerFailure("flat32_exception_edge", "only ordinary conditional edges are admitted")
             if destination.op != "const" or destination.value not in CONTROL_TARGETS:
                 return S.LowerFailure("flat32_indirect_control", "unmapped conditional successor")
             address = S.SsaExpr(
@@ -239,7 +190,7 @@ def lower_function(
         "source": {"ir": "vex", "jumpkind": block.vex.jumpkind, "machine_code_size": block.size},
         **lowered,
     }
-    body["id"] = S.stable_id("ssa-function", body)
+    body["id"] = stable_id("ssa-function", body)
     return [body], [], 1
 
 
@@ -248,7 +199,8 @@ def quick_compare(oracle: dict[str, Any], candidate: dict[str, Any], *, skip_bin
     """Raw SSA identity is sufficient only when neither side rewrites constants."""
     if oracle.get('_constant_normalization') or candidate.get('_constant_normalization'):
         return None
-    return _ORIGINAL_QUICK(oracle, candidate, skip_binary_equal=skip_binary_equal)
+    result: dict[str, Any] | None = _ORIGINAL_QUICK(oracle, candidate, skip_binary_equal=skip_binary_equal)
+    return result
 
 
 @contextmanager
@@ -259,35 +211,66 @@ def installed(
     global CONTROL_TARGETS
     prior_targets = CONTROL_TARGETS
     CONTROL_TARGETS = control_targets
-    replacements = {
-        "_load_lifter_project": load32,
-        "_vex_live_statement_indices": all_statements,
-        "REG_BY_OFFSET": REG32,
-        "RAW_OUTPUT_REGS": GPRS,
-        "BYTE_REGISTER_ACCESS": {},
-        "_lower_expr": lower_expr,
-        "_read_register": read_register,
-        "_write_register": write_register,
-        "_register_write_target": write_target,
-        "_finish_irsb_lowering": _ORIGINAL_FINISH if region else finish_lowering,
-        "_prepare_layout_normalized_functions": strict_layout,
-        "_quick_compare_functions": quick_compare,
-    }
-    if region:
-        # Region mode lowers through the native multi-block scan; the leaf
-        # single-block _lower_function override is intentionally absent.
-        # .lst extents understate reachability through shared tails, so
-        # successors are admitted whenever the target is executable image bytes.
-        replacements["_can_add_dynamic_successor_range"] = executable_section_bounds
-    else:
-        replacements["_lower_function"] = lower_function
-    # This is the explicitly isolated monkey-patch boundary, not owned data access.
-    previous = {name: getattr(S, name) for name in replacements}
+    previous = (
+        S._load_lifter_project,
+        S._vex_live_statement_indices,
+        S.REG_BY_OFFSET,
+        S.SSA_REGISTER_WIDTHS,
+        S.INTERNAL_STATE_REGS,
+        S.HIGH_HALF_REGS,
+        S.RAW_OUTPUT_REGS,
+        S.BYTE_REGISTER_ACCESS,
+        S._lower_expr,
+        S._read_register,
+        S._write_register,
+        S._register_write_target,
+        S._finish_irsb_lowering,
+        S._prepare_layout_normalized_functions,
+        S._quick_compare_functions,
+        S._lower_function,
+        S._can_add_dynamic_successor_range,
+    )
     try:
-        for name, value in replacements.items():
-            setattr(S, name, value)
+        S._load_lifter_project = load32
+        S._vex_live_statement_indices = all_statements
+        S.REG_BY_OFFSET = REG32
+        S.SSA_REGISTER_WIDTHS = dict(REG32.values())
+        S.INTERNAL_STATE_REGS = REG_NAMES
+        S.HIGH_HALF_REGS = ()
+        S.RAW_OUTPUT_REGS = GPRS
+        S.BYTE_REGISTER_ACCESS = {}
+        S._lower_expr = lower_expr
+        S._read_register = read_register
+        S._write_register = write_register
+        S._register_write_target = write_target
+        S._finish_irsb_lowering = _ORIGINAL_FINISH if region else finish_lowering
+        S._prepare_layout_normalized_functions = strict_layout
+        S._quick_compare_functions = quick_compare
+        if region:
+            # Listing ranges can omit shared tails; retain the driver's existing
+            # executable-section policy without changing the execution lifter.
+            S._can_add_dynamic_successor_range = executable_section_bounds
+        else:
+            S._lower_function = lower_function
         yield
     finally:
         CONTROL_TARGETS = prior_targets
-        for name, value in previous.items():
-            setattr(S, name, value)
+        (
+            S._load_lifter_project,
+            S._vex_live_statement_indices,
+            S.REG_BY_OFFSET,
+            S.SSA_REGISTER_WIDTHS,
+            S.INTERNAL_STATE_REGS,
+            S.HIGH_HALF_REGS,
+            S.RAW_OUTPUT_REGS,
+            S.BYTE_REGISTER_ACCESS,
+            S._lower_expr,
+            S._read_register,
+            S._write_register,
+            S._register_write_target,
+            S._finish_irsb_lowering,
+            S._prepare_layout_normalized_functions,
+            S._quick_compare_functions,
+            S._lower_function,
+            S._can_add_dynamic_successor_range,
+        ) = previous

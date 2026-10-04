@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CVariable
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CReturn, CStatements, CVariable
 from angr.sim_type import (
     SimStruct,
     SimTypeFunction,
@@ -61,6 +62,7 @@ class _Codegen:
         self.cfunc: object | None = None
         self._next_index = 0
         self._inertia_codegen_decl_refresh_required_8616 = False
+        self.cstyle_null_cmp = False
 
     def next_idx(self, _kind: str) -> int:
         index = self._next_index
@@ -70,6 +72,39 @@ class _Codegen:
         return self.next_idx("")
     def next_ident(self, name: str) -> str:
         return name
+
+
+@pytest.mark.parametrize("operation", ("Add", "Sub", "Shl", "Mul"))
+@pytest.mark.parametrize("uses_argument", (True, False))
+def test_pointer_promotion_refuses_unlowered_numeric_argument_arithmetic(operation, uses_argument) -> None:
+    arch = Arch86_16()
+    word = SimTypeShort(False).with_arch(arch)
+    prototype = SimTypeFunction([word], word).with_arch(arch)
+    function = SimpleNamespace(prototype=prototype, is_prototype_guessed=True)
+    project = SimpleNamespace(arch=arch, kb=SimpleNamespace(functions=SimpleNamespace(
+        function=lambda *, addr, create=False: function)))
+    contract = _contract(inputs=(_slot(
+        StorageTrialRole8616.INPUT, 0, 2, StorageTrialSignedness8616.NOT_APPLICABLE,
+        StorageTrialValueClass8616.POINTER, offset=4),))
+    _publish(project, contract)
+    codegen = _Codegen(project)
+    argument = CVariable(SimStackVariable(2, 2, base="bp", region=0x2000),
+                         variable_type=word, codegen=codegen)
+    publish_selected_stack_cvar_projection_8616(codegen, argument, bp_offset=4, size=2)
+    left = argument if uses_argument else CConstant(2, word, codegen=codegen)
+    expression = CBinaryOp(operation, left, CConstant(1, word, codegen=codegen), codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=0x2000, arg_list=[argument], functy=prototype,
+                                   statements=CStatements([CReturn(expression, codegen=codegen)], codegen=codegen))
+    result = apply_accepted_function_storage_prototype_8616(project, codegen)
+    if not uses_argument:
+        assert result.verdict is FunctionStoragePrototypeApplicationVerdict8616.APPLIED
+        assert isinstance(argument.variable_type, SimTypePointer)
+        return
+    assert result.verdict is FunctionStoragePrototypeApplicationVerdict8616.TYPE_REFUSED
+    assert result.type_failures == (StorageSimTypeFailureKind8616.POINTER_ARITHMETIC_UNPROVEN,)
+    assert not result.changed and codegen.cfunc.functy is prototype
+    assert function.prototype is prototype and argument.variable_type is word
+    assert function.is_prototype_guessed
 
 
 def _identity(
@@ -280,13 +315,16 @@ def test_application_requires_contiguous_byte_pieces_for_one_stack_word(
         signedness=StorageTrialSignedness8616.UNSIGNED,
         value_class=StorageTrialValueClass8616.VALUE,
     )
-    pointer_output = _slot(
-        StorageTrialRole8616.RETURN,
-        0,
-        2,
-        StorageTrialSignedness8616.NOT_APPLICABLE,
-        StorageTrialValueClass8616.POINTER,
-        register="ax",
+    pointer_output = replace(
+        _slot(
+            StorageTrialRole8616.RETURN,
+            0,
+            2,
+            StorageTrialSignedness8616.NOT_APPLICABLE,
+            StorageTrialValueClass8616.POINTER,
+            register="ax",
+        ),
+        pointee_width_bytes=2,
     )
     _publish(project, _contract(inputs=(input_slot,), outputs=(pointer_output,)))
     codegen = _Codegen(project)
@@ -306,6 +344,7 @@ def test_application_requires_contiguous_byte_pieces_for_one_stack_word(
     assert result.verdict is expected_verdict
     if expected_verdict is FunctionStoragePrototypeApplicationVerdict8616.APPLIED:
         assert isinstance(codegen.cfunc.functy.returnty, SimTypePointer)
+        assert codegen.cfunc.functy.returnty.pts_to.size == 16
         assert function.prototype == codegen.cfunc.functy
     else:
         assert result.type_failures == (StorageSimTypeFailureKind8616.INVALID_LOGICAL_ORDER,)

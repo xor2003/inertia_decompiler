@@ -85,6 +85,32 @@ def _project_for_code(code: bytes) -> tuple[Any, Any]:
     return project, SimpleNamespace(addr=0x100, blocks=(block,))
 
 
+def _vex_data_producer_indices(
+    statements: Any,
+    store_index: int,
+) -> frozenset[int]:
+    """Return the transitive WrTmp data-producer ancestry of one VEX store."""
+    definitions = {
+        statement.tmp: index
+        for index, statement in enumerate(statements)
+        if statement.tag == "Ist_WrTmp"
+    }
+    producers: set[int] = set()
+
+    def visit(expression: Any) -> None:
+        if expression.tag == "Iex_RdTmp":
+            producer_index = definitions[expression.tmp]
+            if producer_index not in producers:
+                producers.add(producer_index)
+                visit(statements[producer_index].data)
+            return
+        for child in expression.child_expressions:
+            visit(child)
+
+    visit(statements[store_index].data)
+    return frozenset(producers)
+
+
 @pytest.fixture(scope="module")
 def far_call_facts() -> tuple[Any, Any, CallReturnFrameEffectCollection8616]:
     project, function = _project_for_code(b"\x9a\x78\x56\x34\x12")
@@ -117,13 +143,52 @@ def test_collects_complete_near_call_return_frame_effects() -> None:
         collection.failure_count,
     ) == (1, 1, 3, 3, 0)
     projections = collection.projection_collection
+    store_indices = tuple(
+        sorted(
+            effect.key.vex_stmt_idx
+            for effect in collection.effects
+            if effect.role is CallReturnFrameEffectRole8616.STACK_STORE
+        )
+    )
+    statements = function.blocks[0].vex.statements
+    assert store_indices == tuple(
+        index for index, statement in enumerate(statements) if statement.tag == "Ist_Store"
+    )
+    expected_facts: list[
+        tuple[int, int, CallReturnFrameProjectionRole8616]
+    ] = []
+    for store_index in store_indices:
+        expected_facts.append(
+            (
+                store_index,
+                store_index,
+                CallReturnFrameProjectionRole8616.STORE_STATEMENT,
+            )
+        )
+        expected_facts.extend(
+            (
+                store_index,
+                producer_index,
+                CallReturnFrameProjectionRole8616.VALUE_PRODUCER,
+            )
+            for producer_index in sorted(
+                _vex_data_producer_indices(statements, store_index)
+            )
+        )
+    expected = tuple(expected_facts)
     assert (
         projections.raw_fact_count,
         projections.normalized_fact_count,
         projections.classified_fact_count,
         projections.materialized_count,
         projections.failure_count,
-    ) == (2, 2, 5, 5, 0)
+    ) == (
+        len(store_indices),
+        len(store_indices),
+        len(expected),
+        len(expected),
+        0,
+    )
     assert projections.closed
     assert tuple(
         (
@@ -132,13 +197,7 @@ def test_collects_complete_near_call_return_frame_effects() -> None:
             fact.role,
         )
         for fact in projections.projections
-    ) == (
-        (16, 16, CallReturnFrameProjectionRole8616.STORE_STATEMENT),
-        (16, 15, CallReturnFrameProjectionRole8616.VALUE_PRODUCER),
-        (19, 19, CallReturnFrameProjectionRole8616.STORE_STATEMENT),
-        (19, 17, CallReturnFrameProjectionRole8616.VALUE_PRODUCER),
-        (19, 18, CallReturnFrameProjectionRole8616.VALUE_PRODUCER),
-    )
+    ) == expected
 
 
 def test_collects_complete_far_call_return_frame_effects(
@@ -608,6 +667,32 @@ def _near_call_argument_surface(
     return project, function, codegen, call, argument
 
 
+def _exclusive_near_call_value_producer() -> CallReturnFrameProjectionFact8616:
+    """Return a real VALUE_PRODUCER fact bound to exactly one frame store."""
+    project, function = _project_for_code(b"\xe8\x00\x00")
+    collection = collect_call_return_frame_effects_8616(
+        project,
+        function,
+        {0x100: 0x103},
+    )
+    assert collection.failure_count == 0 and collection.projection_collection.closed
+    producer_facts = tuple(
+        fact
+        for fact in collection.projection_collection.projections
+        if fact.role is CallReturnFrameProjectionRole8616.VALUE_PRODUCER
+    )
+    return next(
+        fact
+        for fact in producer_facts
+        if sum(
+            1
+            for other in producer_facts
+            if other.projection_key == fact.projection_key
+        )
+        == 1
+    )
+
+
 def test_prunes_exact_return_address_projected_as_call_argument() -> None:
     project, function, codegen, call, _argument = _near_call_argument_surface()
 
@@ -648,8 +733,9 @@ def test_prunes_transformed_projection_by_exact_semantic_key() -> None:
 
 
 def test_publishes_and_prunes_real_near_call_value_producer_projection() -> None:
+    producer_fact = _exclusive_near_call_value_producer()
     project, function, codegen, call, _argument = _near_call_argument_surface(
-        argument_statement_index=17,
+        argument_statement_index=producer_fact.projection_key.vex_stmt_idx,
     )
     dead_variable = SimStackVariable(-1, 1, base="bp", name="frame_dead", region=0x100)
     live_variable = SimStackVariable(-2, 1, base="bp", name="frame_live", region=0x100)
@@ -673,8 +759,8 @@ def test_publishes_and_prunes_real_near_call_value_producer_projection() -> None
 
     collection = codegen._inertia_call_return_frame_effect_collection_8616
     assert any(
-        fact.store_key.vex_stmt_idx == 19
-        and fact.projection_key.vex_stmt_idx == 17
+        fact.store_key == producer_fact.store_key
+        and fact.projection_key == producer_fact.projection_key
         and fact.role is CallReturnFrameProjectionRole8616.VALUE_PRODUCER
         for fact in collection.projection_collection.projections
     )
@@ -695,8 +781,9 @@ def test_publishes_and_prunes_real_near_call_value_producer_projection() -> None
 
 
 def test_prunes_value_producer_from_live_ailment_tag_carrier() -> None:
+    producer_fact = _exclusive_near_call_value_producer()
     project, function, codegen, call, argument = _near_call_argument_surface(
-        argument_statement_index=17,
+        argument_statement_index=producer_fact.projection_key.vex_stmt_idx,
     )
     argument.tags = AilmentTags(argument.tags)
 
@@ -755,8 +842,9 @@ def test_preserves_equal_return_constant_without_semantic_key() -> None:
 
 
 def test_refuses_exact_frame_key_owned_by_another_structured_callsite() -> None:
+    producer_fact = _exclusive_near_call_value_producer()
     project, function, codegen, call, argument = _near_call_argument_surface(
-        argument_statement_index=17,
+        argument_statement_index=producer_fact.projection_key.vex_stmt_idx,
         structured_callsite_addr=0x101,
     )
 
@@ -798,8 +886,9 @@ def test_refuses_non_frame_producer_from_exact_call_imark() -> None:
 def test_refuses_producer_claimed_by_multiple_frame_stores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    producer = _exclusive_near_call_value_producer()
     project, function, codegen, call, argument = _near_call_argument_surface(
-        argument_statement_index=17,
+        argument_statement_index=producer.projection_key.vex_stmt_idx,
     )
     real_collection = collect_call_return_frame_effects_8616(
         project,
@@ -807,11 +896,6 @@ def test_refuses_producer_claimed_by_multiple_frame_stores(
         {0x100: 0x103},
     )
     real_projections = real_collection.projection_collection
-    producer = next(
-        fact
-        for fact in real_projections.projections
-        if fact.projection_key.vex_stmt_idx == 17
-    )
     other_store = next(
         effect.key
         for effect in real_collection.effects

@@ -28,7 +28,7 @@ class TerminalReturnFrameKind8616(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TerminalStackCleanupEvidence8616:
-    """Closed accounting for cleanup amounts and decoded return properties."""
+    """Closed accounting for distinct reachable returns and incomplete edges."""
 
     cleanup_amounts: frozenset[int]
     raw_fact_count: int
@@ -41,7 +41,7 @@ class TerminalStackCleanupEvidence8616:
 
     @property
     def complete(self) -> bool:
-        """Return whether every terminal path has a valid cleanup amount."""
+        """Return whether every reachable terminal fact has a valid cleanup amount."""
         return (
             self.raw_fact_count > 0
             and self.normalized_fact_count == self.raw_fact_count

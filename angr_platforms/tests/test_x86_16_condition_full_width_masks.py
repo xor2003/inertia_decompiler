@@ -9,9 +9,13 @@ from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, 
 from angr.sim_type import SimTypeInt
 from angr.sim_variable import SimVariable
 from angr_platforms.X86_16.ir.condition_fingerprint_masks import (
+    _split_args_8616,
     normalize_condition_full_width_masks_8616,
 )
-from angr_platforms.X86_16.ir.condition_ir import normalize_condition_fingerprint_algebraic_8616
+from angr_platforms.X86_16.ir.condition_ir import (
+    _split_fingerprint_args_8616,
+    normalize_condition_fingerprint_algebraic_8616,
+)
 from angr_platforms.X86_16.ir.ir_canonicalize_8616 import canonicalize_expr_8616
 
 
@@ -122,3 +126,48 @@ def test_repeated_exact_mask_preserves_inner_narrowing(inner, mask_first):
 def test_mask_identity_refuses_different_mask_or_intervening_operation(operand):
     raw = f"And({operand},const:255)"
     assert normalize_condition_full_width_masks_8616(raw) == raw
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    ("", []),
+    (",", [""]),
+    (",,", ["", ""]),
+    (" ", [""]),
+    ("a,", ["a"]),
+    ("a, \t", ["a", ""]),
+    (",a", ["", "a"]),
+    ("a,,b", ["a", "", "b"]),
+    ("Add(reg:ax,const:1),reg:bx", ["Add(reg:ax,const:1)", "reg:bx"]),
+    ("a,(b,(c,d)),e", ["a", "(b,(c,d))", "e"]),
+    ("(a,b", ["(a,b"]),
+    ("a),b,c", ["a),b,c"]),
+    (")a(,b", [")a(", "b"]),
+    ("(,", ["(,"]),
+    (",)", ["", ")"]),
+    ("a,(b,c)),d(,e", ["a", "(b,c)),d(", "e"]),
+    ("\u00a0é ,\U0001f642,\ud800", ["é", "\U0001f642", "\ud800"]),
+    ("x\x00y, z", ["x\x00y", "z"]),
+])
+def test_fingerprint_splitters_preserve_exact_spans(value: str, expected: list[str]) -> None:
+    """Nesting, malformed spans and trailing whitespace are part of the contract."""
+    list_result = _split_fingerprint_args_8616(args_str=value)
+    tuple_result = _split_args_8616(value=value)
+    assert type(list_result) is list
+    assert type(tuple_result) is tuple
+    assert list_result == expected
+    assert tuple_result == tuple(expected)
+
+
+def test_fingerprint_splitters_keep_deep_and_long_arguments() -> None:
+    """Delimiter scanning does not impose a recursion or argument-length limit."""
+    argument = "Add(" * 1500 + "x" * 10000 + ")" * 1500
+    value = argument + ",reg:ax"
+    assert _split_fingerprint_args_8616(value) == [argument, "reg:ax"]
+    assert _split_args_8616(value) == (argument, "reg:ax")
+
+
+def test_fingerprint_splitters_track_negative_depth_until_balanced() -> None:
+    """Malformed closing parentheses must not make nested commas top-level."""
+    argument = ")" * 100 + "a,b," * 1000 + "(" * 100
+    assert _split_fingerprint_args_8616(argument + ",last") == [argument, "last"]
+    assert _split_args_8616(argument + ",last") == (argument, "last")

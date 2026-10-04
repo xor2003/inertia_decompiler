@@ -58,16 +58,31 @@ class _FunctionIRRegistrySurface8616(Protocol):
     _inertia_function_ir_artifacts_8616: dict[int, IRFunctionArtifact]
 
 
-def _registry_8616(project: object) -> dict[int, IRFunctionArtifact]:
-    """Return the validated project-owned raw-IR registry."""
+def _existing_registry_8616(
+    project: object,
+) -> dict[int, IRFunctionArtifact] | None:
+    """Return the validated project-owned registry without creating it.
+
+    Resolving must not mutate the project: an absent attribute yields ``None``
+    so the caller can refuse, while a malformed attribute stays loud.
+    """
     surface = cast(_FunctionIRRegistrySurface8616, project)
     try:
         registry = surface._inertia_function_ir_artifacts_8616
     except AttributeError:
-        registry = {}
-        surface._inertia_function_ir_artifacts_8616 = registry
+        return None
     if not isinstance(registry, dict):
         raise TypeError("function IR artifact registry must be a dict")
+    return registry
+
+
+def _registry_8616(project: object) -> dict[int, IRFunctionArtifact]:
+    """Return the validated registry, creating it for publication only."""
+    surface = cast(_FunctionIRRegistrySurface8616, project)
+    registry = _existing_registry_8616(project)
+    if registry is None:
+        registry = {}
+        surface._inertia_function_ir_artifacts_8616 = registry
     return registry
 
 
@@ -75,8 +90,9 @@ def registered_function_ir_artifact_8616(
     project: object,
     function_addr: int,
 ) -> FunctionIRArtifactResolution8616:
-    """Return one exact registered raw artifact without rebuilding it."""
-    artifact = _registry_8616(project).get(function_addr)
+    """Return one exact registered raw artifact without creating state."""
+    registry = _existing_registry_8616(project)
+    artifact = registry.get(function_addr) if registry is not None else None
     if artifact is None:
         return FunctionIRArtifactResolution8616(
             function_addr,

@@ -41,7 +41,7 @@ class _Segment:
     name: str
 
 
-def _segments(db: "DatabaseView") -> list[_Segment]:
+def _segments(db: DatabaseView) -> list[_Segment]:
     """Load segments ordered by address; synthesize segNNN names like the LST."""
     rows = db.conn.execute(
         "SELECT start_addr, end_addr, base, class, type, executable, name "
@@ -104,7 +104,7 @@ def _is_far(conn: sqlite3.Connection, start: int, end: int, flags: int,
         (start, end)).fetchone() is not None
 
 
-def write_map(db: "DatabaseView", path: Path) -> int:
+def write_map(db: DatabaseView, path: Path) -> int:
     """Write path as an mzmap-format map; return the routine count.
 
     Function extents come from the functions table; when a function has a

@@ -10,9 +10,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
+
+if TYPE_CHECKING:
+    from .direct_call_segment_context import SegmentEntryContext8616
+    from .real16_invocation_domain import Real16InvocationDomain8616
+    from .scoped_function_ir_view import ScopedFunctionIRView8616
 
 from .core import IRFunctionArtifact, IRValue, MemSpace, SegmentOrigin
+from .segment_call_preservation import SegmentCallPreservationResult8616
 from .segment_state_solver import solve_segment_state_8616
 from .segment_state_transfer import (
     SEGMENT_REGISTERS,
@@ -20,6 +26,7 @@ from .segment_state_transfer import (
     SegmentRegisterState,
     SegmentRestoreSource,
     SegmentValueKind8616,
+    call_preservation_at_instruction_8616,
     join_register_states,
 )
 from .ssa_function import SSAFunctionArtifact
@@ -40,6 +47,7 @@ class _SegmentStateCodegenBoundary(Protocol):
     _inertia_vex_ir_function_ssa: object
     _inertia_segment_stack_restore_artifact: object
     _inertia_segment_state_artifact: SegmentStateArtifact
+    _inertia_segment_call_preservations_8616: tuple[SegmentCallPreservationResult8616, ...]
 
 
 class _SegmentRestoreEvidenceSurface(Protocol):
@@ -50,13 +58,28 @@ class _SegmentRestoreEvidenceSurface(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class SegmentStateArtifact:
-    """Entry/exit segment-register state for a function's IR blocks."""
+    """Entry/exit state retaining the identical analyzed IR artifact.
+
+    An absent source is unbound legacy/test evidence. Serialized source address
+    is diagnostic only and cannot reconstruct in-process artifact identity.
+
+    ``scoped_view`` retains the exact conditional CFG view the predecessor
+    relation was taken from, alongside the still-raw ``source_artifact`` and
+    the supplied ``invocation_scope`` consuming entry. Its presence marks the
+    state as scoped evidence for that entry only — never universal function
+    proof — and the default builder/codegen paths never attach one.
+    """
 
     entry_states: dict[int, dict[str, SegmentRegisterState]]
     exit_states: dict[int, dict[str, SegmentRegisterState]]
     summary: dict[str, object]
     instruction_entry_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = field(default_factory=dict)
     instruction_exit_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = field(default_factory=dict)
+    source_artifact: IRFunctionArtifact | None = field(default=None, repr=False, compare=False)
+    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = ()
+    entry_context: SegmentEntryContext8616 | None = field(default=None, repr=False, compare=False)
+    invocation_scope: Real16InvocationDomain8616 | None = field(default=None, repr=False, compare=False)
+    scoped_view: ScopedFunctionIRView8616 | None = field(default=None, repr=False, compare=False)
 
     def state_for_register(self, register: str) -> SegmentRegisterState | None:
         """Return the one proven identity held throughout the function."""
@@ -100,6 +123,12 @@ class SegmentStateArtifact:
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
         return {
+            "invocation_scope": None if self.invocation_scope is None else self.invocation_scope.to_dict(),
+            "scoped_view": None if self.scoped_view is None else self.scoped_view.to_dict(),
+            "entry_context_callsite": None if self.entry_context is None else self.entry_context.candidate.callsite_addr,
+            "entry_context_complete": None if self.entry_context is None else self.entry_context.complete,
+            "source_function_addr": None if self.source_artifact is None else self.source_artifact.function_addr,
+            "call_preservation_sites": [proof.callsite_addr for proof in self.call_preservations],
             "entry_states": {
                 hex(addr): {name: state.to_dict() for name, state in sorted(states.items())}
                 for addr, states in sorted(self.entry_states.items())
@@ -121,6 +150,7 @@ class SegmentStateArtifact:
 
 
 def _instruction_state_key_text(key: InstructionStateKey) -> str:
+    """Format an exact instruction coordinate for diagnostic serialization."""
     return hex(key) if isinstance(key, int) else f"{key[0]:#x}:{key[1]}"
 
 
@@ -128,14 +158,44 @@ def build_x86_16_segment_state_artifact(
     artifact: IRFunctionArtifact,
     function_ssa: SSAFunctionArtifact | None = None,
     restore_sources: tuple[SegmentRestoreSource, ...] = (),
+    *,
+    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
+    entry_context: SegmentEntryContext8616 | None = None,
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+    scoped_view: ScopedFunctionIRView8616 | None = None,
 ) -> SegmentStateArtifact:
-    """Build forward segment-register state from typed IR and SSA predecessors."""
-    solution = solve_segment_state_8616(artifact, function_ssa, restore_sources)
+    """Build forward segment-register state from typed IR and SSA predecessors.
+
+    Closed evidence accounting counts one raw fact per explicit segment write
+    and one raw fact per CALL boundary. A write is classified when its exit
+    state is proven. A CALL is classified only by one complete, bound leaf
+    preservation proof; unsupported and ambiguous calls remain counted
+    refusals. GP proxy identities never survive on that segment evidence.
+    An optional entry context remains callsite-local and contributes one
+    retained proof fact; it must never become a universal callee summary.
+
+    A supplied ``scoped_view`` routes the solve through the view's
+    authenticated effective CFG while keeping ``artifact`` — the identical
+    raw source — as the call/write accounting and instruction-identity
+    surface; the solver owns the binding checks and refuses unbound
+    combinations. The default codegen apply path never supplies a view, so
+    state it publishes stays universal.
+    """
+    solution = solve_segment_state_8616(
+        artifact, function_ssa, restore_sources, call_preservations, entry_context=entry_context, invocation_scope=invocation_scope, scoped_view=scoped_view,
+    )
+    call_boundary_count = sum(
+        1
+        for block in artifact.blocks
+        for instruction in block.instrs
+        if instruction.op == "CALL"
+    )
     explicit_write_count = sum(
         1
         for block in artifact.blocks
         for instruction in block.instrs
-        if isinstance(instruction.dst, IRValue)
+        if instruction.op != "CALL"
+        and isinstance(instruction.dst, IRValue)
         and instruction.dst.space is MemSpace.REG
         and instruction.dst.name in SEGMENT_REGISTERS
     )
@@ -143,7 +203,8 @@ def build_x86_16_segment_state_artifact(
         1
         for block in artifact.blocks
         for instruction_index, instruction in enumerate(block.instrs)
-        if isinstance(instruction.dst, IRValue)
+        if instruction.op != "CALL"
+        and isinstance(instruction.dst, IRValue)
         and instruction.dst.space is MemSpace.REG
         and instruction.dst.name in SEGMENT_REGISTERS
         and solution.instruction_exit_states[
@@ -151,14 +212,35 @@ def build_x86_16_segment_state_artifact(
         ][instruction.dst.name].origin
         is SegmentOrigin.PROVEN
     )
+    entry_context_count = int(entry_context is not None)
+    raw_fact_count = explicit_write_count + call_boundary_count + entry_context_count
+    classified_call_count = sum(
+        call_preservation_at_instruction_8616(artifact, block, instruction, call_preservations, invocation_scope) is not None
+        for block in artifact.blocks for instruction in block.instrs if instruction.op == "CALL"
+    )
+    scoped_projection = solution.scoped_projection
     summary: dict[str, object] = {
         "block_count": len(artifact.blocks),
+        "scoped_view_bound": scoped_view is not None,
+        "scoped_discharged_edge_count": (
+            0 if scoped_projection is None else len(scoped_projection.applied)
+        ),
+        "scoped_pending_block_count": (
+            0
+            if scoped_projection is None
+            else sum(
+                1 for refusals in scoped_projection.pending.values() if refusals
+            )
+        ),
         "explicit_write_count": explicit_write_count,
-        "raw_fact_count": explicit_write_count,
-        "normalized_fact_count": explicit_write_count,
-        "classified_fact_count": classified_write_count,
-        "materialized_count": classified_write_count,
-        "failure_count": explicit_write_count - classified_write_count,
+        "call_boundary_count": call_boundary_count,
+        "classified_call_count": classified_call_count,
+        "entry_context_count": entry_context_count,
+        "raw_fact_count": raw_fact_count,
+        "normalized_fact_count": raw_fact_count,
+        "classified_fact_count": classified_write_count + classified_call_count + entry_context_count,
+        "materialized_count": classified_write_count + classified_call_count + entry_context_count,
+        "failure_count": raw_fact_count - classified_write_count - classified_call_count - entry_context_count,
         "architectural_live_in_count": sum(
             state.value_kind is SegmentValueKind8616.ARCHITECTURAL_LIVE_IN
             for state in solution.entry_states.get(artifact.function_addr, {}).values()
@@ -180,6 +262,10 @@ def build_x86_16_segment_state_artifact(
         summary=summary,
         instruction_entry_states=solution.instruction_entry_states,
         instruction_exit_states=solution.instruction_exit_states,
+        source_artifact=artifact,
+        call_preservations=call_preservations,
+        entry_context=entry_context, invocation_scope=invocation_scope,
+        scoped_view=scoped_view,
     )
 
 
@@ -205,10 +291,17 @@ def apply_x86_16_segment_state_artifact(project: object, codegen: object) -> boo
         restore_sources = restore_evidence.restore_sources
     except AttributeError:
         restore_sources = ()
+    try:
+        call_preservations = boundary._inertia_segment_call_preservations_8616
+    except AttributeError:
+        call_preservations = ()
+    if not isinstance(call_preservations, tuple):
+        raise TypeError("segment call preservation evidence must be a tuple")
     segment_artifact = build_x86_16_segment_state_artifact(
         artifact,
         function_ssa=function_ssa,
         restore_sources=restore_sources,
+        call_preservations=call_preservations,
     )
     boundary._inertia_segment_state_artifact = segment_artifact
     return False

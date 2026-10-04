@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .condition_fingerprint_masks import normalize_condition_full_width_masks_8616
+from .condition_fingerprint_syntax import split_condition_fingerprint_arguments_8616
 from .core import IRBinaryValue, IRCondition, IRValue
+
+if TYPE_CHECKING:
+    from ..relative_control_edge import DecodedRelativeEdge
 
 __all__ = (
     "JCC_EQ_MNEMONICS_8616",
@@ -180,6 +184,8 @@ class ConditionIR:
 
     Forbidden: flags-based conditions, tmp-based conditions.
     AGENTS rule: Conditions must be explicit (``x < y``, not ``flags & ZF``).
+    ``relative_edge`` retains exact binary semantics when a concrete loaded
+    target has not been proved. It never grants a resolved CFG edge itself.
     """
 
     op: ConditionOp
@@ -195,6 +201,7 @@ class ConditionIR:
     operand_bind_insn: int | None = None
     producer_semantics: tuple[Any, ...] | None = None
     register_bindings: tuple[ConditionRegisterBindingIR, ...] = ()
+    relative_edge: DecodedRelativeEdge | None = None
 
     @property
     def is_comparison(self) -> bool:
@@ -260,6 +267,7 @@ def build_condition_from_cmp_8616(
     operand_bind_insn: int | None = None,
     producer_semantics: tuple[Any, ...] | None = None,
     register_bindings: tuple[ConditionRegisterBindingIR, ...] = (),
+    relative_edge: DecodedRelativeEdge | None = None,
 ) -> ConditionResult:
     """Build a ConditionIR from CMP operands + JCC mnemonic.
 
@@ -294,6 +302,7 @@ def build_condition_from_cmp_8616(
         operand_bind_insn=operand_bind_insn,
         producer_semantics=producer_semantics,
         register_bindings=register_bindings,
+        relative_edge=relative_edge,
     )
 
 
@@ -310,6 +319,7 @@ def build_condition_from_test_8616(
     operand_bind_insn: int | None = None,
     producer_semantics: tuple[Any, ...] | None = None,
     register_bindings: tuple[ConditionRegisterBindingIR, ...] = (),
+    relative_edge: DecodedRelativeEdge | None = None,
 ) -> ConditionResult:
     """Build a ConditionIR from TEST/OR/AND self-test + JCC mnemonic.
 
@@ -337,6 +347,7 @@ def build_condition_from_test_8616(
             operand_bind_insn=operand_bind_insn,
             producer_semantics=producer_semantics,
             register_bindings=register_bindings,
+            relative_edge=relative_edge,
         )
     if jcc in {"jne", "jnz"}:
         return ConditionIR(
@@ -352,6 +363,7 @@ def build_condition_from_test_8616(
             operand_bind_insn=operand_bind_insn,
             producer_semantics=producer_semantics,
             register_bindings=register_bindings,
+            relative_edge=relative_edge,
         )
     return ConditionFailure(
         "unsupported_test_jcc",
@@ -375,6 +387,7 @@ def build_condition_from_compare_8616(
     operand_bind_insn: int | None = None,
     producer_semantics: tuple[Any, ...] | None = None,
     register_bindings: tuple[ConditionRegisterBindingIR, ...] = (),
+    relative_edge: DecodedRelativeEdge | None = None,
 ) -> ConditionIR:
     """Direct ConditionIR constructor from known op and operands."""
     lhs, rhs = _harmonize_condition_pair_8616(lhs, rhs, width_bits)
@@ -392,6 +405,7 @@ def build_condition_from_compare_8616(
         operand_bind_insn=operand_bind_insn,
         producer_semantics=producer_semantics,
         register_bindings=register_bindings,
+        relative_edge=relative_edge,
     )
 
 
@@ -433,8 +447,12 @@ class ConditionEdgeEvidence:
 
 def condition_sort_key_8616(
     cond: ConditionIR,
-) -> tuple[int, int, int, int, int, int, str, str, int, str, str, str, int]:
-    """Deterministic sort key for ConditionIR."""
+) -> tuple[int, int, int, int, int, int, str, str, int, str, str, str, int, tuple[int, str, int, str]]:
+    """Preserve distinct binary edges while deterministically ordering conditions."""
+    edge = cond.relative_edge
+    edge_key = (-1, "", 1, "") if edge is None else (
+        edge.head, edge.encoding.hex(), int(edge.source is None), edge.source or "",
+    )
     return (
         cond.block_addr if isinstance(cond.block_addr, int) else -1,
         cond.src_insn if isinstance(cond.src_insn, int) else -1,
@@ -449,13 +467,14 @@ def condition_sort_key_8616(
         str(cond.lhs) if cond.lhs is not None else "",
         str(cond.rhs) if cond.rhs is not None else "",
         cond.width_bits,
+        edge_key,
     )
 
 
 def deduplicate_conditions_8616(conditions: list[ConditionIR]) -> list[ConditionIR]:
     """Return deduplicated, deterministically sorted conditions."""
     seen: set[
-        tuple[int, int, int, int, int, int, str, str, int, str, str, str, int]
+        tuple[int, int, int, int, int, int, str, str, int, str, str, str, int, tuple[int, str, int, str]]
     ] = set()
     unique: list[ConditionIR] = []
     for cond in sorted(conditions, key=condition_sort_key_8616):
@@ -716,25 +735,8 @@ def _split_fingerprint_call_8616(value: str) -> tuple[str, str] | None:
 
 
 def _split_fingerprint_args_8616(args_str: str) -> list[str]:
-    """Split fingerprint arguments by top-level commas, respecting nested parens."""
-    parts: list[str] = []
-    depth = 0
-    current: list[str] = []
-    for ch in args_str:
-        if ch == "(":
-            depth += 1
-            current.append(ch)
-        elif ch == ")":
-            depth -= 1
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            parts.append("".join(current).strip())
-            current = []
-        else:
-            current.append(ch)
-    if current:
-        parts.append("".join(current).strip())
-    return parts
+    """Keep the condition parser's keyword contract over the shared syntax owner."""
+    return split_condition_fingerprint_arguments_8616(args_str)
 
 
 def _normalize_segmented_index_duplicate_displacement_8616(value: str) -> str:

@@ -38,6 +38,12 @@ TAIL_VALIDATION_FALLBACK_PROJECT_SNAPSHOT_KINDS: frozenset[str] = frozenset({"si
 TAIL_VALIDATION_ENABLE_ENV: str = "INERTIA_ENABLE_TAIL_VALIDATION"
 
 
+class TailValidationAcceptanceSeverity(Enum):
+    """CLI surface outcome for rejection separate from semantic-tail changes."""
+
+    FAILED = "acceptance_failed"
+
+
 class TailValidationDisplayStatus(Enum):
     """Display verdicts shown in decompiler attempt status lines."""
 
@@ -94,13 +100,18 @@ def _as_iterable(value: object) -> Iterable[object]:
 
 
 def _has_acceptance_validation_failure(results: Iterable[object]) -> bool:
+    """Return whether any finished work result carries a final ``validation_failed`` status.
+
+    The status is the terminal work-result verdict: when it is
+    ``validation_failed`` the run's final acceptance gate (compile, quality, or
+    tail checks) rejected the output. A clean semantic tail snapshot must not
+    exempt that rejection from the reported surface.
+    """
     for result in results:
         status = _dynamic_cli_attr(result, "status", None)
-        snapshot = _dynamic_cli_attr(result, "tail_validation", None)
-        snapshot_mapping = _as_mapping(snapshot)
         if (
-            TailValidationResultStatus.from_result_status(status) is TailValidationResultStatus.VALIDATION_FAILED
-            and not x86_16_tail_validation_snapshot_passed(snapshot_mapping if snapshot_mapping else None)
+            TailValidationResultStatus.from_result_status(status)
+            is TailValidationResultStatus.VALIDATION_FAILED
         ):
             return True
     return False
@@ -394,15 +405,24 @@ def emit_tail_validation_console_summary(
     summary: dict[str, object] = dict(_as_mapping(aggregate.get("summary", {})))
     surface: dict[str, object] = dict(_as_mapping(aggregate.get("surface", {})))
     acceptance_validation_failed = _has_acceptance_validation_failure(result_map.values())
-    if acceptance_validation_failed and str(surface.get("severity", "")).strip().lower() == "clean":
-        # Acceptance gates are part of semantic validation policy; if they fail,
-        # the surface summary must not claim clean.
-        surface["severity"] = "changed"
-        surface["merge_gate"] = "hold"
-        surface["headline"] = f"whole-tail validation failed across {max(1, int(scanned or 1))} functions"
+    if acceptance_validation_failed:
+        # Acceptance gates are part of validation policy: a failed final gate
+        # always holds the merge gate as a typed bool, even when the semantic
+        # tail surface already reports a mismatch.
+        surface["merge_gate"] = False
+        surface["acceptance_validation_failed"] = True
+        if str(surface.get("severity", "")).strip().lower() == "clean":
+            # A clean semantic surface must not be relabeled as a semantic
+            # "changed" verdict, but it must not claim clean either.
+            surface["severity"] = TailValidationAcceptanceSeverity.FAILED.value
+            surface["headline"] = (
+                f"whole-tail acceptance failed across {max(1, int(scanned or 1))} functions; "
+                "semantic tail checks clean"
+            )
     cache_payload = {
         "surface": surface,
         "summary": summary,
+        "acceptance_validation_failed": acceptance_validation_failed,
     }
     cache_salt = hashlib.sha256(
         json.dumps(cache_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")

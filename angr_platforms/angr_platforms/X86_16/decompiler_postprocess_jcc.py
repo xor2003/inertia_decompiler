@@ -1025,12 +1025,12 @@ def _call_return_expr_before_insn_8616(project: Any, codegen: Any, ins_addr: int
         start_idx = len(tuple(insn for insn in insns if int(getattr(insn, "address", -1)) < int(ins_addr)))
     if start_idx is None:
         return None
-    return _scan_call_return_before_insn_8616(
+    call = _scan_call_return_before_insn_8616(
         project, codegen, insns, start_idx
     )
-    if debug_jcc:
+    if call is None and debug_jcc:
         _log_call_return_miss_8616(project, codegen, ins_addr, insns, linear_insns)
-    return None
+    return call
 
 
 def _scan_call_return_before_insn_8616(

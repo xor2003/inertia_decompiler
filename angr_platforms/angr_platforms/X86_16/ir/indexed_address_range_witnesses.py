@@ -28,10 +28,12 @@ __all__ = [
 
 
 class IndexedLoopGuardRelation8616(StrEnum):
-    """Typed unsigned relation present at the loop guard."""
+    """Typed comparison relation present at the loop guard."""
 
     UNSIGNED_LT = "unsigned_lt"
     UNSIGNED_GE = "unsigned_ge"
+    SIGNED_LT = "signed_lt"
+    SIGNED_GE = "signed_ge"
     OTHER = "other"
 
 
@@ -143,12 +145,54 @@ class IndexedLoopGuardWitness8616:
         return (
             self.complete
             and self.relation is IndexedLoopGuardRelation8616.UNSIGNED_LT
+            and self.condition.op in {"ult", "ugt"}
             and self.polarity is IndexedLoopGuardPolarity8616.CONTINUE_WHEN_TRUE
         ) or (
             self.complete
             and self.relation is IndexedLoopGuardRelation8616.UNSIGNED_GE
+            and self.condition.op in {"uge", "ule"}
             and self.polarity is IndexedLoopGuardPolarity8616.CONTINUE_WHEN_FALSE
         )
+
+    @property
+    def proves_strict_signed_continue(self) -> bool:
+        """Retain signedness and require a strict continued comparison edge."""
+        if not self.complete:
+            return False
+        if self.relation is IndexedLoopGuardRelation8616.SIGNED_LT:
+            return (self.condition.op in {"slt", "sgt"}
+                    and self.polarity is IndexedLoopGuardPolarity8616.CONTINUE_WHEN_TRUE)
+        if self.relation is IndexedLoopGuardRelation8616.SIGNED_GE:
+            return (self.condition.op in {"sge", "sle"}
+                    and self.polarity is IndexedLoopGuardPolarity8616.CONTINUE_WHEN_FALSE)
+        return False
+
+    def proves_positive_signed_bound(
+        self, upper_bound: int, width: int,
+        induction: IndexedInductionSourceIdentity8616 | None,
+    ) -> bool:
+        """Prove a constant signed bound reached before unit-step overflow.
+
+        A zero-initialized induction stops at N <= signed_max; no live
+        induction value crosses the sign bit. The exact condition constant
+        and width must agree, rather than trusting normalized metadata alone.
+        """
+        if not self.proves_strict_signed_continue or self.condition.width_bits != width * 8:
+            return False
+        if type(upper_bound) is not int or type(width) is not int or width not in {1, 2, 4}:
+            return False
+        if not 0 < upper_bound <= (1 << (width * 8 - 1)) - 1:
+            return False
+        bound = self.condition.rhs if self.condition.op in {"slt", "sge"} else self.condition.lhs
+        index = self.condition.lhs if self.condition.op in {"slt", "sge"} else self.condition.rhs
+        if induction is None or not induction.complete or not isinstance(index, IRValue):
+            return False
+        index_matches = (
+            index.space is induction.space and index.name == "bp"
+            and index.offset == induction.offset and index.size == induction.width == width
+        )
+        return bool(isinstance(bound, IRValue) and bound.space is MemSpace.CONST
+                    and type(bound.const) is int and bound.const == upper_bound and index_matches)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,4 +1,6 @@
+import contextlib
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -131,7 +133,11 @@ except TimeoutError as exc:
     assert float(lines[2]) < 2.5
 
 
-def test_captured_subprocess_timeout_reaps_pipe_holding_descendants(tmp_path: Path) -> None:
+@pytest.mark.parametrize("startup_delay", [0.0, 1.25])
+def test_captured_subprocess_timeout_reaps_pipe_holding_descendants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, startup_delay: float,
+) -> None:
+    """A ready pipe-holding process tree is reaped within the cleanup budget."""
     if os.name != "posix":
         return
 
@@ -143,25 +149,49 @@ import time
 from pathlib import Path
 
 marker = Path(sys.argv[1])
+time.sleep(float(sys.argv[2]))
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 marker.write_text(str(child.pid), encoding="ascii")
 time.sleep(60)
 '''
-    started = time.monotonic()
-    try:
-        run_captured_subprocess_tree(
-            [sys.executable, "-c", script, str(marker)],
-            env=os.environ,
-            timeout=1,
-        )
-    except subprocess.TimeoutExpired:
-        pass
-    else:
-        raise AssertionError("captured subprocess tree did not time out")
+    original_communicate = subprocess.Popen.communicate
+    ready_at: float | None = None
+    leader: subprocess.Popen[str] | None = None
 
-    assert time.monotonic() - started < 3.0
-    descendant_pid = int(marker.read_text(encoding="ascii"))
-    deadline = time.monotonic() + 2.0
-    while _process_is_running(descendant_pid) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert not _process_is_running(descendant_pid)
+    def communicate_after_ready(
+        process: subprocess.Popen[str], input: str | None = None,
+        timeout: float | None = None,
+    ) -> tuple[str, str]:
+        """Separate bounded fixture startup from the one-second cleanup budget."""
+        nonlocal ready_at, leader
+        leader = process
+        if ready_at is None:
+            setup_deadline = time.monotonic() + 10.0
+            while not marker.exists() and time.monotonic() < setup_deadline:
+                assert process.poll() is None, "fixture exited before spawning descendant"
+                time.sleep(0.01)
+            assert marker.exists(), "fixture did not publish descendant within setup budget"
+            ready_at = time.monotonic()
+        return original_communicate(process, input=input, timeout=timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", communicate_after_ready)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_captured_subprocess_tree(
+                [sys.executable, "-c", script, str(marker), str(startup_delay)],
+                env=os.environ,
+                timeout=1,
+            )
+        assert ready_at is not None
+        assert time.monotonic() - ready_at < 3.0
+        descendant_pid = int(marker.read_text(encoding="ascii"))
+        deadline = time.monotonic() + 2.0
+        while _process_is_running(descendant_pid) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not _process_is_running(descendant_pid)
+    finally:
+        # This runs after the real cleanup assertions, including on a failed control.
+        if leader is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(leader.pid, signal.SIGKILL)
+            leader.wait(timeout=3)

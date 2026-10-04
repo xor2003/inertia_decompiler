@@ -10,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .condition_ir import ConditionIR
 from .core import IRValue, MemSpace
 from .indexed_address_contracts import IndexedAddressEvidence8616, IndexedAddressFact8616
@@ -31,8 +33,13 @@ from .indexed_address_range_contracts import (
     canonical_induction_source_identity_8616,
 )
 from .indexed_address_range_evidence import collect_indexed_loop_range_evidence_8616
+from .indexed_induction_write_census import (
+    IndexedInductionWriteCensus8616,
+    collect_indexed_induction_write_census_8616,
+)
 from .logical_memory_write_value import (
     LogicalWordWriteValueArtifact8616,
+    LogicalWordWriteValueFact8616,
     LogicalWordWriteValueKind8616,
     trace_logical_word_write_values_8616,
 )
@@ -62,6 +69,96 @@ def _generation_refusal_8616(
         generation_failure=failure,
         generation_detail=detail,
     )
+
+
+def _induction_lifetime_failure_8616(
+    source: IndexedAddressFact8616,
+    loop: SSANaturalLoop8616, dominators: SSADominators8616,
+    init_write: LogicalWordWriteValueFact8616,
+    census: IndexedInductionWriteCensus8616,
+) -> IndexedLoopRangeCandidate8616 | None:
+    """Refuse initialization bypasses and every unaccounted raw mutation."""
+    if dominators.dominates(init_write.access.key.block_addr, loop.header) is not True:
+        return _generation_refusal_8616(
+            source, IndexedLoopRangeFailureKind8616.INIT_UNPROVEN,
+            "initializer does not dominate every entry into the loop header",
+        )
+    if not census.complete:
+        return _generation_refusal_8616(
+            source, IndexedLoopRangeFailureKind8616.INDUCTION_MUTATION_UNPROVEN,
+            "raw induction lifetime contains an unaccounted memory or frame effect",
+        )
+    return None
+
+
+def _constant_bound_8616(bound: object) -> tuple[bool, int | None]:
+    """Retain only a condition operand's explicit IR constant value."""
+    if isinstance(bound, IRValue) and bound.space is MemSpace.CONST and bound.const is not None:
+        return True, bound.const
+    return False, None
+
+
+def _header_conditions_8616(
+    artifact: SSAFunctionArtifact, header: int,
+) -> tuple[ConditionIR, ...]:
+    """Read header guards only from the closed condition evidence owner."""
+    evidence = artifact.condition_evidence
+    if evidence is None or not evidence.complete:
+        return ()
+    return evidence.conditions_for_block(header)
+
+
+def _select_step_write_8616(
+    source: IndexedAddressFact8616,
+    writes: LogicalWordWriteValueArtifact8616, loop: SSANaturalLoop8616,
+) -> LogicalWordWriteValueFact8616 | IndexedLoopRangeCandidate8616:
+    """Select one exact increment without dropping independently proven guards."""
+    identity = canonical_induction_source_identity_8616(source.index_source)
+    steps = tuple(
+        write for write in writes.facts
+        if write.kind is LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE
+        and write.access.key.block_addr == loop.latch
+        and identity is not None and logical_write_matches_induction_8616(write, identity)
+    )
+    if len(steps) != 1:
+        failure = (IndexedLoopRangeFailureKind8616.STEP_UNPROVEN if not steps
+                   else IndexedLoopRangeFailureKind8616.STEP_CONFLICT)
+        return _generation_refusal_8616(
+            source, failure, f"expected one latch increment, found {len(steps)}",
+        )
+    return steps[0]
+
+
+def _close_induction_candidate_8616(
+    artifact: SSAFunctionArtifact, candidate: IndexedLoopRangeCandidate8616,
+    loop: SSANaturalLoop8616, dominators: SSADominators8616,
+    init_write: LogicalWordWriteValueFact8616, step_write: LogicalWordWriteValueFact8616,
+) -> IndexedLoopRangeCandidate8616:
+    """Retain guard/CFG evidence even when the complete mutation proof refuses."""
+    # Dynamic candidates cannot materialize: the bound owner refuses first.
+    # Preserve that prerequisite diagnostic; never invent a constant to reach
+    # the mutation proof. Caller-bound ranges need their own retained context.
+    if not candidate.upper_bound_is_constant:
+        return candidate
+    identity = canonical_induction_source_identity_8616(candidate.source.index_source)
+    if identity is None:
+        return replace(candidate, generation_failure=(
+            IndexedLoopRangeFailureKind8616.INDUCTION_IDENTITY_UNPROVEN),
+            generation_detail="induction lifetime has no canonical source identity")
+    census = collect_indexed_induction_write_census_8616(
+        artifact, identity, loop.blocks, loop.header, init_write, step_write,
+        initializer_dominates_header=(
+            dominators.dominates(init_write.access.key.block_addr, loop.header) is True
+        ),
+    )
+    candidate = replace(candidate, induction_write_census=census)
+    failure = _induction_lifetime_failure_8616(
+        candidate.source, loop, dominators, init_write, census,
+    )
+    if failure is None:
+        return candidate
+    return replace(candidate, generation_failure=failure.generation_failure,
+                   generation_detail=failure.generation_detail)
 
 
 def _candidate_for_source_8616(
@@ -97,7 +194,7 @@ def _candidate_for_source_8616(
     init_writes = tuple(
         write
         for write in writes.facts
-        if write.kind is LogicalWordWriteValueKind8616.CONSTANT_ZERO
+        if write.proves_constant_zero
         and write.access.key.block_addr in entry_sources
         and logical_write_matches_induction_8616(write, identity)
     )
@@ -112,30 +209,12 @@ def _candidate_for_source_8616(
             failure,
             f"expected one entry zero-write, found {len(init_writes)}",
         )
-    step_writes = tuple(
-        write
-        for write in writes.facts
-        if write.kind is LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE
-        and write.access.key.block_addr == loop.latch
-        and logical_write_matches_induction_8616(write, identity)
+    step_write = _select_step_write_8616(
+        source, writes, loop,
     )
-    if len(step_writes) != 1:
-        failure = (
-            IndexedLoopRangeFailureKind8616.STEP_UNPROVEN
-            if not step_writes
-            else IndexedLoopRangeFailureKind8616.STEP_CONFLICT
-        )
-        return _generation_refusal_8616(
-            source,
-            failure,
-            f"expected one latch increment, found {len(step_writes)}",
-        )
-    condition_evidence = artifact.condition_evidence
-    conditions: tuple[ConditionIR, ...] = (
-        ()
-        if condition_evidence is None or not condition_evidence.complete
-        else condition_evidence.conditions_for_block(loop.header)
-    )
+    if isinstance(step_write, IndexedLoopRangeCandidate8616):
+        return step_write
+    conditions = _header_conditions_8616(artifact, loop.header)
     if len(conditions) != 1:
         failure = (
             IndexedLoopRangeFailureKind8616.GUARD_UNPROVEN
@@ -172,12 +251,7 @@ def _candidate_for_source_8616(
             "header guard has no exact machine instruction address",
         )
     edge_polarity, continue_block, exit_block = polarity
-    upper_bound_is_constant = bool(
-        isinstance(bound, IRValue)
-        and bound.space is MemSpace.CONST
-        and bound.const is not None
-    )
-    upper_bound = bound.const if upper_bound_is_constant and isinstance(bound, IRValue) else None
+    upper_bound_is_constant, upper_bound = _constant_bound_8616(bound)
     guard = IndexedLoopGuardWitness8616(
         relation,
         edge_polarity,
@@ -189,8 +263,7 @@ def _candidate_for_source_8616(
         condition,
     )
     init_write = init_writes[0]
-    step_write = step_writes[0]
-    return IndexedLoopRangeCandidate8616(
+    candidate = IndexedLoopRangeCandidate8616(
         source=source,
         induction_source=identity,
         init=init_write.constant,
@@ -209,6 +282,9 @@ def _candidate_for_source_8616(
         guard=guard,
         init_write=init_write,
         step_write=step_write,
+    )
+    return _close_induction_candidate_8616(
+        artifact, candidate, loop, dominators, init_write, step_write,
     )
 
 

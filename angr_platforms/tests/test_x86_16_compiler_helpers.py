@@ -64,6 +64,16 @@ def test_identify_msc_afchkstk_far_probe_from_binary_bytes_without_sidecars():
     assert is_x86_16_stack_probe_evidence_kind_8616(CompilerHelperEvidenceKind8616.SIGNED_LONG_DIVIDE) is False
 
 
+def test_near_probe_diverted_overflow_branch_has_no_helper_evidence() -> None:
+    """Near-probe inlining requires branches to bypass every returning write."""
+    for branch_index in (6, 12):
+        mutated = bytearray(MSC_ANCHKSTK_BYTES)
+        mutated[branch_index] = 0
+        project = _project_with_memory(bytes(mutated))
+
+        assert identify_x86_16_compiler_helper_at_8616(project, 0x1000) is None
+
+
 def test_identify_msc_signed_long_divide_from_binary_bytes_without_sidecars() -> None:
     project = _project_with_memory(MSC_ANLDIV_BYTES)
 

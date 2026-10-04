@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import cast
 
+from ..analysis_helpers import CallTargetKind8616
 from ..callsite_summary import (
     CallsiteArgumentClass8616,
     CallsitePushSourceKind8616,
@@ -23,6 +24,10 @@ from .call_argument_arity_ownership import (
     classify_callsite_zero_argument_ownership_8616,
 )
 from .call_argument_state import ProtectedCallArgument8616, ProtectedCallArgumentStore8616
+from .function_pointer_parameter_evidence import (
+    FunctionPointerParameterFact8616,
+    collect_function_pointer_parameter_evidence_8616,
+)
 
 __all__ = [
     "CallerStackObject8616",
@@ -41,6 +46,7 @@ __all__ = [
     "exact_call_return_pair_shape_evidence_8616",
     "exact_caller_stack_object_for_word_pair_8616",
     "exact_caller_stack_object_shape_evidence_8616",
+    "exact_far_callback_call_shape_evidence_8616",
     "reconcile_materialized_call_argument_shape_8616",
 ]
 
@@ -115,7 +121,7 @@ def _identical_physical_summary_8616(
         or fresh_summary.arg_count != previous_summary.arg_count
     ):
         return False
-    return (
+    return bool(
         fresh_summary.arg_widths == previous_summary.arg_widths
         and fresh_summary.stack_cleanup == previous_summary.stack_cleanup
         and fresh_summary.push_arg_sources == previous_summary.push_arg_sources
@@ -438,6 +444,66 @@ def exact_caller_stack_object_for_word_pair_8616(
         if stack_object.offset == low_source[1] and stack_object.width == 4
     )
     return candidates[0] if len(candidates) == 1 else None
+
+
+def _exact_bp_word_offset_8616(source: object) -> int | None:
+    """Read a machine-proven BP word source without claiming object identity."""
+    if not isinstance(source, tuple) or len(source) != 3:
+        return None
+    kind, offset, width = source
+    if (
+        kind != CallsitePushSourceKind8616.BP_VALUE.value
+        or not isinstance(offset, int)
+        or isinstance(offset, bool)
+        or width != 2
+    ):
+        return None
+    return offset
+
+
+def exact_far_callback_call_shape_evidence_8616(
+    caller: CallsiteSummary8616,
+    *,
+    callee_addr: int,
+    callee_fact: FunctionPointerParameterFact8616,
+    callee_indirect_calls: tuple[CallsiteSummary8616, ...],
+) -> LogicalArgumentShapeEvidence8616 | None:
+    """Prove a far callback plus scalar from exact caller and callee ABI facts.
+
+    This classifies logical stack widths only. It does not claim that the two
+    caller BP words are one C object or authorize replacing either store.
+    """
+    sources = caller.push_arg_sources
+    invalid_caller_contract = (
+        caller.target_addr != callee_addr
+        or caller.kind is not CallTargetKind8616.DIRECT_FAR_CALL
+        or caller.arg_widths != (2, 2, 2)
+        or caller.stack_cleanup != 6
+    )
+    if invalid_caller_contract or len(sources) != 3 or sources[0] is None:
+        return None
+    high_offset = _exact_bp_word_offset_8616(sources[1])
+    low_offset = _exact_bp_word_offset_8616(sources[2])
+    if high_offset is None or low_offset is None or high_offset != low_offset + 2:
+        return None
+    if not callee_indirect_calls or tuple(sorted(call.callsite_addr for call in callee_indirect_calls)) != callee_fact.callsite_addresses:
+        return None
+    evidence = collect_function_pointer_parameter_evidence_8616(callee_indirect_calls)
+    if evidence.failure_count or evidence.facts != (callee_fact,):
+        return None
+    if callee_fact.stack_offset != 6 or callee_fact.pointer_width != 4:
+        return None
+    if any(
+        call.arg_widths != (2,)
+        or call.stack_cleanup != 2
+        or _exact_bp_word_offset_8616(call.push_arg_sources[0] if call.push_arg_sources else None) != 10
+        for call in callee_indirect_calls
+    ):
+        return None
+    return LogicalArgumentShapeEvidence8616(
+        widths=(4, 2),
+        source=LogicalArgumentShapeEvidenceSource8616.EXACT_CALLEE_ABI,
+    )
 
 
 def _materialized_far_pointer_logical_widths_8616(

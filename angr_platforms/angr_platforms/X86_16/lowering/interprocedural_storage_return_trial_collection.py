@@ -17,11 +17,13 @@ from dataclasses import replace
 from typing import Protocol, cast
 
 from ..alias.domains import AX, DX, DomainKey, register_domain_for_name
+from ..analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from ..caller_return_use_contracts import (
     CallerReturnUseEvidence8616,
     CallerReturnUseFact8616,
     CallerReturnUseVerdict8616,
 )
+from ..frontend_function_boundary import ExactFunctionRangeBoundary8616
 from ..ir.condition_ir import ConditionIR
 from ..ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
@@ -29,6 +31,9 @@ from ..ir.function_ssa_registry import (
 from ..ir.ssa_function import SSAFunctionArtifact
 from ..semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
+)
+from ..semantics.call_target_evidence_8616 import (
+    resolve_call_target_evidence_8616,
 )
 from ..semantics.terminal_return_storage import (
     terminal_return_storage_8616,
@@ -183,9 +188,13 @@ def _canonical_instruction_use_8616(
     indices_by_site: dict[tuple[int, int], list[int]] = {}
     for block in artifact.blocks:
         for instr_index, instruction in enumerate(block.instrs):
-            if instruction.addr != producer or not any(
-                split_return_register_matches_8616(argument, storage)
-                for argument in instruction.args
+            if (
+                not isinstance(instruction.addr, int)
+                or instruction.addr != producer
+                or not any(
+                    split_return_register_matches_8616(argument, storage)
+                    for argument in instruction.args
+                )
             ):
                 continue
             indices_by_site.setdefault((block.addr, instruction.addr), []).append(
@@ -226,6 +235,20 @@ def _materialize_canonical_split_return_trials_8616(
     artifact = ssa.artifact
     if artifact is None:
         return None
+    evidence = resolve_call_target_evidence_8616(
+        caller_project,
+        fact.caller_addr,
+        boundary=(
+            caller_function
+            if isinstance(caller_function, ExactFunctionRangeBoundary8616)
+            else None
+        ),
+        direct_target_resolver=lambda instruction: (
+            resolve_direct_call_target_from_instruction_8616(
+                caller_project, instruction
+            )
+        ),
+    )
     definitions = resolve_call_output_definitions_8616(
         artifact,
         fact,
@@ -233,6 +256,8 @@ def _materialize_canonical_split_return_trials_8616(
         accepted_target_addrs,
         output_storages,
         project=caller_project,
+        callsite_index=evidence.callsite_index if evidence.complete else None,
+        projection=evidence.projection if evidence.complete else None,
     )
     if not _definitions_exact_8616(definitions, output_storages):
         return None

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CConstant,
     CFunctionCall,
@@ -200,6 +201,26 @@ def test_function_parameter_validation_accepts_exact_width() -> None:
     assert report.classified_fact_count == 1
     assert report.materialized_count == 1
     assert report.failure_count == 0
+
+
+@pytest.mark.parametrize(
+    ("raw_offset", "expected"),
+    [(6, 6), (None, None), ("unresolved", None), (True, None)],
+)
+def test_parameter_bp_offset_refuses_invalid_import_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_offset: object,
+    expected: int | None,
+) -> None:
+    """Only concrete integer coordinates may cross the skipped-import boundary."""
+    variable = SimStackVariable(4, 2, base="bp", name="arg_4", region=0x1000)
+    monkeypatch.setattr(
+        validation_calls_module,
+        "machine_bp_offset_for_stack_variable_8616",
+        lambda _codegen, _variable: raw_offset,
+    )
+
+    assert validation_calls_module._parameter_bp_offset_8616(object(), variable, None) == expected
 
 
 def test_function_parameter_validation_projects_complete_entry_sp_interface() -> None:

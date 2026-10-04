@@ -16,7 +16,7 @@ Current audit of the modules that previously looked unused:
 
 | Module | Status | Owner | Note |
 | --- | --- | --- | --- |
-| `validation.canonicalize` | `TEST_ONLY_PROTOTYPE` | validation | Equivalence canonicalizer prototype only. |
+| `validation.canonicalize` | `PRODUCTION_WIRED` | validation | Validation-only canonicalizer consumed by production control-flow checks. |
 | `alias.state` | `PRODUCTION_WIRED` | alias | Imported by CLI AST rewrite handoff for alias evidence. |
 | `alias.domains` | `PRODUCTION_WIRED` | alias | Register-domain helpers consumed by production bridges. |
 | `structuring.loop_recovery` | `TEST_ONLY_PROTOTYPE` | structuring | Natural-loop metadata prototype only. |
@@ -24,8 +24,8 @@ Current audit of the modules that previously looked unused:
 | `structuring.control_flow` | `COMPATIBILITY_WRAPPER` | structuring | Re-export wrapper for existing structuring stage. |
 | `semantics.evidence_cache` | `PRODUCTION_WIRED` | semantics | Raw semantic access cache. |
 | `postprocess.simplify` | `COMPATIBILITY_WRAPPER` | postprocess | Re-export wrapper for cleanup-only simplification. |
-| `quality` | `PRODUCTION_WIRED` | diagnostics | Metrics used by the MSC6 example harness. |
-| `postprocess.cleanup` | `COMPATIBILITY_WRAPPER` | postprocess | Re-export wrapper for existing cleanup stage. |
+| `quality` | `COMPATIBILITY_WRAPPER` | diagnostics | Historical quality exports; the implementation lives in `inertia_decompiler.acceptance_scorecard`. |
+| `postprocess.cleanup` | `COMPATIBILITY_WRAPPER` | postprocess | Reserved compatibility module with no implementation logic. |
 | `lowering.segmented_lowering` | `PRODUCTION_WIRED` | lowering | Typed segmented-address classifier. |
 | `ir.ir_canonicalize_8616` | `TEST_ONLY_PROTOTYPE` | IR | Local expression canonicalizer prototype only. |
 | `exact_region_diagnostics` | `PRODUCTION_WIRED` | diagnostics | Function-discovery diagnostics. |

@@ -105,10 +105,24 @@ def _find_sibling_sidecar_cached(binary: str, suffix: str) -> Path | None:
 
 
 def _signature_matched_code_addrs(metadata: LSTMetadata | None) -> frozenset[int]:
+    """Keep signature boundaries outside explicit procedure bodies.
+
+    A byte-pattern hit inside a procedure with an independently recorded end
+    cannot split that procedure's caller range or replace its owned label.
+    """
     if metadata is None:
         return frozenset()
     addrs = metadata.signature_code_addrs
-    return addrs if isinstance(addrs, frozenset) else frozenset(addrs)
+    signature_addrs = addrs if isinstance(addrs, frozenset) else frozenset(addrs)
+    procedure_ranges = tuple(
+        span
+        for start in metadata.cod_proc_kinds
+        if (span := metadata.code_ranges.get(start)) is not None and span[0] < span[1]
+    )
+    return frozenset(
+        addr for addr in signature_addrs
+        if not any(start < addr < end for start, end in procedure_ranges)
+    )
 
 
 def _visible_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:

@@ -159,6 +159,10 @@ from .validation_dataflow import (
     DefUseValidationReport8616,
     validate_structured_def_use_8616,
 )
+from .validation_goto_target_identity import (
+    goto_target_boundary_identity_8616,
+    goto_target_effect_token_8616,
+)
 from .validation_interrupt_calls import (
     SoftwareInterruptValidationReport8616,
     validate_software_interrupt_inputs_8616,
@@ -286,10 +290,11 @@ _TAIL_VALIDATION_SEMANTIC_FAILURE_FIELDS = (
     "function_return_class_issues",
     "control_flow_issues",
     "storage_identity_issues",
+    "unproven_goto_target_identities",
 )
 _MISSING_CALLSITE_FINGERPRINT_PREFIX_8616 = "missing-callsite:"
 _COMPACT_OBSERVABLE_FIELDS_8616 = {"conditions", "control_flow_effects"}
-_TAIL_VALIDATION_COMPARISON_VERSION_8616 = 15
+_TAIL_VALIDATION_COMPARISON_VERSION_8616 = 17
 _STACK_ARG_ALIAS_TOKEN_RE_8616 = re.compile(
     r"stack_arg:(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::size(?P<size>\d+))?(?::bp[+-]0x[0-9a-fA-F]+)?"
 )
@@ -1346,6 +1351,7 @@ class X86_16TailValidationSummary:
     storage_identity_issues: tuple[str, ...] = ()
     callsite_multiplicity_issues: tuple[str, ...] = ()
     exposed_stack_values: tuple[str, ...] = ()
+    unproven_goto_target_identities: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, tuple[str, ...]]:
         """Return a serializable mapping of summary fields to fingerprints."""
@@ -2891,7 +2897,7 @@ def _node_boundary_stmt_fingerprint_8616(
     if structured_fp is not None:
         return structured_fp
     if isinstance(node, CGoto):
-        return ("goto", node.target, node.target_idx)
+        return goto_target_boundary_identity_8616(node)
     if isinstance(node, CBreak):
         return ("break",)
     if isinstance(node, CContinue):
@@ -3675,8 +3681,10 @@ def extract_x86_16_tail_validation_snapshot(
 
 
 def x86_16_tail_validation_result_passed(validation: Mapping[str, TailValidationValue] | None) -> bool:
-    """Return whether one validation stage is explicitly stable or passed."""
+    """Accept a stable stage only when no semantic failure evidence remains."""
     if not isinstance(validation, Mapping):
+        return False
+    if validation.get("semantic_failures"):
         return False
     status = validation.get("status")
     if isinstance(status, str) and status:
@@ -3691,7 +3699,7 @@ def x86_16_tail_validation_snapshot_passed(
     *,
     expected_stages: Sequence[str] = ("structuring", "postprocess"),
 ) -> bool:
-    """Return whether all expected validation stages in a snapshot passed."""
+    """Accept expected stages only without retained semantic failure evidence."""
 
     def _impl() -> bool:
         if not isinstance(snapshot, Mapping):
@@ -3702,6 +3710,8 @@ def x86_16_tail_validation_snapshot_passed(
         for stage in required_stages:
             entry = snapshot.get(stage)
             if not isinstance(entry, Mapping):
+                return False
+            if entry.get("semantic_failures"):
                 return False
             status = entry.get("status")
             if isinstance(status, str) and status:
@@ -5290,6 +5300,7 @@ class _ControlFlowEffectRun8616:
         return True
 
     def run(self) -> bool:
+        """Record supported control-flow observables and report recognition."""
         node = self.node
         if isinstance(node, CIfElse):
             return self._if_else_arm(node)
@@ -5304,7 +5315,7 @@ class _ControlFlowEffectRun8616:
         if isinstance(node, CSwitchCase):
             return self._switch_arm(node)
         if isinstance(node, CGoto):
-            self.control_flow_effects.add(f"goto:{node.target!r}")
+            self.control_flow_effects.add(goto_target_effect_token_8616(node))
             return True
         if isinstance(node, CBreak):
             self.control_flow_effects.add("break")
@@ -6391,6 +6402,9 @@ class _TailSummaryBuildRun8616:
             function_return_class_issues=self.reports.function_return_class_report.issue_tokens(),
             control_flow_issues=self.reports.control_flow_report.issue_tokens(),
             storage_identity_issues=self.reports.storage_identity_report.issue_tokens(),
+            unproven_goto_target_identities=(
+                self.reports.control_flow_report.unproven_goto_target_tokens()
+            ),
         )
 
     def build(self) -> X86_16TailValidationSummary:
@@ -6768,6 +6782,17 @@ def compare_x86_16_tail_validation_summaries(
         before=before,
         scope=TailSemanticFailureScope8616.INTRODUCED,
     )
+    unproven_goto_identities = tuple(after.unproven_goto_target_identities)
+    if unproven_goto_identities:
+        # An unproven computed-goto identity can never certify equality, so an
+        # identical unknown marker in before and after must refuse rather than
+        # report stable.  The introduced-scope collector above cannot express
+        # this: the refusal is forced from the typed after-state evidence.
+        semantic_failures = dict(semantic_failures)
+        family = "control_flow_identity"
+        semantic_failures[family] = tuple(
+            dict.fromkeys((*semantic_failures.get(family, ()), *unproven_goto_identities))
+        )
     if semantic_failures:
         diff["semantic_failures"] = semantic_failures
         changed = True

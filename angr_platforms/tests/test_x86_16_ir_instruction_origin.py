@@ -4,6 +4,7 @@ import pickle
 from dataclasses import replace
 
 import pyvex
+from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir.instruction_origin import IRInstructionOrigin8616, vex_instruction_origin_8616
 from angr_platforms.X86_16.ir.ssa import build_x86_16_block_local_ssa
 from angr_platforms.X86_16.ir.ssa_memory import build_x86_16_function_memory_ssa
@@ -41,10 +42,20 @@ def test_ssa_and_persistence_preserve_instruction_origin():
         assert original.to_dict()["origin"] == decoded.to_dict()["origin"]
 
 
-def test_synthetic_terminal_does_not_claim_a_vex_statement():
-    block = _lift_function(bytes.fromhex("8e c2 26 8b 07 c3")).blocks[0]
+def test_imported_terminal_retains_block_next_not_a_vex_statement() -> None:
+    """A native RET retains the exact post-statement next-expression identity."""
+    code = bytes.fromhex("8e c2 26 8b 07 c3")
+    block = _lift_function(code).blocks[0]
+    native = pyvex.lift(code, block.addr, Arch86_16(), opt_level=0)
     assert block.instrs[-1].op == "RET"
-    assert block.instrs[-1].origin is None
+    origin = block.instrs[-1].origin
+    assert origin is not None
+    assert origin.block_addr == block.addr
+    assert origin.is_block_next
+    assert origin.statement_index == len(native.statements)
+    assert origin.address_tmp is None
+    assert isinstance(native.next, pyvex.expr.RdTmp)
+    assert origin.block_next_tmp == native.next.tmp
 
 
 def test_ssa_cache_does_not_reuse_another_source_origin():

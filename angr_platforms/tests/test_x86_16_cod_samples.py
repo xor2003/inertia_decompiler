@@ -1212,9 +1212,10 @@ def test_dosfunc_cod_sample_deduplicates_stack_local_names(tmp_path):
     ("proc_name", "header_anchor"),
     (
         ("_dos_getProcessId", "void _dos_getProcessId(void)"),
-        ("_dos_setProcessId", "void _dos_setProcessId(unsigned short pid)"),
+        ("_dos_setProcessId", "void _dos_setProcessId(void)"),
     ),
 )
+@pytest.mark.requires_kvm
 def test_dosfunc_cod_sample_process_helpers_stay_empty(proc_name: str, header_anchor: str):
     result = subprocess.run(
         [
@@ -1237,6 +1238,8 @@ def test_dosfunc_cod_sample_process_helpers_stay_empty(proc_name: str, header_an
     assert header_anchor in text
     assert "return;" in text
     if proc_name == "_dos_setProcessId":
+        # The COD machine body neither reads BP+4 nor has an observed caller. Its
+        # source-only parameter annotation is not binary signature evidence.
         assert "[bp+0x4]" not in text
         assert f"{header_anchor}\n{{\n    return;\n}}" in text
 

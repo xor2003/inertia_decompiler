@@ -1,6 +1,6 @@
 """Recover exact failed-case selections from completed coverage reports.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: reject stale or ambiguous report identities before rerunning.
 """
 

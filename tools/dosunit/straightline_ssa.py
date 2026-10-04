@@ -28,7 +28,12 @@ if TYPE_CHECKING:
     from tools.dosunit.real16_control_boundary import BoundaryProof, ControlProofLedger
     from tools.dosunit.ssa_output_lemmas import ScalarPreprocessing
 
-from tools.dosunit.callee_proof_scope import CalleeIdentity, callee_identity, leaf_proof_covers_callee_state
+from tools.dosunit.callee_proof_scope import (
+    CalleeIdentity,
+    callee_identity,
+    complete_leaf_block,
+    leaf_proof_covers_callee_state,
+)
 from tools.dosunit.data_compare import load_mz_image
 from tools.dosunit.ir_edges import _load_lifter_project
 from tools.dosunit.model import DosUnitError, canonical_json_bytes, normalize_hex, parse_int, stable_id
@@ -147,8 +152,9 @@ ABI_OUTPUT_REGS = {
 DEFAULT_ABI = "msc16-near"
 DEFAULT_OUTPUT_REGS = ABI_OUTPUT_REGS[DEFAULT_ABI]
 SUPPORTED_SOURCE_IRS = {"vex", "ail"}
-# Earlier lifts could suppress live FLAGS across a decoded control transfer.
-LIFTER_CACHE_SCHEMA: str = "dosunit.lifter_cache.v6"
+# v7 binds cached lifts to loaded bytes and the active lifting implementation.
+# Earlier lifts could also suppress live FLAGS across a decoded control transfer.
+LIFTER_CACHE_SCHEMA: str = "dosunit.lifter_cache.v7"
 CALL_TARGET_PREVIEW_INSTRUCTION_LIMIT = 4
 BINARY_CALL_TARGET_SIGNATURE_BYTES = 32
 CONTROL_MNEMONICS = {
@@ -290,11 +296,14 @@ def lower_straightline_ssa_document(
     max_function_ms: int = 60000,
     lifter_project: angr.Project | None = None,
     successor_range_policy: SuccessorRangePolicy = SuccessorRangePolicy.DISCOVER,
+    selected_roots: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Lower complete source blocks while preserving the declared range policy.
 
-    Open discovery may extend proposal ranges using decoded successors. A
-    declared-only candidate never extends; external edges retain their full
+    Open discovery may extend proposal ranges using decoded successors.
+    Selected roots schedule their catalogued binary-call closure; None retains
+    complete-catalog lowering. Uncertain targets retain conservative full scope.
+    A declared-only candidate never extends; external edges retain their full
     transfer and a lowering refusal rather than disappearing as complete code.
     """
     if not isinstance(successor_range_policy, SuccessorRangePolicy):
@@ -306,7 +315,7 @@ def lower_straightline_ssa_document(
     project = _lifter_project_for_exe(exe_path, lifter_project)
     linked_base = int(getattr(project.loader.main_object, "linked_base", 0))
     exe_digest = _file_sha256(exe_path)
-    cache_document = _load_vex_cache(cache_dir=cache_dir, exe_digest=exe_digest) if cache_dir is not None else None
+    cache_document = _load_vex_cache(cache_dir=cache_dir, exe_digest=exe_digest, project=project) if cache_dir is not None else None
     cache_stats = {"hits": 0, "misses": 0, "writes": 0, "errors": 0}
     lowered: list[dict[str, Any]] = []
     refusals: list[dict[str, Any]] = []
@@ -326,7 +335,15 @@ def lower_straightline_ssa_document(
         "refusals_by_reason": {},
     }
 
-    for function in functions:
+    from tools.dosunit.ssa_selection import LoweringSelection
+
+    selection = LoweringSelection(
+        functions, selected_roots,
+        lambda function: linked_base + (
+            _entry_segment_para(function["entry"], segment_paragraphs=segment_paragraphs) << 4
+        ) + parse_int(function["entry"].get("offset"), field="function.entry.offset"),
+    )
+    for function in selection:
         counters["functions_attempted"] += 1
         try:
             with _timeout_alarm(max_function_ms, message=f"SSA function lowering exceeded timeout for {function.get('id', '<unknown>')}"):
@@ -353,6 +370,7 @@ def lower_straightline_ssa_document(
             results = []
             function_refusals = [_refusal(function, "timeout", f"{ex} after {max_function_ms} ms")]
             blocks_lifted = 0
+        selection.observe(results)
         counters["lifter_blocks_lifted"] += blocks_lifted
         if not results:
             counters["functions_refused"] += 1
@@ -395,6 +413,7 @@ def lower_straightline_ssa_document(
             "cache_dir": None if cache_dir is None else str(cache_dir),
             "follow_call_fallthrough": follow_call_fallthrough,
             "successor_range_policy": successor_range_policy.value,
+            "selected_roots": None if selected_roots is None else sorted(selected_roots),
         },
         "functions": lowered,
         "refusals": refusals,
@@ -3465,6 +3484,13 @@ def _lower_irsb_dirty(
         tmp = int(getattr(statement, "tmp", -1))
         if tmp >= 0:
             state.temp_defs[tmp] = lowered_dirty
+        # A read changes the external trace even when its returned value dies.
+        # Include both the prior device state and sampled value in the next
+        # state so subsequent blocks cannot silently reuse the same read.
+        state.io_version = SsaExpr(
+            "summary_io_in_state", 0, (*lowered_dirty.args, lowered_dirty)
+        )
+        state.io_touched = True
         state.io_event_index += 1
     return None
 
@@ -3748,17 +3774,18 @@ def _dirty_io_lowered(
 
 
 def _dirty_io_value_width(width: SsaExpr, *, kind: str) -> int | LowerFailure:
-    """Resolve the port io value width from its width operand."""
+    """Normalize native VEX byte counts and real16 frontend bit counts.
+
+    Native x86 VEX uses 1/2/4 bytes; the real16 frontend emits 8/16/32
+    bits. These encodings are disjoint. Unknown widths cannot be guessed.
+    """
     width_value = _const_value(width)
-    if width_value == 8:
-        return 8
-    if width_value == 16:
-        return 16
-    if width_value == 32:
-        return 32
     if width_value is not None:
-        return LowerFailure("unsupported_ir", f"unsupported port {kind} width: {width_value}")
-    return 16
+        if width_value in {1, 2, 4}:
+            return width_value * 8
+        if width_value in {8, 16, 32}:
+            return width_value
+    return LowerFailure("unsupported_ir", f"unsupported port {kind} width: {width_value}")
 
 
 def _lower_dirty_in(
@@ -3808,7 +3835,7 @@ def _lower_dirty_in(
             io,
             SsaExpr("const", 16, value=event_index & 0xFFFF),
             _coerce_width(port, 16),
-            _coerce_width(width, 16),
+            SsaExpr("const", 16, value=value_width),
         ),
     )
 
@@ -3861,7 +3888,7 @@ def _lower_dirty_out(
             SsaExpr("const", 16, value=event_index & 0xFFFF),
             _coerce_width(port, 16),
             _coerce_width(value, value_width),
-            _coerce_width(width, 16),
+            SsaExpr("const", 16, value=value_width),
         ),
     )
 
@@ -4756,6 +4783,7 @@ def _lower_binop(
     tyenv: Any,  # noqa: ANN401
     memory: SsaExpr,
 ) -> SsaExpr | LowerFailure:
+    """Lower VEX binary operations while preserving operand width and signedness."""
     op = _strip_iop(str(expr.op))
     base = _normalize_binop(op)
     args: list[SsaExpr] = []
@@ -4776,7 +4804,11 @@ def _lower_binop(
         # DIV/IDIV idiom as (remainder << 32) | quotient.  (_normalize_binop
         # strips the trailing width digits.)
         dividend = _coerce_width(args[0], 64)
-        divisor = _coerce_width(args[1], 64)
+        divisor = (
+            SsaExpr("sext", 64, (args[1],))
+            if base == "DivModS64to"
+            else _coerce_width(args[1], 64)
+        )
         div_op, rem_op = ("udiv", "urem") if base.startswith("DivModU") else ("sdiv", "srem")
         quotient = SsaExpr(div_op, 64, (dividend, divisor))
         remainder = SsaExpr(rem_op, 64, (dividend, divisor))
@@ -9520,7 +9552,7 @@ def _compose_budget_check(
 
 
 def _compose_deadline_check(compose_stats: dict[str, Any] | None) -> None:
-    """Raise ``compose_budget_exceeded`` once the wall-clock deadline passes.
+    """Raise ``compose_budget_exceeded`` when the wall-clock deadline is reached.
 
     Inner loops (block output substitution, branch-arm state merges) can spend
     minutes between block-entry budget checks on multi-million-node terms, so
@@ -9529,10 +9561,10 @@ def _compose_deadline_check(compose_stats: dict[str, Any] | None) -> None:
     if compose_stats is None:
         return
     deadline = compose_stats.get("deadline")
-    if isinstance(deadline, float) and time.monotonic() > deadline:
+    if isinstance(deadline, float) and time.monotonic() >= deadline:
         raise LowerFailure(
             "compose_budget_exceeded",
-            f"ABI compose exceeded {_COMPOSE_MAX_SECONDS:.0f}s wall-clock budget",
+            "ABI compose exceeded its wall-clock deadline",
         )
 
 
@@ -11981,6 +12013,7 @@ def _ssa_function_brief(
         "layout_block_signature_sha256": _block_signature_digest(layout_block_signature),
         "layout_block_signature_size": None if layout_block_signature is None else len(layout_block_signature),
         "semantic_ssa_id": _semantic_ssa_id(function),
+        "complete_leaf": complete_leaf_block(function),
     }
 
 
@@ -12161,9 +12194,11 @@ def _normalized_symbol_name(name: str) -> str:
 def _call_target_semantic_equivalence_reason(
     oracle_targets: list[dict[str, Any]], candidate_targets: list[dict[str, Any]]
 ) -> str | None:
-    """Admit exact complete body equality; entry signatures are correspondence only."""
+    """Admit identical complete leaves; nonleaf bytes do not bind dependencies."""
     for oracle_target in oracle_targets:
         for candidate_target in candidate_targets:
+            if oracle_target.get("complete_leaf") is not True or candidate_target.get("complete_leaf") is not True:
+                continue
             oracle_identity = callee_identity(oracle_target)
             candidate_identity = callee_identity(candidate_target)
             if (oracle_identity is not None and candidate_identity is not None
@@ -15274,32 +15309,41 @@ def _vex_cache_file(*, cache_dir: Path, exe_digest: str) -> Path:
     return cache_dir / "vex" / f"{exe_digest}.pickle"
 
 
-def _new_vex_cache(exe_digest: str) -> dict[str, Any]:
+def _new_vex_cache(exe_digest: str, identity: str | None = None) -> dict[str, Any]:
+    """Create an empty cache; identity-less legacy callers cannot admit entries."""
     return {
         "schema": LIFTER_CACHE_SCHEMA,
         "flavor": "vex",
         "exe_sha256": exe_digest,
+        "lifting_identity": identity,
         "entries": {},
     }
 
 
-def _load_vex_cache(*, cache_dir: Path, exe_digest: str) -> dict[str, Any]:
+def _load_vex_cache(
+    *, cache_dir: Path, exe_digest: str, project: angr.Project | None = None,
+) -> dict[str, Any]:
+    """Reuse blocks only under fresh loaded-image and implementation identity."""
+    from tools.dosunit.vex_cache_identity import vex_cache_identity
+
+    identity = vex_cache_identity(project) if project is not None else None
     path = _vex_cache_file(cache_dir=cache_dir, exe_digest=exe_digest)
-    if not path.exists():
-        return _new_vex_cache(exe_digest)
+    if identity is None or not path.exists():
+        return _new_vex_cache(exe_digest, identity)
     try:
         with path.open("rb") as handle:
             document = pickle.load(handle)
-    except Exception:
-        return _new_vex_cache(exe_digest)
+    except (OSError, EOFError, pickle.UnpicklingError, ImportError, AttributeError, ValueError, TypeError):
+        return _new_vex_cache(exe_digest, identity)
     if not isinstance(document, dict):
-        return _new_vex_cache(exe_digest)
+        return _new_vex_cache(exe_digest, identity)
     if (
         document.get("schema") != LIFTER_CACHE_SCHEMA
         or document.get("flavor") != "vex"
         or document.get("exe_sha256") != exe_digest
+        or document.get("lifting_identity") != identity
     ):
-        return _new_vex_cache(exe_digest)
+        return _new_vex_cache(exe_digest, identity)
     if not isinstance(document.get("entries"), dict):
         document["entries"] = {}
     return document
@@ -15371,14 +15415,20 @@ def _lift_vex_block_cached(
 
 
 class _BlockLiftTimeout:
+    """Restore alarm state and preserve expiration across native error wrapping."""
+
     def __init__(self, timeout_ms: int, *, message: str) -> None:
+        """Prepare a bounded alarm without changing process signal handlers."""
         self.timeout_ms = max(0, int(timeout_ms))
         self.message = message
         self.previous_handler: Any = None
         self.previous_timer: tuple[float, float] | None = None
         self.enabled = False
+        self.expired: bool = False
 
     def __enter__(self) -> _BlockLiftTimeout:
+        """Arm the attempt and clear expiration from any previous use."""
+        self.expired = False
         if self.timeout_ms <= 0 or not hasattr(signal, "setitimer"):
             return self
         self.previous_handler = signal.getsignal(signal.SIGALRM)
@@ -15389,6 +15439,7 @@ class _BlockLiftTimeout:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Literal[False]:  # noqa: ANN401
+        """Restore signals before propagating a recorded timeout with its cause."""
         if self.enabled:
             signal.setitimer(signal.ITIMER_REAL, 0)
             if self.previous_handler is not None:
@@ -15397,9 +15448,15 @@ class _BlockLiftTimeout:
                 delay, interval = self.previous_timer
                 if delay > 0 or interval > 0:
                     signal.setitimer(signal.ITIMER_REAL, delay, interval)
+        # ctypes can wrap a signal-handler TimeoutError during argument
+        # conversion. Use our recorded expiration, never exception text.
+        if self.expired and not isinstance(exc, TimeoutError):
+            raise TimeoutError(self.message) from exc
         return False
 
     def _handle_timeout(self, _signum: int, _frame: Any) -> None:  # noqa: ANN401
+        """Record expiration before crossing a potentially wrapping native call."""
+        self.expired = True
         raise TimeoutError(self.message)
 
 

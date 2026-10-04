@@ -30,6 +30,15 @@ from scripts.pytest_resource_scheduler import build_heavy_worker_waves
 from scripts.pytest_source_state import SourceTreeSnapshot
 
 
+def test_partition_runner_defaults_to_three_workers() -> None:
+    """A direct complete-suite run must not expand its pool with the CPU count."""
+    args = runner._parse_args([
+        "--inventory-json", "inventory.json", "--summary-json", "summary.json",
+    ])
+    assert args.workers == 3
+    assert 1 <= args.heavy_workers <= args.workers
+
+
 @dataclass(frozen=True)
 class _FakeMarker:
     args: tuple[str, ...]

@@ -1,0 +1,447 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dosunit.pe32_program_replay.v1",
+  "title": "Concrete initialized PE32 process comparison; no proof promotion",
+  "type": "object",
+  "required": [
+    "schema",
+    "agreement",
+    "proof_status",
+    "contract",
+    "inputs",
+    "oracle",
+    "candidate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dosunit.pe32_program_replay.v1"
+    },
+    "agreement": {
+      "enum": [
+        "agreed",
+        "mismatched",
+        "incomplete"
+      ]
+    },
+    "proof_status": {
+      "const": "not_established_by_execution"
+    },
+    "contract": {
+      "type": "object",
+      "required": [
+        "entry",
+        "initial_memory",
+        "services",
+        "segments",
+        "startup",
+        "scope"
+      ],
+      "properties": {
+        "entry": {
+          "type": "string"
+        },
+        "initial_memory": {
+          "type": "string"
+        },
+        "services": {
+          "type": "string"
+        },
+        "segments": {
+          "type": "string"
+        },
+        "startup": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "oracle": {
+      "type": "object",
+      "required": [
+        "status",
+        "exit_code",
+        "registers",
+        "observations",
+        "requested_observations",
+        "writes",
+        "events",
+        "requested_streams",
+        "instructions",
+        "boot_identity",
+        "environment_identity",
+        "detail",
+        "requested_input_files",
+        "input_file_positions",
+        "file_receipts"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "terminated",
+            "faulted",
+            "unsupported",
+            "budget_exhausted",
+            "unavailable"
+          ]
+        },
+        "exit_code": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "bytes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "size"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 67108864
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "pe_exit",
+                  "cpu_fault",
+                  "unsupported_instruction",
+                  "control_escape",
+                  "undeclared_access",
+                  "code_write"
+                ]
+              },
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_streams": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "instructions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boot_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "environment_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "requested_input_files": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "input_file_positions": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "file_receipts": {
+          "type": "array",
+          "maxItems": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "status",
+        "exit_code",
+        "registers",
+        "observations",
+        "requested_observations",
+        "writes",
+        "events",
+        "requested_streams",
+        "instructions",
+        "boot_identity",
+        "environment_identity",
+        "detail",
+        "requested_input_files",
+        "input_file_positions",
+        "file_receipts"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "terminated",
+            "faulted",
+            "unsupported",
+            "budget_exhausted",
+            "unavailable"
+          ]
+        },
+        "exit_code": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "bytes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "size"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 67108864
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "address",
+              "bytes"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "pe_exit",
+                  "cpu_fault",
+                  "unsupported_instruction",
+                  "control_escape",
+                  "undeclared_access",
+                  "code_write"
+                ]
+              },
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "bytes": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-fA-F]{2})*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requested_streams": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "instructions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boot_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "environment_identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "requested_input_files": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "input_file_positions": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "file_receipts": {
+          "type": "array",
+          "maxItems": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

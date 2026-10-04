@@ -19,8 +19,11 @@ from ..callsite_summary import (
     CallsiteSummary8616,
     logical_argument_widths_from_callsite_8616,
 )
+from ..frontend_direct_callsite_index import DecodedDirectCallsiteIndex8616
 from ..ir import IRValue, ScalarAffineExpression8616
 from ..ir.ssa_function import SSAFunctionArtifact
+from ..semantics.call_stack_effect_pipeline import CallSemanticProjection8616
+from .call_target_ssa_binder import bind_ssa_call_target_8616
 from .interprocedural_storage_contracts import (
     StorageReachingDefinition8616,
     StorageUseEvidence8616,
@@ -94,17 +97,57 @@ def _sites_8616(
     )
 
 
+def _symbolic_call_target_matches_8616(
+    function_ssa: SSAFunctionArtifact,
+    summary: CallsiteSummary8616,
+    expected_target: int,
+    *,
+    project: object | None,
+    callsite_index: DecodedDirectCallsiteIndex8616 | None,
+    projection: CallSemanticProjection8616 | None,
+) -> bool:
+    """Prove a non-CONST CALL operand's target through the shared binder.
+
+    The same typed proof the output gate consumes: producer integrity against
+    the owned block-local SSA projection of the registered source block (raw
+    or Semantics-enriched via the retained projection), then the
+    Semantics-owned native binding restricted to the admitted target
+    relation. Any refused or non-admitted proof leaves the operand unmatched.
+    """
+    binding = bind_ssa_call_target_8616(
+        function_ssa,
+        function_ssa.function_addr,
+        summary.callsite_addr,
+        (expected_target,),
+        project=project,
+        callsite_index=callsite_index,
+        projection=projection,
+    )
+    if not binding.complete or binding.target_addr is None:
+        return False
+    if project is None:
+        return binding.target_addr == expected_target
+    return x86_16_call_targets_equivalent_8616(
+        project,
+        binding.target_addr,
+        expected_target,
+    )
+
+
 def _call_use_8616(
     sites: tuple[SSAInstructionSite8616, ...],
     summary: CallsiteSummary8616,
     *,
+    function_ssa: SSAFunctionArtifact,
     project: object | None,
     expected_target_addr: int | None,
+    callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
+    projection: CallSemanticProjection8616 | None = None,
 ) -> tuple[
     StorageUseEvidence8616 | None,
     CallArgumentDefinitionFailure8616 | None,
 ]:
-    """Find one exact SSA CALL and verify its constant internal target."""
+    """Find one exact SSA CALL and verify its constant or proven target."""
     calls = tuple(site for site in sites if site.instr.op == "CALL" and site.instr.addr == summary.callsite_addr)
     if not calls:
         return None, CallArgumentDefinitionFailure8616.CALLSITE_NOT_FOUND
@@ -119,15 +162,26 @@ def _call_use_8616(
     )
     if not isinstance(target, IRValue) or not isinstance(expected_target, int):
         return None, CallArgumentDefinitionFailure8616.CALL_TARGET_CONFLICT
-    if project is None:
+    if not isinstance(target.const, int):
+        target_matches = _symbolic_call_target_matches_8616(
+            function_ssa,
+            summary,
+            expected_target,
+            project=project,
+            callsite_index=callsite_index,
+            projection=projection,
+        )
+    elif project is None:
         target_matches = target.const == expected_target
-        summary_matches = summary.target_addr in {None, expected_target}
     else:
         target_matches = x86_16_call_targets_equivalent_8616(
             project,
             target.const,
             expected_target,
         )
+    if project is None:
+        summary_matches = summary.target_addr in {None, expected_target}
+    else:
         summary_matches = summary.target_addr is None or x86_16_call_targets_equivalent_8616(
             project,
             summary.target_addr,
@@ -257,14 +311,19 @@ def resolve_call_argument_reaching_definition_8616(
     *,
     project: object | None = None,
     expected_target_addr: int | None = None,
+    callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
+    projection: CallSemanticProjection8616 | None = None,
 ) -> CallArgumentDefinitionResolution8616:
     """Resolve one source-order call argument without inventing missing proof."""
     sites = _sites_8616(function_ssa)
     use, call_failure = _call_use_8616(
         sites,
         summary,
+        function_ssa=function_ssa,
         project=project,
         expected_target_addr=expected_target_addr,
+        callsite_index=callsite_index,
+        projection=projection,
     )
     if call_failure is not None or use is None:
         failure = call_failure or CallArgumentDefinitionFailure8616.CALLSITE_NOT_FOUND

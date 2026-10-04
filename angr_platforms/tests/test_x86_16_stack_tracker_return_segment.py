@@ -9,7 +9,7 @@ from angr.calling_conventions import SimCCStdcall
 from angr.sim_type import SimTypeFunction, SimTypeInt
 from angr_platforms.X86_16 import stack_tracker_return_segment as adapter
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
-from angr_platforms.X86_16.ir import IRFunctionArtifact
+from angr_platforms.X86_16.ir import IRFunctionArtifact, IRValue, MemSpace
 from angr_platforms.X86_16.ir.vex_import import _block_to_ir
 from angr_platforms.X86_16.semantics.call_return_segment import collect_return_segment_frames_8616
 from angr_platforms.X86_16.semantics.call_stack_effects import materialize_call_stack_effects_8616
@@ -75,6 +75,110 @@ def test_native_cleanup_resolves_near_targets_in_loaded_code_segment(base, calle
     assert tracker.offset_before(base + 7, project.arch.sp_offset) == (expected & 0xffffffff)
 
 
+def _patched_call_import(monkeypatch, mutate_block):
+    """Patch the adapter's IR import with one block-level mutation."""
+    real_import = adapter._block_to_ir
+    seen = []
+
+    def _imported(block):
+        imported, transport, terminal_evidence = real_import(block)
+        if any(instruction.op == "CALL" for instruction in imported.instrs):
+            seen.append(imported)
+        return mutate_block(imported), transport, terminal_evidence
+
+    monkeypatch.setattr(adapter, "_block_to_ir", _imported)
+    return seen
+
+
+def _unbound_operand(block):
+    """Replace the retained symbolic CALL operand with an unbound temporary."""
+    return replace(
+        block,
+        instrs=tuple(
+            replace(
+                instruction,
+                args=(IRValue(MemSpace.TMP, name="unbound_test_operand", size=4),),
+            )
+            if instruction.op == "CALL"
+            else instruction
+            for instruction in block.instrs
+        ),
+    )
+
+
+def _changed_producer(block):
+    """Rewrite the CALL operand's producer instruction to a foreign shape."""
+    call = next(instruction for instruction in block.instrs if instruction.op == "CALL")
+    producer_tmp = call.args[0].source_tmp
+    return replace(
+        block,
+        instrs=tuple(
+            replace(instruction, op="Iop_Xor32")
+            if instruction.dst is not None
+            and instruction.dst.source_tmp == producer_tmp
+            else instruction
+            for instruction in block.instrs
+        ),
+    )
+
+
+def _retargeted_operand(block):
+    """Point the CALL operand at a real but foreign block temporary."""
+    return replace(
+        block,
+        instrs=tuple(
+            replace(
+                instruction,
+                args=(replace(instruction.args[0], source_tmp=0),),
+            )
+            if instruction.op == "CALL"
+            else instruction
+            for instruction in block.instrs
+        ),
+    )
+
+
+@pytest.mark.parametrize("mutate", [_unbound_operand, _changed_producer, _retargeted_operand])
+def test_native_cleanup_refuses_an_unproven_call_operand(monkeypatch, mutate):
+    """A forged or retargeted CALL operand must not admit the decoded target."""
+    project, function = _project("c2 02 00")
+    seen = _patched_call_import(monkeypatch, mutate)
+    tracker = project.analyses.StackPointerTracker(function, {project.arch.sp_offset})
+    assert seen
+    assert tracker.offset_before(0x1004, project.arch.sp_offset) == (-2 & 0xffffffff)
+
+
+def test_native_cleanup_binds_the_imported_call_operand():
+    """The adapter consumes the binding owner's proven target, not a guess."""
+    project, _function = _project("c3")
+    bound = adapter._bound_terminal_direct_call_8616(
+        project, project.factory.block(0x1000).vex,
+    )
+    assert bound is not None
+    _block, instruction, target = bound
+    assert instruction.op == "CALL" and instruction.addr == 0x1001
+    assert target == 0x1005
+
+
+def test_native_cleanup_refuses_a_divergent_slice_original_encoding():
+    """The slice→original correspondence must match the exact call encoding."""
+    code = bytes.fromhex("50 50 50 50 e8 01 00 c3 c2 08 00")
+    divergent = code[:4] + bytes.fromhex("e8 00 00") + code[7:]
+    original = angr.Project(
+        io.BytesIO(_mz(divergent, header_paragraphs=4)), auto_load_libs=False,
+        main_opts={"backend": "dos_mz", "base_addr": 0x10000},
+    )
+    sliced = angr.Project(
+        io.BytesIO(code[:8]), auto_load_libs=False,
+        main_opts={"backend": "blob", "arch": original.arch, "base_addr": 0x1000, "entry_point": 0x1000},
+    )
+    sliced._inertia_original_project = original
+    sliced._inertia_original_linear_delta = 0xf000
+    cfg = sliced.analyses.CFGFast(normalize=True)
+    tracker = sliced.analyses.StackPointerTracker(cfg.kb.functions[0x1000], {sliced.arch.sp_offset})
+    assert tracker.offset_before(0x1007, sliced.arch.sp_offset) == (-8 & 0xffffffff)
+
+
 def test_native_cleanup_rebases_out_of_slice_target_exactly_once():
     code = bytes.fromhex("50 50 50 50 e8 01 00 c3 c2 08 00")
     original = angr.Project(
@@ -134,7 +238,7 @@ def test_native_cleanup_does_not_guess_from_incomplete_or_mixed_returns(callee):
 @pytest.mark.parametrize("arg_widths", [(), (2, 2)])
 def test_ir_call_effect_consumes_the_same_return_segment_proof(callee, adjustment, arg_widths):
     project, function = _project(callee)
-    block, _transport = _block_to_ir(project.factory.block(0x1000))
+    block, _transport, _terminal_evidence = _block_to_ir(project.factory.block(0x1000))
     artifact = IRFunctionArtifact(0x1000, (block,))
     summary = replace(
         _summary(arg_widths=arg_widths, cleanup=sum(arg_widths)),

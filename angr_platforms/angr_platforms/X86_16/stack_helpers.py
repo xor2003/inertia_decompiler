@@ -13,6 +13,15 @@ from typing import Protocol, cast
 from pyvex.lifting.util import JumpKind
 from pyvex.lifting.util.vex_helper import Type
 
+from .control_coordinates import (
+    ControlAddressDomain,
+    ControlWidth,
+    CoordinateConstant,
+    CoordinateValue,
+    NearTargetDomain,
+    architectural_offset,
+    linear_continuation,
+)
 from .regs import reg16_t, reg32_t, sgreg_t
 
 
@@ -35,6 +44,10 @@ class StackExpr(Protocol):
 
     def __or__(self, other: object) -> StackExpr:
         """Return a PyVEX bitwise-or expression."""
+        ...
+
+    def __lshift__(self, other: object) -> StackExpr:
+        """Return a PyVEX left-shift expression."""
         ...
 
     def __ne__(self, other: object) -> StackExpr:  # type: ignore[override]
@@ -73,6 +86,7 @@ class StackEmulator(Protocol):
 
     irsb: StackIrsb
     lifter_instruction: StackLifterInstruction
+    control_address_domain: ControlAddressDomain
 
     def update_gpreg(self, reg: object, delta: object) -> None:
         """Apply a relative update to a general-purpose register."""
@@ -347,25 +361,35 @@ def pop_segment32(emu: StackEmulator, segment: sgreg_t) -> None:
 
 
 def near_return_ip16(emu: StackEmulator, instruction_size: int) -> StackExpr:
-    """Materialize the exact wrapping return IP from frontend instruction evidence."""
-    return emu.constant((emu.lifter_instruction.addr + instruction_size) & 0xFFFF, Type.int_16)
+    """Save architectural IP from decoded next-address and live CS evidence."""
+    return cast(StackExpr, architectural_offset(
+        emu.lifter_instruction.addr + instruction_size,
+        cast(CoordinateValue, emu.get_sgreg(sgreg_t.CS)), ControlWidth.WORD,
+        cast(CoordinateConstant, emu.constant),
+        domain=emu.control_address_domain,
+    ))
 
 
 def near_return_eip32(emu: StackEmulator, instruction_size: int = 0) -> StackExpr:
-    """Return the current 32-bit EIP used as a near-call return target."""
-    return emu.get_gpreg(reg32_t.EIP) + emu.constant(instruction_size, Type.int_32)
+    """Save architectural EIP from the decoded linear instruction address."""
+    return cast(StackExpr, architectural_offset(
+        emu.lifter_instruction.addr + instruction_size,
+        cast(CoordinateValue, emu.get_sgreg(sgreg_t.CS)), ControlWidth.DWORD,
+        cast(CoordinateConstant, emu.constant),
+        domain=emu.control_address_domain,
+    ))
 
 
 def near_relative_target16(emu: StackEmulator, displacement: object, instruction_size: int) -> StackExpr:
-    """Compute a 16-bit relative branch target from IP, displacement, and size."""
-    return near_return_ip16(emu, instruction_size) + emu.constant(displacement, Type.int_16)
+    """Keep relative control in the loader domain, separate from saved IP."""
+    linear_next = emu.constant((emu.lifter_instruction.addr + instruction_size) & 0xFFFF, Type.int_16)
+    return linear_next + emu.constant(displacement, Type.int_16)
 
 
 def near_relative_target32(emu: StackEmulator, displacement: object, instruction_size: int = 0) -> StackExpr:
-    """Compute a 32-bit relative branch target from EIP, displacement, and size."""
+    """Compute a full-width loader control target from decoded instruction facts."""
     return (
-        emu.get_gpreg(reg32_t.EIP)
-        + emu.constant(instruction_size, Type.int_32)
+        emu.constant(emu.lifter_instruction.addr + instruction_size, Type.int_32)
         + emu.constant(displacement, Type.int_32)
     )
 
@@ -427,13 +451,33 @@ def pop_interrupt_frame32(emu: StackEmulator) -> StackTriple:
     return eip, cs, flags
 
 
+def _return_control_target(
+    emu: StackEmulator, cs: object, ip: object, width: ControlWidth,
+) -> CoordinateValue:
+    """Adapt concrete or symbolic emulator values to the common control owner."""
+    return linear_continuation(
+        cast(CoordinateValue, cs), cast(CoordinateValue, ip), width,
+        cast(CoordinateConstant, emu.constant),
+        domain=emu.control_address_domain,
+    )
+
+
+def _near_transfer_control_target(
+    emu: StackEmulator, target: object, width: ControlWidth, domain: NearTargetDomain,
+) -> object:
+    """Project an architectural near operand, preserving already-decoded control."""
+    if domain is NearTargetDomain.ARCHITECTURAL_OFFSET:
+        return _return_control_target(emu, emu.get_sgreg(sgreg_t.CS), target, width)
+    return target
+
+
 def return_near16(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
     """Emit a 16-bit near return and apply an optional stack adjustment."""
     ip = pop16(emu)
     if stack_adjust:
         emu.set_gpreg(reg16_t.SP, emu.get_gpreg(reg16_t.SP) + emu.constant(stack_adjust, Type.int_16))
     emu.set_gpreg(reg16_t.IP, ip)
-    emu.irsb.next = ip
+    emu.irsb.next = _return_control_target(emu, emu.get_sgreg(sgreg_t.CS), ip, ControlWidth.WORD)
     emu.irsb.jumpkind = "Ijk_Ret"
     return ip
 
@@ -444,7 +488,9 @@ def return_near32(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
     if stack_adjust:
         emu.update_gpreg(reg16_t.SP, stack_adjust)
     emu.set_eip(eip)
-    emu.lifter_instruction.jump(None, eip, JumpKind.Ret)
+    emu.lifter_instruction.jump(
+        None, _return_control_target(emu, emu.get_sgreg(sgreg_t.CS), eip, ControlWidth.DWORD), JumpKind.Ret,
+    )
     return eip
 
 
@@ -453,39 +499,55 @@ def emit_near_call16(
     target: object,
     return_ip: object | None = None,
     instruction_size: int | None = None,
+    *, target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
 ) -> object:
-    """Emit a 16-bit near call edge after pushing the return IP."""
+    """Push return IP and project the decoded near target into execution control."""
     if return_ip is None:
         if instruction_size is None:
             raise ValueError("instruction_size is required when return_ip is not provided")
         return_ip = near_return_ip16(emu, instruction_size)
     push16(emu, return_ip)
     emu.set_gpreg(reg16_t.IP, target)
-    emu.lifter_instruction.jump(None, target, JumpKind.Call)
+    emu.lifter_instruction.jump(None, _near_transfer_control_target(
+        emu, target, ControlWidth.WORD, target_domain,
+    ), JumpKind.Call)
     return return_ip
 
 
-def emit_near_jump16(emu: StackEmulator, target: object) -> object:
-    """Emit a 16-bit near jump edge."""
+def emit_near_jump16(
+    emu: StackEmulator, target: object, *,
+    target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
+) -> object:
+    """Emit near control, composing architectural register/memory IP with CS."""
     emu.set_gpreg(reg16_t.IP, target)
-    emu.lifter_instruction.jump(None, target, JumpKind.Boring)
+    control = _near_transfer_control_target(emu, target, ControlWidth.WORD, target_domain)
+    emu.lifter_instruction.jump(None, control, JumpKind.Boring)
     return target
 
 
-def emit_near_call32(emu: StackEmulator, target: object, return_ip: object | None = None) -> object:
-    """Emit a 32-bit near call edge after pushing the return EIP."""
+def emit_near_call32(
+    emu: StackEmulator, target: object, return_ip: object | None = None, *,
+    target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
+) -> object:
+    """Push return EIP and project the decoded near target without word truncation."""
     if return_ip is None:
         return_ip = near_return_eip32(emu)
     push32(emu, return_ip)
     emu.set_eip(target)
-    emu.lifter_instruction.jump(None, target, JumpKind.Call)
+    emu.lifter_instruction.jump(None, _near_transfer_control_target(
+        emu, target, ControlWidth.DWORD, target_domain,
+    ), JumpKind.Call)
     return return_ip
 
 
-def emit_near_jump32(emu: StackEmulator, target: object) -> object:
-    """Emit a 32-bit near jump edge."""
+def emit_near_jump32(
+    emu: StackEmulator, target: object, *,
+    target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
+) -> object:
+    """Emit near control, preserving all architectural EIP bits before CS addition."""
     emu.set_eip(target)
-    emu.lifter_instruction.jump(None, target, JumpKind.Boring)
+    control = _near_transfer_control_target(emu, target, ControlWidth.DWORD, target_domain)
+    emu.lifter_instruction.jump(None, control, JumpKind.Boring)
     return target
 
 
@@ -513,12 +575,15 @@ def far_linear_target_8616(segment: object, offset: object) -> int | None:
 def _far_control_flow_target_8616(emu: StackEmulator, segment: object, offset: object) -> object:
     """Return the flat control-flow target for a 16-bit far call or far jump.
 
-    Concrete seg:offset pairs resolve to their linear real-mode address so the
-    CFG reaches the callee; symbolic pairs retain the bare offset target.
+    The native adapter uses offsets. The loader adapter composes CS even for
+    symbolic pairs; it never discards the segment from a control destination.
     """
+    if emu.control_address_domain is ControlAddressDomain.ARCHITECTURAL_OFFSET:
+        return offset
     linear_target = far_linear_target_8616(segment, offset)
     if linear_target is None:
-        return offset
+        composed = _return_control_target(emu, segment, offset, ControlWidth.WORD)
+        return cast(StackExpr, composed) & emu.constant(0xFFFFF, Type.int_32)
     return emu.constant(linear_target, Type.int_32)
 
 
@@ -544,7 +609,7 @@ def emit_far_call32(emu: StackEmulator, segment: object, offset: object, return_
     push_far_return_frame32(emu, return_ip)
     emu.set_segment(sgreg_t.CS, segment)
     emu.set_eip(offset)
-    emu.lifter_instruction.jump(None, offset, JumpKind.Call)
+    emu.lifter_instruction.jump(None, _return_control_target(emu, segment, offset, ControlWidth.DWORD), JumpKind.Call)
     return return_ip
 
 
@@ -552,7 +617,7 @@ def emit_far_jump32(emu: StackEmulator, segment: object, offset: object) -> obje
     """Emit a 32-bit far jump through the emulator boundary."""
     emu.set_segment(sgreg_t.CS, segment)
     emu.set_eip(offset)
-    emu.lifter_instruction.jump(None, offset, JumpKind.Boring)
+    emu.lifter_instruction.jump(None, _return_control_target(emu, segment, offset, ControlWidth.DWORD), JumpKind.Boring)
     return offset
 
 
@@ -563,7 +628,7 @@ def return_far16(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
         emu.set_gpreg(reg16_t.SP, emu.get_gpreg(reg16_t.SP) + emu.constant(stack_adjust, Type.int_16))
     emu.set_sgreg(sgreg_t.CS, seg)
     emu.set_gpreg(reg16_t.IP, ip)
-    emu.lifter_instruction.jump(None, ip, jumpkind=JumpKind.Ret)
+    emu.lifter_instruction.jump(None, _return_control_target(emu, seg, ip, ControlWidth.WORD), jumpkind=JumpKind.Ret)
     return ip, seg
 
 
@@ -574,7 +639,7 @@ def return_interrupt16(emu: StackEmulator) -> StackTriple:
     emu.set_gpreg(reg16_t.FLAGS, flags)
     emu.set_sgreg(sgreg_t.CS, cs)
     emu.set_gpreg(reg16_t.IP, ip)
-    emu.lifter_instruction.jump(None, ip, jumpkind=JumpKind.Ret)
+    emu.lifter_instruction.jump(None, _return_control_target(emu, cs, ip, ControlWidth.WORD), jumpkind=JumpKind.Ret)
     return ip, cs, raw_flags
 
 
@@ -586,7 +651,7 @@ def return_far32(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
     selector = seg & 0xFFFF if isinstance(seg, int) else seg.cast_to(Type.int_16)
     emu.set_segment(sgreg_t.CS, selector)
     emu.set_eip(eip)
-    emu.lifter_instruction.jump(None, eip, jumpkind=JumpKind.Ret)
+    emu.lifter_instruction.jump(None, _return_control_target(emu, selector, eip, ControlWidth.DWORD), jumpkind=JumpKind.Ret)
     return eip, seg
 
 
@@ -598,7 +663,7 @@ def return_interrupt32(emu: StackEmulator) -> StackTriple:
     emu.set_eflags(flags)
     emu.set_segment(sgreg_t.CS, selector)
     emu.set_eip(eip)
-    emu.lifter_instruction.jump(None, eip, jumpkind=JumpKind.Ret)
+    emu.lifter_instruction.jump(None, _return_control_target(emu, selector, eip, ControlWidth.DWORD), jumpkind=JumpKind.Ret)
     return eip, cs, raw_flags
 
 

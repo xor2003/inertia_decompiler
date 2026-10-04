@@ -1,6 +1,6 @@
 """Select coverage candidates and run them through the existing DOS harness.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: manifest selection and compact aggregate reporting, without
 claiming that successful round trips prove the nominated feature witnesses.
 """

@@ -458,6 +458,7 @@ def test_record_typed_condition_deduplicates_module_cache():
     )
     instruction = Instruction_ANY.__new__(Instruction_ANY)
     instruction.addr = 0x4014
+    instruction.cs = SimpleNamespace(bytes=b"\x90")
     instruction.emu = SimpleNamespace(
         _inertia_current_block_addr=0x4010,
         _inertia_typed_conditions=[],
@@ -1171,12 +1172,9 @@ def test_emit_simple_jcc_consumes_pending_fallthrough_condition_source():
         Instruction_ANY._inertia_pending_condition_sources_by_addr = original_pending
 
 
-def test_direct_jcc_rebuilds_pending_cmp_guard_without_packed_flags():
+def test_direct_jcc_refuses_unbound_pending_cmp_execution_guard():
+    """Address-only transfer metadata cannot establish the live FLAGS value."""
     from angr_platforms.X86_16.lift_86_16 import Instruction_ANY
-
-    class _SignedValue:
-        def __ge__(self, _other):
-            return object()
 
     original_pending = dict(Instruction_ANY._inertia_pending_condition_sources_by_addr)
     source = ConditionSource(
@@ -1187,14 +1185,9 @@ def test_direct_jcc_rebuilds_pending_cmp_guard_without_packed_flags():
         addr=0x10F55,
         block_addr=0x10F55,
     )
-    signed_lhs = _SignedValue()
-    signed_rhs = object()
-    lhs = SimpleNamespace(signed=signed_lhs)
-    rhs = SimpleNamespace(signed=signed_rhs)
     instr = SimpleNamespace(
         addr=0x10F5D,
         _past_instructions=[],
-        _cmp_operands_from_semantics=lambda _semantics: (lhs, rhs),
     )
 
     try:
@@ -1203,7 +1196,7 @@ def test_direct_jcc_rebuilds_pending_cmp_guard_without_packed_flags():
     finally:
         Instruction_ANY._inertia_pending_condition_sources_by_addr = original_pending
 
-    assert condition is not None
+    assert condition is None
 
 
 def test_emit_simple_jcc_prefers_normalized_condition_operands():

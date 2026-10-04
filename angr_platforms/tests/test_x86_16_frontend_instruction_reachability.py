@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from angr.errors import SimEngineError
 from angr_platforms.X86_16.frontend_capstone_decode import DirectCapstoneBlock8616
 from angr_platforms.X86_16.frontend_function_instructions import (
     FunctionInstructionInventoryStatus8616,
@@ -22,6 +23,25 @@ from angr_platforms.X86_16.recovery_instruction_coverage import (
 )
 
 from inertia_decompiler.project_loading import _build_project_from_bytes
+
+
+@pytest.mark.parametrize("cached_failure", [False, True])
+def test_unmapped_decode_is_an_incomplete_reachability_census(cached_failure: bool) -> None:
+    """Foreign image coordinates refuse on both fresh and cached decode failures."""
+    project = _build_project_from_bytes(b"\xc3", base_addr=0x1000, entry_point=0x1000)
+    address = 0x10010
+    if cached_failure:
+        with pytest.raises(SimEngineError):
+            collect_decoded_block_evidence_8616(project, address, opt_level=0)
+    evidence = collect_instruction_reachability_8616(
+        project, entry=address, region_start=address, region_end=address + 1,
+    )
+    assert not evidence.complete
+    assert evidence.unresolved_block_addrs == (address,)
+    assert evidence.reachable_instruction_addrs == ()
+    assert evidence.raw_fact_count == evidence.normalized_fact_count == 1
+    assert evidence.classified_fact_count == evidence.failure_count == 1
+    assert evidence.materialized_count == 0
 
 
 @pytest.mark.parametrize("mnemonic", ["call", "lcall", "callq"])

@@ -15,6 +15,10 @@ from angr.knowledge_plugins.functions.function import Function, PrototypeSource
 
 from .ail_displacement_compat import apply_register_displacement_compatibility_8616
 from .call_frame_compat import apply_call_frame_compatibility_8616
+from .clinic_terminal_control import (
+    record_clinic_terminal_transport_8616,
+    transport_terminal_direct_jump_8616,
+)
 from .codegen_parentheses import apply_codegen_parentheses_8616
 from .ir.native_segment_live_out import apply_native_segment_live_out_compatibility_8616
 from .lowering.codegen_return_origin import apply_codegen_return_origin_8616
@@ -73,6 +77,18 @@ class _ClinicBoundary8616(Protocol):
     """Third-party Clinic surface required by the custom-lifter guard."""
 
     project: _ClinicProjectBoundary8616
+
+
+class _AilManagerBoundary8616(Protocol):
+    """Third-party AIL atom allocator required by the terminal transport."""
+
+    next_atom: Callable[[], int]
+
+
+class _ClinicConversionBoundary8616(_ClinicBoundary8616, Protocol):
+    """Third-party Clinic surface required by the conversion wrapper."""
+
+    _ail_manager: _AilManagerBoundary8616
 
 
 def _normalize_x86_16_io_dirty_statements(
@@ -187,10 +203,10 @@ def _apply_clinic_custom_lifter_compatibility() -> None:
         return
 
     def _convert_vex_with_io_normalization(
-        clinic: _ClinicBoundary8616,
+        clinic: _ClinicConversionBoundary8616,
         block: object,
     ) -> object:
-        """Materialize x86-16 port writes immediately after VEX-to-AIL conversion."""
+        """Materialize x86-16 port writes and proven JMP targets post-conversion."""
         converted = current_convert(clinic, block)
         if clinic.project.arch.name != "86_16":
             return converted
@@ -198,6 +214,14 @@ def _apply_clinic_custom_lifter_compatibility() -> None:
         if raw > 0 and materialized == 0:
             msg = f"x86-16 I/O effects were not materialized: raw={raw} failures={failures}"
             raise TypeError(msg)
+        transport = transport_terminal_direct_jump_8616(
+            block,
+            converted,
+            next_atom=clinic._ail_manager.next_atom,
+        )
+        if not transport.stats.closed:
+            raise ValueError(f"Unclosed x86-16 terminal transport ledger: {transport.stats.to_dict()}")
+        record_clinic_terminal_transport_8616(clinic, transport)
         return converted
 
     convert_guarded = cast(Any, _convert_vex_with_io_normalization)

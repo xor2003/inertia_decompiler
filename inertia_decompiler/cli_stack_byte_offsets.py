@@ -1228,7 +1228,6 @@ class _SsStackByteOffsetRewrite8616:
             )
 
         return True, self.changed
-        return False, None
 
 def _rewrite_ss_stack_byte_offsets(
     project: Any,  # noqa: ANN401

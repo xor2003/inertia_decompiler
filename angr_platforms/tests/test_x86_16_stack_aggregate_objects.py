@@ -724,6 +724,54 @@ def test_materialization_promotes_projected_entry_sp_aggregate_base(monkeypatch)
     assert machine_bp_offset_for_stack_variable_8616(codegen, regenerated) == -90
 
 
+def test_projected_array_preserves_narrow_saved_register_view(monkeypatch) -> None:
+    """An array and a saved-register byte may share an entry-SP offset."""
+    codegen = _AggregateCodegen()
+    codegen._inertia_vex_ir_frame = proven_frame_coordinate(-2)
+    array_var, array_cvar = _stack_cvar(codegen, -20, 16, "local_12", SimTypeChar(False))
+    saved_var, saved_cvar = _stack_cvar(codegen, -20, 1, "local_14", SimTypeChar(False))
+    record_stack_variable_coordinate_projection_8616(
+        codegen,
+        variable=array_var,
+        cvar=array_cvar,
+        bp_offset=-18,
+        entry_sp_offset=-20,
+        size=16,
+        display_name="local_12",
+    )
+    record_stack_variable_coordinate_projection_8616(
+        codegen,
+        variable=saved_var,
+        cvar=saved_cvar,
+        bp_offset=-18,
+        entry_sp_offset=-20,
+        size=1,
+        display_name="local_14",
+    )
+    fact = StackAggregateObjectFact8616(-18, 16, 1, 18, 8, 0, (), -2, 2)
+    recovery = StackAggregateRecovery8616(
+        StackAggregateRecoveryStatus8616.MATERIALIZABLE,
+        raw_fact_count=14,
+        normalized_fact_count=14,
+        classified_fact_count=1,
+        materialized_count=0,
+        failure_count=0,
+        facts=(fact,),
+    )
+    monkeypatch.setattr(
+        aggregate_objects,
+        "collect_stack_aggregate_object_facts_8616",
+        lambda *_args, **_kwargs: recovery,
+    )
+
+    assert materialize_stack_aggregate_objects_8616(codegen, object(), object()) is True
+    assert isinstance(array_cvar.variable_type, SimTypeFixedSizeArray)
+    assert saved_cvar.variable_type == SimTypeChar(False)
+    assert codegen.cfunc.variables_in_use[saved_var] is saved_cvar
+    assert codegen._inertia_stack_aggregate_cvars_8616[-18] is array_cvar
+    assert array_var.size == 16
+
+
 def test_materialization_creates_missing_base_at_projected_entry_sp(monkeypatch) -> None:
     codegen = _AggregateCodegen()
     codegen._inertia_vex_ir_frame = proven_frame_coordinate(-2)

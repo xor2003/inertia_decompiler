@@ -23,6 +23,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CDoWhileLoop,
     CForLoop,
     CFunctionCall,
+    CGoto,
     CIfBreak,
     CIfElse,
     CStatements,
@@ -43,6 +44,10 @@ from .validation.canonicalize import EquivalenceResult, equivalent_expr_8616
 from .validation.control_flow_ast_index import ControlFlowAstIndex8616
 from .validation_branch_conditions import BranchConditionIssue8616
 from .validation_control_flow_obligations import ControlFlowObligationIssue8616
+from .validation_goto_target_identity import (
+    GotoTargetIdentityReason8616,
+    goto_target_identity_8616,
+)
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -50,6 +55,8 @@ __all__ = [
     "ControlFlowIssue8616",
     "ControlFlowIssueKind8616",
     "ControlFlowValidationReport8616",
+    "GotoTargetIdentityIssue8616",
+    "GotoTargetIdentityIssueKind8616",
     "LoopBranchGuardIssue8616",
     "LoopBranchGuardIssueKind8616",
     "validate_structured_control_flow_8616",
@@ -72,6 +79,12 @@ class LoopBranchGuardIssueKind8616(StrEnum):
     INVALID_EVIDENCE = "invalid-evidence"
     MISSING_GUARD = "missing-guard"
     WRONG_GUARD_SHAPE = "wrong-guard-shape"
+
+
+class GotoTargetIdentityIssueKind8616(StrEnum):
+    """Computed-goto target identity refusals detected by final validation."""
+
+    UNPROVEN_TARGET_IDENTITY = "unproven-target-identity"
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -110,9 +123,33 @@ class LoopBranchGuardIssue8616:
         )
 
 
+@dataclass(frozen=True, order=True, slots=True)
+class GotoTargetIdentityIssue8616:
+    """One CGoto whose target identity could not be proven structurally.
+
+    ``node_index`` is the node's position in the deterministic control-flow
+    AST walker order, so identical issue tokens for equivalent regenerated
+    trees are stable and serialization-safe.  ``reasons`` carries the typed
+    incompleteness evidence from the goto-target identity owner.
+    """
+
+    kind: GotoTargetIdentityIssueKind8616
+    node_index: int
+    reasons: tuple[GotoTargetIdentityReason8616, ...]
+
+    def token(self) -> str:
+        """Return a deterministic AST-location and reason fingerprint."""
+        reason_text = ",".join(reason.value for reason in self.reasons)
+        return (
+            f"goto-target:{self.kind.value}:node={self.node_index}:"
+            f"reasons={reason_text}"
+        )
+
+
 type ControlFlowValidationIssue8616 = (
     BranchConditionIssue8616
     | ControlFlowIssue8616
+    | GotoTargetIdentityIssue8616
     | LoopBranchGuardIssue8616
     | ControlFlowObligationIssue8616
 )
@@ -144,6 +181,19 @@ class ControlFlowValidationReport8616:
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable issue fingerprints for tail-validation summaries."""
         return tuple(issue.token() for issue in self.issues)
+
+    def unproven_goto_target_tokens(self) -> tuple[str, ...]:
+        """Return tokens for CGoto targets whose identity stayed unproven.
+
+        These tokens are the typed refusal channel for summary comparison:
+        an unproven computed-goto identity can never certify before/after
+        equality, even when the same opaque marker appears on both sides.
+        """
+        return tuple(
+            issue.token()
+            for issue in self.issues
+            if isinstance(issue, GotoTargetIdentityIssue8616)
+        )
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible closed-loop evidence report."""
@@ -486,6 +536,48 @@ def _adjacent_guard_sequence_issues_8616(
     )
 
 
+def _goto_target_identity_evidence_8616(
+    ast_index: ControlFlowAstIndex8616,
+) -> tuple[int, int, int, int, list[ControlFlowValidationIssue8616]]:
+    """Classify every CGoto target identity, refusing unproven ones.
+
+    Each CGoto is one raw fact; the typed identity owner either materializes
+    a complete structural identity (proof) or returns typed incompleteness
+    reasons.  An unproven identity is recorded as an issue and withheld from
+    ``materialized_count`` so ``passed`` can never certify an unknown
+    computed-goto target as equal to anything, including itself.
+    """
+    raw_fact_count = 0
+    normalized_fact_count = 0
+    classified_fact_count = 0
+    materialized_count = 0
+    issues: list[ControlFlowValidationIssue8616] = []
+    for node_index, node in enumerate(ast_index.nodes):
+        if not isinstance(node, CGoto):
+            continue
+        raw_fact_count += 1
+        normalized_fact_count += 1
+        classified_fact_count += 1
+        identity = goto_target_identity_8616(node)
+        if identity.complete:
+            materialized_count += 1
+            continue
+        issues.append(
+            GotoTargetIdentityIssue8616(
+                kind=GotoTargetIdentityIssueKind8616.UNPROVEN_TARGET_IDENTITY,
+                node_index=node_index,
+                reasons=identity.reasons,
+            )
+        )
+    return (
+        raw_fact_count,
+        normalized_fact_count,
+        classified_fact_count,
+        materialized_count,
+        issues,
+    )
+
+
 def _loop_branch_issue_8616(
     fact: LoopBranchGuardFact8616,
     kind: LoopBranchGuardIssueKind8616,
@@ -704,6 +796,11 @@ def validate_structured_control_flow_8616(
     fingerprint plus taken/exit target membership. Validation does not repair it.
     A storage matcher may additionally prove equivalent typed memory views;
     it must retain access width, signedness and the requested branch polarity.
+    Every CGoto target identity is classified through the typed
+    goto-target-identity owner; an unproven (unsupported, cyclic, or
+    bound-exceeded) target is recorded as a refusal issue and withheld from
+    the materialized count so it can never certify equality — including
+    equality with itself across before/after snapshots.
     """
     ast_index = ControlFlowAstIndex8616.build(root, root_index=query_index)
     (
@@ -713,6 +810,19 @@ def validate_structured_control_flow_8616(
         materialized_count,
         issues,
     ) = _adjacent_guard_sequence_issues_8616(ast_index)
+
+    (
+        goto_raw_count,
+        goto_normalized_count,
+        goto_classified_count,
+        goto_materialized_count,
+        goto_issues,
+    ) = _goto_target_identity_evidence_8616(ast_index)
+    raw_fact_count += goto_raw_count
+    normalized_fact_count += goto_normalized_count
+    classified_fact_count += goto_classified_count
+    materialized_count += goto_materialized_count
+    issues.extend(goto_issues)
 
     normalized_loop_branch_facts = tuple(sorted(set(loop_branch_facts)))
     raw_fact_count += len(loop_branch_facts)

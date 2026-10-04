@@ -35,6 +35,24 @@ def test_source_tree_snapshot_ignores_generated_directories(tmp_path: Path) -> N
     assert snapshot.file_count == 1
 
 
+def test_source_tree_snapshot_can_scope_runtime_inputs(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    tests = tmp_path / "tests"
+    runtime.mkdir()
+    tests.mkdir()
+    (runtime / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    test_path = tests / "test_module.py"
+    test_path.write_text("assert True\n", encoding="utf-8")
+
+    first = source_tree_snapshot(tmp_path, included_roots=("runtime",))
+    test_path.write_text("assert False\n", encoding="utf-8")
+    second = source_tree_snapshot(tmp_path, included_roots=("runtime",))
+    assert first == second
+
+    (runtime / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert first.sha256 != source_tree_snapshot(tmp_path, included_roots=("runtime",)).sha256
+
+
 def test_source_tree_snapshot_json_round_trip(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
     snapshot = source_tree_snapshot(tmp_path)

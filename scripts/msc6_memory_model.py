@@ -1,9 +1,11 @@
 """Explicit small/large toolchain settings for DOS round-trip tests.
 
-Layer: Test infrastructure.
+Layer: Tooling/gates.
 Responsibility: keep original, rebuilt and runtime compilation/linkage on the
 same memory model. This does not supply decompiler semantic evidence.
 """
+
+from __future__ import annotations
 
 from enum import StrEnum
 

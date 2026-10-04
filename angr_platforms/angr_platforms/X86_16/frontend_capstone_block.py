@@ -16,6 +16,7 @@ class _DetailedInstructionBoundary8616(Protocol):
     """Capstone detail fields consumed by downstream semantic recovery."""
 
     operands: Sequence[object]
+    bytes: bytes | bytearray
 
     def reg_name(self, register_id: int) -> str:
         """Return Capstone's canonical name for one register id."""
@@ -31,6 +32,11 @@ class DirectCapstoneInstruction8616:
     mnemonic: str
     op_str: str
     insn: object
+
+    @property
+    def bytes(self) -> bytes:
+        """Expose immutable encoded bytes from the raw decoder boundary."""
+        return bytes(cast(_DetailedInstructionBoundary8616, self.insn).bytes)
 
     @property
     def operands(self) -> Sequence[object]:

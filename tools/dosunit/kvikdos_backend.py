@@ -2,24 +2,35 @@
 
 Responsibility: build isolated DOS harnesses and execute them through Kvikdos
 without changing dosunit observation or comparison semantics.
+
+The embedded libkvikdos VM runs inside a dedicated worker process (see
+``tools.dosunit.kvikdos_vm_worker``) so kvikdos strict-mode aborts
+(``exit(252)``) are contained there and surface here as KvikdosBackendError
+with diagnostics instead of terminating the host.
 """
 
 from __future__ import annotations
 
-import ctypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tools.dosunit.kvikdos_vm_worker import (
+    DOS_MEM_LIMIT,
+    REQUEST_TIMEOUT_S,
+    RUN_TIMEOUT_S,
+    KvikdosVmClient,
+    KvikdosWorkerError,
+)
 from tools.dosunit.model import DosUnitError, normalize_hex, parse_int
 
 PSP_PARA = 0x100
 IMAGE_PARA = PSP_PARA + 0x10
-DOS_MEM_LIMIT = 0xA0000
 ORIGINAL_IMAGE_PARA = 0x0100
 MIRROR_CODE_PARA = 0x3000
 AUTO_STACK_SEGMENT = 0x8000
@@ -57,119 +68,178 @@ class KvikdosBackendError(DosUnitError):
 
 
 class KvikdosSession:
-    """Own one reusable in-process Kvikdos VM and its temporary harness files."""
+    """Own one isolated libkvikdos worker process and its temporary files.
 
-    def __init__(self, *, kvikdos_path: Path | None = None) -> None:
-        """Create an inactive session; enter the context to allocate the VM."""
+    The guest VM lives in a dedicated child process so a kvikdos strict abort
+    (``exit(252)``) cannot terminate this process: it surfaces from
+    :meth:`run_harness` as KvikdosBackendError carrying the child's bounded
+    stderr diagnostic, and the session then stays FAILED — every subsequent
+    operation refuses with the recorded failure until the context is re-entered
+    (which spawns a fresh worker). Snapshot and memory state is never
+    fabricated or silently reset after a failure.
+    """
+
+    def __init__(
+        self,
+        *,
+        kvikdos_path: Path | None = None,
+        request_timeout_s: float = REQUEST_TIMEOUT_S,
+        run_timeout_s: float = RUN_TIMEOUT_S,
+    ) -> None:
+        """Create an inactive session; enter the context to spawn the worker."""
         self.kvikdos_path = kvikdos_path
-        self._lib: ctypes.CDLL | None = None
-        self._vm: ctypes.c_void_p | None = None
+        self._request_timeout_s = request_timeout_s
+        self._run_timeout_s = run_timeout_s
+        self._worker: KvikdosVmClient | None = None
         self._tmp: tempfile.TemporaryDirectory[str] | None = None
         self._counter = 0
 
     def __enter__(self) -> KvikdosSession:
-        """Allocate the native VM and return this active session."""
-        self._lib = _load_libkvikdos()
-        create = self._lib.dosvm_create
-        create.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
-        create.restype = ctypes.c_int
-        vm = ctypes.c_void_p()
-        status = int(create(ctypes.byref(vm), None))
-        if status != 0 or not vm.value:
-            raise KvikdosBackendError(f"dosvm_create failed with status {status}")
-        self._vm = vm
+        """Spawn the worker VM and return this active session."""
+        if self._worker is not None:
+            self._worker.close()
+            self._worker = None
+        lib_path = _build_libkvikdos()
+        try:
+            self._worker = _spawn_vm_worker(
+                lib_path=lib_path,
+                request_timeout_s=self._request_timeout_s,
+                run_timeout_s=self._run_timeout_s,
+            )
+        except KvikdosWorkerError as exc:
+            raise KvikdosBackendError(f"kvikdos worker startup failed: {exc}") from exc
         self._tmp = tempfile.TemporaryDirectory(prefix="dosunit-session-")
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        """Destroy the native VM and remove session-local temporary files."""
-        if self._lib is not None and self._vm is not None:
-            destroy = self._lib.dosvm_destroy
-            destroy.argtypes = [ctypes.c_void_p]
-            destroy.restype = None
-            destroy(self._vm)
+        """Shut down the worker process and remove session temporary files."""
+        if self._worker is not None:
+            self._worker.close()
+            self._worker = None
         if self._tmp is not None:
             self._tmp.cleanup()
-        self._lib = None
-        self._vm = None
         self._tmp = None
 
+    def _require_active(self) -> KvikdosVmClient:
+        """Return the session worker, or refuse when the session is inactive."""
+        if self._worker is None:
+            raise KvikdosBackendError("KvikdosSession is not active")
+        return self._worker
+
+    def _call(self, op: str, *, timeout_s: float, **fields: object) -> dict[str, object]:
+        """Forward one op to the worker; map process failures to backend errors."""
+        worker = self._require_active()
+        try:
+            reply: dict[str, object] = worker.request(op, timeout_s=timeout_s, **fields)
+        except KvikdosWorkerError as exc:
+            raise KvikdosBackendError(f"kvikdos {op}: {exc}") from exc
+        return reply
+
+    @staticmethod
+    def _reply_int(reply: dict[str, object], key: str) -> int:
+        """Extract a mandatory int field from a worker reply, refusing otherwise."""
+        value = reply.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise KvikdosBackendError(f"kvikdos worker reply missing int field {key!r}")
+        return value
+
+    def _call_status(self, op: str, api: str, *, timeout_s: float, **fields: object) -> dict[str, object]:
+        """Call a dosvm op and raise the legacy status message on nonzero."""
+        reply = self._call(op, timeout_s=timeout_s, **fields)
+        status = self._reply_int(reply, "status")
+        if status != 0:
+            raise KvikdosBackendError(f"{api} failed with status {status}")
+        return reply
+
     def run_harness(self, exe_bytes: bytes) -> bytes:
-        """Run an executable harness and return its captured memory dump."""
-        if self._lib is None or self._vm is None or self._tmp is None:
+        """Run an executable harness and return its captured memory dump.
+
+        A guest request for an unsupported service makes kvikdos abort the
+        worker (exit 252); that surfaces here as KvikdosBackendError with the
+        fatal diagnostic, and later calls on this session refuse until it is
+        re-entered.
+        """
+        if self._tmp is None:
             raise KvikdosBackendError("KvikdosSession is not active")
         tmp_path = Path(self._tmp.name)
         self._counter += 1
         harness_path = tmp_path / f"harness-{self._counter:06d}.exe"
         dump_path = tmp_path / f"mem-{self._counter:06d}.dmp"
         harness_path.write_bytes(exe_bytes)
-        run_program = self._lib.dosvm_run_program
-        run_program.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
-        run_program.restype = ctypes.c_int
-        status = int(run_program(self._vm, os.fsencode(harness_path), os.fsencode(dump_path)))
-        if status != 0:
-            raise KvikdosBackendError(f"dosvm_run_program failed with status {status}")
+        self._call_status(
+            "run_program",
+            "dosvm_run_program",
+            timeout_s=self._run_timeout_s,
+            prog=str(harness_path),
+            dump=str(dump_path),
+        )
         if not dump_path.exists():
             raise KvikdosBackendError("kvikdos did not produce a memory dump")
         return dump_path.read_bytes()
 
     def snapshot_create(self) -> int:
-        """Create and return a native VM snapshot handle."""
-        if self._lib is None or self._vm is None:
-            raise KvikdosBackendError("KvikdosSession is not active")
-        create = self._lib.dosvm_snapshot_create
-        create.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-        create.restype = ctypes.c_int
-        snapshot = ctypes.c_void_p()
-        status = int(create(self._vm, ctypes.byref(snapshot)))
-        if status != 0 or not snapshot.value:
+        """Create and return a worker-side VM snapshot handle."""
+        reply = self._call("snapshot_create", timeout_s=self._request_timeout_s)
+        status = self._reply_int(reply, "status")
+        handle = self._reply_int(reply, "handle") if status == 0 else 0
+        if status != 0 or not handle:
             raise KvikdosBackendError(f"dosvm_snapshot_create failed with status {status}")
-        return int(snapshot.value)
+        return handle
 
     def snapshot_restore(self, snapshot: int) -> None:
-        """Restore a previously created native VM snapshot."""
-        if self._lib is None or self._vm is None:
-            raise KvikdosBackendError("KvikdosSession is not active")
-        restore = self._lib.dosvm_snapshot_restore
-        restore.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        restore.restype = ctypes.c_int
-        status = int(restore(self._vm, ctypes.c_void_p(snapshot)))
-        if status != 0:
-            raise KvikdosBackendError(f"dosvm_snapshot_restore failed with status {status}")
+        """Restore a previously created worker-side VM snapshot."""
+        self._call_status(
+            "snapshot_restore",
+            "dosvm_snapshot_restore",
+            timeout_s=self._request_timeout_s,
+            handle=snapshot,
+        )
 
     def snapshot_destroy(self, snapshot: int) -> None:
-        """Release a native VM snapshot handle."""
-        if self._lib is None:
-            raise KvikdosBackendError("KvikdosSession is not active")
-        destroy = self._lib.dosvm_snapshot_destroy
-        destroy.argtypes = [ctypes.c_void_p]
-        destroy.restype = None
-        destroy(ctypes.c_void_p(snapshot))
+        """Release a worker-side VM snapshot handle.
+
+        The child refuses handles it no longer owns (stale or already
+        destroyed) with a nonzero status; that refusal is surfaced here
+        rather than silently ignored.
+        """
+        self._call_status(
+            "snapshot_destroy",
+            "dosvm_snapshot_destroy",
+            timeout_s=self._request_timeout_s,
+            handle=snapshot,
+        )
 
     def read_memory(self, linear: int, size: int) -> bytes:
-        """Read a byte range from the active guest memory image."""
-        if self._lib is None or self._vm is None:
-            raise KvikdosBackendError("KvikdosSession is not active")
-        out = (ctypes.c_ubyte * size)()
-        read = self._lib.dosvm_read_memory
-        read.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_size_t]
-        read.restype = ctypes.c_int
-        status = int(read(self._vm, linear, out, size))
-        if status != 0:
-            raise KvikdosBackendError(f"dosvm_read_memory failed with status {status}")
-        return bytes(out)
+        """Read a byte range from the guest memory image inside the worker."""
+        reply = self._call_status(
+            "read_memory",
+            "dosvm_read_memory",
+            timeout_s=self._request_timeout_s,
+            linear=linear,
+            size=size,
+        )
+        data = reply.get("data")
+        if not isinstance(data, str):
+            raise KvikdosBackendError("kvikdos worker reply missing data field 'data'")
+        try:
+            result = bytes.fromhex(data)
+        except ValueError as exc:
+            raise KvikdosBackendError("kvikdos worker memory reply contains invalid hexadecimal data") from exc
+        if len(result) != size:
+            raise KvikdosBackendError(
+                f"kvikdos worker memory reply has {len(result)} bytes; expected {size}"
+            )
+        return result
 
     def write_memory(self, linear: int, data: bytes) -> None:
-        """Write bytes into the active guest memory image."""
-        if self._lib is None or self._vm is None:
-            raise KvikdosBackendError("KvikdosSession is not active")
-        buf = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
-        write = self._lib.dosvm_write_memory
-        write.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_size_t]
-        write.restype = ctypes.c_int
-        status = int(write(self._vm, linear, buf, len(data)))
-        if status != 0:
-            raise KvikdosBackendError(f"dosvm_write_memory failed with status {status}")
+        """Write bytes into the guest memory image inside the worker."""
+        self._call_status(
+            "write_memory",
+            "dosvm_write_memory",
+            timeout_s=self._request_timeout_s,
+            linear=linear,
+            data=data.hex(),
+        )
 
 
 def execute_vector(
@@ -181,7 +251,14 @@ def execute_vector(
     kvikdos_path: Path | None = None,
     session: KvikdosSession | None = None,
 ) -> dict[str, Any]:
-    """Execute one vector and return its normalized register observation."""
+    """Execute one vector and return its normalized register observation.
+
+    Both backends enforce kvikdos strict mode: unsupported guest services fail
+    the vector instead of producing synthesized register results. The
+    ``kvikdos`` CLI backend raises KvikdosBackendError directly; the
+    ``libkvikdos`` backend runs inside a worker process, so its strict
+    ``exit(252)`` abort is contained and surfaced as KvikdosBackendError too.
+    """
     normalized_backend = backend.lower()
     harness = build_harness(vector, exe_path=exe_path, functions_catalog=functions_catalog)
     if normalized_backend == "libkvikdos" and session is not None:
@@ -656,21 +733,77 @@ def _mov_moffs_imm16(offset: int, value: int) -> bytes:
     return b"\xc7\x06" + _u16(offset) + _u16(value)
 
 
-_LIB: ctypes.CDLL | None = None
+_LIB_PATH: Path | None = None
+_WORKER_SCRIPT = Path(__file__).resolve().with_name("kvikdos_vm_worker.py")
+
+
+def _spawn_vm_worker(
+    *,
+    lib_path: Path,
+    request_timeout_s: float,
+    run_timeout_s: float,
+) -> KvikdosVmClient:
+    """Spawn the isolated VM worker around the prebuilt libkvikdos wrapper.
+
+    Split out so the session and one-shot paths share exactly one spawn seam;
+    the worker script is a sibling of this module.
+    """
+    return KvikdosVmClient.spawn(
+        lib_path=lib_path,
+        command_prefix=[sys.executable, "-u", str(_WORKER_SCRIPT), "--lib", str(lib_path)],
+        request_timeout_s=request_timeout_s,
+        run_timeout_s=run_timeout_s,
+    )
 
 
 def _run_with_libkvikdos(harness_path: Path, dump_path: Path) -> int:
-    lib = _load_libkvikdos()
-    func = lib.dosunit_kvikdos_run
-    func.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-    func.restype = ctypes.c_int
-    return int(func(os.fsencode(harness_path), os.fsencode(dump_path)))
+    """Run one harness in a fresh worker VM and return its DosVmStatus.
+
+    Each call spawns a dedicated worker — and therefore a fresh guest VM —
+    matching the original ``dosunit_kvikdos_run`` create/run/destroy-per-call
+    contract: no guest memory, snapshot, or program state can leak between
+    one-shot runs. The worker is always closed in ``finally``; worker process
+    death (including kvikdos strict exit 252) raises KvikdosBackendError with
+    the child diagnostic instead of terminating this process, while a nonzero
+    guest status is still returned as an int.
+    """
+    worker: KvikdosVmClient | None = None
+    try:
+        worker = _spawn_vm_worker(
+            lib_path=_build_libkvikdos(),
+            request_timeout_s=REQUEST_TIMEOUT_S,
+            run_timeout_s=RUN_TIMEOUT_S,
+        )
+        reply = worker.request(
+            "run_program",
+            timeout_s=RUN_TIMEOUT_S,
+            prog=str(harness_path),
+            dump=str(dump_path),
+        )
+    except KvikdosWorkerError as exc:
+        raise KvikdosBackendError(f"kvikdos run_program: {exc}") from exc
+    finally:
+        if worker is not None:
+            worker.close()
+    status = reply.get("status")
+    if not isinstance(status, int) or isinstance(status, bool):
+        raise KvikdosBackendError("kvikdos worker reply missing int field 'status'")
+    return status
 
 
-def _load_libkvikdos() -> ctypes.CDLL:
-    global _LIB
-    if _LIB is not None:
-        return _LIB
+def _build_libkvikdos() -> Path:
+    """Build (once per process) and return the libkvikdos wrapper .so path.
+
+    The generated C pins ``cmd_args.emu_params.strict_mode = 1`` so the
+    embedded backend enforces the same unsupported-environment policy as the
+    ``kvikdos --strict`` CLI. This process only compiles the wrapper; the
+    shared object is loaded exclusively inside the worker child, so kvikdos's
+    ``fatal:`` path (``exit(252)`` plus a stderr diagnostic) can never
+    terminate this process and load failures surface as ``init_error``.
+    """
+    global _LIB_PATH
+    if _LIB_PATH is not None:
+        return _LIB_PATH
     kvikdos_c = Path(os.environ.get("DOSUNIT_KVIKDOS_C", "/home/xor/kvikdos/kvikdos.c"))
     if not kvikdos_c.exists():
         raise KvikdosBackendError(f"kvikdos.c not found: {kvikdos_c}")
@@ -678,9 +811,57 @@ def _load_libkvikdos() -> ctypes.CDLL:
     cache.mkdir(parents=True, exist_ok=True)
     wrapper = cache / "libkvikdos_wrapper.c"
     shared = cache / "libdosunit_kvikdos.so"
+    mini_kvm_h = kvikdos_c.parent / "mini_kvm.h"
     source = f"""
+#define _GNU_SOURCE 1
 #define main kvikdos_embedded_main
+
+/* Descriptor-provenance prelude. The four dosvm_fd_* wrappers defined after
+ * the include sit at the actual descriptor acquisition/release sites this
+ * kvikdos.c revision uses inside run_dos_prog() reachability: open(), dup(),
+ * dup2() and close(). The pre-include block below pulls in every system
+ * header kvikdos.c itself includes while the names are still unmodified and
+ * under the same _GNU_SOURCE setting as the original translation unit, so
+ * the macros never reach libc declarations; kvikdos.c's own includes then
+ * collapse under their header guards and only its call sites bind to the
+ * wrappers. No descriptor is duplicated or held, so guest-visible handle
+ * allocation is byte-identical to the unmodified source. */
+#include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <termios.h>
+#include <unistd.h>
+#ifdef USE_MINI_KVM
+#  include "{mini_kvm_h}"
+#else
+#  include <linux/kvm.h>
+#endif
+#include <stdarg.h>
+
+static int dosvm_fd_open(const char *pathname, int flags, ...);
+static int dosvm_fd_dup(int fd);
+static int dosvm_fd_dup2(int src_fd, int dst_fd);
+static int dosvm_fd_close(int fd);
+
+#define open dosvm_fd_open
+#define dup dosvm_fd_dup
+#define dup2 dosvm_fd_dup2
+#define close dosvm_fd_close
 #include "{kvikdos_c}"
+#undef close
+#undef dup2
+#undef dup
+#undef open
 #undef main
 
 typedef enum DosVmStatus {{
@@ -689,7 +870,8 @@ typedef enum DosVmStatus {{
   DOSVM_STATUS_TIMEOUT = 2,
   DOSVM_STATUS_FAULT = 3,
   DOSVM_STATUS_UNSUPPORTED = 4,
-  DOSVM_STATUS_BACKEND_ERROR = 5
+  DOSVM_STATUS_BACKEND_ERROR = 5,
+  DOSVM_STATUS_RESET_FAILED = 6
 }} DosVmStatus;
 
 typedef struct DosVm {{
@@ -757,17 +939,195 @@ DosVmStatus dosvm_write_memory(DosVm *vm, unsigned linear, const void *bytes, si
   return DOSVM_STATUS_OK;
 }}
 
+/* Descriptor provenance ledger.
+ *
+ * dosvm_fd_ledger records the descriptor numbers the hooked calls above
+ * created and have not released. It holds numbers only -- never a duplicate
+ * descriptor -- so recording cannot perturb the fd namespace the guest
+ * observes through map_fd_open()/get_linux_fd() (unlike held references or
+ * fd-number snapshots, which were rejected). Ownership follows the
+ * acquisition/release events, not the number's history: a guest descriptor
+ * that reoccupies a previously released number is ledgered again at its own
+ * acquisition, and a number the ledger released stays unowned when a
+ * non-hooked (worker/infra) caller reoccupies it.
+ *
+ * Coverage is exact for this source revision under the wrapper's pinned
+ * configuration (strict_mode=1, is_hlt_ok=0, call_* disabled,
+ * tty_in_fd=-3):
+ * - every descriptor surviving a run boundary came through a hooked call:
+ *   guest file/dup handles, parked /dev/null placeholders, and /dev/kvm
+ *   (filtered out of the drain by emu->kvm_fds below). The ioctl()-created
+ *   vm_fd/vcpu_fd, opendir()/find_dirp (always closed on do_exit, the only
+ *   reachable return), fopen() streams and worker-process fds never enter
+ *   the ledger;
+ * - every release of a ledgered descriptor goes through dosvm_fd_close()
+ *   or through dup2() replacement, which transfers ledger ownership to the
+ *   destination number (the descriptor it replaces no longer exists);
+ * - the ledger bound is fixed (DOSVM_FD_LEDGER_CAP ints); overflowing it
+ *   makes the drain incomplete. Incompleteness is sticky for the worker
+ *   lifetime: it refuses every subsequent run instead of silently leaking,
+ *   and is cleared only by worker-process destruction, which is what
+ *   reclaims descriptors the ledger could not account for.
+ */
+#ifndef DOSVM_FD_LEDGER_CAP
+#define DOSVM_FD_LEDGER_CAP 4096
+#endif
+static int dosvm_fd_ledger[DOSVM_FD_LEDGER_CAP];
+static unsigned dosvm_fd_ledger_len;
+static int dosvm_fd_ledger_incomplete;
+
+static int dosvm_fd_ledger_has(int fd) {{
+  unsigned i;
+  for (i = 0; i != dosvm_fd_ledger_len; ++i) {{
+    if (dosvm_fd_ledger[i] == fd) return 1;
+  }}
+  return 0;
+}}
+
+static void dosvm_fd_ledger_add(int fd) {{
+  if (fd < 0 || dosvm_fd_ledger_has(fd)) return;
+  if (dosvm_fd_ledger_len >= DOSVM_FD_LEDGER_CAP) {{
+    dosvm_fd_ledger_incomplete = 1;
+    return;
+  }}
+  dosvm_fd_ledger[dosvm_fd_ledger_len++] = fd;
+}}
+
+static void dosvm_fd_ledger_remove(int fd) {{
+  unsigned i;
+  for (i = 0; i != dosvm_fd_ledger_len; ++i) {{
+    if (dosvm_fd_ledger[i] == fd) {{
+      dosvm_fd_ledger[i] = dosvm_fd_ledger[--dosvm_fd_ledger_len];
+      return;
+    }}
+  }}
+}}
+
+static int dosvm_fd_open(const char *pathname, int flags, ...) {{
+  int fd;
+  if (flags & O_CREAT) {{
+    va_list ap;
+    va_start(ap, flags);
+    fd = open(pathname, flags, va_arg(ap, mode_t));
+    va_end(ap);
+  }} else {{
+    fd = open(pathname, flags);
+  }}
+  if (fd >= 0) dosvm_fd_ledger_add(fd);
+  return fd;
+}}
+
+static int dosvm_fd_dup(int fd) {{
+  const int fd2 = dup(fd);
+  if (fd2 >= 0) dosvm_fd_ledger_add(fd2);
+  return fd2;
+}}
+
+static int dosvm_fd_dup2(int src_fd, int dst_fd) {{
+  const int result = dup2(src_fd, dst_fd);
+  /* A successful dup2() atomically releases whatever dst_fd held and
+   * installs a descriptor this run created, so a target >= 5 is always
+   * run-acquired residue the drain must own -- even when src_fd itself was
+   * not ledgered (e.g. the guest force-dups standard handle 0..4 onto an
+   * overflow handle). Targets below 5 stay outside the ledger: that is a
+   * stdio redirection whose original description is unrecoverable and must
+   * not be closed (and the guest can reach it only through the pre-existing
+   * handle == fd + 20 aliasing kvikdos already exposes). */
+  if (result == dst_fd && src_fd != dst_fd && dst_fd >= 5) dosvm_fd_ledger_add(dst_fd);
+  return result;
+}}
+
+static int dosvm_fd_close(int fd) {{
+  const int result = close(fd);
+  if (result == 0) {{
+    dosvm_fd_ledger_remove(fd);
+    return result;
+  }}
+  /* A failed close() cannot be retained for a later blind close: on Linux
+   * an erroring close may still have released the fd (and EBADF means the
+   * number is already gone), so by the time a drain would reach it the
+   * number can belong to an unowned descriptor that lawfully reoccupied it.
+   * The recorded evidence is inconsistent either way -- drop the number so
+   * it is never closed again, and mark provenance incomplete so the reset
+   * refuses the next run instead of claiming a clean state. */
+  if (dosvm_fd_ledger_has(fd)) {{
+    dosvm_fd_ledger_remove(fd);
+    dosvm_fd_ledger_incomplete = 1;
+  }}
+  return result;
+}}
+
+/* Restore the parts of a reused VM that reset_emu() (in kvikdos.c above) does
+ * not clear before each dosvm_run_program. This covers guest RAM and the
+ * descriptor set; external state remains a separate gap:
+ *
+ * - reset_emu() memsets [0, ENV_PARA << 4) and [ENV_LIMIT, DOS_MEM_LIMIT)
+ *   (the latter via madvise) but deliberately keeps the environment block
+ *   [ENV_PARA << 4, ENV_LIMIT) so DOS exec() children inherit variables, and
+ *   never touches the mapped guest RAM window [DOS_MEM_LIMIT, GUEST_MEM_LIMIT)
+ *   (the VGA/MDA area). Both regions are guest-writable, so a prior program
+ *   can leave bytes a later program in the same VM would read back. A fresh
+ *   VM has all-zero anonymous RAM there, so restoring zeros is exact.
+ *   DOS exec() inside one run still inherits its own run's env block because
+ *   this helper runs once per dosvm_run_program call, before run_dos_prog.
+ * - mapped_handles is process-static in kvikdos.c and no run resets it, and
+ *   a guest exiting with open handles >= 20 leaks the raw host descriptors
+ *   those handles name. Every mapped_handles entry was recorded in the
+ *   ledger at acquisition, so the slots only need clearing -- closing
+ *   through the table again would risk a stale-alias double close, because
+ *   a guest can release a mapped descriptor through its overflow alias
+ *   (handle == fd + 20) and leave the slot pointing at a number that may
+ *   already have been reused by an unowned descriptor. The drain below
+ *   closes exactly the recorded set, minus the VM's own KVM descriptors,
+ *   so tracked file/dup residue no longer shifts subsequent guest allocation.
+ *   This does not restore standard-stream redirection or external file state.
+ * Returns DOSVM_STATUS_RESET_FAILED when the provenance evidence is
+ * incomplete (ledger overflow or an inconsistent release) or a recorded
+ * descriptor could not be closed; the run must then be refused rather than
+ * execute on unproven state. The failure is sticky: a worker whose evidence
+ * was once incomplete is never rearmed, and its eventual destruction is
+ * what releases the unknown descriptors.
+ */
+static DosVmStatus dosvm_reset_reused_vm(DosVm *vm) {{
+  unsigned i;
+  int failed = dosvm_fd_ledger_incomplete;
+  if (vm->emu.mem != NULL) {{
+    memset((char*)vm->emu.mem + (ENV_PARA << 4), '\0', ENV_LIMIT - (ENV_PARA << 4));
+    memset((char*)vm->emu.mem + DOS_MEM_LIMIT, '\0', GUEST_MEM_LIMIT - DOS_MEM_LIMIT);
+  }}
+  memset(mapped_handles, 0, sizeof(mapped_handles));
+  for (i = 0; i != dosvm_fd_ledger_len; ++i) {{
+    const int fd = dosvm_fd_ledger[i];
+    if (fd == vm->emu.kvm_fds.kvm_fd || fd == vm->emu.kvm_fds.vm_fd || fd == vm->emu.kvm_fds.vcpu_fd) continue;
+    if (close(fd) != 0) failed = 1;
+  }}
+  /* Failed entries are dropped, not retained: a close() error may already
+   * have released the number, and keeping it would invite a later blind
+   * close of an unowned descriptor that reoccupied it. The incomplete flag
+   * is sticky for the worker lifetime: once provenance is incomplete the
+   * descriptor space can never be proven clean again, so every later reset
+   * must keep refusing -- a failed reset never silently rearms into a clean
+   * one. Unknown descriptors are reclaimed only when the worker process is
+   * destroyed; preserving refusal is not a claim of successful cleanup. */
+  dosvm_fd_ledger_len = 0;
+  dosvm_fd_ledger_incomplete = failed;
+  return failed ? DOSVM_STATUS_RESET_FAILED : DOSVM_STATUS_OK;
+}}
+
 DosVmStatus dosvm_run_program(DosVm *vm, const char *prog_filename, const char *dump_filename) {{
   ParsedCmdArgs cmd_args;
   TtyState tty_state;
   char placeholder[] = ".";
   const char *empty_args[] = {{ NULL }};
   int exit_code;
+  DosVmStatus reset_status;
   if (!vm || !prog_filename) return DOSVM_STATUS_BACKEND_ERROR;
+  reset_status = dosvm_reset_reused_vm(vm);
+  if (reset_status != DOSVM_STATUS_OK) return reset_status;
   init_parsed_cmd_args(&cmd_args, placeholder);
   init_tty_state(&tty_state, -3);
   cmd_args.prog_filename = prog_filename;
-  cmd_args.emu_params.strict_mode = 0;
+  cmd_args.emu_params.strict_mode = 1;
   cmd_args.emu_params.is_hlt_ok = 0;
   g_case_fallback_mode = 2;
   g_diag_file = stderr;
@@ -810,11 +1170,17 @@ int dosunit_kvikdos_run(const char *prog_filename, const char *dump_filename) {{
         os.replace(temporary_shared, shared)
     finally:
         temporary_shared.unlink(missing_ok=True)
-    _LIB = ctypes.CDLL(str(shared))
-    return _LIB
+    _LIB_PATH = shared
+    return shared
 
 
 def _run_with_kvikdos_cli(harness_path: Path, dump_path: Path, *, kvikdos_path: Path | None) -> int:
+    """Run a harness with explicit strict policy and preserve failure diagnostics.
+
+    Unsupported guest services must fail instead of synthesizing successful
+    observations. Subprocess isolation keeps native aborts catchable by the
+    vector runner as KvikdosBackendError, preserving result accounting.
+    """
     executable = kvikdos_path or Path(os.environ.get("DOSUNIT_KVIKDOS", "/home/xor/kvikdos/kvikdos"))
     found = shutil.which(str(executable)) if not executable.is_absolute() else str(executable)
     if not found or not Path(found).exists():
@@ -824,7 +1190,7 @@ def _run_with_kvikdos_cli(harness_path: Path, dump_path: Path, *, kvikdos_path: 
     env["KVIKDOS_MEM_DUMP_START"] = "0"
     env["KVIKDOS_MEM_DUMP_SIZE"] = str(DOS_MEM_LIMIT)
     result = subprocess.run(
-        [found, "--tty-in=-3", str(harness_path)],
+        [found, "--strict", "--tty-in=-3", str(harness_path)],
         check=False,
         capture_output=True,
         env=env,

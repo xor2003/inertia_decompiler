@@ -1,11 +1,14 @@
+import io
 from types import SimpleNamespace
 
+import angr
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.annotations import ANNOTATION_KEY
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.calling_convention_compat import collect_wide_stack_argument_width_evidence_8616
 from angr_platforms.X86_16.ir import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from angr_platforms.X86_16.lowering import stack_prototype_materialization as prototype_lowering
 from angr_platforms.X86_16.lowering.callee_argument_count_evidence import (
@@ -206,6 +209,55 @@ def test_carry_chain_proves_matching_loaded_wide_accumulator_and_source() -> Non
     assert evidence.normalized_fact_count == 2
     assert evidence.classified_offsets == (4, 8)
     assert evidence.failure_count == 0
+
+
+def test_types_add_long_instruction_bytes_prove_two_wide_arguments() -> None:
+    """The exact TYPES.EXE carry-chain bytes prove two wide BP arguments."""
+    instruction_bytes = bytes.fromhex("8b 46 08 8b 56 0a 03 46 04 13 56 06")
+    project = angr.Project(
+        io.BytesIO(instruction_bytes + bytes.fromhex("c3")),
+        main_opts={
+            "backend": "blob",
+            "arch": Arch86_16(),
+            "base_addr": 0x1000,
+            "entry_point": 0x1000,
+        },
+        auto_load_libs=False,
+    )
+    function = SimpleNamespace(
+        block_addrs_set={0x1000},
+        get_block_size=lambda _address: len(instruction_bytes) + 1,
+    )
+
+    assert project.loader.memory.load(0x1000, len(instruction_bytes)) == instruction_bytes
+    evidence = collect_wide_stack_argument_width_evidence_8616(project, function)
+
+    assert evidence.raw_fact_count == 2
+    assert evidence.normalized_fact_count == 2
+    assert evidence.classified_offsets == (4, 8)
+    assert evidence.terminal_return_offsets == ()
+    assert evidence.failure_count == 0
+    assert evidence.closes_classification
+    assert project_logical_stack_argument_widths_8616((2, 2, 2, 2), evidence.classified_offsets) == (4, 4)
+
+
+def test_return_seed_exception_refuses_nonadjacent_carry_source() -> None:
+    """A broken high-word operand cannot hide a failed terminal pair."""
+    evidence = analyze_wide_stack_argument_widths_8616(
+        (
+            (
+                _fact("mov", 1, 4, destination_role=StackWordRegisterRole8616.AX_LOW_RETURN),
+                _fact("mov", 2, 6, destination_role=StackWordRegisterRole8616.DX_HIGH_RETURN),
+                _fact("add", 1, 8, destination_role=StackWordRegisterRole8616.AX_LOW_RETURN),
+                _fact("adc", 2, 12, destination_role=StackWordRegisterRole8616.DX_HIGH_RETURN),
+            ),
+        )
+    )
+
+    assert evidence.classified_offsets == ()
+    assert evidence.terminal_return_offsets == ()
+    assert evidence.failure_count == 2
+    assert not evidence.closes_classification
 
 
 def test_carry_chain_refuses_loaded_pair_with_mismatched_destination() -> None:
