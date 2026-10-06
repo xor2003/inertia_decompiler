@@ -129,8 +129,8 @@ class _ForwardingScan8616:
 
         if not isinstance(stmt, structured_c.CAssignment):
             return
-        rhs = getattr(stmt, "rhs", None)
-        lhs = getattr(stmt, "lhs", None)
+        rhs = stmt.rhs
+        lhs = stmt.lhs
 
         # Forward: if reading from a stored-to address
         if rhs is not None and _is_deref_read(rhs):
@@ -167,7 +167,12 @@ class _ForwardingScan8616:
             self.walk_node(getattr(node, "default", None))
 
     def _walk_attr_children(self, node: object) -> None:
-        """Recurse into the node's named structural child attributes."""
+        """Recurse into the node's named structural child attributes.
+
+        Dynamic boundary: third-party angr expression and statement variants
+        expose different child slots. Missing slots have no child to visit;
+        no storage identity or forwarding evidence is inferred from absence.
+        """
         for attr in (
             "condition",
             "cond",

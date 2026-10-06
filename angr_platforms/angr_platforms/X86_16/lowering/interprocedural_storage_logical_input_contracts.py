@@ -6,6 +6,7 @@ consumers, and check exact caller/callee/call/argument/slice identity. Value
 transport does not prove pointer type, pointee, segment equivalence, or storage
 widening; original callee address provenance is preserved unchanged.
 Consumes alias, widening, and typed facts. No codegen or text-based recovery.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

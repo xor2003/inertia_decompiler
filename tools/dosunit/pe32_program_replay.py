@@ -32,6 +32,7 @@ from tools.dosunit.flat32_replay import _instruction_scope, _written_bytes
 from tools.dosunit.flat32_replay_model import OBSERVABLE_REGISTER_IDS, REGISTER_IDS, MemoryRange
 from tools.dosunit.pe32_program_boot import PeProgramBoot, _environment_identity
 from tools.dosunit.real16_program_model import ProgramEvent, ProgramEventKind, ProgramResult, ProgramStatus
+from tools.dosunit.unicorn_engine import EngineArenaRefusal, make_guest
 
 UNDECLARED_EXTERNAL_IDS: frozenset[int] = frozenset({
     decoded_ids.X86_INS_IN, decoded_ids.X86_INS_OUT,
@@ -190,7 +191,7 @@ def _initialize(boot: PeProgramBoot) -> tuple[Uc, tuple[PageGrant, ...]]:
     gateway = boot.environment.exit_address // PAGE_SIZE * PAGE_SIZE
     if not any(grant.address == gateway and grant.access & DeclaredAccess.EXECUTE for grant in grants):
         raise ValueError("declared exit gateway has no executable page grant")
-    guest = Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_32)
+    guest = make_guest(unicorn.UC_ARCH_X86, unicorn.UC_MODE_32)
     for grant in grants:
         guest.mem_map(grant.address, PAGE_SIZE)
     for address, data in boot.image.chunks:
@@ -236,7 +237,7 @@ def replay_pe_program(
     ).hexdigest()
     try:
         guest, grants = _initialize(boot)
-    except UcError as error:
+    except (UcError, EngineArenaRefusal) as error:
         return ProgramResult(
             ProgramStatus.UNAVAILABLE, None, (), (), tuple((item.name, item.region.size) for item in observations),
             (), (), 0, boot.boot_sha256, identity, f"backend_initialization_failed:{error}",

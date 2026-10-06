@@ -34,12 +34,15 @@ from tools.dosunit.recursive_proofs.recursive_call_components import CallCompone
 from tools.dosunit.recursive_proofs.recursive_joint_admission import JointRefusal
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointNodeId,
+    JointProvedControl,
     JointReason,
     JointStepKind,
     JointStepPair,
     JointSystem,
     Real16EnvironmentScope,
 )
+from tools.dosunit.recursive_proofs.recursive_joint_identity import control_view_model_hash
+from tools.dosunit.recursive_proofs.recursive_static_control import resolve_static_control
 
 
 def build_real16_joint_system(
@@ -149,9 +152,11 @@ def _pair_step(member: FunctionId, a: FunctionCtx, b: FunctionCtx, delta: int,
         successors = tuple(JointNodeId(member, target) for target in sorted(declared))
     else:
         raise JointRefusal(JointReason.DISPATCH, "atomic transition has unsupported control kind")
+    original_view = _proved_control_view(a, delta, node, states[0], deadline)
+    candidate_view = _proved_control_view(b, delta, node, states[1], deadline)
     return JointStepPair(node, a.entry_linear + delta, b.entry_linear + delta,
                          a.body_sha256, b.body_sha256, kind, states[0], states[1],
-                         successors, callee, continuation)
+                         successors, callee, continuation, original_view, candidate_view)
 
 
 def _effect(ctx: FunctionCtx, delta: int, deadline: float) -> dict[str, dict[str, Any]]:
@@ -160,6 +165,42 @@ def _effect(ctx: FunctionCtx, delta: int, deadline: float) -> dict[str, dict[str
     state: dict[str, dict[str, Any]] = S._compose_block_outputs(
         block, block["outputs"], initial_state(), compose_stats={"deadline": deadline})
     return state
+
+
+def _proved_control_view(ctx: FunctionCtx, delta: int, node: JointNodeId,
+                         state: dict[str, dict[str, Any]], deadline: float) -> JointProvedControl | None:
+    """Prove a structurally opaque control term under the block's fetch domain.
+
+    The raw composed state is never rewritten — ``native_effect_hash`` and the
+    independent native binder must keep seeing the identical lifted term. The
+    returned ``JointProvedControl`` binds the exact raw term, node and loaded
+    coordinate plus the recorded domain fact, covered machine code and current
+    control-owner model, so joint dispatch validates that binding before
+    resolving the proved ``normalized`` term. Ledger accounting is exact: a
+    produced normalization is adopted into the view and ``consume``d; when no
+    normalization is produced there is no pending product to settle, so no
+    ``unconsumed`` path exists here. Unproven terms return ``None``.
+    """
+    block = ctx.blocks[delta]
+    term = state.get("control_ip")
+    if not isinstance(term, dict) or resolve_static_control(term, deadline=deadline).complete:
+        return None
+    proved = S._proved_composed_control(block, term, state, compose_stats={"deadline": deadline})
+    if proved is None or proved.normalized is None:
+        return None
+    proved.consume()
+    source = block_source(block)
+    domain = source.get("control_domain")
+    return JointProvedControl(
+        node=node,
+        address=ctx.entry_linear + delta,
+        raw=term,
+        normalized=proved.normalized,
+        domain=domain if isinstance(domain, dict) else {},
+        block=block,
+        code_sha256=str(source.get("machine_code_sha256") or ""),
+        model_hash=control_view_model_hash(),
+    )
 
 
 def _image_hash(document: dict[str, Any]) -> str:

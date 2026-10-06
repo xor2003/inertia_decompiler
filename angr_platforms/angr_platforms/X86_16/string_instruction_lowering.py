@@ -387,6 +387,7 @@ class _CompactIntrinsicRender8616(_IntrinsicRender8616):
     declared_prototypes: set[str] = field(default_factory=set)
 
     def record(self, rec: StringIntrinsicRecord) -> None:
+        """Append the family's prototype once, then emit the record's render lines."""
         prototype = _COMPACT_PROTOTYPES_8616[rec.family]
         if prototype not in self.declared_prototypes:
             self.prototype_lines.append(prototype)

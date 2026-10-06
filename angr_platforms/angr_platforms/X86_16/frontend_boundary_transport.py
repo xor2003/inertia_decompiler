@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Protocol, cast
 
-from .frontend_function_boundary import ExactFunctionRangeBoundary8616
+from .frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    bounded_entry_function_boundary_8616,
+)
 from .frontend_function_boundary_index import exact_function_range_inventory_8616
 
 
@@ -78,6 +81,11 @@ class FunctionBoundaryWitness8616:
     blocks: tuple[BoundaryBlockWitness8616, ...]
 
     @property
+    def start(self) -> int:
+        """Return the decoding floor independently of the callable entry."""
+        return min(block.addr for block in self.blocks)
+
+    @property
     def end(self) -> int:
         """Return the enclosing bound from extents, never summed block sizes."""
         return max(block.addr + block.size for block in self.blocks)
@@ -88,13 +96,13 @@ class FunctionBoundaryWitness8616:
             raise ValueError("caller boundary needs a nonnegative entry and blocks")
         if self.blocks != tuple(sorted(set(self.blocks))):
             raise ValueError("caller boundary blocks must be canonical and unique")
-        if self.entry != self.blocks[0].addr:
-            raise ValueError("caller boundary entry must begin its first extent")
+        if self.entry not in {block.addr for block in self.blocks}:
+            raise ValueError("caller boundary entry must begin a witnessed extent")
         for block in self.blocks:
             if type(block.addr) is not int or type(block.size) is not int or block.size <= 0:
                 raise ValueError("caller boundary extent must have integer coordinates and positive size")
-            if block.addr < self.entry:
-                raise ValueError("caller boundary contains an extent before entry")
+            if block.addr < 0:
+                raise ValueError("caller boundary contains a negative extent")
             if len(block.digest) != 64 or any(char not in "0123456789abcdef" for char in block.digest):
                 raise ValueError("caller boundary has an invalid byte digest")
 
@@ -136,10 +144,18 @@ def restore_function_boundary_8616(
     for block in witness.blocks:
         if _digest(project, block.addr, block.size) != block.digest:
             raise ValueError(f"caller boundary bytes disagree at {block.addr:#x}")
-    inventory = exact_function_range_inventory_8616(project, ((witness.entry, witness.end),))
-    if len(inventory.boundaries) != 1:
+    boundary: ExactFunctionRangeBoundary8616 | None
+    if witness.start == witness.entry:
+        # Preserve the established immutable-project boundary identity after
+        # every byte witness has been revalidated above.
+        inventory = exact_function_range_inventory_8616(project, ((witness.entry, witness.end),))
+        boundary = inventory.boundaries[0] if len(inventory.boundaries) == 1 else None
+    else:
+        boundary = bounded_entry_function_boundary_8616(
+            project, witness.entry, witness.start, witness.end
+        )
+    if boundary is None:
         return None
-    boundary = inventory.boundaries[0]
     for raw_block in boundary.blocks:
         decoded = cast(_BlockSurface, raw_block)
         if not _covered(decoded.addr, decoded.addr + decoded.size, witness.blocks):

@@ -50,6 +50,7 @@ from tools.dosunit.recursive_proofs.recursive_call_components import (
 from tools.dosunit.recursive_proofs.recursive_static_control import (
     StaticControlLimits,
     StaticControlReason,
+    StaticControlResult,
     resolve_static_control,
 )
 
@@ -365,6 +366,53 @@ def _call_linear(block: dict[str, Any]) -> int | None:
     return value
 
 
+def _resolve_control(block: dict[str, Any], state: dict[str, dict[str, Any]],
+                     budget: _Budget) -> StaticControlResult:
+    """Resolve the block's control term; consult the fetch domain on opacity.
+
+    Mirrors the production compose router's contract: when the bounded
+    structural evaluator cannot close ``control_ip``, a verified real16
+    ``control_domain`` marker authorizes the same Z3 boundary proof used by
+    ``S._proved_composed_control``. Only a proven normalized term is
+    re-evaluated — under the same shared deadline and step budget — and any
+    unproved, unnormalized or still-incomplete term keeps the original
+    structural non-result, so no refusal boundary is loosened. A proof that
+    produced a normalization the structural closure could not consume is
+    recorded ``unconsumed`` in the shared ledger, never silently dropped.
+    """
+    term = state.get("control_ip")
+    remaining = budget.limits.max_steps - budget.steps
+    if remaining <= 0:
+        budget.bump()
+    control = resolve_static_control(term, deadline=budget.deadline,
+                                     limits=StaticControlLimits(max_nodes=min(65_536, remaining)))
+    budget.bump(control.node_count)
+    if control.reason is StaticControlReason.DEADLINE:
+        raise _BudgetExhausted(AdmissionRefusalReason.DEADLINE_EXCEEDED, {"counter": "static_control"})
+    if control.reason is StaticControlReason.NODE_LIMIT and remaining <= 65_536:
+        raise _BudgetExhausted(AdmissionRefusalReason.STEP_BUDGET_EXCEEDED, {"counter": "static_control"})
+    if control.complete or not isinstance(term, dict):
+        return control
+    proved = S._proved_composed_control(block, term, state, compose_stats=budget.stats)
+    if proved is None or proved.normalized is None:
+        return control
+    remaining = budget.limits.max_steps - budget.steps
+    if remaining <= 0:
+        budget.bump()
+    retry = resolve_static_control(proved.normalized, deadline=budget.deadline,
+                                   limits=StaticControlLimits(max_nodes=min(65_536, remaining)))
+    budget.bump(retry.node_count)
+    if retry.reason is StaticControlReason.DEADLINE:
+        raise _BudgetExhausted(AdmissionRefusalReason.DEADLINE_EXCEEDED, {"counter": "static_control"})
+    if retry.reason is StaticControlReason.NODE_LIMIT and remaining <= 65_536:
+        raise _BudgetExhausted(AdmissionRefusalReason.STEP_BUDGET_EXCEEDED, {"counter": "static_control"})
+    if not retry.complete:
+        proved.unconsumed()
+        return control
+    proved.consume()
+    return retry
+
+
 def _follow_control(
     acc: _Acc, ctx: FunctionCtx, delta: int, block: dict[str, Any],
     state: dict[str, dict[str, Any]], pending: list[tuple[int, dict[str, dict[str, Any]]]],
@@ -373,7 +421,10 @@ def _follow_control(
     """Queue the composed control destination(s); refuse unknown transfers.
 
     The lifted ``control_ip`` term must describe exactly the block's declared
-    static successors. Expansion collects every constant arm (``ite`` arms
+    static successors. When the structural evaluator cannot close a term on
+    a verified fetch-domain block, the same Z3 boundary proof the compose
+    router uses normalizes it first; unproved terms keep the refusal.
+    Expansion collects every constant arm (``ite`` arms
     recurse; any other leaf keeps its explicit unsupported-control refusal
     and marks the term unresolved). A fully resolved term must satisfy exact
     closure — ``discovered == declared`` — or one ``SUCCESSOR_MISMATCH``
@@ -386,16 +437,7 @@ def _follow_control(
     """
     declared = S._direct_successor_delta_set(block)
     budget.bump()
-    remaining = budget.limits.max_steps - budget.steps
-    if remaining <= 0:
-        budget.bump()
-    control = resolve_static_control(state.get("control_ip"), deadline=budget.deadline,
-                                     limits=StaticControlLimits(max_nodes=min(65_536, remaining)))
-    budget.bump(control.node_count)
-    if control.reason is StaticControlReason.DEADLINE:
-        raise _BudgetExhausted(AdmissionRefusalReason.DEADLINE_EXCEEDED, {"counter": "static_control"})
-    if control.reason is StaticControlReason.NODE_LIMIT and remaining <= 65_536:
-        raise _BudgetExhausted(AdmissionRefusalReason.STEP_BUDGET_EXCEEDED, {"counter": "static_control"})
+    control = _resolve_control(block, state, budget)
     discovered = {value - ctx.entry_linear for value in control.targets}
     if not control.complete:
         _refuse(acc, AdmissionRefusalReason.CONTROL_TRANSFER_UNSUPPORTED, ctx.function_id, delta,

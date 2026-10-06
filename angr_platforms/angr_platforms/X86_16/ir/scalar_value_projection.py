@@ -78,6 +78,44 @@ class ScalarBinaryOp8616:
     bits: int
 
 
+def scalar_active_unary_projection_8616(
+    value: IRValue, *, proven_operand_bits: int | None = None,
+) -> ScalarProjection8616 | None:
+    """Authenticate a pending unary conversion without changing its operand identity.
+
+    Captured references already name computed results and cannot carry a pending
+    operation. The declaration must agree with both operand and result widths;
+    compatibility decorations may corroborate it but never supply lineage.
+    A caller may supply ``proven_operand_bits`` only from an exact reaching
+    producer's authoritative result width; byte storage alone cannot prove a
+    captured one-bit result.
+    """
+    unary = value.active_unary
+    if unary is None or value.source_tmp is not None:
+        return None
+    if value.size != (unary.result_bits + 7) // 8:
+        return None
+    if value.expr is not None and value.expr != (unary.op,):
+        return None
+    operand = unary.operand
+    operand_bits = operand.size * 8 if operand.active_unary is None else operand.active_unary.result_bits
+    if proven_operand_bits is not None:
+        if operand.active_unary is not None and operand_bits != proven_operand_bits:
+            return None
+        operand_bits = proven_operand_bits
+    if operand.size != (operand_bits + 7) // 8:
+        return None
+    decision = scalar_read_projection_8616(
+        read_expr=(unary.op,),
+        read_bits=unary.result_bits,
+        produced=(),
+        produced_bits=operand_bits,
+    )
+    if decision is None or decision.kind is not ScalarProjectionKind8616.CONVERSION:
+        return None
+    return decision
+
+
 def scalar_binary_operation_8616(op: str) -> ScalarBinaryOp8616 | None:
     """Decode one backend operation name into typed kind/bits, or refuse."""
     decoded = _SCALAR_BINARY_OPS_8616.get(op)
@@ -165,6 +203,7 @@ __all__ = [
     "ScalarBinaryOp8616",
     "ScalarProjection8616",
     "ScalarProjectionKind8616",
+    "scalar_active_unary_projection_8616",
     "scalar_binary_operation_8616",
     "scalar_produced_decoration_8616",
     "scalar_read_projection_8616",

@@ -66,6 +66,47 @@ class ManifestViolation:
 
 TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
+        owner="local-call-frame-evidence",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/frontend_local_call_evidence.py",
+            "inertia_decompiler/mz_static_intake.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_local_call_evidence.py",
+            "angr_platforms/tests/test_x86_16_local_evidence_epoch.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="per-edge-frame-premise",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/ir/entry_domain_call_preservation.py",
+        ),
+        tests=("angr_platforms/tests/test_x86_16_per_edge_frame_premise.py",),
+    ),
+    TestOwnershipRule(
+        owner="scoped-near-return-continuation",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/frontend_near_return_continuation.py",
+            "angr_platforms/angr_platforms/X86_16/ir/near_return_continuation_view.py",
+            "angr_platforms/angr_platforms/X86_16/ir/scoped_control_obligations.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_near_return_continuation.py",
+            "angr_platforms/tests/test_x86_16_scoped_control_obligations.py",
+            "angr_platforms/tests/test_x86_16_scoped_control_refusal_ledger.py",
+            "angr_platforms/tests/test_x86_16_near_return_scope_guards.py",
+            "angr_platforms/tests/test_x86_16_near_call_frame_width.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="confidence-evidence-reporting",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/confidence_evidence.py",
+            "angr_platforms/angr_platforms/X86_16/confidence_and_assumptions.py",
+        ),
+        tests=("angr_platforms/tests/test_x86_16_confidence_and_assumptions.py",),
+    ),
+    TestOwnershipRule(
         owner="compact-diagnostic-paths",
         paths=("scripts/compact_paths.py",),
         tests=("angr_platforms/tests/test_compact_paths.py",),
@@ -113,6 +154,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
                "tools/dosunit/pe32_program_manifest.py", "tools/dosunit/pe32_program_cli.py"),
         tests=("angr_platforms/tests/test_pe32_program_boot.py",
                "angr_platforms/tests/test_pe32_program_replay.py", "angr_platforms/tests/test_pe32_program_cli.py"),
+    ),
+    TestOwnershipRule(
+        owner="unicorn-engine-arena-policy",
+        paths=("tools/dosunit/unicorn_engine.py",),
+        tests=("angr_platforms/tests/test_unicorn_engine_bounds.py",),
     ),
     TestOwnershipRule(
         owner="symbolic-terminal-services",
@@ -190,8 +236,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="binary-source-bound-leaf-intake",
-        paths=("tools/dosunit/binary_callee_intake.py", "tools/dosunit/binary_callee_discovery.py"),
+        paths=("tools/dosunit/binary_callee_intake.py", "tools/dosunit/binary_callee_discovery.py",
+               "tools/dosunit/binary_callee_control_target.py"),
         tests=("angr_platforms/tests/test_binary_callee_intake.py",
+               "angr_platforms/tests/test_binary_callee_relative_call_coordinates.py",
                "angr_platforms/tests/test_binary_callee_intake_review.py",
                "angr_platforms/tests/test_real16_uncatalogued_calls.py"),
     ),
@@ -212,9 +260,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="binary-recursive-local-induction",
-        paths=("tools/dosunit/recursive_proofs", "angr_platforms/tests/recursive_proof_fixtures"),
+        paths=("tools/dosunit/recursive_proofs", "angr_platforms/tests/recursive_proof_fixtures",
+               "tools/dosunit/real16_call_graph_admission.py"),
         tests=(
             "angr_platforms/tests/test_recursive_call_continuation_contracts.py",
+            "angr_platforms/tests/test_real16_admission_control_domains.py",
             "angr_platforms/tests/test_real16_bound_control_scope.py",
             "angr_platforms/tests/test_real16_native_control_scope.py",
             "angr_platforms/tests/test_real16_native_control_scope_edges.py",
@@ -265,6 +315,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
     ),
 
+    TestOwnershipRule(
+        owner="real16-write-readback",
+        paths=(
+            "tools/dosunit/real16_replay.py",
+            "tools/dosunit/real16_program_replay.py",
+        ),
+        tests=("angr_platforms/tests/test_real16_write_readback.py",),
+    ),
     TestOwnershipRule(
         owner="real16-native-control-proofs",
         paths=("tools/dosunit/real16_control_targets.py", "tools/dosunit/real16_control_boundary.py",
@@ -957,10 +1015,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=(
             "inertia_decompiler/cli_decompilation.py",
             "inertia_decompiler/cli_semantic_rollback.py",
+            "inertia_decompiler/cli_rollback_snapshot_8616.py",
         ),
         tests=(
             "angr_platforms/tests/test_cli_regeneration.py",
             "angr_platforms/tests/test_cli_semantic_rollback.py",
+            "angr_platforms/tests/test_cli_rollback_snapshot.py",
+            "angr_platforms/tests/test_cli_call_inventory.py",
+            "angr_platforms/tests/test_cli_retry_outcome.py",
             "angr_platforms/tests/test_near_pointer_helper_call_guard.py",
         ),
     ),
@@ -1452,6 +1514,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-real16-invocation-domain",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/frontend_direct_callsite_index.py",
+            "angr_platforms/angr_platforms/X86_16/ir/entry_domain_call_preservation.py",
             "angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py",
             "angr_platforms/angr_platforms/X86_16/ir/direct_call_segment_entry.py",
             "angr_platforms/angr_platforms/X86_16/ir/direct_call_segment_context.py",
@@ -1459,10 +1523,45 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_invocation_domain.py",
+            "angr_platforms/tests/test_x86_16_declared_call_target_binding.py",
+            "angr_platforms/tests/test_x86_16_encoded_entry_transport.py",
+            "angr_platforms/tests/test_x86_16_caller_native_intake.py",
+            "angr_platforms/tests/test_x86_16_premise_collection_budget.py",
             "angr_platforms/tests/test_x86_16_invocation_domain_boundaries.py",
             "angr_platforms/tests/test_x86_16_invocation_partition_census.py",
             "angr_platforms/tests/test_x86_16_boot_call_prefix.py",
             "angr_platforms/tests/test_x86_16_invocation_unused_premise.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-declared-interrupt-boundary",
+        paths=(
+            "angr_platforms/angr_platforms/real16_resize_response8616.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_path_memory8616.py",
+            "angr_platforms/angr_platforms/X86_16/frontend_repeated_store8616.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_repeated_store8616.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_initial_memory8616.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_wide_multiply8616.py",
+            "tools/dosunit/real16_program_resize.py",
+            "angr_platforms/angr_platforms/real16_version_response8616.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_declared_interrupt8616.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py",
+            "tools/dosunit/real16_declared_invocation8616.py",
+            "tools/dosunit/real16_program_version.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_declared_resize_boundary.py",
+            "angr_platforms/tests/test_x86_16_resize_path_memory.py",
+            "angr_platforms/tests/test_x86_16_invocation_path_load.py",
+            "angr_platforms/tests/test_x86_16_native_load_binding.py",
+            "angr_platforms/tests/test_x86_16_invocation_feasible_joins.py",
+            "angr_platforms/tests/test_x86_16_invocation_edge_refinement.py",
+            "angr_platforms/tests/test_x86_16_invocation_wide_multiply.py",
+            "angr_platforms/tests/test_x86_16_invocation_internal_exit.py",
+            "angr_platforms/tests/test_x86_16_repeated_store_invocation.py",
+            "angr_platforms/tests/test_x86_16_declared_interrupt_boundary.py",
+            "angr_platforms/tests/test_x86_16_declared_interrupt_collision.py",
+            "angr_platforms/tests/test_real16_program_version.py",
         ),
     ),
     TestOwnershipRule(
@@ -1474,6 +1573,26 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=(
             "angr_platforms/tests/test_x86_16_scoped_invocation_adapter.py",
             "angr_platforms/tests/test_x86_16_invocation_inventory_budgets.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-static-mz-invocation",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/mz_static_boot.py",
+            "angr_platforms/angr_platforms/X86_16/frontend_invocation_inventory.py",
+            "angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py",
+            "angr_platforms/angr_platforms/X86_16/ir/entry_domain_call_preservation.py",
+            "inertia_decompiler/mz_static_intake.py",
+            "inertia_decompiler/project_loading.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_mz_static_invocation.py",
+            "angr_platforms/tests/test_x86_16_mz_static_intake_guards.py",
+            "angr_platforms/tests/test_x86_16_invocation_refusal_site.py",
+            "angr_platforms/tests/test_x86_16_scoped_invocation_source.py",
+            "angr_platforms/tests/test_x86_16_declared_service_chain.py",
+            "angr_platforms/tests/test_x86_16_mz_static_pending_callee.py",
+            "angr_platforms/tests/test_x86_16_invocation_pending_inventory.py",
         ),
     ),
     TestOwnershipRule(
@@ -1937,9 +2056,36 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("angr_platforms/tests/test_x86_16_segment_program_layout.py",),
     ),
     TestOwnershipRule(
+        owner="x86-16-declared-call-consumption",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/declared_external_call_evidence.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/call_projection_blocks.py",
+            "inertia_decompiler/declared_call_transport.py",
+            "angr_platforms/tests/x86_16_declared_call_fixture.py",
+            "angr_platforms/tests/x86_16_declared_admission_fixture.py",
+            "angr_platforms/tests/fixtures/declared_calls",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_declared_call_consumption.py",
+            "angr_platforms/tests/test_declared_call_transport.py",
+            "angr_platforms/tests/test_projected_call_consumption.py",
+            "angr_platforms/tests/test_declared_call_admission.py",
+            "angr_platforms/tests/test_declared_call_schema.py",
+            "angr_platforms/tests/test_declared_call_binding.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="x86-16-segment-state-ir",
-        paths=("angr_platforms/angr_platforms/X86_16/ir/segment_state.py",),
-        tests=("angr_platforms/tests/test_x86_16_segment_state.py",),
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/ir/segment_state.py",
+            "angr_platforms/angr_platforms/X86_16/ir/segment_state_solver.py",
+            "angr_platforms/angr_platforms/X86_16/ir/segment_state_transfer.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_segment_state.py",
+            "angr_platforms/tests/test_x86_16_segment_state_call_boundary.py",
+            "angr_platforms/tests/test_x86_16_segment_state_call_outputs.py",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-segmented-load-origins",
@@ -2139,6 +2285,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/frontend_function_boundary_index.py",
         ),
         tests=("angr_platforms/tests/test_x86_16_frontend_function_boundary_index.py",
+               "angr_platforms/tests/test_x86_16_mapped_backward_boundary.py",
                "angr_platforms/tests/test_x86_16_frontend_boundary_transport.py"),
     ),
     TestOwnershipRule(

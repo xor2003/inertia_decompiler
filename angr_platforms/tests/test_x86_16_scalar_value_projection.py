@@ -6,16 +6,103 @@ the consuming engine; these tests cover the newly shared metadata contract.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from angr_platforms.X86_16.ir.constant_flow import IRConstantFlow8616
-from angr_platforms.X86_16.ir.core import IRInstr, IRValue, MemSpace
+from angr_platforms.X86_16.ir.core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
+from angr_platforms.X86_16.ir.indexed_address_contracts import IndexedAddressFailureKind8616
+from angr_platforms.X86_16.ir.logical_memory_register_transfer import _trace_store_lane_8616
+from angr_platforms.X86_16.ir.logical_memory_register_transfer_contracts import (
+    LogicalMemoryRegisterTransferFailure8616,
+)
+from angr_platforms.X86_16.ir.logical_memory_value_trace import _trace_mov_to_byte_load_8616
 from angr_platforms.X86_16.ir.scalar_value_projection import (
     ScalarBinaryKind8616,
     ScalarProjectionKind8616,
+    scalar_active_unary_projection_8616,
     scalar_binary_operation_8616,
     scalar_produced_decoration_8616,
     scalar_read_projection_8616,
 )
+
+
+@pytest.mark.parametrize("op,source_size,result_bits", [
+    ("Iop_16to8", 2, 8), ("Iop_8Uto16", 1, 16),
+])
+def test_pending_conversion_keeps_exact_operand(
+    op: str, source_size: int, result_bits: int,
+) -> None:
+    """Only coherent pending projections retain the original capture identity."""
+    operand = IRValue(MemSpace.TMP, size=source_size, source_tmp=7)
+    unary = IRActiveUnary8616(op, operand, result_bits)
+    value = IRValue(MemSpace.TMP, size=result_bits // 8, expr=(op,), active_unary=unary)
+    projection = scalar_active_unary_projection_8616(value)
+    assert projection is not None
+    assert (projection.source_bits, projection.target_bits, projection.signed) == (
+        source_size * 8, result_bits, False,
+    )
+    assert unary.operand is operand and operand.source_tmp == 7
+    malformed = (
+        replace(value, size=4), replace(value, source_tmp=7),
+        replace(value, expr=("Iop_Not8",)),
+        replace(value, active_unary=replace(unary, result_bits=32)),
+        replace(value, active_unary=replace(unary, operand=replace(operand, size=4))),
+    )
+    assert all(scalar_active_unary_projection_8616(item) is None for item in malformed)
+
+
+@pytest.mark.parametrize("op", ["Iop_8Sto16", "Iop_Not16", "Iop_16to8"])
+def test_pending_load_refuses_other_operations(op: str) -> None:
+    """A byte-load proof admits unsigned byte extension only."""
+    operand = IRValue(MemSpace.TMP, size=1, source_tmp=7)
+    value = IRValue(MemSpace.TMP, size=2, active_unary=IRActiveUnary8616(op, operand, 16))
+    result = _trace_mov_to_byte_load_8616(value, {}, block_addr=0x1000, before_index=1)
+    assert result.failure is IndexedAddressFailureKind8616.INDEX_EXPRESSION_UNSUPPORTED
+
+
+@pytest.mark.parametrize("op", ["Iop_Not8", "Iop_32to8", "Iop_8Uto16"])
+def test_pending_store_refuses_other_operations(op: str) -> None:
+    """A stored byte proof admits exact word truncation only."""
+    operand = IRValue(MemSpace.TMP, size=2, source_tmp=7)
+    value = IRValue(MemSpace.TMP, size=1, active_unary=IRActiveUnary8616(op, operand, 8))
+    result = _trace_store_lane_8616(value, {}, block_addr=0x1000, before_index=1)
+    assert result.failure is LogicalMemoryRegisterTransferFailure8616.VALUE_OPERATION_UNSUPPORTED
+
+
+def test_pending_one_bit_width_is_not_guessed_from_byte_storage() -> None:
+    """Nested authoritative one-bit results survive; a bare byte does not imply one bit."""
+    word = IRValue(MemSpace.TMP, size=4, source_tmp=7)
+    bit = IRValue(MemSpace.TMP, size=1, active_unary=IRActiveUnary8616("Iop_32to1", word, 1))
+    unary = IRActiveUnary8616("Iop_1Uto8", bit, 8)
+    byte = IRValue(MemSpace.TMP, size=1, active_unary=unary)
+    narrowed = scalar_active_unary_projection_8616(bit)
+    widened = scalar_active_unary_projection_8616(byte)
+    assert narrowed is not None and (narrowed.source_bits, narrowed.target_bits) == (32, 1)
+    assert widened is not None and (widened.source_bits, widened.target_bits) == (1, 8)
+    guessed = replace(byte, active_unary=replace(unary, operand=replace(bit, active_unary=None)))
+    assert scalar_active_unary_projection_8616(guessed) is None
+
+
+def test_pending_load_walk_budget_refuses() -> None:
+    """Exhausted pending-operation traversal cannot publish a load proof."""
+    value = IRValue(MemSpace.TMP, size=1, source_tmp=7)
+    result = _trace_mov_to_byte_load_8616(
+        value, {}, block_addr=0x1000, before_index=1, pending_depth=17,
+    )
+    assert result.failure is IndexedAddressFailureKind8616.INDEX_DEFINITION_CONFLICT
+
+
+def test_captured_bit_needs_producer_width_evidence() -> None:
+    """An operation label on a capture cannot substitute for its producer's width."""
+    captured = IRValue(MemSpace.TMP, size=1, source_tmp=7, expr=("Iop_32to1",))
+    value = IRValue(
+        MemSpace.TMP, size=2, active_unary=IRActiveUnary8616("Iop_1Uto16", captured, 16),
+    )
+    assert scalar_active_unary_projection_8616(value) is None
+    projection = scalar_active_unary_projection_8616(value, proven_operand_bits=1)
+    assert projection is not None and (projection.source_bits, projection.target_bits) == (1, 16)
+    assert scalar_active_unary_projection_8616(value, proven_operand_bits=8) is None
 
 
 @pytest.mark.parametrize("expression,source,target,produced,kind,signed", [

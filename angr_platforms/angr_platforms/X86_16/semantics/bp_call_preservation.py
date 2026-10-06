@@ -4,6 +4,9 @@ Layer: Semantics.
 Responsibility: verify the exact loaded call transfer, resolve its binary-framed
 leaf body through existing Frontend/IR owners, and retain the Alias proof for
 caller-effect consumers. Never infer a compiler ABI or pointer representation.
+Owns instruction effects, flags, branch meaning, and expression interpretation.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

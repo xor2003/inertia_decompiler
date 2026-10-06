@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: require distinct retained VEX statements for an instruction-level
 return-use projection. Address equality alone cannot merge synthetic duplicates.
 Consumes typed IR provenance; does not classify returns or mutate codegen.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

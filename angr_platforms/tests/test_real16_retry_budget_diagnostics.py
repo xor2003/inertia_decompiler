@@ -263,13 +263,13 @@ def test_macro_gate_not_evaluated_passthrough(
 
 
 def test_macro_first_gate_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first early return now leaves typed attempt evidence."""
+    """Exhaustion before the macro gate names the budget, retaining prior evidence."""
     result, clock, log = _macro_run(monkeypatch, jumps={"retry": 0.15})
     assert result is not None and clock.calls == 2 and _names(log) == ["retry"]
     assert "macro_steps" not in result.backend
     _check(result.backend["retry_budget"]["macro_steps"],
            attempted=False, required=True, remaining_ms=_remaining(0.15))
-    assert result.evidence.reason == "inner_refusal"
+    assert result.evidence.reason == "compose_budget_exceeded"
     assert result.evidence.method == "inner_method"
     assert result.evidence.counters == COUNTERS
 
@@ -281,6 +281,7 @@ def test_macro_unmapped_candidate_never_exhausted(
     """An unresolved candidate records a non-budget skip, never exhaustion."""
     result, clock, log = _macro_run(monkeypatch, mapped=False, jumps=jumps)
     assert result is not None and clock.calls == 2 and _names(log) == ["retry"]
+    assert result.evidence.reason == "inner_refusal"
     _check(result.backend["retry_budget"]["macro_steps"],
            attempted=False, required=False, remaining_ms=_remaining(expected))
 

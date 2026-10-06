@@ -66,6 +66,7 @@ compiler-coverage-contracts:
 		angr_platforms/tests/test_compiler_coverage_pointer_oracle.py \
 		angr_platforms/tests/test_compiler_coverage_provenance.py \
 		angr_platforms/tests/test_compiler_coverage_result.py \
-		angr_platforms/tests/test_compiler_coverage_runner.py \
+		$(filter angr_platforms/tests/test_compiler_coverage_runner.py::%,$(CONTROL_HOST_PYTEST_TARGETS)) \
 		angr_platforms/tests/test_msc6_binary_recovery_policy.py \
 		angr_platforms/tests/test_compiler_coverage_suite.py
+	$(Q)$(PYTHON) scripts/test_pipeline.py --lane linux-process-controls --out .cache/pytest/compiler-process-controls.json

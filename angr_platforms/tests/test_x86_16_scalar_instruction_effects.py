@@ -58,14 +58,48 @@ def test_emitted_ordered_comparisons_close(bits: int, relation: str, signedness:
     assert effect.clobber is Clobber.NONE
 
 
-@pytest.mark.parametrize("bits", [8, 16, 32, 64])
+@pytest.mark.parametrize("bits", [1, 8, 16, 32, 64])
 @pytest.mark.parametrize("relation", ["EQ", "NE"])
 def test_equality_comparison_spellings_close(bits: int, relation: str) -> None:
     """Equality comparisons are emitted at all widths without signedness."""
     op = _emitted_comparison_op(relation, bits)
     assert op == f"Iop_Cmp{relation}{bits}"
-    effect = _effect(_compare(op, bits // 8))
+    effect = _effect(_compare(op, max(1, bits // 8)))
     assert effect.kind is Kind.CLOSED_DESTINATION
+
+
+def test_one_bit_comparison_register_destination_clobbers_only_it() -> None:
+    """A REG predicate destination reports exactly that register clobber."""
+    effect = _effect(_binop(
+        "Iop_CmpEQ1", _reg("al", 1), _const(7, 1), _const(3, 1), size=1,
+    ))
+    assert effect.kind is Kind.CLOSED_DESTINATION
+    assert effect.clobber is Clobber.DATA_REGISTER
+
+
+@pytest.mark.parametrize("operand_bytes", [2, 4])
+@pytest.mark.parametrize("op", ["Iop_CmpEQ1", "Iop_CmpNE1"])
+def test_one_bit_comparison_rejects_wider_operands(op: str, operand_bytes: int) -> None:
+    """A Cmp*1 spelling whose operands exceed one byte refuses."""
+    assert _effect(_compare(op, operand_bytes)).kind is Kind.UNKNOWN
+
+
+def test_one_bit_comparison_rejects_wide_destination() -> None:
+    """A 2-byte predicate destination contradicts the one-byte IR shape."""
+    instruction = _binop(
+        "Iop_CmpEQ1", _tmp(7, 2), _const(7, 1), _const(3, 1), size=2,
+    )
+    assert _effect(instruction).kind is Kind.UNKNOWN
+
+
+def test_one_bit_comparison_recomputes_on_mutated_shape() -> None:
+    """Effects re-derive per instruction; decorated or widened shapes refuse."""
+    instruction = _compare("Iop_CmpEQ1", 1)
+    assert _effect(instruction).kind is Kind.CLOSED_DESTINATION
+    decorated = replace(instruction, dst=replace(instruction.dst, expr=("Iop_8to1",)))
+    assert _effect(decorated).kind is Kind.UNKNOWN
+    wider = replace(instruction, args=(_const(7, 2), _const(3, 2)))
+    assert _effect(wider).kind is Kind.UNKNOWN
 
 
 @pytest.mark.parametrize("op", [
@@ -79,6 +113,13 @@ def test_equality_comparison_spellings_close(bits: int, relation: str) -> None:
     "Iop_Cmp24U",
     "Iop_CmpEQ128",
     "Iop_CmpLT128U",
+    "Iop_CmpEQ1S",
+    "Iop_CmpEQ1U",
+    "Iop_CmpNE1S",
+    "Iop_CmpLT1U",
+    "Iop_CmpGE1S",
+    "Iop_CmpEQ0",
+    "Iop_CmpEQ",
 ])
 def test_misspelled_comparisons_refuse(op: str) -> None:
     """A spelling outside the emitter's format is not a closed opcode."""

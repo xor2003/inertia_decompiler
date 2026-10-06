@@ -87,7 +87,14 @@ class _CFunctionBoundary8616(Protocol):
 
 
 class _CodegenBoundary8616(Protocol):
-    """Third-party codegen field exposing the structured function contract."""
+    """Third-party codegen field exposing the structured function contract.
+
+    The ``_inertia_*`` slots are optional evidence attached by earlier stages:
+    the alias restore producer returns without attaching when IR is absent or
+    invalid, and the IR importer may never have run on a partial codegen. A
+    physically absent slot therefore means absent evidence; readers catch only
+    ``AttributeError`` at that boundary and let other failures propagate.
+    """
 
     cfunc: _CFunctionBoundary8616
     _inertia_segment_stack_restore_artifact: object
@@ -138,9 +145,15 @@ def _far_return_cs_entry_ranges_8616(
     RET proves the far return frame, whose CS word at machine BP+4..+5 was
     defined by the caller before entry.
     """
-    artifact = getattr(boundary, "_inertia_segment_stack_restore_artifact", None)
-    ir_artifact = getattr(boundary, "_inertia_vex_ir_artifact", None)
+    try:
+        artifact = boundary._inertia_segment_stack_restore_artifact
+    except AttributeError:
+        return ()
     if not isinstance(artifact, SegmentStackRestoreArtifact8616):
+        return ()
+    try:
+        ir_artifact = boundary._inertia_vex_ir_artifact
+    except AttributeError:
         return ()
     terminal_ret_addrs = terminal_ret_instruction_addrs_8616(ir_artifact)
     if not terminal_ret_addrs:

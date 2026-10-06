@@ -405,6 +405,24 @@ def active_status_flag_lift_context_8616(
         _publish_stats_8616(function, session)
 
 
+@contextmanager
+def architectural_status_flag_replay_8616() -> Iterator[bool]:
+    """Temporarily replay native provenance without function-CFG flag omission.
+
+    Raw IR can predate the active optimized lift. Its statement/temporary
+    coordinates must be checked against that architectural view as well.
+    Yield whether an active context was suspended, so a caller can avoid a
+    duplicate replay when no alternate view exists. Restore the exact task-local
+    session on every exit; no liveness evidence or counters are discarded.
+    """
+    session = _active_session.get()
+    token = _active_session.set(None)
+    try:
+        yield session is not None
+    finally:
+        _active_session.reset(token)
+
+
 def cfg_status_flag_dead_write_mask_8616(
     instruction_address: int,
     written: StatusFlag8616,
@@ -463,6 +481,7 @@ __all__ = [
     "StatusFlagLiftSession8616",
     "active_status_flag_lift_artifact_8616",
     "active_status_flag_lift_context_8616",
+    "architectural_status_flag_replay_8616",
     "cfg_status_flag_dead_write_mask_8616",
     "published_status_flag_lift_artifact_8616",
     "resolve_status_flag_lift_artifact_8616",

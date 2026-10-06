@@ -20,6 +20,9 @@ refusal, never a guess.
 
 This module does not classify targets or discharge native binding proofs;
 those remain with ``direct_near_call_target_binding`` and the shared binder.
+Owns instruction effects, flags, branch meaning, and expression interpretation.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
@@ -63,6 +66,7 @@ __all__ = [
     "CallTargetEvidenceStats8616",
     "CallTargetEvidenceVerdict8616",
     "publish_call_semantic_projection_8616",
+    "resolve_call_ir_projection_8616",
     "resolve_call_target_evidence_8616",
 ]
 
@@ -519,6 +523,40 @@ def _semantic_source_identity_8616(
             admitted,
         )
     return source, admitted + 1
+
+
+def resolve_call_ir_projection_8616(
+    project: object, artifact: IRFunctionArtifact
+) -> CallTargetEvidencePublication8616:
+    """Authenticate the exact enriched IR against retained SSA and raw source.
+
+    IR consumers rebind the raw CALL against native bytes themselves, so they
+    need the projection chain without constructing a separate decoded census.
+    This shares the registry authentication used by the SSA target resolver.
+    """
+    caller_addr = artifact.function_addr
+    refused = CallTargetEvidenceStats8616(1, 1, 0, 0, 1)
+    ssa = registered_function_ssa_artifact_8616(project, caller_addr)
+    projection = _retained_projection_8616(project, caller_addr)
+    failure = CallTargetEvidenceFailure8616.SEMANTIC_PROJECTION_STALE
+    if (
+        ssa.verdict is FunctionSSAArtifactVerdict8616.PROVEN
+        and ssa.stage is FunctionSSAArtifactStage8616.SEMANTIC
+        and projection is not None
+        and projection.outputs.function is artifact
+    ):
+        verified = _semantic_source_identity_8616(project, caller_addr, ssa, projection, 0)
+        if not isinstance(verified, CallTargetEvidenceResolution8616):
+            return CallTargetEvidencePublication8616(
+                caller_addr, CallTargetEvidenceVerdict8616.PROVEN, None,
+                projection, CallTargetEvidenceStats8616(1, 1, 1, 1, 0),
+            )
+        assert verified.failure is not None
+        failure = verified.failure
+    return CallTargetEvidencePublication8616(
+        caller_addr, CallTargetEvidenceVerdict8616.UNKNOWN_REFUSE,
+        failure, None, refused,
+    )
 
 
 def resolve_call_target_evidence_8616(

@@ -109,6 +109,7 @@ def _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result: subproces
     )
 
 
+@pytest.mark.requires_kvm
 def test_cod_timeout_target_is_classified_deterministically():
     start = time.monotonic()
     result = _run_cod_proc(
@@ -189,6 +190,7 @@ def test_cod_runner_hotspots_fall_back_through_scan_safe_classifier(monkeypatch,
     assert "worker process terminated abruptly" not in rendered
 
 
+@pytest.mark.requires_kvm
 def test_cod_biosfunc_clearkeyflags_far_word_store() -> None:
     """Retain discovery and far-store behavior in one real decompilation."""
     result = _run_cod_proc(COD_DIR / "BIOSFUNC.COD", "_bios_clearkeyflags")
@@ -216,6 +218,7 @@ def test_cod_biosfunc_clearkeyflags_far_word_store() -> None:
     )
 
 
+@pytest.mark.requires_kvm
 def test_cod_dos_getfree_call_and_return_recovered() -> None:
     """Retain discovery, declaration and return checks from one CLI run."""
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_getfree")
@@ -256,6 +259,7 @@ def test_cod_process_id_source_headers_are_captured():
     assert "int dos_setProcessId(const uint16 pid) {" in set_meta.source_lines
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.parametrize(
     ("proc_name", "header_anchor"),
     (
@@ -322,6 +326,7 @@ def test_preferred_known_helper_signature_decl_prefers_canonical_prefixed_names(
     assert decompile.preferred_known_helper_signature_decl("ERROR") == "int _ERROR(const char *fmt, ...);"
 
 
+@pytest.mark.requires_kvm
 def test_cod_strlen_stack_local_copy_is_declared():
     result = _run_cod_proc(COD_DIR / "default" / "STRLEN.COD", "_strlen")
 
@@ -388,6 +393,7 @@ def test_cod_overlay_header_known_object_is_pointer_typed():
     assert getattr(spec.type.pts_to, "name", None) == "OvlHeader"
 
 
+@pytest.mark.requires_kvm
 def test_cod_overlay_function_address_keeps_proven_known_object_bindings(tmp_path: Path) -> None:
     result = _run_cod_proc(COD_DIR / "OVERLAY.COD", "_overlay_functionAddress")
 
@@ -409,6 +415,7 @@ def test_cod_overlay_function_address_keeps_proven_known_object_bindings(tmp_pat
     assert_overlay_return_behavior(text, tmp_path)
 
 
+@pytest.mark.requires_kvm
 def test_cod_dos_loadoverlay_wrapper_returns_loadprog() -> None:
     """Retain discovery, declaration and forwarding checks from one CLI run."""
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_loadOverlay")
@@ -437,6 +444,7 @@ def test_cod_dos_loadoverlay_wrapper_returns_loadprog() -> None:
     )
 
 
+@pytest.mark.requires_kvm
 def test_cod_dos_runprogram_wrapper_returns_loadprog():
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_runProgram")
 
@@ -463,6 +471,7 @@ def test_cod_dos_runprogram_wrapper_returns_loadprog():
     )
 
 
+@pytest.mark.requires_kvm
 def test_cod_loadprog_preserves_binary_arguments_and_recompiles() -> None:
     """Require validated, recompilable binary recovery without source substitution."""
     result = _run_cod_proc(
@@ -501,6 +510,7 @@ def test_cod_loadprog_preserves_binary_arguments_and_recompiles() -> None:
     assert compile_result.passed, compile_result.stderr
 
 
+@pytest.mark.requires_kvm
 def test_cod_openfilewrapper_direct_forwarding() -> None:
     """Check discovery, declarations and forwarding from one identical CLI run."""
     result = _run_cod_proc(COD_DIR / "EGAME2.COD", "_openFileWrapper")
@@ -520,6 +530,7 @@ def test_cod_openfilewrapper_direct_forwarding() -> None:
     )
 
 
+@pytest.mark.requires_kvm
 def test_cod_dos_getreturncode_returns_value() -> None:
     """Retain discovery and return behavior from one real decompilation."""
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_getReturnCode")
@@ -619,31 +630,46 @@ def test_prune_unused_local_declarations_text_drops_unused_stack_bp_placeholder_
     assert "char s_fffa;" in pruned
 
 
-def test_cod_dos_loadprogram_wrapper_keeps_err_guard_and_segment_stores(monkeypatch, tmp_path):
-    from x86_16_loadprogram_behavior import assert_loadprogram_behavior
+@pytest.mark.requires_kvm
+def test_cod_dos_loadprogram_wrapper_keeps_err_guard_and_segment_stores(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Validate the binary ABI and execute the explicitly declared call contract.
+
+    The CLI run recompiles generated C through the KvikDOS-hosted MS C 5.1
+    toolchain, so this test requires writable /dev/kvm.
+    """
+    from x86_16_loadprogram_behavior import LoadProgramAbi, assert_loadprogram_behavior
 
     monkeypatch.setenv("INERTIA_DEBUG_TIMING", "1")
-    result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_loadProgram")
+    result = _run_cod_proc(
+        COD_DIR / "DOSFUNC.COD", "_dos_loadProgram",
+        extra_args=(
+            "--declared-call-effects",
+            "angr_platforms/tests/fixtures/declared_calls/loadprogram-declarations.json",
+        ),
+    )
 
     assert result.returncode == 0, result.stderr
     assert "validation=passed" in result.stderr
+    assert "assumption_consumed=true" in result.stderr
     assert result.stdout.count("err = loadprog(") == 1
     _assert_has_all(
         result.stdout,
         (
-            "cs[0] = exeLoadParams[10];",
-            "ss[0] = exeLoadParams[8];",
+            "arg_a[0] = exeLoadParams[10];",
+            "arg_c[0] = exeLoadParams[8];",
             "return 0;",
         ),
     )
-    assert_loadprogram_behavior(result.stdout, tmp_path)
+    assert_loadprogram_behavior(result.stdout, tmp_path, abi=LoadProgramAbi.BINARY)
     _assert_has_none(
         result.stdout,
         (
             "MK_FP(ds,",
             "SEG_U8(inertia_ss,",
-            "cs[1]",
-            "ss[1]",
+            "arg_a[1]",
+            "arg_c[1]",
             "ax = exeLoadParams",
         ),
     )

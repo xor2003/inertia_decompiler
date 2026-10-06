@@ -347,6 +347,27 @@ different results. Run eligible SSA/Z3 checks before concrete dosunit tests.
 Keep timeouts/refusals and normalization assumptions visible; a partial-region
 proof is not a whole-function proof. Preserve counterexamples for replay.
 
+**Neither the 16-bit nor the 32-bit SSA/Z3 comparator needs KVM.** VEX
+lifting and symbolic comparison run without executing the DOS binary. Unicorn
+replay and host GCC checks also do not require KVM. KVM is required when
+executing the libkvikdos backend or a DOS compiler through kvikdos, including
+decompiler CLI acceptance tests that recompile generated C with that compiler.
+
+Tests that execute those KVM paths must carry `@pytest.mark.requires_kvm`.
+Tests also carry [component ownership markers](reference/test-components.md),
+such as `decompiler`, `ssa_z3`, `dosunit`, `compiler_detector` and `ada_script`.
+Use `-m 'ssa_z3 and not requires_kvm'` to select static comparator coverage.
+Mixed test modules use function-level marks; mocked runners stay unmarked.
+From the repository root, select the two test lanes explicitly:
+
+```bash
+nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest -m 'not requires_kvm'
+nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest -m requires_kvm
+```
+
+Unavailable KVM skips marked tests with a device-access reason. It does not
+block static comparator evidence, and a skipped native test is not acceptance.
+
 ### 6. Run concrete oracle tests, then full game scenarios
 
 With reviewed `original.functions.json`, `candidate.functions.json` and

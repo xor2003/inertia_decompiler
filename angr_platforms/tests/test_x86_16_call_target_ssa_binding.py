@@ -15,7 +15,8 @@ from angr_platforms.X86_16.frontend_direct_callsite_index import (
     build_boundary_direct_callsite_index_8616,
 )
 from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from angr_platforms.X86_16.ir import IRFunctionArtifact, IRValue
+from angr_platforms.X86_16.ir import IRFunctionArtifact, IRValue, MemSpace
+from angr_platforms.X86_16.ir.core import IRActiveUnary8616
 from angr_platforms.X86_16.ir.function_ir_registry import publish_function_ir_artifact_8616
 from angr_platforms.X86_16.ir.function_ssa_registry import (
     FunctionSSAArtifactStage8616,
@@ -26,6 +27,7 @@ from angr_platforms.X86_16.ir.vex_import import build_x86_16_ir_function_artifac
 from angr_platforms.X86_16.lowering.call_target_projection_integrity import (
     CallProducerIntegrityFailure8616,
     call_operand_producer_integrity_8616,
+    ssa_value_modulo_version_8616,
 )
 from angr_platforms.X86_16.lowering.call_target_ssa_binder import (
     CallTargetBindStage8616,
@@ -231,3 +233,16 @@ def test_public_producer_integrity_accepts_actual_call_index() -> None:
     source = evidence.raw.blocks[0]
     index = next(i for i, instruction in enumerate(source.instrs) if instruction.op == "CALL")
     assert call_operand_producer_integrity_8616(evidence.ssa.blocks[0], source, index) is None
+
+
+@pytest.mark.parametrize("field", ["source_tmp", "memory_access_insn"])
+def test_pending_operand_provenance_is_checked_beneath_unary(field: str) -> None:
+    """Compare-exempt nested provenance cannot authorize a different producer."""
+    operand = IRValue(MemSpace.TMP, size=2, source_tmp=7, memory_access_insn=0x1000)
+    unary = IRActiveUnary8616("Iop_16Uto32", operand, 32)
+    source = IRValue(MemSpace.TMP, size=4, active_unary=unary)
+    projected = replace(source, version=1)
+    assert ssa_value_modulo_version_8616(projected, source)
+    changed = replace(operand, **{field: 123})
+    corrupted = replace(projected, active_unary=replace(unary, operand=changed))
+    assert not ssa_value_modulo_version_8616(corrupted, source)

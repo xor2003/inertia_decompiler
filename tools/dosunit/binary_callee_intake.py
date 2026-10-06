@@ -331,22 +331,24 @@ def _instruction_bytes(record: Mapping[str, Any]) -> bytes | None:
 
 
 def _near_call_target(site_linear: int, raw: bytes, operand_size: int) -> int | None:
-    """Recompute the near-CALL destination from exact instruction bytes.
+    """Recompute full loaded control from exact bytes and all fetching selectors.
 
-    Follows the lifter's own rule: rel16 wraps in the 16-bit loader control
-    domain, rel32 keeps the full 32-bit sum.  Returns None when the bytes are
-    not an ``E8`` near call with a complete displacement.
+    Unsupported prefix/width or selector-dependent control stays unresolved.
+    Wrapping belongs to architectural IP/EIP, not loader coordinates.
     """
-    index = 0
-    while index < len(raw) and raw[index] in _LEGACY_PREFIX_BYTES:
-        index += 1
-    if index >= len(raw) or raw[index] != 0xE8:
+    from angr_platforms.X86_16.relative_control_edge import (
+        DecodedRelativeEdge,
+        decode_relative_edge,
+        invariant_relative_destination,
+    )
+
+    edge = decode_relative_edge(site_linear, raw, source="callee_intake")
+    if (not isinstance(edge, DecodedRelativeEdge) or not edge.is_call
+            or edge.width.value != operand_size * 8):
         return None
-    displacement = raw[index + 1 :]
-    if len(displacement) != operand_size:
-        return None
-    offset = int.from_bytes(displacement, "little", signed=True)
-    return (site_linear + len(raw) + offset) & ((1 << (operand_size * 8)) - 1)
+    target: int | None = invariant_relative_destination(edge).target
+    return target
+
 
 
 def _resolve_document_identity(

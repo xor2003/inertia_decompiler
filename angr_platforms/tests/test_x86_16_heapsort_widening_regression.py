@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from x86_16_heapsort_behavior import assert_heapsort_behavior
 from x86_16_timeout_support import scaled_decompile_timeout as _scaled_timeout
 
@@ -52,6 +53,7 @@ def _run_decompile_addr(
     )
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_heapsort_uses_widened_word_access_for_crow_anchor(tmp_path: Path) -> None:
     result = _run_decompile_addr(SORTDEMO_EXE, 0x10970, analysis_timeout=30, subprocess_timeout=120)
 
@@ -64,6 +66,7 @@ def test_sortdemo_heapsort_uses_widened_word_access_for_crow_anchor(tmp_path: Pa
     assert "SEG_PTR(ds" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortd_heapsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Path) -> None:
     isolated_binary = tmp_path / "SORTD.EXE"
     isolated_binary.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -87,6 +90,7 @@ def test_sortd_heapsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Pat
     assert re.search(r"^\s+sub_1075b\(", result.stdout, re.MULTILINE) is None
 
 
+@pytest.mark.requires_kvm
 def test_sortd_shellsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Path) -> None:
     isolated_binary = tmp_path / "SORTD.EXE"
     isolated_binary.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -148,6 +152,7 @@ def test_sortd_shellsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Pa
     assert contract_result.passed, contract_result.to_json()
 
 
+@pytest.mark.requires_kvm
 def test_sortd_swaps_sidecar_free_materializes_aggregate_interface(
     tmp_path: Path,
 ) -> None:
@@ -193,6 +198,7 @@ def test_sortd_swaps_sidecar_free_materializes_aggregate_interface(
     assert "validation_failed" not in combined
 
 
+@pytest.mark.requires_kvm
 def test_sortd_swaps_caller_uses_one_proven_aggregate_family(
     tmp_path: Path,
 ) -> None:
@@ -234,6 +240,7 @@ def test_sortd_swaps_caller_uses_one_proven_aggregate_family(
     assert "g_0B4E" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortd_percolate_down_uses_canonical_shifted_global_view(
     tmp_path: Path,
 ) -> None:
@@ -280,6 +287,7 @@ def test_sortd_percolate_down_uses_canonical_shifted_global_view(
     assert "g_0B4E" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortd_percolate_up_sidecar_free_preserves_heap_updates_and_compiles(
     tmp_path: Path,
 ) -> None:

@@ -5,6 +5,8 @@ Responsibility: invalidate semantic caches when the external Deark executable
 changes, including a replacement at the same configured path.
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 from pathlib import Path

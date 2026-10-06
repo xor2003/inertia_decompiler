@@ -4,6 +4,10 @@ Layer: IR.
 Responsibility: bind an existing direct-call DS==SS proof to registered caller
 and callee coverage. Recheck the retained evidence before supplying an entry
 relation; never publish a program-wide invariant or guess callee preservation.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

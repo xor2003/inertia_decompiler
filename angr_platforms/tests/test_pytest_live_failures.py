@@ -71,6 +71,7 @@ def test_nonfailure_reports_are_quiet(request: pytest.FixtureRequest, outcome: s
 
 
 @pytest.mark.parametrize("workers", [0, 2])
+@pytest.mark.resource_serial
 @pytest.mark.skipif(
     "PYTEST_XDIST_WORKER" in os.environ,
     reason="Nested pytest controls run in an explicit serial lane to preserve the aggregate worker limit",

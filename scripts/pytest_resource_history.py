@@ -9,7 +9,7 @@ concurrency.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -267,7 +267,7 @@ class WorkerResourceHistory:
         return _maximum_measurements((*self.observed_lower_bounds, *current))
 
 
-def _typed_observed_measurements(payload: dict[str, object]) -> tuple[WorkerResourceMeasurement, ...]:
+def _typed_observed_measurements(payload: Mapping[object, object]) -> tuple[WorkerResourceMeasurement, ...]:
     """Decode exact current-run peaks without inferring contracts from worker names."""
 
     worker_contracts = payload.get("worker_contracts")

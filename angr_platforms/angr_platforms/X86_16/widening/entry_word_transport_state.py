@@ -13,6 +13,7 @@ refuses, since it cannot describe the taken edge. The block-entry register map
 is ``None`` when the entry is unseeded or poisoned, which then propagates as a
 poisoned exit. Unknown effects and CALLs kill all register evidence; no cone
 construction or selected-site policy lives here.
+Consumes alias-proven storage identity.
 Do not join values from rendered text, cosmetic shape, postprocess, or CLI/reporting evidence.
 """
 

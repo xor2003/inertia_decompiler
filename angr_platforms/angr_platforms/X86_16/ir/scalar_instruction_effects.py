@@ -103,16 +103,27 @@ class ScalarInstructionEffect8616:
 # carry a trailing S/U at every width, including spellings absent from the
 # stock VEX enum (``Iop_CmpLT16U`` is observed in real lifted IR).
 # ``Iop_CmpLTU16``-style misspellings are not emitted. Values map each
-# exact spelling to its operand width in bits.
+# exact spelling to its operand width in bits. Equality at width 1 is
+# emitted by one-bit comparisons (``Iop_CmpEQ1``/``Iop_CmpNE1`` — observed
+# in REPNE/REPE string-operation tails and single-flag tests); like the
+# predicate destination, one-bit operands occupy one byte of IR storage.
 _COMPARISON_OPS_8616: dict[str, int] = {
     f"Iop_Cmp{relation}{bits}": bits
     for relation in ("EQ", "NE")
-    for bits in (8, 16, 32, 64)
+    for bits in (1, 8, 16, 32, 64)
 } | {
     f"Iop_Cmp{relation}{bits}{signedness}": bits
     for relation in ("LT", "LE", "GT", "GE")
     for bits in (8, 16, 32, 64)
     for signedness in ("S", "U")
+}
+
+# Widening products have different operand/result widths and therefore must
+# not enter the same-width scalar_binary_operation descriptor table.
+_WIDENING_PRODUCT_BYTES_8616: dict[str, int] = {
+    f"Iop_Mull{signedness}{bits}": bits // 8
+    for signedness in ("S", "U")
+    for bits in (8, 16, 32)
 }
 
 
@@ -144,7 +155,8 @@ def _closed_destination_8616(instruction: IRInstr) -> IRValue | None:
 
     A closed destination is exact storage: no displacement, index, decoration,
     or fabricated literal, and a positive width. TMPs retain producer identity;
-    REGs retain their name and never carry a tmp's capture identity. The
+    REGs retain their name and never carry a tmp's capture identity. An active
+    computation cannot identify destination storage. The
     instruction width agrees with the declared destination width.
     """
     destination = instruction.dst
@@ -156,7 +168,8 @@ def _closed_destination_8616(instruction: IRInstr) -> IRValue | None:
         return None
     if destination.offset or destination.index is not None or destination.index_shift:
         return None
-    if destination.expr or destination.const is not None or destination.call_output is not None:
+    if (destination.expr or destination.const is not None
+            or destination.call_output is not None or destination.active_unary is not None):
         return None
     if destination.source_tmp is not None and destination.space is not MemSpace.TMP:
         return None
@@ -194,7 +207,10 @@ def _const_target_8616(value: object) -> TypeGuard[IRValue]:
         return False
     if value.offset or value.index is not None or value.index_shift:
         return False
-    return not value.expr and value.source_tmp is None and value.call_output is None
+    return (
+        not value.expr and value.source_tmp is None
+        and value.call_output is None and value.active_unary is None
+    )
 
 
 def _classify_mov_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
@@ -294,16 +310,18 @@ def _classify_comparison_8616(
 
     The IR represents the 1-bit predicate in one byte: ``dst.size`` and the
     instruction size are 1 while both operands are typed reads of exactly the
-    width encoded in the exact custom-emitter operation spelling.
+    width encoded in the exact custom-emitter operation spelling. One-bit
+    operand spellings share that same one-byte storage convention.
     """
     operand_bits = _COMPARISON_OPS_8616.get(instruction.op)
     if operand_bits is None or len(instruction.args) != 2:
         return None
+    operand_bytes = max(1, operand_bits // 8)
     left, right = instruction.args
     if not (
         _readable_scalar_source_8616(left)
         and _readable_scalar_source_8616(right)
-        and left.size == right.size == operand_bits // 8
+        and left.size == right.size == operand_bytes
     ):
         return _unknown_8616("compare_shape")
     destination = _closed_destination_8616(instruction)
@@ -334,8 +352,8 @@ def _binary_operands_valid_8616(
     if left.size != operation.bits // 8:
         return False
     if operation.kind in {ScalarBinaryKind8616.SHL, ScalarBinaryKind8616.SHR}:
-        return right.size > 0
-    return right.size == operation.bits // 8
+        return bool(right.size > 0)
+    return bool(right.size == operation.bits // 8)
 
 
 def _classify_binary_8616(
@@ -370,6 +388,24 @@ def _classify_boolean_binary_8616(instruction: IRInstr) -> ScalarInstructionEffe
     return effect if effect is not None else _unknown_8616("boolean_shape")
 
 
+def _classify_widening_product_8616(
+    instruction: IRInstr,
+) -> ScalarInstructionEffect8616 | None:
+    """Close a pure product's explicit double-width write, without proving its value."""
+    operand_bytes = _WIDENING_PRODUCT_BYTES_8616.get(instruction.op)
+    if operand_bytes is None:
+        return None
+    if instruction.size != 2 * operand_bytes or len(instruction.args) != 2:
+        return _unknown_8616("widening_product_shape")
+    if not all(
+        _readable_scalar_source_8616(value) and value.size == operand_bytes
+        for value in instruction.args
+    ):
+        return _unknown_8616("widening_product_shape")
+    effect = _closed_write_8616(instruction, "widening_product")
+    return effect if effect is not None else _unknown_8616("widening_product_shape")
+
+
 _CLASSIFIERS_8616: dict[str, Callable[[IRInstr], ScalarInstructionEffect8616]] = {
     "MOV": _classify_mov_8616,
     "LOAD": _classify_load_8616,
@@ -389,7 +425,9 @@ def scalar_instruction_effect_8616(
     MOV/LOAD and registered ``scalar_binary_operation_8616`` descriptors are
     closed only under validated typed shapes whose widths agree with the
     operator. Exact integer comparisons are pure one-byte-destination
-    operations. A valid STORE writes memory and no register; a valid CJMP
+    operations. Widening products require a destination twice the operand
+    width; effect closure does not establish a numeric product value.
+    A valid STORE writes memory and no register; a valid CJMP
     writes IP explicitly rather than claiming "no register write". Literal
     JMP shapes likewise close their explicit IP transfer; indirect jumps stay
     unknown. CALL and
@@ -398,7 +436,10 @@ def scalar_instruction_effect_8616(
     classifier = _CLASSIFIERS_8616.get(instruction.op)
     if classifier is not None:
         return classifier(instruction)
-    for classify in (_classify_comparison_8616, _classify_binary_8616, _classify_boolean_binary_8616):
+    for classify in (
+        _classify_comparison_8616, _classify_binary_8616,
+        _classify_boolean_binary_8616, _classify_widening_product_8616,
+    ):
         effect = classify(instruction)
         if effect is not None:
             return effect

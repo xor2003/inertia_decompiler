@@ -100,9 +100,15 @@ def test_region_report_checks_environment_after_retry(
             "tools.dosunit.flat32_proof_retry.retry_function_proof",
             lambda *_args, **_kwargs: {"status": lane.verdict.Status.PASSED, "reason": "macro_step_induction"},
         )
+        seen_models: list[object] = []
+
+        def _scan(_project, _parts, *, io_model=None):
+            seen_models.append(io_model)
+            return EnvironmentScan(True, True, 1)
+
         monkeypatch.setattr(
             "tools.dosunit.binary_environment.scan_lowered_parts",
-            lambda *_args: EnvironmentScan(True, True, 1),
+            _scan,
         )
         document = {"functions": [], "refusals": [
             {"detail": {"function_id": "oracle:loop"}, "reason": "incomplete"},
@@ -117,6 +123,7 @@ def test_region_report_checks_environment_after_retry(
         report = lane.z3cmp32.compare_region_mode(args, document, document, ["loop"], **kwargs)
         assert report["results"][0]["status"] == "refused"
         assert report["results"][0]["reason"] == "external_environment_contract_required"
+        assert seen_models and all(model is seen_models[0] for model in seen_models)
 
 
 def test_cfg_retry_cannot_publish_without_environment_coverage() -> None:

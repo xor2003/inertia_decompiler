@@ -180,6 +180,11 @@ from inertia_decompiler.c_text_cleanup import normalize_unresolved_c_text
 from inertia_decompiler.cli_output import (
     _timestamped_print,
 )
+from inertia_decompiler.cli_rollback_snapshot_8616 import (
+    PickledCfuncSnapshot8616,
+    pickled_trusted_cfunc_8616,
+    unpickle_trusted_cfunc_8616,
+)
 from inertia_decompiler.cli_semantic_rollback import (
     TrustedCoreSnapshot8616,
     rollback_final_semantic_drift_8616,
@@ -2746,6 +2751,21 @@ class CallLossGuardedDceResult8616:
     after_calls: int
 
 
+@dataclass(frozen=True)
+class CliCallInventory8616:
+    """One traversal's observation of the current structured-C call surface.
+
+    ``total`` counts every node satisfying ``_is_semantic_codegen_call``;
+    ``name_counts`` maps each normalized callee name to its occurrence count
+    and is populated only when the observation is taken with
+    ``with_names=True``. The observation is valid only for the exact tree
+    state walked; callers must not retain it across a rewrite or restore.
+    """
+
+    total: int
+    name_counts: dict[str, int]
+
+
 _STACK_SLOT_DECL_RE_8616 = re.compile(
     r"\b(?P<name>[A-Za-z_]\w*)\s*;\s*//\s*\[bp(?P<sign>[+-])0x(?P<offset>[0-9a-fA-F]+)\]"
 )
@@ -3687,6 +3707,7 @@ class _DecompileRun8616:
         self.had_storage_free_dirty_attr: Any = None
         self.helper_guard_active: Any = None
         self.indexed_segmented_global_changed: Any = None
+        self.isolated_retry_budget_exhausted: bool = False
         self.iter_changed: Any = None
         self.large_x86_16_function: Any = None
         self.late_ast_cleanup_result: Any = None
@@ -4223,6 +4244,8 @@ class _DecompileRun8616:
                 self.clinic_failure = self._clinic_failure_detail()
                 if self.clinic_failure is not None:
                     self.detail += f" {self.clinic_failure}."
+            if self.isolated_retry_budget_exhausted:
+                self.detail += " Isolated retry not attempted: analysis deadline exhausted."
             typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
             return "empty", self.detail
         return None
@@ -4298,6 +4321,8 @@ class _DecompileRun8616:
                     self.clinic_failure = self._clinic_failure_detail()
                     if self.clinic_failure is not None:
                         self.detail += f" {self.clinic_failure}."
+                if self.isolated_retry_budget_exhausted:
+                    self.detail += " Isolated retry not attempted: analysis deadline exhausted."
                 _emit_direct_addr_stage_bundle_8616(
                     self.project,
                     self.function,
@@ -4977,9 +5002,10 @@ class _DecompileRun8616:
         self._debug_cli_stage_marker_8616("after-final-callsite-pass")
         return None
 
-    def _rewrite_round_prepare_8616(self, rewrite: typing.Any, round_idx: int) -> bool:
+    def _rewrite_round_prepare_8616(self, rewrite: Callable[[], bool], round_idx: int) -> bool:
         """Return False when the pass should be skipped this iteration."""
-        if rewrite is self._run_stack_lowering_pass and not self.stack_lowering_dirty:
+        # Method lookup creates a fresh wrapper; equality retains its binding.
+        if rewrite == self._run_stack_lowering_pass and not self.stack_lowering_dirty:
             return False
         self.recurrence_rebound = bool(
             getattr(self.dec.codegen, "_inertia_has_rebound_materialized_recurrence", False)
@@ -5005,7 +5031,7 @@ class _DecompileRun8616:
         self.pass_name = self.rewrite_pass_names.get(id(rewrite), getattr(rewrite, "__name__", type(rewrite).__name__))
         return True
 
-    def _rewrite_round_apply_8616(self, rewrite: typing.Any, round_idx: int, rewrite_idx: int) -> None:
+    def _rewrite_round_apply_8616(self, rewrite: Callable[[], bool], round_idx: int, rewrite_idx: int) -> None:
         """Run one rewrite pass and fold its result into round state."""
         with span(
             "decompile.cli_rewrite_pass",
@@ -5015,9 +5041,16 @@ class _DecompileRun8616:
             round=round_idx,
             index=rewrite_idx,
         ):
-            self.before_calls = self._codegen_call_expr_count() if self.call_loss_guard_active else 0
+            before_inventory = (
+                self._codegen_call_inventory_8616(with_names=self.expected_call_guard_active)
+                if self.call_loss_guard_active or self.expected_call_guard_active
+                else CliCallInventory8616(0, {})
+            )
+            self.before_calls = before_inventory.total if self.call_loss_guard_active else 0
             self.before_missing = (
-                self._missing_expected_call_names_from_codegen_counts() if self.expected_call_guard_active else ()
+                self._missing_expected_call_names_8616(before_inventory.name_counts)
+                if self.expected_call_guard_active
+                else ()
             )
             # A zero call count cannot decrease. Keep the guard itself active
             # and retain snapshots whenever named-call coverage is checked.
@@ -5035,7 +5068,7 @@ class _DecompileRun8616:
                 pass_name=self.pass_name,
                 function_addr=function_original_addr(self.function),
             )
-        if rewrite is self._run_stack_lowering_pass:
+        if rewrite == self._run_stack_lowering_pass:
             self._stack_lowering_already_attempted = True
             self.stack_lowering_dirty = False
         elif rewrite_changed and self._stack_lowering_already_attempted:
@@ -5043,7 +5076,10 @@ class _DecompileRun8616:
     def _rewrite_round_guarded_evidence_8616(self, rewrite_idx: int, rewrite_changed: bool) -> bool:
         """Apply the call-loss evidence guard; return the effective pass-changed flag."""
         if rewrite_changed and self.call_loss_guard_active:
-            self.after_calls = self._codegen_call_expr_count()
+            after_inventory = self._codegen_call_inventory_8616(
+                with_names=self.expected_call_guard_active
+            )
+            self.after_calls = after_inventory.total
             if self.after_calls < self.before_calls and self._restore_codegen_cfunc(self.snapshot):
                 logging.getLogger(__name__).warning(
                     "Rejected CLI rewrite pass due to call loss at function=%#x pass=%s idx=%d (%d -> %d calls)",
@@ -5074,7 +5110,9 @@ class _DecompileRun8616:
                     },
                 )
             elif self.expected_call_guard_active:
-                self.after_missing = self._missing_expected_call_names_from_codegen_counts()
+                self.after_missing = self._missing_expected_call_names_8616(
+                    after_inventory.name_counts
+                )
                 if len(self.after_missing) > len(self.before_missing) and self._restore_codegen_cfunc(self.snapshot):
                     logging.getLogger(__name__).warning(
                         "Rejected CLI rewrite pass due to worse source-evidenced call coverage at function=%#x pass=%s idx=%d (missing %d -> %d)",
@@ -6036,8 +6074,10 @@ class _DecompileRun8616:
         return None
 
     def _retry_in_isolated_project(self) -> tuple[str, str] | None:
+        """Retry within the deadline; an unstarted attempt preserves prior evidence."""
         if not self.allow_isolated_retry or self.binary_path is None or self.project.arch.name != "86_16":
             return None
+        attempted = False
         if (
             os.name == "posix"
             and threading.current_thread() is threading.main_thread()
@@ -6045,7 +6085,11 @@ class _DecompileRun8616:
         ):
             try:
                 if self.deadline is not None and time.monotonic() >= self.deadline:
-                    return ("timeout", f"Timed out after {self.timeout}s before isolated retry.")
+                    # No retry attempt ran: the completed outcome must stand,
+                    # with the exhausted retry budget recorded explicitly.
+                    self.isolated_retry_budget_exhausted = True
+                    return None
+                attempted = True
                 logging.getLogger(__name__).debug(
                     "retrying %#x %s in a forked isolated project after empty decompilation",
                     function_original_addr(self.function),
@@ -6091,7 +6135,11 @@ class _DecompileRun8616:
             return None
         try:
             if self.deadline is not None and time.monotonic() >= self.deadline:
-                return ("timeout", f"Timed out after {self.timeout}s before isolated retry.")
+                if attempted:
+                    # A forked attempt genuinely consumed the remaining budget.
+                    return ("timeout", f"Timed out after {self.timeout}s before isolated retry.")
+                self.isolated_retry_budget_exhausted = True
+                return None
             isolated_project = _build_project_cached(
                 str(Path(self.binary_path)),
                 force_blob=False,
@@ -6165,25 +6213,28 @@ class _DecompileRun8616:
             return False
         return name not in self.semantic_call_helper_names
 
-    def _codegen_call_expr_count(self) -> int:
-        cfunc = getattr(self.dec.codegen, "cfunc", None)
-        if cfunc is None:
-            return 0
-        root = getattr(cfunc, "statements", None)
-        if root is None:
-            return 0
-        return sum(1 for node in _iter_c_nodes_deep(root) if self._is_semantic_codegen_call(node))
+    def _codegen_call_inventory_8616(self, *, with_names: bool) -> CliCallInventory8616:
+        """Observe total and per-name semantic call counts in one traversal.
 
-    def _codegen_call_name_counts(self) -> dict[str, int]:
+        One ``_iter_c_nodes_deep`` walk of the current statements root yields
+        both the call total and the normalized callee-name histogram, so the
+        two back-to-back guard checks at a rewrite guard point share one
+        observation of one tree state. The returned value must not be retained
+        across a rewrite or restore.
+        """
         cfunc = getattr(self.dec.codegen, "cfunc", None)
         if cfunc is None:
-            return {}
+            return CliCallInventory8616(0, {})
         root = getattr(cfunc, "statements", None)
         if root is None:
-            return {}
+            return CliCallInventory8616(0, {})
         counts: dict[str, int] = {}
+        total = 0
         for node in _iter_c_nodes_deep(root):
             if not self._is_semantic_codegen_call(node):
+                continue
+            total += 1
+            if not with_names:
                 continue
             raw_name = getattr(node, "callee_target", None)
             if not isinstance(raw_name, str):
@@ -6192,12 +6243,20 @@ class _DecompileRun8616:
             if not isinstance(name, str) or not name:
                 continue
             counts[name] = counts.get(name, 0) + 1
-        return counts
+        return CliCallInventory8616(total, counts)
 
-    def _missing_expected_call_names_from_codegen_counts(self) -> tuple[str, ...]:
+    def _codegen_call_expr_count(self) -> int:
+        """Count semantic calls in a fresh observation of the live tree."""
+        return self._codegen_call_inventory_8616(with_names=False).total
+
+    def _codegen_call_name_counts(self) -> dict[str, int]:
+        """Collect normalized semantic call multiplicities from the live tree."""
+        return self._codegen_call_inventory_8616(with_names=True).name_counts
+
+    def _missing_expected_call_names_8616(self, counts: dict[str, int]) -> tuple[str, ...]:
+        """Compare normalized expected call names against one name histogram."""
         if not self.expected_non_prologue_calls:
             return ()
-        counts = self._codegen_call_name_counts()
         needed: dict[str, int] = {}
         for raw_name in self.expected_non_prologue_calls:
             name = normalize_callee_name_8616(raw_name)
@@ -6211,15 +6270,28 @@ class _DecompileRun8616:
                 missing.append(f"{name}({have}/{count})")
         return tuple(missing)
 
+    def _missing_expected_call_names_from_codegen_counts(self) -> tuple[str, ...]:
+        """Observe named calls only when an expected-name obligation exists."""
+        if not self.expected_non_prologue_calls:
+            return ()
+        return self._missing_expected_call_names_8616(
+            self._codegen_call_inventory_8616(with_names=True).name_counts
+        )
+
     def _snapshot_codegen_cfunc(self) -> object | None:
+        """Capture a bounded trusted C function for semantic rollback."""
         if self.large_x86_16_function or self.block_count > 16 or self.byte_count > 0x300:
             return None
         cfunc = getattr(self.dec.codegen, "cfunc", None)
         if cfunc is None:
             return None
+        preserve_objects = (self.dec.codegen, self.project, self.project.arch)
+        pickled: object | None = pickled_trusted_cfunc_8616(cfunc, preserve_objects=preserve_objects)
+        if pickled is not None:
+            return pickled
         snapshot: object | None = snapshot_trusted_cfunc_8616(
             cfunc,
-            preserve_objects=(self.dec.codegen, self.project, self.project.arch),
+            preserve_objects=preserve_objects,
         )
         return snapshot
 
@@ -6229,9 +6301,17 @@ class _DecompileRun8616:
         codegen = self.dec.codegen
         if codegen is None:
             return False
-        typing.cast(typing.Any, codegen).cfunc = snapshot
+        restored = snapshot
+        if isinstance(snapshot, PickledCfuncSnapshot8616):
+            restored = unpickle_trusted_cfunc_8616(
+                snapshot,
+                preserve_objects=(codegen, self.project, self.project.arch),
+            )
+            if restored is None:
+                return False
+        typing.cast(typing.Any, codegen).cfunc = restored
         with contextlib.suppress(Exception):
-            typing.cast(typing.Any, snapshot).codegen = codegen
+            typing.cast(typing.Any, restored).codegen = codegen
         for node in _iter_c_nodes_deep(getattr(codegen, "cfunc", None)):
             with contextlib.suppress(Exception):
                 node.codegen = codegen

@@ -240,7 +240,7 @@ def test_agents_document_bounded_gate_output() -> None:
     """Agents retain full diagnostics without loading successful broad logs."""
     instructions = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-    assert "### Mandatory execution guidance" in instructions
+    assert "Mandatory guidance: read and follow" in instructions
     assert "[reference/agent-execution.md](reference/agent-execution.md)" in instructions
     execution = (REPO_ROOT / "reference/agent-execution.md").read_text(encoding="utf-8")
     assert "### Token-Efficient Command Output" in execution

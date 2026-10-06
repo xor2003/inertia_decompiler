@@ -1,8 +1,11 @@
 """Bind an SSA block's CALL operand producer closure to its owned projection.
 
-Layer: IR (staged candidate under
-``.cache/comparator-implementation/call-target-consolidation/``; intended
-production home ``ir/`` alongside ``ssa.py``).
+Layer: Types/Lowering.
+This boundary consumes the IR-owned SSA projection; it does not own SSA
+construction. Originally staged under
+``.cache/comparator-implementation/call-target-consolidation/`` with a proposed
+home in ``ir/`` alongside ``ssa.py``; the current module verifies projection
+integrity for the Lowering CALL-target binder.
 Responsibility: prove that every instruction transitively producing a CALL's
 operands — plus the CALL itself — inside one ``SSABlock`` equals the owned
 ``build_x86_16_block_local_ssa`` projection of the exact typed ``IRBlock``
@@ -21,6 +24,7 @@ owner's bounded identity cache is reused.
 Permitted projection delta, verified against ``ssa_memory.py``: memory SSA
 rewrites only ``IRAddress.version`` on argument atoms in accepted ``SS``
 ranges. Every other field must match the projection exactly.
+Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
@@ -38,7 +42,7 @@ from angr_platforms.X86_16.ir import (
     IRValue,
     MemSpace,
 )
-from angr_platforms.X86_16.ir.core import IRAtom
+from angr_platforms.X86_16.ir.core import IRActiveUnary8616, IRAtom
 from angr_platforms.X86_16.ir.ssa import (
     SSABlock,
     _version_key,
@@ -77,10 +81,22 @@ def ssa_value_modulo_version_8616(ssa_value: IRValue, source_value: IRValue) -> 
     ``source_tmp`` and ``memory_access_insn`` are checked explicitly so a
     foreign temporary identity cannot hide inside an otherwise equal value.
     """
-    return bool(
-        replace(ssa_value, version=source_value.version) == source_value
-        and ssa_value.source_tmp == source_value.source_tmp
-        and ssa_value.memory_access_insn == source_value.memory_access_insn
+    return _value_matches_projection_8616(
+        replace(ssa_value, version=source_value.version), source_value,
+    )
+
+
+def _active_unary_matches_projection_8616(
+    actual: IRActiveUnary8616 | None,
+    expected: IRActiveUnary8616 | None,
+) -> bool:
+    """Bind the pending operation and its operand's otherwise equality-exempt provenance."""
+    if actual is None or expected is None:
+        return actual is expected
+    return (
+        actual.op == expected.op
+        and actual.result_bits == expected.result_bits
+        and _value_matches_projection_8616(actual.operand, expected.operand)
     )
 
 
@@ -113,6 +129,7 @@ def _value_matches_projection_8616(
     )
     return bool(
         index_bound
+        and _active_unary_matches_projection_8616(ssa_value.active_unary, projection_value.active_unary)
         and ssa_value == projection_value
         and ssa_value.source_tmp == projection_value.source_tmp
         and ssa_value.memory_access_insn == projection_value.memory_access_insn
@@ -194,15 +211,19 @@ def _instr_matches_projection_8616(ssa_instr: IRInstr, projection_instr: IRInstr
 def _atom_use_values_8616(atom: IRAtom) -> list[IRValue]:
     """Collect every use-position scalar value inside one argument atom.
 
-    Nested ``index`` subtrees and ``IRAddress.base_values`` are uses of their
-    own reaching definitions, so they contribute to the dependency closure of
-    whichever instruction reads the atom.
+    Nested indexes, address bases and pending unary operands contribute their
+    reaching definitions. A pending unary computation is not itself a captured
+    temporary use: its operation is checked by exact projection comparison,
+    while its operand supplies the dependency that must be bound.
     """
     values: list[IRValue] = []
     pending: list[IRAtom] = [atom]
     while pending:
         node = pending.pop()
         if isinstance(node, IRValue):
+            if node.active_unary is not None:
+                pending.append(node.active_unary.operand)
+                continue
             values.append(node)
             if node.index is not None:
                 pending.append(node.index)

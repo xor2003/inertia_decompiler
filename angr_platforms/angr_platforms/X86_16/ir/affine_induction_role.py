@@ -6,6 +6,10 @@ increment and strict continued guard in one supplied natural loop. This role
 receipt proves neither memory stability nor a bound/range, Alias identity,
 pointer type, physical disjointness or completeness of binary CFG coverage.
 Residual terms remain unclassified values, never guessed pointer bases.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

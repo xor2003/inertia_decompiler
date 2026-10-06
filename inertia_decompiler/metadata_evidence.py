@@ -5,6 +5,8 @@ Responsibility: distinguish binary signature matches from local source/debug
 evidence using the owned metadata contract, without inferring semantics.
 """
 
+from __future__ import annotations
+
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 
 

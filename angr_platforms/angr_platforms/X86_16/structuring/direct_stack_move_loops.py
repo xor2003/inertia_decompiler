@@ -250,7 +250,12 @@ class _LoopTailSiteScan8616:
         class_name: str,
         depth: int,
     ) -> None:
-        """Record proven tail sites owned by one structured loop body."""
+        """Record proven tail sites owned by one structured loop body.
+
+        Dynamic boundary: third-party angr loop variants may omit a condition
+        node. An absent condition contributes no instruction addresses; the
+        existing body/target ownership checks remain required.
+        """
         body_addresses = {
             candidate
             for address in _tree_tag_addresses_8616(body)
@@ -288,7 +293,12 @@ class _LoopTailSiteScan8616:
             )
 
     def visit(self, node: object, depth: int) -> None:
-        """Collect candidate loop bodies recursively."""
+        """Collect candidate loop bodies recursively.
+
+        Dynamic boundary: heterogeneous third-party angr C-AST containers use
+        optional body, statements, else_node and condition-pair slots. Inspect
+        only present children; only an observed statement list can own a site.
+        """
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))

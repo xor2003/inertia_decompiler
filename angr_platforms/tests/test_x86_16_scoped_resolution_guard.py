@@ -63,13 +63,13 @@ def test_records_only_for_parent_retry(
     events: list[str] = []
     head = 0x10000
     artifact = object()
-    boundary = SimpleNamespace(addr=head)
+    project = object()
+    boundary = SimpleNamespace(addr=head, project=project)
     coverage = SimpleNamespace(complete=True)
     boot = SimpleNamespace(failure=None if boot_complete else object(), complete=boot_complete)
     row, record, chained = object(), object(), object()
-    project = object()
     session = resolver._PremiseResolution8616()
-    source = SimpleNamespace(boot=object(), boot_recompute=object(), callsite_index=SimpleNamespace(for_target=lambda addr: (row,) if has_parent else ()))
+    source = SimpleNamespace(boot=object(), boot_recompute=object(), declared_services=(), callsite_index=SimpleNamespace(for_target=lambda addr: (row,) if has_parent else ()))
     monkeypatch.setattr(resolver, "registered_function_ir_artifact_8616", lambda *a: SimpleNamespace(verdict=resolver.FunctionIRArtifactVerdict8616.PROVEN, artifact=artifact))
     monkeypatch.setattr(resolver, "_exact_boundary_for_8616", lambda *a: boundary)
     monkeypatch.setattr(resolver, "prove_ir_boundary_coverage_8616", lambda *a: coverage)

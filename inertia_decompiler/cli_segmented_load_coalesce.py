@@ -178,8 +178,8 @@ def _coalesce_segmented_word_load_expressions(
 
     for walk_node in iter_c_nodes_deep(cfunc.statements):
         if isinstance(walk_node, structured_c.CUnaryOp) and walk_node.op == "Dereference":
-            # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
             coalescer._collect_variable_ids(
+                # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
                 getattr(walk_node, "operand", None), coalescer.dereferenced_variable_ids
             )
 

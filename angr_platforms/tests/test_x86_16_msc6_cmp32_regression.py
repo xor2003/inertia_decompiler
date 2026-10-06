@@ -24,6 +24,7 @@ def test_compare32_fixture_identity(artifact: str) -> None:
     assert hashlib.sha256((FIXTURE_ROOT / artifact).read_bytes()).hexdigest() == expected[artifact]
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.parametrize(
     ("address", "argument_type"),
     ((0x1004E, "long"), (0x100C3, "unsigned long")),
@@ -77,6 +78,7 @@ def test_msc6_compare_functions_sidecar_free_preserve_scalar_types(
     assert "local_" not in combined
 
 
+@pytest.mark.requires_kvm
 def test_msc6_select_max_materializes_direct_wide_comparison() -> None:
     env = dict(os.environ)
     env.setdefault("INERTIA_ENABLE_TAIL_VALIDATION", "1")
@@ -112,6 +114,7 @@ def test_msc6_select_max_materializes_direct_wide_comparison() -> None:
     assert "return b;" in combined
 
 
+@pytest.mark.requires_kvm
 def test_msc6_clamp_window_sidecar_free_preserves_every_return(
     tmp_path: Path,
 ) -> None:

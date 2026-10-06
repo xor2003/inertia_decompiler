@@ -1,0 +1,356 @@
+diff --git a/scripts/mz_dump_pair.py b/scripts/mz_dump_pair.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/mz_dump_pair.py
+@@ -0,0 +1,216 @@
++"""Layer: libdosbox dump postprocessing.
++
++Responsibility: validate same-point DOS memory dumps and recover an MZ image.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import struct
++from dataclasses import dataclass
++from pathlib import Path
++
++PSP_BYTES: int = 0x100
++MZ_HEADER_BYTES: int = 0x1C
++DUMP_HEADER_BYTES: int = 32
++
++
++@dataclass(frozen=True)
++class Dump:
++    """A current libdosbox DE dump and its live capture point."""
++
++    path: Path
++    image: bytes
++    loadseg: int
++    cs: int
++    ip: int
++    ss: int
++    sp: int
++
++    @property
++    def relative_cs(self) -> int:
++        """Return CS relative to the DOS image load segment."""
++        return (self.cs - self.loadseg) & 0xFFFF
++
++
++@dataclass(frozen=True)
++class Recovery:
++    """A normalized image and candidate MZ relocation offsets."""
++
++    image: bytes
++    relocations: tuple[int, ...]
++    load_segments: tuple[int, ...]
++    relative_cs: int
++    ip: int
++    relative_ss: int
++    sp: int
++
++
++def read_dump(path: Path) -> Dump:
++    """Read a current DE dump; refuse missing or inconsistent live metadata."""
++    raw = path.read_bytes()
++    if len(raw) < DUMP_HEADER_BYTES + PSP_BYTES or raw[:2] != b"DE":
++        raise ValueError(f"{path}: invalid or truncated current DE dump")
++    cs, ip, ss, sp, psp, loadseg, size = struct.unpack_from("<HHHHHHI", raw, 2)
++    if size != len(raw) - DUMP_HEADER_BYTES or size < PSP_BYTES:
++        raise ValueError(f"{path}: dump payload length does not match its header")
++    if not psp or psp >= 0xA000:
++        raise ValueError(f"{path}: invalid PSP {psp:04x}")
++    loadseg = loadseg or ((psp + 0x10) & 0xFFFF)
++    meta_path = Path(f"{path}.meta.json")
++    if not meta_path.is_file():
++        raise ValueError(f"{path}: live dump-point metadata is required")
++    meta = json.loads(meta_path.read_text())
++    if int(meta["dump_psp"]) != psp:
++        raise ValueError(f"{path}: metadata PSP differs from dump")
++    recorded_loadseg = int(meta["dump_loadseg"])
++    if recorded_loadseg and recorded_loadseg != loadseg:
++        raise ValueError(f"{path}: metadata load segment differs from dump")
++    # DE register fields describe the original EXEC start, not the paused CPU.
++    # A packer's EXEC start is the wrong entry for the unpacked image.
++    del cs, ip, ss, sp
++    return Dump(
++        path=path,
++        image=raw[DUMP_HEADER_BYTES + PSP_BYTES :],
++        loadseg=loadseg,
++        cs=int(meta["dump_runtime_cs"]),
++        ip=int(meta["dump_runtime_ip"]),
++        ss=int(meta["dump_runtime_ss"]),
++        sp=int(meta["dump_runtime_sp"]),
++    )
++
++
++def _candidate_relocations(first: bytes, second: bytes, delta: int) -> tuple[int, ...]:
++    """Find the unique non-overlapping relocation explanation for all changes."""
++    size = len(first)
++    counts = bytearray(size + 2)
++    choice = bytearray(size)
++    counts[size] = 1
++    for offset in range(size - 1, -1, -1):
++        skip = counts[offset + 1] if first[offset] == second[offset] else 0
++        relocation = 0
++        if offset + 1 < size:
++            old = first[offset] | (first[offset + 1] << 8)
++            new = second[offset] | (second[offset + 1] << 8)
++            if old != new and ((new - old) & 0xFFFF) == delta:
++                relocation = counts[offset + 2]
++        counts[offset] = min(2, skip + relocation)
++        if relocation and not skip:
++            choice[offset] = 2
++        elif skip and not relocation:
++            choice[offset] = 1
++    if counts[0] == 0:
++        mismatch = next(i for i, (a, b) in enumerate(zip(first, second, strict=True)) if a != b)
++        raise ValueError(f"unexplained image change near offset 0x{mismatch:x}")
++    if counts[0] > 1:
++        raise ValueError("ambiguous relocation positions; another load is needed")
++    offsets: list[int] = []
++    offset = 0
++    while offset < size:
++        if choice[offset] == 2:
++            offsets.append(offset)
++            offset += 2
++        else:
++            offset += 1
++    return tuple(offsets)
++
++
++def _verify_loaded_image(image: bytes, relocations: tuple[int, ...], dump: Dump) -> None:
++    """Replay DOS load fixups and compare every captured image byte."""
++    loaded = bytearray(image)
++    for offset in relocations:
++        value = (struct.unpack_from("<H", loaded, offset)[0] + dump.loadseg) & 0xFFFF
++        struct.pack_into("<H", loaded, offset, value)
++    if loaded != dump.image:
++        mismatch = next(i for i, (a, b) in enumerate(zip(loaded, dump.image, strict=True)) if a != b)
++        raise ValueError(f"{dump.path}: MZ load replay differs at image offset 0x{mismatch:x}")
++
++
++def recover(dumps: tuple[Dump, ...]) -> Recovery:
++    """Recover a candidate image, refusing unpaired changes and mismatched points."""
++    if len(dumps) < 2:
++        raise ValueError("at least two dumps at different load segments are required")
++    first, second = dumps[:2]
++    if first.loadseg == second.loadseg:
++        raise ValueError("load segments are equal; relocations are unobservable")
++    for dump in dumps[1:]:
++        if len(dump.image) != len(first.image):
++            raise ValueError(f"{dump.path}: image sizes differ")
++        if (dump.relative_cs, dump.ip) != (first.relative_cs, first.ip):
++            raise ValueError(f"{dump.path}: different relative CS:IP dump point")
++    delta = (second.loadseg - first.loadseg) & 0xFFFF
++    relocations = _candidate_relocations(first.image, second.image, delta)
++    image = bytearray(first.image)
++    for offset in relocations:
++        value = (struct.unpack_from("<H", image, offset)[0] - first.loadseg) & 0xFFFF
++        struct.pack_into("<H", image, offset, value)
++    normalized = bytes(image)
++    for dump in dumps:
++        _verify_loaded_image(normalized, relocations, dump)
++    return Recovery(
++        image=normalized,
++        relocations=relocations,
++        load_segments=tuple(dump.loadseg for dump in dumps),
++        relative_cs=first.relative_cs,
++        ip=first.ip,
++        relative_ss=(first.ss - first.loadseg) & 0xFFFF,
++        sp=first.sp,
++    )
++
++
++def build_mz(recovery: Recovery, template: Path | None = None) -> bytes:
++    """Build a DOS MZ with exact validated fixups and a live unpacked entry."""
++    minalloc, maxalloc, overlay = 0, 0xFFFF, 0
++    if template is not None:
++        source = template.read_bytes()
++        if len(source) < MZ_HEADER_BYTES or source[:2] not in (b"MZ", b"ZM"):
++            raise ValueError(f"{template}: invalid MZ template")
++        minalloc, maxalloc = struct.unpack_from("<HH", source, 10)
++        overlay = struct.unpack_from("<H", source, 26)[0]
++    if len(recovery.relocations) > 0xFFFF:
++        raise ValueError("too many MZ relocations")
++    table = bytearray()
++    for offset in recovery.relocations:
++        table.extend(struct.pack("<HH", offset & 15, offset >> 4))
++    header_paragraphs = (MZ_HEADER_BYTES + len(table) + 15) // 16
++    header_size = header_paragraphs * 16
++    file_size = header_size + len(recovery.image)
++    pages = (file_size + 511) // 512
++    if pages > 0xFFFF:
++        raise ValueError("MZ image exceeds the header page-count limit")
++    header = struct.pack(
++        "<2s13H", b"MZ", file_size % 512, pages, len(recovery.relocations),
++        header_paragraphs, minalloc, maxalloc, recovery.relative_ss,
++        recovery.sp, 0, recovery.ip, recovery.relative_cs,
++        MZ_HEADER_BYTES, overlay,
++    )
++    return header + table + bytes(header_size - MZ_HEADER_BYTES - len(table)) + recovery.image
++
++
++def main(argv: list[str] | None = None) -> int:
++    """Validate two or more libdosbox dumps and write a recovered MZ."""
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("dumps", nargs="+", type=Path, help="DE dumps at the same live CS:IP")
++    parser.add_argument("-o", "--output", required=True, type=Path, help="recovered MZ path")
++    parser.add_argument("--template", type=Path, help="packed MZ for allocation header defaults")
++    args = parser.parse_args(argv)
++    try:
++        dumps = tuple(read_dump(path) for path in args.dumps)
++        recovery = recover(dumps)
++        exe = build_mz(recovery, args.template)
++    except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
++        parser.error(str(exc))
++    args.output.write_bytes(exe)
++    print(json.dumps({
++        "output": str(args.output), "image_size": len(recovery.image),
++        "load_segments": recovery.load_segments,
++        "entry_cs": recovery.relative_cs, "entry_ip": recovery.ip,
++        "relocation_count": len(recovery.relocations),
++        "verdict": "load_replay_matches_all_dumps",
++    }, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/tests/test_mz_dump_pair.py b/scripts/tests/test_mz_dump_pair.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/tests/test_mz_dump_pair.py
+@@ -0,0 +1,108 @@
++"""Verify same-point dump recovery and refusal of unexplained memory changes."""
++
++from __future__ import annotations
++
++import json
++import struct
++from pathlib import Path
++
++import pytest
++
++from scripts.mz_dump_pair import build_mz, read_dump, recover
++
++
++def _write_dump(
++    path: Path,
++    *,
++    image: bytes,
++    loadseg: int,
++    relative_cs: int = 2,
++    ip: int = 0x10,
++) -> Path:
++    """Write the current libdosbox DE format with a live paused CPU point."""
++    psp = loadseg - 0x10
++    header = b"DE" + struct.pack(
++        "<HHHHHHI", loadseg, 0, loadseg, 0xFFFE, psp, loadseg,
++        len(image) + 0x100,
++    )
++    path.write_bytes(header + bytes(14) + bytes(0x100) + image)
++    Path(f"{path}.meta.json").write_text(json.dumps({
++        "dump_psp": psp,
++        "dump_loadseg": loadseg,
++        "dump_runtime_cs": loadseg + relative_cs,
++        "dump_runtime_ip": ip,
++        "dump_runtime_ss": loadseg + 4,
++        "dump_runtime_sp": 0xFF00,
++    }))
++    return path
++
++
++def _relocated_image(base: bytes, offsets: tuple[int, ...], loadseg: int) -> bytes:
++    """Simulate the DOS MZ loader on an image."""
++    image = bytearray(base)
++    for offset in offsets:
++        value = (struct.unpack_from("<H", image, offset)[0] + loadseg) & 0xFFFF
++        struct.pack_into("<H", image, offset, value)
++    return bytes(image)
++
++
++def test_recover_mz_uses_live_entry_and_replays_three_loads(tmp_path: Path) -> None:
++    """Recover two fixups, including one whose low byte never changes."""
++    image = bytearray(0x80)
++    image[0x30:0x32] = b"\x34\x12"
++    image[0x42:0x44] = b"\x20\x00"
++    base = bytes(image)
++    offsets = (0x30, 0x42)
++    paths = tuple(
++        _write_dump(
++            tmp_path / f"capture{idx}.1",
++            image=_relocated_image(base, offsets, loadseg),
++            loadseg=loadseg,
++        )
++        for idx, loadseg in enumerate((0x2000, 0x2100, 0x2230))
++    )
++    result = recover(tuple(read_dump(path) for path in paths))
++    assert result.image == base
++    assert result.relocations == offsets
++    assert (result.relative_cs, result.ip) == (2, 0x10)
++
++    exe = build_mz(result)
++    relocation_count = struct.unpack_from("<H", exe, 6)[0]
++    image_offset = struct.unpack_from("<H", exe, 8)[0] * 16
++    assert relocation_count == 2
++    assert exe[image_offset:] == base
++    assert struct.unpack_from("<HH", exe, 0x1C) == (0, 3)
++
++
++def test_recover_refuses_changed_data_even_with_valid_relocation(tmp_path: Path) -> None:
++    """A changed runtime byte must not silently disappear from the output."""
++    base = bytearray(0x40)
++    base[0x20:0x22] = b"\x02\x00"
++    first = _write_dump(
++        tmp_path / "first.1",
++        image=_relocated_image(bytes(base), (0x20,), 0x2000),
++        loadseg=0x2000,
++    )
++    changed = bytearray(_relocated_image(bytes(base), (0x20,), 0x2100))
++    changed[0x30] = 0x77
++    second = _write_dump(tmp_path / "second.1", image=bytes(changed), loadseg=0x2100)
++    with pytest.raises(ValueError, match="unexplained image change"):
++        recover((read_dump(first), read_dump(second)))
++
++
++def test_recover_refuses_different_dump_point(tmp_path: Path) -> None:
++    """Two captures at different instruction pointers cannot form a pair."""
++    image = bytes(0x40)
++    first = _write_dump(tmp_path / "first.1", image=image, loadseg=0x2000)
++    second = _write_dump(tmp_path / "second.1", image=image, loadseg=0x2100, ip=0x12)
++    with pytest.raises(ValueError, match="different relative CS:IP"):
++        recover((read_dump(first), read_dump(second)))
++
++
++def test_third_load_rejects_false_two_dump_relocation(tmp_path: Path) -> None:
++    """A coincidental two-run word delta must fail a third replay."""
++    first = _write_dump(tmp_path / "first.1", image=b"\x00\x00", loadseg=0x2000)
++    second = _write_dump(tmp_path / "second.1", image=b"\x00\x01", loadseg=0x2100)
++    third = _write_dump(tmp_path / "third.1", image=b"\x04\x00", loadseg=0x2200)
++    with pytest.raises(ValueError, match="MZ load replay differs"):
++        recover(tuple(read_dump(path) for path in (first, second, third)))
+diff --git a/scripts/memdump-workflow.sh b/scripts/memdump-workflow.sh
+--- a/scripts/memdump-workflow.sh
++++ b/scripts/memdump-workflow.sh
+@@ -6,6 +6,7 @@
+ Usage:
+   scripts/memdump-workflow.sh snap [--fix-relocs] [--dir <dosbox-working-dir>] [<label>]
+   scripts/memdump-workflow.sh compare <dump_a> <dump_b> [offset_a offset_b]
++  scripts/memdump-workflow.sh recover <dump1> <dump2> [more dumps...] -o <unpacked.exe>
+   scripts/memdump-workflow.sh -h | --help
+ 
+ Examples:
+@@ -83,6 +84,10 @@
+ 		fi
+ 		;;
+ 
++	recover)
++		python3 "$script_dir/mz_dump_pair.py" "$@"
++		;;
++
+ 	compare|diff)
+ 		if [[ $# -lt 2 || $# -gt 4 ]]; then
+ 			echo "compare mode requires <dump_a> <dump_b> [offset_a offset_b]" >&2

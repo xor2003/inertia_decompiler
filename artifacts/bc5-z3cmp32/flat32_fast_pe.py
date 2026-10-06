@@ -154,11 +154,15 @@ def _write_certificate(path: Path, payload: Mapping[str, Any]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def load32_verified(exe_path: Path, cache_dir: Path) -> angr.Project:
-    """Skip costly PE relocation parsing only after full-load code-byte proof."""
+def load32_verified(exe_path: Path, cache_dir: Path | None) -> angr.Project:
+    """Skip costly PE relocation parsing only after full-load code-byte proof.
+
+    ``cache_dir=None`` disables the certificate layer entirely: no read, write
+    or lock, and the result is the same ``load32`` image a cache miss returns.
+    """
     with exe_path.open("rb") as stream:
         magic = stream.read(2)
-    if magic != b"MZ":
+    if magic != b"MZ" or cache_dir is None:
         return load32(exe_path)
     digest = hashlib.sha256(exe_path.read_bytes()).hexdigest()
     cache_dir.mkdir(parents=True, exist_ok=True)

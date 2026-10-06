@@ -14,16 +14,20 @@ from angr_platforms.X86_16.callsite_summary import CallsiteSummary8616
 from angr_platforms.X86_16.callsite_summary_program import build_callsite_summary_inventory_with_program_evidence_8616
 from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
 from angr_platforms.X86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from angr_platforms.X86_16.ir import status_flag_lift_context as context
 from angr_platforms.X86_16.ir.core import IRBlock, IRInstr, IRValue, MemSpace
-from angr_platforms.X86_16.ir.vex_import import build_x86_16_ir_function_artifact
+from angr_platforms.X86_16.ir.vex_import import _block_to_ir, build_x86_16_ir_function_artifact
 from angr_platforms.X86_16.semantics.call_stack_effects import _bound_call_target_8616
 from angr_platforms.X86_16.semantics.direct_near_call_target_binding import (
+    DirectNearCallCoordinates8616,
     DirectNearCallTargetBinding8616,
     prove_direct_near_call_target_binding_8616,
+    prove_direct_near_call_target_binding_at_coordinates_8616,
 )
 from angr_platforms.X86_16.semantics.direct_near_call_target_binding import (
     DirectNearCallTargetBindingFailure8616 as Failure,
 )
+from angr_platforms.X86_16.semantics.status_flag_contracts import STATUS_FLAGS_8616
 
 from tools.dosunit.recursive_proofs.real16_loader_arch import real16_loader_arch
 
@@ -239,3 +243,73 @@ def test_truncated_constant_target_cannot_bind_high_summary(fixture: Fixture) ->
     summary = replace(fixture.summary, target_addr=fixture.summary.target_addr + 0x10000)
     bound, proof = _bound_call_target_8616(fixture.project, fixture.block, summary, call)
     assert not bound and proof is not None and not proof.complete
+
+
+@pytest.mark.parametrize("corrupt_origin", [False, True])
+@pytest.mark.parametrize("optimized_source", [False, True])
+def test_raw_native_call_binding_in_flag_context(
+    corrupt_origin: bool, optimized_source: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ambient optimization cannot invalidate raw provenance or admit forgery."""
+    image = bytes.fromhex("050100 e80a00 c3") + bytes(9) + b"\xc3"
+    project = angr.Project(io.BytesIO(image), main_opts={
+        "backend": "blob", "arch": Arch86_16(), "base_addr": 0x1000, "entry_point": 0x1000,
+    }, auto_load_libs=False, simos="DOS")
+    native_fixture = _fixture(project, 0x1000, 0x1007, 0x1003)
+    block, instruction = native_fixture.block, native_fixture.call
+    session = context.StatusFlagLiftSession8616(
+        0x1000,
+        tuple(context.StatusFlagLiftCandidate8616(address, STATUS_FLAGS_8616, STATUS_FLAGS_8616)
+              for address in (0x1000,)),
+    )
+    token = context._active_session.set(session)
+    try:
+        if optimized_source:
+            block, _, _ = _block_to_ir(project.factory.block(
+                block.addr, size=0x1006 - block.addr,
+                opt_level=0, collect_data_refs=True,
+            ))
+            instruction = next(item for item in block.instrs if item.op == "CALL")
+        if corrupt_origin:
+            assert instruction.origin is not None
+            changed = replace(instruction, origin=replace(instruction.origin, statement_index=1))
+            block = replace(block, instrs=tuple(changed if item is instruction else item for item in block.instrs))
+            instruction = changed
+        original_lift = project.factory.block
+        calls = []
+
+        def counted_lift(*args: object, **kwargs: object) -> object:
+            """Count native replays without substituting their semantics."""
+            calls.append(None)
+            return original_lift(*args, **kwargs)
+
+        monkeypatch.setattr(project.factory, "block", counted_lift)
+        proof = prove_direct_near_call_target_binding_at_coordinates_8616(
+            project, block=block, instruction=instruction,
+            coordinates=DirectNearCallCoordinates8616(0x1003, 0x1006, 0x1010),
+        )
+        assert context._active_session.get() is session
+        assert proof.complete is not corrupt_origin, proof.to_dict()
+        assert 1 <= len(calls) <= 2
+        if optimized_source and not corrupt_origin:
+            assert len(calls) == 1
+    finally:
+        context._active_session.reset(token)
+
+
+def test_architectural_replay_restores_session_after_exception() -> None:
+    """Nested replay cannot leak suspended context or discard materialization."""
+    session = context.StatusFlagLiftSession8616(0x1000, ())
+    token = context._active_session.set(session)
+    try:
+        with (
+            pytest.raises(RuntimeError, match="replay failed"),
+            context.architectural_status_flag_replay_8616() as active,
+        ):
+            assert active and context._active_session.get() is None
+            with context.architectural_status_flag_replay_8616() as nested:
+                assert not nested
+            raise RuntimeError("replay failed")
+        assert context._active_session.get() is session
+    finally:
+        context._active_session.reset(token)

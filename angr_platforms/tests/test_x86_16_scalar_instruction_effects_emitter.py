@@ -12,10 +12,116 @@ from dataclasses import replace
 import archinfo
 import pytest
 import pyvex
+from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir import scalar_instruction_effects as _EFFECTS
 from angr_platforms.X86_16.ir.core import IRCondition, IRInstr, IRValue, MemSpace
+from angr_platforms.X86_16.ir.vex_condition_demand import (
+    VexConditionDemand8616,
+    VexConditionDemandStats8616,
+)
+from angr_platforms.X86_16.ir.vex_import import _stmt_to_instr
 from pyvex.const import vex_int_class
 from pyvex.lifting.util.vex_helper import IRSBCustomizer
+
+
+def test_native_neg_widening_product_has_only_explicit_effects() -> None:
+    """The real NEG lift closes every scalar row, including its signed wide product."""
+    address = 0x1000
+    block = pyvex.IRSB(b"\xf7\xdb", address, Arch86_16(), num_inst=1, opt_level=0)
+    views, conditions, expressions = {}, {}, {}
+    demand = VexConditionDemand8616(frozenset(), VexConditionDemandStats8616())
+    rows = []
+    for statement in block.statements:
+        row = _stmt_to_instr(
+            statement, views, conditions, instruction_addr=address,
+            segment_hints={}, tmp_exprs=expressions, type_environment=block.tyenv,
+            condition_demand=demand,
+        )
+        if row is not None:
+            rows.append(row)
+    products = [row for row in rows if row.op == "Iop_MullS16"]
+    assert len(products) == 1
+    product = products[0]
+    assert product.size == 4
+    assert tuple(value.size for value in product.args) == (2, 2)
+    assert _EFFECTS.scalar_instruction_effect_8616(product).clobber is (
+        _EFFECTS.ScalarInstructionClobber8616.NONE
+    )
+    assert all(
+        _EFFECTS.scalar_instruction_effect_8616(row).kind is (
+            _EFFECTS.ScalarInstructionEffectKind8616.CLOSED_DESTINATION
+        ) for row in rows
+    )
+
+
+def test_native_repne_scasb_lift_has_only_closed_effects() -> None:
+    """The real REPNE SCASB lift closes every row, including the one-bit ZF test."""
+    address = 0x10000
+    block = pyvex.IRSB(b"\xf2\xae", address, Arch86_16(), num_inst=1, opt_level=0)
+    views, conditions, expressions = {}, {}, {}
+    demand = VexConditionDemand8616(frozenset(), VexConditionDemandStats8616())
+    rows = []
+    for statement in block.statements:
+        row = _stmt_to_instr(
+            statement, views, conditions, instruction_addr=address,
+            segment_hints={}, tmp_exprs=expressions, type_environment=block.tyenv,
+            condition_demand=demand,
+        )
+        if row is not None:
+            rows.append(row)
+    ops = {row.op for row in rows}
+    assert "LOAD" in ops
+    assert "CJMP" in ops
+    assert "Iop_CmpEQ1" in ops
+    effects = {id(row): _EFFECTS.scalar_instruction_effect_8616(row) for row in rows}
+    assert [
+        row.op for row in rows
+        if effects[id(row)].kind is _EFFECTS.ScalarInstructionEffectKind8616.UNKNOWN
+    ] == []
+    clobbered_registers = {
+        row.dst.name for row in rows
+        if effects[id(row)].clobber is _EFFECTS.ScalarInstructionClobber8616.DATA_REGISTER
+        and isinstance(row.dst, IRValue) and row.dst.name is not None
+    }
+    assert {"cx", "di", "flags"} <= clobbered_registers
+    assert "cs" not in clobbered_registers
+
+
+@pytest.mark.parametrize("bits", [8, 16, 32])
+@pytest.mark.parametrize("signedness", ["S", "U"])
+def test_widening_product_closes_only_double_width_destination(
+    bits: int, signedness: str,
+) -> None:
+    """Real VEX widening products write twice the operand width, without hidden effects."""
+    op = f"Iop_Mull{signedness}{bits}"
+    const_type = vex_int_class(bits)
+    expression = pyvex.expr.Binop(op, [
+        pyvex.expr.Const(const_type(1)), pyvex.expr.Const(const_type(2)),
+    ])
+    env = pyvex.IRTypeEnv(archinfo.ArchX86())
+    assert expression.result_size(env) == bits * 2
+    width = bits // 8
+    instruction = IRInstr(
+        op, IRValue(MemSpace.TMP, source_tmp=1, size=width * 2),
+        (IRValue(MemSpace.CONST, const=1, size=width),
+         IRValue(MemSpace.CONST, const=2, size=width)), size=width * 2,
+    )
+    effect = _EFFECTS.scalar_instruction_effect_8616(instruction)
+    assert effect.kind is _EFFECTS.ScalarInstructionEffectKind8616.CLOSED_DESTINATION
+    assert effect.clobber is _EFFECTS.ScalarInstructionClobber8616.NONE
+    assert isinstance(instruction.dst, IRValue)
+    corruptions = (
+        replace(instruction, size=width),
+        replace(instruction, dst=replace(instruction.dst, size=width)),
+        replace(instruction, args=instruction.args[:1]),
+        replace(instruction, args=(replace(instruction.args[0], size=width * 2), instruction.args[1])),
+        replace(instruction, dst=replace(instruction.dst, offset=1)),
+        replace(instruction, op=f"Iop_Mull{bits}{signedness}"),
+    )
+    for corrupted in corruptions:
+        assert _EFFECTS.scalar_instruction_effect_8616(corrupted).kind is (
+            _EFFECTS.ScalarInstructionEffectKind8616.UNKNOWN
+        )
 
 
 def _comparison(op: str, width: int) -> IRInstr:

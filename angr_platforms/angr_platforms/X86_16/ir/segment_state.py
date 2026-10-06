@@ -13,7 +13,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
+    from ..declared_external_call_evidence import (
+        DeclaredCallAdmission8616,
+        DeclaredCallEffectConsumption8616,
+    )
     from .direct_call_segment_context import SegmentEntryContext8616
+    from .near_return_continuation_view import (
+        ScopedNearReturnContinuationView8616,
+    )
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import ScopedFunctionIRView8616
 
@@ -27,6 +34,7 @@ from .segment_state_transfer import (
     SegmentRestoreSource,
     SegmentValueKind8616,
     call_preservation_at_instruction_8616,
+    declared_call_effect_at_instruction_8616,
     join_register_states,
 )
 from .ssa_function import SSAFunctionArtifact
@@ -38,6 +46,7 @@ __all__ = [
     "SegmentValueKind8616",
     "apply_x86_16_segment_state_artifact",
     "build_x86_16_segment_state_artifact",
+    "republish_declared_call_consumptions_8616",
 ]
 
 class _SegmentStateCodegenBoundary(Protocol):
@@ -48,6 +57,13 @@ class _SegmentStateCodegenBoundary(Protocol):
     _inertia_segment_stack_restore_artifact: object
     _inertia_segment_state_artifact: SegmentStateArtifact
     _inertia_segment_call_preservations_8616: tuple[SegmentCallPreservationResult8616, ...]
+    _inertia_segment_function_summary_8616: object
+
+
+class _SegmentStateProjectBoundary(Protocol):
+    """Project registry field the apply path refreshes for receipts."""
+
+    _inertia_segment_function_summaries_8616: dict[int, object]
 
 
 class _SegmentRestoreEvidenceSurface(Protocol):
@@ -64,10 +80,12 @@ class SegmentStateArtifact:
     is diagnostic only and cannot reconstruct in-process artifact identity.
 
     ``scoped_view`` retains the exact conditional CFG view the predecessor
-    relation was taken from, alongside the still-raw ``source_artifact`` and
-    the supplied ``invocation_scope`` consuming entry. Its presence marks the
-    state as scoped evidence for that entry only — never universal function
-    proof — and the default builder/codegen paths never attach one.
+    relation was taken from — a retained application view or a
+    premise-derived near-return continuation view — alongside the
+    still-raw ``source_artifact`` and the supplied ``invocation_scope``
+    consuming entry. Its presence marks the state as scoped evidence for
+    that entry only — never universal function proof — and the default
+    builder/codegen paths never attach one.
     """
 
     entry_states: dict[int, dict[str, SegmentRegisterState]]
@@ -77,9 +95,12 @@ class SegmentStateArtifact:
     instruction_exit_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = field(default_factory=dict)
     source_artifact: IRFunctionArtifact | None = field(default=None, repr=False, compare=False)
     call_preservations: tuple[SegmentCallPreservationResult8616, ...] = ()
+    declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
     entry_context: SegmentEntryContext8616 | None = field(default=None, repr=False, compare=False)
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, repr=False, compare=False)
-    scoped_view: ScopedFunctionIRView8616 | None = field(default=None, repr=False, compare=False)
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ) = field(default=None, repr=False, compare=False)
 
     def state_for_register(self, register: str) -> SegmentRegisterState | None:
         """Return the one proven identity held throughout the function."""
@@ -129,6 +150,9 @@ class SegmentStateArtifact:
             "entry_context_complete": None if self.entry_context is None else self.entry_context.complete,
             "source_function_addr": None if self.source_artifact is None else self.source_artifact.function_addr,
             "call_preservation_sites": [proof.callsite_addr for proof in self.call_preservations],
+            "declared_call_consumptions": [
+                consumption.to_record() for consumption in self.declared_call_consumptions
+            ],
             "entry_states": {
                 hex(addr): {name: state.to_dict() for name, state in sorted(states.items())}
                 for addr, states in sorted(self.entry_states.items())
@@ -162,7 +186,10 @@ def build_x86_16_segment_state_artifact(
     call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
     entry_context: SegmentEntryContext8616 | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
-    scoped_view: ScopedFunctionIRView8616 | None = None,
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ) = None,
+    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
 ) -> SegmentStateArtifact:
     """Build forward segment-register state from typed IR and SSA predecessors.
 
@@ -180,9 +207,30 @@ def build_x86_16_segment_state_artifact(
     surface; the solver owns the binding checks and refuses unbound
     combinations. The default codegen apply path never supplies a view, so
     state it publishes stays universal.
+
+    ``declared_call_effects`` carries only already-admitted frontend
+    declarations bound to this identical artifact's function address; each
+    consumed declaration contributes one classified CALL-boundary fact and
+    one retained immutable consumption receipt, never a universal callee
+    summary.
     """
+    declared_consumptions: list[DeclaredCallEffectConsumption8616] = []
+    if declared_call_effects:
+        from ..declared_external_call_evidence import DeclaredCallEffectConsumption8616
+
+        for block in artifact.blocks:
+            for instruction in block.instrs:
+                if instruction.op != "CALL":
+                    continue
+                admission = declared_call_effect_at_instruction_8616(
+                    artifact, block, instruction, declared_call_effects
+                )
+                if admission is not None:
+                    declared_consumptions.append(
+                        DeclaredCallEffectConsumption8616.from_admission_8616(admission)
+                    )
     solution = solve_segment_state_8616(
-        artifact, function_ssa, restore_sources, call_preservations, entry_context=entry_context, invocation_scope=invocation_scope, scoped_view=scoped_view,
+        artifact, function_ssa, restore_sources, call_preservations, entry_context=entry_context, invocation_scope=invocation_scope, scoped_view=scoped_view, declared_call_effects=declared_call_effects,
     )
     call_boundary_count = sum(
         1
@@ -216,6 +264,7 @@ def build_x86_16_segment_state_artifact(
     raw_fact_count = explicit_write_count + call_boundary_count + entry_context_count
     classified_call_count = sum(
         call_preservation_at_instruction_8616(artifact, block, instruction, call_preservations, invocation_scope) is not None
+        or declared_call_effect_at_instruction_8616(artifact, block, instruction, declared_call_effects) is not None
         for block in artifact.blocks for instruction in block.instrs if instruction.op == "CALL"
     )
     scoped_projection = solution.scoped_projection
@@ -235,6 +284,7 @@ def build_x86_16_segment_state_artifact(
         "explicit_write_count": explicit_write_count,
         "call_boundary_count": call_boundary_count,
         "classified_call_count": classified_call_count,
+        "declared_call_consumption_count": len(declared_consumptions),
         "entry_context_count": entry_context_count,
         "raw_fact_count": raw_fact_count,
         "normalized_fact_count": raw_fact_count,
@@ -264,6 +314,7 @@ def build_x86_16_segment_state_artifact(
         instruction_exit_states=solution.instruction_exit_states,
         source_artifact=artifact,
         call_preservations=call_preservations,
+        declared_call_consumptions=tuple(declared_consumptions),
         entry_context=entry_context, invocation_scope=invocation_scope,
         scoped_view=scoped_view,
     )
@@ -297,11 +348,105 @@ def apply_x86_16_segment_state_artifact(project: object, codegen: object) -> boo
         call_preservations = ()
     if not isinstance(call_preservations, tuple):
         raise TypeError("segment call preservation evidence must be a tuple")
+    from ..declared_external_call_evidence import (
+        declared_external_call_registry_8616,
+    )
+
+    declared_registry = declared_external_call_registry_8616(project)
+    declared_call_effects = (
+        ()
+        if declared_registry is None or not declared_registry.closes_evidence
+        else declared_registry.admissions_for_function_8616(artifact.function_addr)
+    )
     segment_artifact = build_x86_16_segment_state_artifact(
         artifact,
         function_ssa=function_ssa,
         restore_sources=restore_sources,
         call_preservations=call_preservations,
+        declared_call_effects=declared_call_effects,
     )
     boundary._inertia_segment_state_artifact = segment_artifact
+    _publish_declared_consumption_receipts_8616(
+        project, boundary, artifact.function_addr, segment_artifact.declared_call_consumptions
+    )
     return False
+
+
+def republish_declared_call_consumptions_8616(
+    project: object, codegen: object, function_addr: int,
+) -> None:
+    """Rebind consumed assumptions after the later function-summary stage.
+
+    Summary construction replaces its project/codegen objects after segment
+    state has run. Reauthenticate only receipts actually consumed by that
+    state; an admission alone cannot manufacture a consumption receipt.
+    """
+    from ..declared_external_call_evidence import (
+        DeclaredCallEffectConsumption8616,
+        declared_external_call_registry_8616,
+    )
+
+    boundary = cast(_SegmentStateCodegenBoundary, codegen)
+    try:
+        state = boundary._inertia_segment_state_artifact
+    except AttributeError:
+        return
+    if not isinstance(state, SegmentStateArtifact) or state.source_artifact is None:
+        return
+    source = state.source_artifact
+    if source.function_addr != function_addr:
+        return
+    registry = declared_external_call_registry_8616(project)
+    admissions = (
+        registry.admissions_for_function_8616(source.function_addr)
+        if registry is not None and registry.closes_evidence else ()
+    )
+    verified: list[DeclaredCallEffectConsumption8616] = []
+    if state.declared_call_consumptions:
+        for block in source.blocks:
+            for instruction in block.instrs:
+                admission = declared_call_effect_at_instruction_8616(source, block, instruction, admissions)
+                if admission is None:
+                    continue
+                receipt = DeclaredCallEffectConsumption8616.from_admission_8616(admission)
+                if receipt in state.declared_call_consumptions:
+                    verified.append(receipt)
+    _publish_declared_consumption_receipts_8616(project, boundary, source.function_addr, tuple(verified))
+
+
+def _publish_declared_consumption_receipts_8616(
+    project: object,
+    boundary: _SegmentStateCodegenBoundary,
+    function_addr: int,
+    consumptions: tuple[DeclaredCallEffectConsumption8616, ...],
+) -> None:
+    """Attach immutable consumption receipts to the retained summary surfaces.
+
+    Both segment-state refresh and the later summary stage publish through this
+    owner. Empty current receipts clear prior consumption after revocation;
+    summary reconstruction must not discard freshly consumed assumptions.
+    """
+    from dataclasses import replace
+
+    from ..segment_function_summary import SegmentFunctionSummary8616
+
+    try:
+        summary = boundary._inertia_segment_function_summary_8616
+    except AttributeError:
+        summary = None
+    if isinstance(summary, SegmentFunctionSummary8616) and summary.function_addr == function_addr:
+        summary = replace(summary, declared_call_consumptions=consumptions)
+        boundary._inertia_segment_function_summary_8616 = summary
+    try:
+        summaries = cast(
+            _SegmentStateProjectBoundary, project
+        )._inertia_segment_function_summaries_8616
+    except AttributeError:
+        return
+    if not isinstance(summaries, dict):
+        return
+    prior = summaries.get(function_addr)
+    if isinstance(prior, SegmentFunctionSummary8616) and prior.function_addr == function_addr:
+        summaries[function_addr] = replace(
+            prior, declared_call_consumptions=consumptions
+        )

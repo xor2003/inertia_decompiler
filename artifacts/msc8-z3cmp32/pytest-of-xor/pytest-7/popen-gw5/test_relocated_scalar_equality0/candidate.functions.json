@@ -1,0 +1,19 @@
+{
+  "schema": "dosunit.functions.v1",
+  "module": "candidate",
+  "functions": [
+    {
+      "id": "candidate:sub_test",
+      "names": [
+        "sub_test"
+      ],
+      "entry": {
+        "kind": "module_relative",
+        "linear": "0x100000",
+        "offset": "0x0"
+      },
+      "return_kind": "near",
+      "size": 6
+    }
+  ]
+}

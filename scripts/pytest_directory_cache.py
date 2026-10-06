@@ -8,13 +8,18 @@ This plugin uses public pytest hooks and never edits installed pytest.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
+from typing import TypeVar, cast
 
 import pytest
 
 MAX_DIRECTORIES: int = 128
 MAX_CHILDREN: int = 10000
+
+_HookFunction = TypeVar("_HookFunction", bound=Callable[..., object])
+_TRY_FIRST_HOOK_IMPL = cast(Callable[[_HookFunction], _HookFunction], pytest.hookimpl(tryfirst=True))
+_WRAPPER_HOOK_IMPL = cast(Callable[[_HookFunction], _HookFunction], pytest.hookimpl(wrapper=True))
 
 
 @dataclass(frozen=True)
@@ -54,7 +59,7 @@ class Lookup:
         """Retain the session-local bounded report cache."""
         self.cache: DirectoryReports = cache
 
-    @pytest.hookimpl(tryfirst=True)
+    @_TRY_FIRST_HOOK_IMPL
     def pytest_make_collect_report(self, collector: pytest.Collector) -> pytest.CollectReport | None:
         """Reuse a directory report; pytest still collects each selected module."""
         saved = self.cache.reports.get(collector)
@@ -71,7 +76,7 @@ class Record:
         """Share the lookup cache for this session only."""
         self.cache: DirectoryReports = cache
 
-    @pytest.hookimpl(wrapper=True)
+    @_WRAPPER_HOOK_IMPL
     def pytest_make_collect_report(
         self, collector: pytest.Collector,
     ) -> Generator[None, pytest.CollectReport, pytest.CollectReport]:

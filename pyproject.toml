@@ -203,6 +203,7 @@ follow_imports = "normal"
 [tool.pytest.ini_options]
 testpaths = [
     "angr_platforms/tests",
+    "test_components.py",
 ]
 markers = [
     "repository_contract: validates current whole-repository state and runs as an explicit hard gate outside focused pytest lanes",

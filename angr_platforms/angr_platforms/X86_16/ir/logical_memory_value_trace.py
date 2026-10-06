@@ -31,6 +31,7 @@ from .scalar_definitions import (
     reaching_scalar_definitions_8616,
     scalar_definition_key_8616,
 )
+from .scalar_value_projection import scalar_active_unary_projection_8616
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,14 +85,30 @@ def _trace_mov_to_byte_load_8616(
     before_index: int,
     path: tuple[IndexedAddressDefinitionSite8616, ...] = (),
     seen: frozenset[tuple[str, str | None, int, int, int | None]] = frozenset(),
+    pending_depth: int = 0,
 ) -> _ByteLoadTrace8616:
     """Trace one exact value through MOV definitions to one byte LOAD."""
     key = scalar_definition_key_8616(value)
-    if key in seen:
-        return _ByteLoadTrace8616(
-            None,
-            path,
-            IndexedAddressFailureKind8616.INDEX_DEFINITION_CONFLICT,
+    if pending_depth > 16 or (value.active_unary is None and key in seen):
+        return _ByteLoadTrace8616(None, path, IndexedAddressFailureKind8616.INDEX_DEFINITION_CONFLICT)
+    if value.active_unary is not None:
+        projection = scalar_active_unary_projection_8616(value)
+        if (
+            projection is None
+            or (projection.source_bits, projection.target_bits) != (8, 16)
+            or projection.signed
+        ):
+            return _ByteLoadTrace8616(
+                None, path, IndexedAddressFailureKind8616.INDEX_EXPRESSION_UNSUPPORTED,
+            )
+        return _trace_mov_to_byte_load_8616(
+            value.active_unary.operand,
+            definitions,
+            block_addr=block_addr,
+            before_index=before_index,
+            path=path,
+            seen=seen,
+            pending_depth=pending_depth + 1,
         )
     candidates = reaching_scalar_definitions_8616(
         definitions,
@@ -149,6 +166,7 @@ def _trace_mov_to_byte_load_8616(
         before_index=definition.instr_index,
         path=next_path,
         seen=seen | {key},
+        pending_depth=pending_depth,
     )
 
 

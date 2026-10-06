@@ -6,24 +6,30 @@ These structural checks do not grant physical or whole-function equivalence.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from tools.dosunit import straightline_ssa as S
 from tools.dosunit.flat32_call_contracts import _initial_state as flat_initial_state
 from tools.dosunit.flat32_call_contracts import _register_widths
 from tools.dosunit.proof_contracts import Architecture
 from tools.dosunit.real16_call_contracts import initial_state
+from tools.dosunit.real16_control_targets import ControlDomainFailure
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointNodeId,
+    JointProvedControl,
     JointReason,
     JointStepKind,
     JointStepPair,
     JointSystem,
 )
+from tools.dosunit.recursive_proofs.recursive_joint_identity import control_view_model_hash
 from tools.dosunit.recursive_proofs.recursive_static_control import (
     StaticControlLimits,
     StaticControlReason,
     resolve_static_control,
 )
 from tools.dosunit.recursive_proofs.stack.recursive_stack_domains import StackWordLayout
+from tools.dosunit.register_state_relations import MachineState
 
 
 class JointRefusal(Exception):
@@ -146,6 +152,59 @@ def _check_reachable(system: JointSystem, by_node: dict[JointNodeId, JointStepPa
         raise JointRefusal(JointReason.MANIFEST, "all proposed cutpoints must be covered by the closed reachable system")
 
 
+def _dispatch_term(system: JointSystem, step: JointStepPair, state: MachineState,
+                   view: JointProvedControl | None, address: int,
+                   targets: frozenset[int], *, deadline: float) -> dict[str, Any]:
+    """Return a re-verified proved control term, else the raw state term.
+
+    A view is consumed only while it still binds this exact step: its node,
+    its own loaded linear coordinate, the paired state's untouched raw
+    ``control_ip`` term, the recorded fetch-domain head, the embedded proving
+    block's ``control_domain``/covered-code identity and the current
+    control-owner model must all agree. The retained ``block`` then re-runs
+    the same bounded fetch-domain boundary proof on the bound ``raw`` term;
+    only a fresh product whose own resolved destinations equal the declared
+    dispatch set authorizes the view's term — metadata alone never
+    authorizes a destination. Stale or tampered evidence refuses, and absent
+    views keep the original structural resolution path unchanged.
+    """
+    raw: dict[str, Any] = state[system.control_field]
+    if view is None:
+        return raw
+    domain = view.domain if isinstance(view.domain, dict) else {}
+    source_raw: Any = view.block.get("source") if isinstance(view.block, dict) else None
+    source: dict[str, Any] = source_raw if isinstance(source_raw, dict) else {}
+    if (view.node != step.node or view.address != address or view.raw != raw
+            or S._optional_int(domain.get("head_linear")) != address):
+        raise JointRefusal(JointReason.DISPATCH,
+                           "proved control view no longer binds this paired effect")
+    if (domain != source.get("control_domain")
+            or view.code_sha256 != source.get("machine_code_sha256")):
+        raise JointRefusal(JointReason.DISPATCH,
+                           "proved control view no longer binds this proving block")
+    if view.model_hash != control_view_model_hash() or not isinstance(view.normalized, dict):
+        raise JointRefusal(JointReason.DISPATCH,
+                           "proved control view predates the current control-owner model")
+    proved = S._proved_composed_control(
+        view.block, view.raw, state,
+        compose_stats={"deadline": deadline if deadline >= 0 else None})
+    if proved is None or proved.normalized is None:
+        failure = proved.failure if proved is not None else None
+        reason = (JointReason.DEADLINE if failure is ControlDomainFailure.BUDGET_EXHAUSTED
+                  else JointReason.DISPATCH)
+        raise JointRefusal(reason,
+                           "proved control view did not re-verify under its bound block/domain")
+    proved_targets = resolve_static_control(proved.normalized, deadline=deadline)
+    if not proved_targets.complete or proved_targets.targets != targets:
+        proved.unconsumed()
+        reason = (JointReason.DEADLINE
+                  if proved_targets.reason is StaticControlReason.DEADLINE else JointReason.DISPATCH)
+        raise JointRefusal(reason,
+                           "re-proved control does not reach the declared dispatch destinations")
+    proved.consume()
+    return view.normalized
+
+
 def _check_dispatch(system: JointSystem, node: JointNodeId, by_node: dict[JointNodeId, JointStepPair],
                     *, deadline: float) -> None:
     """Check actual full control on both sides against complete dispatch metadata."""
@@ -154,8 +213,10 @@ def _check_dispatch(system: JointSystem, node: JointNodeId, by_node: dict[JointN
     if step.kind is JointStepKind.RETURN:
         return
     targets = frozenset(by_node[target].original_address for target in step.successors)
-    for state in (step.original, step.candidate):
-        control = resolve_static_control(state[system.control_field], deadline=deadline)
+    for state, view, address in ((step.original, step.original_control, step.original_address),
+                                 (step.candidate, step.candidate_control, step.candidate_address)):
+        term = _dispatch_term(system, step, state, view, address, targets, deadline=deadline)
+        control = resolve_static_control(term, deadline=deadline)
         if not control.complete:
             reason = JointReason.DEADLINE if control.reason is StaticControlReason.DEADLINE else JointReason.DISPATCH
             raise JointRefusal(reason, f"static control refused: {control.reason.value}; nodes={control.node_count}")

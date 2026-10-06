@@ -53,6 +53,7 @@ class SerialWorkerCacheReason8616(StrEnum):
     """Structured reason for a serial clean-worker cache verdict."""
 
     DIAGNOSTICS = "diagnostics"
+    LIVE_DECLARATION_AUTHORITY_REQUIRED = "live_declaration_authority_required"
     NO_KEY = "no_key"
     NOT_FOUND = "not_found"
     INSUFFICIENT_ANALYSIS_BUDGET = "insufficient_analysis_budget"
@@ -79,6 +80,7 @@ class SerialWorkerCacheInputs8616:
     evidence_sha256: str
     semantic_environment: tuple[tuple[str, str], ...]
     result_schema: int
+    declared_call_effects: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,7 @@ def serial_worker_cache_inputs_8616(
         blob=args.blob,
         signature_catalog=args.signature_catalog,
         evidence_sha256=evidence_file_digest_8616(evidence_path),
+        declared_call_effects=tuple(args.declared_call_effects),
         semantic_environment=semantic_worker_environment_8616(environment),
         result_schema=result_schema,
     )
@@ -158,6 +161,9 @@ def build_serial_worker_cache_key_8616(inputs: SerialWorkerCacheInputs8616) -> d
             "blob": inputs.blob,
             "signature_catalog": signature_fingerprint,
             "evidence_sha256": inputs.evidence_sha256,
+            "declared_call_effects": [
+                _cache_file_fingerprint(path) for path in inputs.declared_call_effects
+            ],
             "semantic_environment": inputs.semantic_environment,
             "worker_policy": {
                 "alternate_source_c": False,
@@ -200,6 +206,9 @@ def _validated_result_record_8616(
         )
     except PipelineHardError, ValueError:
         return None
+    # This cache owns no live project/source authority for conditional effects.
+    if segment_evidence.declared_call_consumptions:
+        return None
     if expected_function_addrs and segment_evidence.function_addr not in expected_function_addrs:
         return None
     return dict(record)
@@ -211,6 +220,12 @@ def load_serial_worker_cache_8616(
     enabled: bool,
 ) -> SerialWorkerCacheLookup8616:
     """Load one exact validated result or return an explicit miss/refusal."""
+    if inputs.declared_call_effects:
+        return SerialWorkerCacheLookup8616(
+            SerialWorkerCacheVerdict8616.DISABLED, None, None,
+            SerialWorkerCacheReason8616.LIVE_DECLARATION_AUTHORITY_REQUIRED,
+            inputs.timeout,
+        )
     if not enabled or live_decompilation_diagnostics_requested_8616():
         return SerialWorkerCacheLookup8616(
             SerialWorkerCacheVerdict8616.DISABLED,

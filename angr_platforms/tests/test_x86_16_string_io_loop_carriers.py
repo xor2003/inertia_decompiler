@@ -2,10 +2,12 @@
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
 from angr_platforms.X86_16.string_instruction_artifact import StringInstructionArtifact, StringInstructionRecord
+from angr_platforms.X86_16.structuring import string_io_loop_carriers
 from angr_platforms.X86_16.structuring.string_io_loop_carriers import materialize_string_io_loop_carriers_8616
 
 
@@ -107,3 +109,99 @@ def test_rep_outsb_rebinds_loop_carriers_and_source_index() -> None:
     assert port_copy.rhs.variable.ident == "dx_pre"
     assert isinstance(source_call.args[1], structured_c.CVariable)
     assert source_call.args[1].variable.ident == "si_pre"
+
+
+def _builder_spy(monkeypatch: pytest.MonkeyPatch) -> tuple[StringInstructionArtifact, list[object]]:
+    """Replace the binary builder with a spy returning one typed artifact."""
+    built = StringInstructionArtifact(records=())
+    calls: list[object] = []
+
+    def _builder(project: object, function: object) -> StringInstructionArtifact:
+        calls.append(function)
+        return built
+
+    monkeypatch.setattr(
+        string_io_loop_carriers,
+        "build_x86_16_string_instruction_artifact",
+        _builder,
+    )
+    return built, calls
+
+
+def _function_project(function: object) -> SimpleNamespace:
+    """Return a project whose kb resolves one binary function by address."""
+    return SimpleNamespace(
+        kb=SimpleNamespace(
+            functions=SimpleNamespace(
+                function=lambda addr, create: function,
+            )
+        )
+    )
+
+
+def test_absent_artifact_uses_binary_function_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A physically absent artifact falls back to the binary builder path."""
+    built, calls = _builder_spy(monkeypatch)
+    function = object()
+    codegen = _Codegen(project=_function_project(function))
+    codegen.cfunc = SimpleNamespace(addr=0x100, statements=None)
+
+    assert materialize_string_io_loop_carriers_8616(codegen.project, codegen) is False
+    assert calls == [function]
+    assert codegen._inertia_string_instruction_artifact is built
+
+
+@pytest.mark.parametrize("malformed", [object(), "artifact", 0])
+def test_malformed_artifact_uses_binary_function_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    malformed: object,
+) -> None:
+    """A present but wrong-typed attachment is rebuilt from binary evidence."""
+    built, calls = _builder_spy(monkeypatch)
+    function = object()
+    codegen = _Codegen(project=_function_project(function))
+    codegen.cfunc = SimpleNamespace(addr=0x100, statements=None)
+    codegen._inertia_string_instruction_artifact = malformed
+
+    assert materialize_string_io_loop_carriers_8616(codegen.project, codegen) is False
+    assert calls == [function]
+    assert codegen._inertia_string_instruction_artifact is built
+
+
+def test_absent_artifact_without_function_evidence_refuses() -> None:
+    """Absent artifact plus missing function lookup produces no attachment."""
+    codegen = _Codegen(project=SimpleNamespace(kb=SimpleNamespace(functions=None)))
+    codegen.cfunc = SimpleNamespace(addr=0x100, statements=None)
+
+    assert materialize_string_io_loop_carriers_8616(codegen.project, codegen) is False
+    assert not hasattr(codegen, "_inertia_string_instruction_artifact")
+    stats = codegen._inertia_string_io_loop_carrier_stats_8616
+    assert stats.materialized_count == 0
+    assert stats.failure_count == 0
+
+
+def test_absent_artifact_without_cfunc_returns_no_records() -> None:
+    """Absent artifact plus no cfunc keeps the existing refuse path."""
+    codegen = _Codegen(project=SimpleNamespace(kb=SimpleNamespace(functions=None)))
+    codegen.cfunc = None
+
+    assert materialize_string_io_loop_carriers_8616(codegen.project, codegen) is False
+    assert not hasattr(codegen, "_inertia_string_instruction_artifact")
+
+
+class _ExplodingArtifactCodegen(_Codegen):
+    """Codegen whose optional artifact slot fails for a non-absence reason."""
+
+    @property
+    def _inertia_string_instruction_artifact(self) -> object:
+        """Raise a failure that physical-absence handling must not swallow."""
+        raise RuntimeError("attachment boundary failure")
+
+
+def test_non_absence_artifact_failure_propagates() -> None:
+    """A non-AttributeError boundary failure must not be treated as absence."""
+    codegen = _ExplodingArtifactCodegen()
+    codegen.cfunc = None
+
+    with pytest.raises(RuntimeError, match="attachment boundary failure"):
+        materialize_string_io_loop_carriers_8616(object(), codegen)

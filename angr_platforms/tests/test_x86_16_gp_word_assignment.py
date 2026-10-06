@@ -145,11 +145,30 @@ def test_runtime_header_does_not_move_globals_before_existing_typedef():
     assert exported.index(definition) < exported.index("extern entry g_1234;")
 
 
-def test_word_projection_regressions_run_in_default_pipeline():
-    """Make's focused list alone does not enroll tests in the curated pipeline."""
-    from scripts.test_pipeline import FOCUSED_PYTEST_TARGETS
+def test_word_projection_regressions_run_in_default_pipeline() -> None:
+    """Every runtime control remains enrolled after separating native execution."""
+    import ast
+    from pathlib import Path
 
-    assert "angr_platforms/tests/test_x86_16_gp_word_runtime.py" in FOCUSED_PYTEST_TARGETS
+    from scripts.test_pipeline import (
+        FOCUSED_PYTEST_TARGETS,
+        GP_NATIVE_PYTEST_TARGETS,
+        PIPELINE_TIERS,
+    )
+
+    runtime_file = "angr_platforms/tests/test_x86_16_gp_word_runtime.py"
+    source = Path(__file__).with_name("test_x86_16_gp_word_runtime.py").read_text()
+    expected = {
+        f"{runtime_file}::{node.name}"
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+    }
+    assert expected
+    enrolled = set(FOCUSED_PYTEST_TARGETS) | set(GP_NATIVE_PYTEST_TARGETS)
+    assert expected <= enrolled
+    assert set(FOCUSED_PYTEST_TARGETS).isdisjoint(GP_NATIVE_PYTEST_TARGETS)
+    assert "gp-word-native" in PIPELINE_TIERS["default"]
+    assert "gp-word-native" in PIPELINE_TIERS["expanded"]
     assert "angr_platforms/tests/test_x86_16_gp_word_assignment.py" in FOCUSED_PYTEST_TARGETS
 
 

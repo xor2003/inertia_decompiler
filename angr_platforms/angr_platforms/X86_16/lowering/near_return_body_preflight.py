@@ -5,6 +5,8 @@ Responsibility: close the structured body census and ensure pointer promotion
 cannot reinterpret any base-argument use outside the proven return expression.
 This mutation-free plan grants neither native-pointer nor segment authority.
 Unknown node kinds, cycles and unsupported body shapes refuse and retain code.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

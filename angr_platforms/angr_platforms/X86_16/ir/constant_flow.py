@@ -20,7 +20,7 @@ from ..semantics.register_value_preservation import (
     register_value_family_8616,
     register_value_projection_8616,
 )
-from .core import IRInstr, IRValue, MemSpace
+from .core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
 from .scalar_value_projection import (
     ScalarBinaryKind8616,
     ScalarProjectionKind8616,
@@ -37,6 +37,11 @@ _BINARY: dict[ScalarBinaryKind8616, Callable[[int, int], int]] = {
     ScalarBinaryKind8616.XOR: operator.xor,
     ScalarBinaryKind8616.SHL: operator.lshift,
     ScalarBinaryKind8616.SHR: operator.rshift,
+}
+
+_ACTIVE_UNARY_DEPTH_LIMIT_8616 = 8
+_UNARY_COMPLEMENT_OPS_8616: dict[str, int] = {
+    f"Iop_Not{bits}": bits for bits in (8, 16, 32, 64)
 }
 
 
@@ -195,14 +200,29 @@ class IRConstantFlow8616:
         self._views[name] = (entry.identity, view)
         return view
 
-    def _read(self, value: object) -> _Value | None:
-        """Prefer the original temporary definition over its register label."""
-        if not isinstance(value, IRValue) or value.offset or value.index is not None or value.call_output is not None:
+    def _read(self, value: object, _depth: int = 0) -> _Value | None:
+        """Prefer the original temporary definition over its register label.
+
+        A ``source_tmp``-pinned read names an already-computed captured
+        definition, so its ``offset`` is provenance inside that captured
+        result rather than arithmetic to re-apply; an unpinned nonzero
+        ``offset`` would require re-reading current storage plus arithmetic
+        this owner does not replay, and refuses. A value carrying
+        ``active_unary`` is the pending operation's result: only the typed
+        operation evidence describes it, never the projected storage fields.
+        """
+        if not isinstance(value, IRValue) or value.index is not None or value.call_output is not None:
             return None
         if value.size not in {1, 2, 4, 8}:
             return None
+        if value.active_unary is not None:
+            if value.source_tmp is not None:
+                return None
+            return self._read_active_unary_8616(value, _depth)
         if value.source_tmp is not None:
             result = self._temporaries.get(value.source_tmp)
+        elif value.offset:
+            return None
         elif value.space is MemSpace.CONST and value.const is not None:
             result = self._new(value.size * 8, value.const)
         elif value.space is MemSpace.REG and value.name is not None:
@@ -212,6 +232,53 @@ class IRConstantFlow8616:
         if result is None:
             return None
         return self._project(value, result)
+
+    def _read_active_unary_8616(self, value: IRValue, depth: int) -> _Value | None:
+        """Evaluate one pending active unary against captured operand evidence.
+
+        The operand may be a pinned temporary (already computed — never
+        replayed), a plain register or constant, or itself an active unary,
+        so recursion proceeds through ``_read`` with a hard depth bound. The
+        scalar-projection adapter authenticates ``Iop_{src}{U,S}to{dst}``
+        conversions against the operand's retained width and the declared
+        result width; ``Iop_Not{bits}`` complements proven lanes. Width
+        contradictions, decoration mismatches and unsupported operations
+        refuse rather than guessing from the projected REG/CONST fields.
+        """
+        unary = value.active_unary
+        if unary is None or depth >= _ACTIVE_UNARY_DEPTH_LIMIT_8616:
+            return None
+        if value.expr is not None and value.expr != (unary.op,):
+            return None
+        if not 0 < unary.result_bits <= value.size * 8:
+            return None
+        operand = self._read(unary.operand, depth + 1)
+        if operand is None:
+            return None
+        result = self._apply_active_unary_8616(unary, operand)
+        if result is None:
+            return None
+        if result.bits == value.size * 8:
+            return result
+        return self._new_lanes(value.size * 8, result.known, result.value)
+
+    def _apply_active_unary_8616(self, unary: IRActiveUnary8616, operand: _Value) -> _Value | None:
+        """Apply one authenticated unary operation to retained operand lanes."""
+        decision = scalar_read_projection_8616(
+            read_expr=(unary.op,),
+            read_bits=unary.result_bits,
+            produced=(),
+            produced_bits=operand.bits,
+        )
+        if decision is not None and decision.kind is ScalarProjectionKind8616.CONVERSION:
+            known, lanes = _convert_lanes_8616(
+                operand, decision.source_bits, decision.target_bits, decision.signed,
+            )
+            return self._new_lanes(decision.target_bits, known, lanes)
+        bits = _UNARY_COMPLEMENT_OPS_8616.get(unary.op)
+        if bits is None or bits != unary.result_bits or operand.bits != bits:
+            return None
+        return self._new_lanes(bits, operand.known, ~operand.value)
 
     def _project(self, value: IRValue, result: _Value) -> _Value | None:
         """Apply one explicit conversion or match earned re-decoration.

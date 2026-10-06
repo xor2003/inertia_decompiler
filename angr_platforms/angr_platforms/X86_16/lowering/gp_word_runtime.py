@@ -7,6 +7,8 @@ state or aliasing an unsigned-long pointer as an unsigned-short pointer.
 Production GP lowering selects coherent views for each fresh codegen. Runtime
 providers consume the same default; explicit scalar selection supports legacy
 artifacts. Never mix definitions from the two storage ABIs.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

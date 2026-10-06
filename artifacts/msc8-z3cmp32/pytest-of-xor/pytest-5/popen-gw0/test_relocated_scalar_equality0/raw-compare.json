@@ -1,0 +1,242 @@
+{
+  "schema": "dosunit.ssa_compare.v1",
+  "oracle": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-5/popen-gw0/test_relocated_scalar_equality0/oracle.bin",
+  "candidate": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-5/popen-gw0/test_relocated_scalar_equality0/candidate.bin",
+  "mapping": null,
+  "include_unmapped": true,
+  "alias_call_targets": false,
+  "callee_lemmas": false,
+  "semantic_proof_passes": 4,
+  "region_equality_enabled": false,
+  "connectivity_enabled": false,
+  "solver_gates": {
+    "max_solver_assignments": 4096,
+    "max_solver_inputs": 64,
+    "max_solver_memory_stores": 256,
+    "max_region_loop_unroll": 0,
+    "max_rss_mb": 0
+  },
+  "region_equality": {
+    "enabled": false,
+    "status": "disabled",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "refused": 0,
+    "covered_results": 0,
+    "skipped_passed_functions": 0,
+    "solver_time_ms": 0,
+    "results": []
+  },
+  "connectivity": {
+    "enabled": false,
+    "status": "disabled",
+    "edges_checked": 0,
+    "state_edges_checked": 0,
+    "state_inputs_checked": 0,
+    "state_solver_time_ms": 0,
+    "external_successor_edges_skipped": 0,
+    "external_successor_edges": [],
+    "external_successor_edges_covered": 0,
+    "external_successor_edges_unproved": 0,
+    "region_exempt_functions": [],
+    "failures": [],
+    "refusals": []
+  },
+  "external_parts": {
+    "enabled": true,
+    "status": "not_applicable",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "refused": 0,
+    "unproved": 0,
+    "solver_time_ms": 0,
+    "results": []
+  },
+  "candidate_only_parts": {
+    "enabled": true,
+    "candidate_parts_total": 1,
+    "candidate_parts_referenced": 1,
+    "total": 0,
+    "alias_total": 0,
+    "parts": [],
+    "alias_parts": []
+  },
+  "loop_scc": {
+    "status": "not_applicable",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "refused": 0,
+    "results": []
+  },
+  "call_scc": {
+    "status": "not_applicable",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "refused": 0,
+    "results": []
+  },
+  "skip_binary_equal": false,
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "refused": 0,
+    "skipped_unmapped": 0,
+    "semantic_proof_facts": 0,
+    "pending_callee_proofs": 0,
+    "external_oracle_parts_total": 0,
+    "external_candidate_parts_total": 0,
+    "external_oracle_parts_checked": 0,
+    "external_oracle_parts_passed": 0,
+    "skipped_external_oracle_parts": 0,
+    "candidate_parts_total": 1,
+    "candidate_parts_referenced": 1,
+    "candidate_only_parts": 0,
+    "candidate_alias_only_parts": 0,
+    "solver_time_ms": 364
+  },
+  "results": [
+    {
+      "function": {
+        "id": "oracle:sub_test",
+        "name": "sub_test"
+      },
+      "oracle_function": "ssa-function:1c3ad922771031dc7e3c368574263008f62256d4025e91822ca6ddced59b7e69",
+      "candidate_function": "ssa-function:09838ede3e64f469ba59e54f9ebab67685aef7c8a35b024448fa558c081cfdfd",
+      "mapped_candidate": {
+        "id": "candidate:sub_test",
+        "name": "sub_test",
+        "entry": null,
+        "sources": [
+          "name_match"
+        ]
+      },
+      "oracle_detail": {
+        "part": {
+          "kind": "block",
+          "index": 0,
+          "entry_delta": "0x0"
+        },
+        "function_entry": {
+          "linear": "0x100000"
+        },
+        "entry": {
+          "linear": "0x100000"
+        },
+        "jumpkind": "Ijk_Ret",
+        "transfer": null,
+        "instruction_count": 0,
+        "instructions": [],
+        "instructions_truncated": 0,
+        "function_machine_code_sha256": null,
+        "function_machine_code_size": null,
+        "machine_code_sha256": null,
+        "machine_code_size": 6,
+        "inputs": [
+          "cs",
+          "d",
+          "ds",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "memory",
+          "ss"
+        ],
+        "outputs": [
+          "cs",
+          "d",
+          "ds",
+          "eax",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "eip",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "ss"
+        ],
+        "input_count": 14,
+        "assignment_count": 2
+      },
+      "candidate_detail": {
+        "part": {
+          "kind": "block",
+          "index": 0,
+          "entry_delta": "0x0"
+        },
+        "function_entry": {
+          "linear": "0x100000"
+        },
+        "entry": {
+          "linear": "0x100000"
+        },
+        "jumpkind": "Ijk_Ret",
+        "transfer": null,
+        "instruction_count": 0,
+        "instructions": [],
+        "instructions_truncated": 0,
+        "function_machine_code_sha256": null,
+        "function_machine_code_size": null,
+        "machine_code_sha256": null,
+        "machine_code_size": 6,
+        "inputs": [
+          "cs",
+          "d",
+          "ds",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "memory",
+          "ss"
+        ],
+        "outputs": [
+          "cs",
+          "d",
+          "ds",
+          "eax",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "eip",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "ss"
+        ],
+        "input_count": 14,
+        "assignment_count": 2
+      },
+      "call_compare": null,
+      "status": "passed",
+      "reason": null,
+      "layout_normalization": null,
+      "output_projection": null,
+      "mismatches": [],
+      "skipped_layout_outputs": []
+    }
+  ],
+  "id": "ssa-compare:441c1c0bceb040b60c48fb976d65e4e966abe785034520e1a08f50aa23dfea89"
+}

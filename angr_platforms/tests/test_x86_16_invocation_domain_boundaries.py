@@ -495,6 +495,7 @@ def test_census_work_bound_refuses_with_closed_ledger() -> None:
     assert not pre.complete
     assert pre.failure is Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
     assert pre.classified_fact_count == 0
+    assert pre.refusal_site is None
     _assert_ledger_closed(pre)
 
     # Classification advances monotonically with the work cap on this
@@ -517,6 +518,7 @@ def test_census_work_bound_refuses_with_closed_ledger() -> None:
         mid_census.materialized_count + mid_census.failure_count
     )
     assert mid_census.materialized_count > 0
+    assert mid_census.refusal_site is None
     _assert_ledger_closed(mid_census)
 
     restored = prove_real16_invocation_domain_8616(

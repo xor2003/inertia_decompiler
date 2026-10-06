@@ -19,16 +19,29 @@ Output:
 - Function comment headers with confidence breakdown
 - Milestone reports with confidence statistics
 - Scan summary with confidence distribution
+
+Evidence contract: markers are built only from the typed projection produced
+by ``confidence_evidence.load_confidence_evidence``, which validates the
+optional producer metadata published by the struct-merging, array-matching and
+segmented-memory passes (and validated legacy cfunc attachments). Missing
+evidence stays absent, refused facts stay LOW, and malformed payloads are
+recorded as report assumptions instead of being replaced by defaults.
 """
 
 from __future__ import annotations
 
-import typing
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, cast
 
 from .codegen_metadata import get_codegen_sequence_attr, get_codegen_side_metadata
+from .confidence_evidence import (
+    ArrayEvidenceItem,
+    EvidenceChannel,
+    SegmentEvidenceItem,
+    StructEvidenceItem,
+    load_confidence_evidence,
+)
 
 __all__ = [
     "ConfidenceLevel",
@@ -287,16 +300,19 @@ def build_function_with_confidence_markers(
     if codegen is not None:
         metadata = get_codegen_side_metadata(codegen)
         metadata["confidence_report"] = confidence_report
-    try:
-        cfunc_dynamic = cast(Any, cfunc)
-        cfunc_metadata = getattr(cfunc, "_recovery_metadata", None)
-        if not isinstance(cfunc_metadata, dict):
-            cfunc_metadata = {}
+    cfunc_dynamic = cast(Any, cfunc)
+    cfunc_metadata = getattr(cfunc, "_recovery_metadata", None)
+    if not isinstance(cfunc_metadata, dict):
+        cfunc_metadata = {}
+        try:
             # Dynamic decompiler boundary: recovery metadata is optional on third-party CFunction objects.
-            typing.cast(typing.Any, cfunc)._recovery_metadata = cfunc_metadata
+            cfunc_dynamic._recovery_metadata = cfunc_metadata
+        except (AttributeError, TypeError):
+            # A third-party object that refuses attribute writes cannot carry
+            # the metadata map; codegen side metadata above still recorded it.
+            cfunc_metadata = None
+    if cfunc_metadata is not None:
         cfunc_metadata["confidence_report"] = confidence_report
-    except Exception:
-        pass
 
     # Prepend comment header to function
     if hasattr(cfunc_dynamic, "decompile"):
@@ -304,7 +320,7 @@ def build_function_with_confidence_markers(
         header = confidence_report.comment_header()
         if original_decomp:
             # Dynamic decompiler boundary: cached text is an optional CFunction diagnostic surface.
-            typing.cast(typing.Any, cfunc)._cached_decomp = header + "\n\n" + original_decomp
+            cfunc_dynamic._cached_decomp = header + "\n\n" + original_decomp
 
     return True
 
@@ -316,7 +332,7 @@ def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
         """Attach confidence markers through the dynamic third-party angr codegen boundary.
 
         This pass:
-        1. Collects confidence markers from type inference stages
+        1. Collects confidence markers from the typed producer-evidence projection
         2. Aggregates assumptions from structuring/type analysis
         3. Attaches metadata to decompiled functions
         4. Optionally caches confidence comment headers for report consumers
@@ -326,85 +342,116 @@ def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
 
         Returns:
             False because this reporting-only pass does not mutate recovered semantics
+
+        Raises:
+            Any unexpected exception raised by third-party attribute access or
+            by the producer-evidence projection propagates unchanged; absent or
+            malformed evidence is reported, never fabricated.
         """
-        try:
-            # For each function in the decompiler
-            codegen_dynamic = cast(Any, codegen)
-            if hasattr(codegen_dynamic, "cfunc") and codegen_dynamic.cfunc:
-                cfunc = codegen_dynamic.cfunc
-                func_addr = getattr(cfunc, "addr", 0)
-                func_name = getattr(cfunc, "name", f"func_{hex(func_addr)}")
-
-                # Build confidence tracker from recovered types/structures
-                tracker = ConfidenceTracker()
-
-                _collect_struct_confidence_8616(tracker, cfunc)
-                _collect_array_confidence_8616(tracker, cfunc)
-                _collect_segmented_memory_confidence_8616(tracker, cfunc)
-
-                # Build report
-                report = FunctionConfidenceReport(func_addr=func_addr, func_name=func_name, confidence_tracker=tracker)
-
-                # Add assumptions from analysis
-                for assumption in get_codegen_sequence_attr(codegen, cfunc, "_assumptions"):
-                    report.add_assumption(assumption)
-
-                # Add critical unknowns
-                for unknown in get_codegen_sequence_attr(codegen, cfunc, "_critical_unknowns"):
-                    report.add_critical_unknown(unknown)
-
-                # Attach to function
-                build_function_with_confidence_markers(cfunc, report, codegen=codegen)
-
+        # Dynamic codegen boundary: angr codegen supplies cfunc at runtime.
+        codegen_dynamic = cast(Any, codegen)
+        cfunc = getattr(codegen_dynamic, "cfunc", None)
+        if cfunc is None:
             return False
 
-        except Exception:
-            return False
+        # Dynamic codegen boundary: addr/name are third-party CFunction fields.
+        func_addr = getattr(cfunc, "addr", 0)
+        func_name = getattr(cfunc, "name", f"func_{hex(func_addr)}")
+
+        # Build confidence tracker from the typed producer-evidence projection
+        evidence = load_confidence_evidence(codegen, cfunc)
+        tracker = ConfidenceTracker()
+
+        _collect_struct_confidence_8616(tracker, evidence.structs)
+        _collect_array_confidence_8616(tracker, evidence.arrays)
+        _collect_segmented_memory_confidence_8616(tracker, evidence.segments)
+
+        # Build report
+        report = FunctionConfidenceReport(func_addr=func_addr, func_name=func_name, confidence_tracker=tracker)
+
+        # Record producer failures and malformed evidence honestly
+        _record_channel_diagnostics_8616(report, "struct merging", evidence.structs)
+        _record_channel_diagnostics_8616(report, "array matching", evidence.arrays)
+        _record_channel_diagnostics_8616(report, "segmented memory", evidence.segments)
+
+        # Add assumptions from analysis
+        for assumption in get_codegen_sequence_attr(codegen, cfunc, "_assumptions"):
+            report.add_assumption(assumption)
+
+        # Add critical unknowns
+        for unknown in get_codegen_sequence_attr(codegen, cfunc, "_critical_unknowns"):
+            report.add_critical_unknown(unknown)
+
+        # Attach to function
+        build_function_with_confidence_markers(cfunc, report, codegen=codegen)
+
+        return False
 
     return _impl()
 
 
-def _collect_struct_confidence_8616(tracker: ConfidenceTracker, cfunc: object) -> None:
-    """Record confidence markers for recovered structs (Phase 2.3)."""
-    cfunc_dynamic = cast(Any, cfunc)
-    if not hasattr(cfunc_dynamic, "_struct_recovery_info"):
-        return
-    struct_info = cfunc_dynamic._struct_recovery_info
-    if not (struct_info and hasattr(struct_info, "structs")):
-        return
-    for struct in struct_info.structs:
-        # Struct from multi-function agreement = HIGH confidence
-        struct_name = getattr(struct, "name", "unknown_struct")
-        evidence_count = len(getattr(struct, "functions", []))  # Number of functions using it
-        confidence = ConfidenceLevel.HIGH if evidence_count >= 2 else ConfidenceLevel.MEDIUM
+def _record_channel_diagnostics_8616[ItemT](
+    report: FunctionConfidenceReport,
+    channel_name: str,
+    channel: EvidenceChannel[ItemT],
+) -> None:
+    """Record producer errors and malformed evidence as explicit assumptions."""
+    if channel.error is not None:
+        report.add_assumption(f"{channel_name} producer reported an error: {channel.error}")
+    for malformed in channel.malformed:
+        report.add_assumption(f"ignored malformed {channel_name} evidence: {malformed}")
+
+
+def _collect_struct_confidence_8616(
+    tracker: ConfidenceTracker,
+    channel: EvidenceChannel[StructEvidenceItem],
+) -> None:
+    """Record confidence markers for projected struct evidence (Phase 2.3)."""
+    for item in channel.items:
+        if item.refusal_reason is not None or not item.segmented_allowed:
+            confidence = ConfidenceLevel.LOW
+            reason = f"segmented memory refused lowering: {item.refusal_reason or 'reason not published'}"
+        else:
+            confidence = ConfidenceLevel.HIGH if item.evidence_count >= 2 else ConfidenceLevel.MEDIUM
+            reason = f"recovered from {item.evidence_count} {item.evidence_basis}(s) [{item.source}]"
         tracker.add_marker(
             fact_kind="struct",
-            fact_detail=f"struct {struct_name}",
+            fact_detail=f"struct {item.identity}",
             confidence=confidence,
-            evidence_count=evidence_count,
-            reason=f"recovered from {evidence_count} function(s)",
+            evidence_count=item.evidence_count,
+            reason=reason,
+        )
+    for refusal in channel.refusals:
+        tracker.add_marker(
+            fact_kind="struct",
+            fact_detail=f"refused storage object {refusal.identity}",
+            confidence=ConfidenceLevel.LOW,
+            evidence_count=0,
+            reason=f"refused: {refusal.reason}",
         )
 
 
-def _collect_array_confidence_8616(tracker: ConfidenceTracker, cfunc: object) -> None:
-    """Record confidence markers for recovered arrays (Phase 2.2)."""
-    cfunc_dynamic = cast(Any, cfunc)
-    if not hasattr(cfunc_dynamic, "_array_recovery_info"):
-        return
-    array_info = cfunc_dynamic._array_recovery_info
-    if not (array_info and hasattr(array_info, "arrays")):
-        return
-    for array in array_info.arrays:
-        # Array with stride pattern = MEDIUM to HIGH confidence
-        array_name = getattr(array, "array_name", "unknown_array")
-        pattern_count = len(getattr(array, "access_patterns", []))
-        confidence = ConfidenceLevel.HIGH if pattern_count >= 3 else ConfidenceLevel.MEDIUM
+def _collect_array_confidence_8616(
+    tracker: ConfidenceTracker,
+    channel: EvidenceChannel[ArrayEvidenceItem],
+) -> None:
+    """Record confidence markers for projected array evidence (Phase 2.2)."""
+    for item in channel.items:
+        confidence = ConfidenceLevel.HIGH if item.evidence_count >= 3 else ConfidenceLevel.MEDIUM
         tracker.add_marker(
             fact_kind="array",
-            fact_detail=f"array {array_name}",
+            fact_detail=f"array {item.identity}",
             confidence=confidence,
-            evidence_count=pattern_count,
-            reason=f"detected from {pattern_count} access pattern(s)",
+            evidence_count=item.evidence_count,
+            reason=f"detected from {item.evidence_count} {item.evidence_basis}(s) [{item.source}]",
+        )
+    for refusal in channel.refusals:
+        tracker.add_marker(
+            fact_kind="array",
+            fact_detail=f"refused array {refusal.identity}",
+            confidence=ConfidenceLevel.LOW,
+            evidence_count=0,
+            reason=f"refused: {refusal.reason}",
         )
 
 
@@ -417,23 +464,16 @@ def _segment_association_confidence_8616(stability: float) -> ConfidenceLevel:
     return ConfidenceLevel.LOW
 
 
-def _collect_segmented_memory_confidence_8616(tracker: ConfidenceTracker, cfunc: object) -> None:
-    """Record confidence markers for segmented memory associations (Phase 3)."""
-    cfunc_dynamic = cast(Any, cfunc)
-    if not hasattr(cfunc_dynamic, "_segmented_memory_info"):
-        return
-    seg_info = cfunc_dynamic._segmented_memory_info
-    if not (seg_info and hasattr(seg_info, "associations")):
-        return
-    for assoc in seg_info.associations:
-        # Stable segment association = HIGH, over-associated = LOW
-        segment_reg = getattr(assoc, "segment_reg", "unknown")
-        seg_str = str(getattr(segment_reg, "value", segment_reg))
-        stability = getattr(assoc, "stability", 0.5)
+def _collect_segmented_memory_confidence_8616(
+    tracker: ConfidenceTracker,
+    channel: EvidenceChannel[SegmentEvidenceItem],
+) -> None:
+    """Record confidence markers for projected segment associations (Phase 3)."""
+    for item in channel.items:
         tracker.add_marker(
             fact_kind="segmented_memory",
-            fact_detail=f"segment {seg_str} association",
-            confidence=_segment_association_confidence_8616(stability),
-            evidence_count=int(stability * 10),
-            reason=f"stability={stability:.2f}",
+            fact_detail=f"segment {item.segment} association",
+            confidence=_segment_association_confidence_8616(item.stability),
+            evidence_count=item.evidence_count,
+            reason=f"{item.detail}; stability={item.stability:.2f}",
         )

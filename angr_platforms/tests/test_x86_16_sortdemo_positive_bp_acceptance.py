@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +43,7 @@ def _run_sidecar_free_function(tmp_path: Path, address: int) -> subprocess.Compl
     )
 
 
+@pytest.mark.requires_kvm
 def test_sortd_beep_sidecar_free_materializes_both_value_arguments(tmp_path: Path) -> None:
     result = _run_sidecar_free_function(tmp_path, 0x10E70)
     combined = f"{result.stderr}{result.stdout}"
@@ -65,6 +68,7 @@ def test_sortd_beep_sidecar_free_materializes_both_value_arguments(tmp_path: Pat
     assert "local_6" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortd_drawbar_uses_binary_proven_void_callee_contracts(tmp_path: Path) -> None:
     result = _run_sidecar_free_function(tmp_path, 0x10768)
     combined = f"{result.stderr}{result.stdout}"
@@ -79,6 +83,7 @@ def test_sortd_drawbar_uses_binary_proven_void_callee_contracts(tmp_path: Path) 
     assert "int sub_106c8(" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortd_drawtime_proves_forwarded_wide_runtime_return(tmp_path: Path) -> None:
     result = _run_sidecar_free_function(tmp_path, 0x10498)
     combined = f"{result.stderr}{result.stdout}"
@@ -103,6 +108,7 @@ def test_sortd_drawtime_proves_forwarded_wide_runtime_return(tmp_path: Path) -> 
     assert not re.search(r"\binertia_ss\s*<<\s*4\b", result.stdout)
 
 
+@pytest.mark.requires_kvm
 def test_sortd_shellsort_uses_alias_proven_zero_argument_interface(tmp_path: Path) -> None:
     result = _run_sidecar_free_function(tmp_path, 0x10C18)
     combined = f"{result.stderr}{result.stdout}"

@@ -12,6 +12,7 @@ This module does not infer original C signedness, pointer or pointee type,
 segment identity, or a return expression, and it never mutates the project,
 codegen, or emitted C. Consumes frontend, IR, and Semantics artifacts through
 owned typed interfaces only.
+Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 

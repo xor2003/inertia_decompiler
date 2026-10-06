@@ -4,6 +4,9 @@ Layer: Alias.
 Responsibility: consume closed typed IR CFGs and exact save/restore coordinates
 to detect writes requiring physical disjointness evidence. Logical DS/ES names
 never prove disjointness from SS. No calling convention or C recovery occurs.
+Owns storage identity.
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting
+work here.
 """
 
 from __future__ import annotations

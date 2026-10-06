@@ -30,6 +30,7 @@ def test_ir_value_to_dict_preserves_expr_and_version():
         "memory_access_insn": None,
         "source_tmp": None,
         "call_output": None,
+        "active_unary": None,
     }
 
 

@@ -238,6 +238,7 @@ def compare_binary16(
     max_rss_mb: int = 0,
     recursive: Real16RecursiveRequest | None = None,
     ordered_io_environment: OrderedIoContract | str | None = None,
+    reuse_identical_lowering: bool = True,
 ) -> dict[str, Any]:
     """Compare two real-mode executables and return a sealed proof report.
 
@@ -248,6 +249,14 @@ def compare_binary16(
     Identical paths, catalogs and fresh identities share one invocation-local
     lowering through independent deep copies; every side retains its seal,
     environment scan and full proof gates. The report records that reuse.
+
+    ``reuse_identical_lowering`` is a diagnostic parity control. The default
+    ``True`` keeps the in-invocation deepcopy reuse above; ``False`` recomputes
+    the candidate lowering from the same sealed inputs, so a parity run can
+    prove the reuse path never changes verdicts or dependency evidence. The
+    mode is reported as ``lowering_reuse_mode`` and the per-side outcome stays
+    in ``lowering_reuse``; neither semantic dependency identities nor any
+    dischargeable-fact machinery are affected.
 
     ``recursive`` is a typed opt-in: when supplied, requested oracle function
     keys are tried as roots for the image-bound recursive joint checker over
@@ -296,6 +305,7 @@ def compare_binary16(
             max_rss_mb=max_rss_mb,
             recursive=recursive,
             io_model=io_model,
+            reuse_identical_lowering=reuse_identical_lowering,
         )
 
 
@@ -322,13 +332,16 @@ def _compare_binary16(
     max_rss_mb: int = 0,
     recursive: Real16RecursiveRequest | None = None,
     io_model: OrderedIoContract | None = None,
+    reuse_identical_lowering: bool = True,
 ) -> dict[str, Any]:
     """Evaluate the sealed comparison body under an already-bound environment.
 
     ``io_model`` is the resolved ordered-I/O contract; the caller has
     installed it ambiently so unowned intake and lowering gates see the
     identical binding, and it is additionally threaded explicitly through
-    the owned scan, composition and report seams.
+    the owned scan, composition and report seams. ``reuse_identical_lowering``
+    selects whether an eligible candidate may deepcopy this invocation's
+    sealed oracle document; ``False`` lowers the candidate independently.
     """
     digests = {
         side: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -352,7 +365,8 @@ def _compare_binary16(
         images[side] = loaded_image_identity(project)
         identity = ssa_provenance.begin_lowering(exe)
         reuse_oracle = (
-            side == "candidate" and exe == oracle_exe
+            reuse_identical_lowering
+            and side == "candidate" and exe == oracle_exe
             and catalog == oracle_catalog and identity == oracle_identity
             and selected_catalog_indices(catalog.get("functions", []), selection_roots["oracle"])
             == selected_catalog_indices(catalog.get("functions", []), selection_roots["candidate"])
@@ -536,6 +550,7 @@ def _compare_binary16(
         "proof_domain": domain_document,
         "recursive_joint": _recursive_document(recursive, recursive_outcome),
         "lowering": {side: documents[side].get("counters") for side in ("oracle", "candidate")},
+        "lowering_reuse_mode": "enabled" if reuse_identical_lowering else "bypassed",
         "lowering_reuse": lowering_reuse,
         "callee_intake": {side: document.get("binary_callee_intake") for side, document in documents.items()},
         "backend": {
@@ -590,6 +605,10 @@ def add_binary16_parser(subparsers: Any) -> argparse.ArgumentParser:  # noqa: AN
     parser.add_argument("--ordered-io-environment", metavar="MODEL_ID",
                         help="Bind the declared ordered scalar port-I/O environment contract "
                              "(model identity dosunit.ordered_io.scalar_in_out.v1; results stay conditional)")
+    parser.add_argument("--no-lowering-reuse", dest="reuse_identical_lowering",
+                        action="store_false", default=True,
+                        help="Diagnostic parity control: recompute the candidate lowering "
+                             "instead of reusing an identical in-invocation oracle document")
     parser.add_argument("--out", required=True)
     parser.set_defaults(func=cmd_compare_binary16)
     return parser
@@ -629,6 +648,7 @@ def cmd_compare_binary16(args: argparse.Namespace) -> int:
             if args.recursive else None
         ),
         ordered_io_environment=args.ordered_io_environment,
+        reuse_identical_lowering=args.reuse_identical_lowering,
     )
     report["id"] = stable_id("binary16-compare", {key: value for key, value in report.items() if key != "id"})
     write_json(Path(args.out), report)

@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: join a direct far caller's physical PUSH facts with the
 callee's decoded indirect-call ABI, preserving the physical facts while
 publishing a logical argument shape for C materialization.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

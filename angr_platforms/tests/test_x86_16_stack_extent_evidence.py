@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 from angr_platforms.X86_16.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
 from angr_platforms.X86_16.ir import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
+from angr_platforms.X86_16.ir.core import IRActiveUnary8616
 from angr_platforms.X86_16.ir.ssa import SSABlock
 from angr_platforms.X86_16.ir.ssa_function import build_x86_16_function_ssa
 from angr_platforms.X86_16.ir.stack_extent_evidence import (
@@ -31,6 +32,55 @@ def _block():
         _move("sp", 3, "bp", 1),
         _move("sp", 4, "sp", 3, 2),
     ), ())
+
+
+def _captured_allocation_block():
+    entry = IRValue(MemSpace.REG, name="sp", size=2, version=0)
+    captured = IRValue(MemSpace.TMP, size=2, source_tmp=40)
+    result = IRValue(MemSpace.TMP, size=2, source_tmp=41)
+    two = IRValue(MemSpace.CONST, size=2, const=2)
+    original = _block()
+    return replace(original, instrs=(
+        IRInstr("MOV", captured, (entry,), size=2),
+        IRInstr("Iop_Sub16", result, (captured, two), size=2),
+        replace(original.instrs[0], args=(replace(result, expr=("Iop_Sub16",)),)),
+        *original.instrs[1:],
+    ))
+
+
+def test_captured_arithmetic_preserves_unwrapped_stack_coordinates():
+    evidence = build_stack_extent_evidence_8616(_captured_allocation_block())
+    assert evidence.complete
+    assert {(e.lower_offset, e.upper_offset) for e in evidence.extents} == {(-2, 0), (-6, -2)}
+
+
+@pytest.mark.parametrize("corruption", (
+    "missing", "duplicate", "width", "operation", "decoration", "unary", "wrap",
+))
+def test_captured_stack_coordinate_requires_exact_prior_word_producer(corruption):
+    block = _captured_allocation_block()
+    instructions = list(block.instrs)
+    producer = instructions[1]
+    read = instructions[2].args[0]
+    if corruption == "missing":
+        instructions[0] = replace(instructions[0], dst=None)
+    elif corruption == "duplicate":
+        instructions.insert(1, instructions[0])
+    elif corruption == "width":
+        instructions[1] = replace(producer, size=4)
+    elif corruption == "operation":
+        instructions[1] = replace(producer, op="Iop_Xor16")
+    elif corruption == "decoration":
+        instructions[2] = replace(instructions[2], args=(replace(read, expr=("Iop_Not16",)),))
+    elif corruption == "unary":
+        instructions[2] = replace(instructions[2], args=(replace(
+            read, active_unary=IRActiveUnary8616("Iop_Not16", read, 16),
+        ),))
+    else:
+        instructions[1] = replace(producer, args=(producer.args[0], replace(producer.args[1], const=65536)))
+    evidence = build_stack_extent_evidence_8616(replace(block, instrs=tuple(instructions)))
+    assert evidence.refusal is StackExtentRefusal8616.UNKNOWN_COORDINATE
+    assert not evidence.extents
 
 
 def test_matches_local_and_saved_register_extents_without_conflating_them():

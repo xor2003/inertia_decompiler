@@ -221,6 +221,7 @@ class _SidecarSliceFallback8616:
         return None
 
     def run_8616_part0(self) -> tuple[bool, object]:
+        """Phase 0: bound the LST code region and load its bytes into run state."""
         self.region = _lst_code_region(self.lst_metadata, self.addr)
         if self.region is None:
             return True, None
@@ -388,6 +389,7 @@ class _SidecarSliceFallback8616:
 
 
     def run_8616_part1(self) -> tuple[bool, object]:
+        """Phase 1: run the bounded slice decompile, wrapping timeout/error outcomes."""
         try:
             self.runner_timeout = max(2, min(self.timeout, _SIDECAR_SLICE_RUNNER_TIMEOUT_CAP_8616))
             self.result = None
@@ -512,6 +514,7 @@ class _NonOptimizedSliceFallback8616:
         return None
 
     def run_8616_part0(self) -> tuple[bool, object]:
+        """Phase 0: emit a known runtime-helper fallback when the name matches."""
         self.helper_fallback = _try_emit_known_runtime_helper_c(name=self.name)
         if self.helper_fallback is not None:
             _mark_helper_fallback_tail_validation_passed(
@@ -846,6 +849,7 @@ class _NonOptimizedSliceFallback8616:
 
 
     def run_8616_part1(self) -> tuple[bool, object]:
+        """Phase 1: attempt the shared-project slice, then a fresh-project retry lane."""
         self.outcome = self._attempt(self.project, label="shared-project slice")
         if self.outcome.rendered is not None:
             return True, self.outcome

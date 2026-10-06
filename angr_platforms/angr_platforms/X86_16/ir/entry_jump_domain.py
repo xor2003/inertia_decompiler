@@ -38,8 +38,10 @@ per-instruction all-selector gate stays in force; this module only
 adds a separately proven, narrower fetch domain. A call or a ``PROVEN``
 tag alone is never evidence; the segment solver is rerun on the same
 artifact instead of trusting retained artifacts or serialized receipts.
-Do not perform alias, widening, lowering/materialization, structuring,
-rewrite, postprocess, or CLI/reporting work here.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

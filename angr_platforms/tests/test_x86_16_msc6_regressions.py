@@ -206,6 +206,7 @@ def test_msc6_cmp16_rel_i16_keeps_recovered_signature_and_avoids_implicit_arg_pl
     assert "return mask;" in emitted_body
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(not CMP16_EXE.is_file(), reason="CMP16 example binary is not available in this workspace.")
 def test_msc6_cmp16_main_preserves_all_guarded_return_chain_values() -> None:
     result = _run_decompile_addr("0x101a7")

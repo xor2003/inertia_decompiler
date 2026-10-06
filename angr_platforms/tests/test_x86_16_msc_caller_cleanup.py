@@ -182,6 +182,7 @@ def test_caller_cleanup_does_not_split_one_push_into_two_arguments() -> None:
         assert _same_c_expression_8616(arguments[0], arguments[1])
 
 
+@pytest.mark.requires_kvm
 def test_sortd_percolateup_caller_cleanup_has_no_opaque_sp_expression(
     tmp_path: Path,
 ) -> None:

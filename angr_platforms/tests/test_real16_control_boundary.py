@@ -621,8 +621,14 @@ def test_e8cbff_negative_still_refuses_through_boundary(tmp_path: Path) -> None:
         current_cs=caller["outputs"].get("cs"), callbacks=_CALLBACKS,
     )
     assert outcome.value is None
-    assert outcome.failure is rt.ControlDomainFailure.DESTINATION_UNPROVED
+    assert outcome.verdict is rt.ControlProofVerdict.UNKNOWN_REFUSE
+    assert outcome.failure is rt.ControlDomainFailure.TERMINAL_DECODE_MISMATCH
+    transfer = caller["source"]["transfer"]
+    assert "target" not in transfer
+    assert transfer["native_target_refusal"] == "terminal_jump_selector_window_unproved"
     assert outcome.ledger.counters().classified_fact_count == 1
+    assert outcome.ledger.counters().materialized_count == 0
+    assert outcome.ledger.counters().failure_count == 1
     assert not outcome.ledger.counters().closed()
 
 

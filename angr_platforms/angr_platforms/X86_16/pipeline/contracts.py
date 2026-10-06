@@ -231,12 +231,21 @@ class SemanticLaneState:
         return f"{self.name}: [{status}] " + " ".join(parts)
 
 
-def _semantic_lane_or_none_8616(contract: _PipelineCodegenContract, attr: str) -> object | None:
-    """Read an owned semantic-lane attribute; missing lane is a typed absence."""
+def _primary_semantic_lanes_8616(contract: _PipelineCodegenContract) -> tuple[object | None, object | None]:
+    """Read optional owned attachments independently at the codegen boundary.
+
+    Partial angr codegen objects may lack either attachment. Absence of one
+    must not suppress validation of the other, including its invalid types.
+    """
     try:
-        return getattr(contract, attr)
+        stack_lane = contract._inertia_stack_lane
     except AttributeError:
-        return None
+        stack_lane = None
+    try:
+        condition_lane = contract._inertia_condition_lane
+    except AttributeError:
+        condition_lane = None
+    return stack_lane, condition_lane
 
 
 def _assert_semantic_lane_type_8616(lane: object, lane_name: str, layer_tag: str) -> None:
@@ -326,8 +335,7 @@ def assert_pipeline_contracts_8616(codegen: object) -> None:
     Raises PipelineHardError if any lane has un-materialized facts.
     """
     contract = cast(_PipelineCodegenContract, codegen)
-    stack_lane = _semantic_lane_or_none_8616(contract, "_inertia_stack_lane")
-    condition_lane = _semantic_lane_or_none_8616(contract, "_inertia_condition_lane")
+    stack_lane, condition_lane = _primary_semantic_lanes_8616(contract)
 
     _assert_semantic_lane_type_8616(stack_lane, "stack lane", "stack_lane")
     _assert_semantic_lane_type_8616(condition_lane, "condition lane", "condition_lane")

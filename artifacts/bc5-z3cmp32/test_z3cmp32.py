@@ -1,9 +1,13 @@
-"""Regression evidence for the bc5 flat32 region comparator seams."""
+"""Regression evidence for the bc5 flat32 region comparator seams and its --no-cache route."""
 
+import contextlib
+import fcntl
 import json
 import sys
+import tempfile
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import archinfo
@@ -12,6 +16,9 @@ import pyvex
 
 sys.path.insert(0, str(Path(__file__).parent))
 import flat32_catalog
+import flat32_fast_pe
+import flat32_verdict
+import z3cmp32
 from flat32_adapter import OUTPUT_REGS, S, installed
 from flat32_catalog import Symbol, cached_lst_data_symbols, cached_lst_functions
 from flat32_region import RegionLimits, RegionRefusal, compare_region, summarize
@@ -23,12 +30,16 @@ from z3cmp32 import (
     region_limits,
 )
 
+from tools.dosunit import straightline_ssa
+
 
 def lower(code: str, base: int = 0x401000) -> dict[str, Any]:
     """Lower actual i386 bytes under the flat32 region seams."""
     block = pyvex.IRSB(bytes.fromhex(code), base, archinfo.ArchX86(), opt_level=0)
     with installed(region=True):
-        out = S._lower_irsb(block, output_regs=OUTPUT_REGS, max_assignments_per_function=512)
+        out: dict[str, Any] = S._lower_irsb(
+            block, output_regs=OUTPUT_REGS, max_assignments_per_function=512
+        )
     assert not isinstance(out, S.LowerFailure), f"lowering refused: {out}"
     return out
 
@@ -423,3 +434,138 @@ def test_installed_region_scope_restores() -> None:
     with installed(region=True):
         assert S._can_add_dynamic_successor_range is not sentinel
     assert S._can_add_dynamic_successor_range is sentinel
+
+
+LISTING = (
+    "CODE:00401000 sub_401000 proc near\n"
+    "CODE:00401002 sub_401000 endp\n"
+    "CODE:00402000 jump_table\tdd offset sub_401000\n"
+    "DATA:00403000 data_label db 0\n"
+)
+
+
+def _run_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str]) -> Namespace:
+    """Route one parse through main() with the proof body stubbed out."""
+    captured: dict[str, Namespace] = {}
+
+    def fake_compare(args: Namespace) -> dict[str, Any]:
+        captured["args"] = args
+        return {"summary": flat32_verdict.summarize([]), "results": []}
+
+    monkeypatch.setattr(z3cmp32, "compare", fake_compare)
+    monkeypatch.setattr(z3cmp32, "installed", lambda **_kw: contextlib.nullcontext())
+    monkeypatch.setattr(sys, "argv", [
+        "z3cmp32.py",
+        "--oracle-exe", str(tmp_path / "oracle.exe"),
+        "--oracle-lst", str(tmp_path / "oracle.lst"),
+        "--candidate-exe", str(tmp_path / "candidate.exe"),
+        "--functions", "sub_401000",
+        "--out-dir", str(tmp_path / "out"),
+        *extra,
+    ])
+    # Stubbed compare produces no passed obligations; routing is what is asserted.
+    z3cmp32.main()
+    return captured["args"]
+
+
+def test_no_cache_maps_single_owner_to_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--no-cache must set the one cache owner to None for every consumer."""
+    args = _run_main(monkeypatch, tmp_path, ["--no-cache"])
+    assert args.cache_dir is None
+
+
+def test_no_cache_overrides_explicit_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dosunit ssa pattern applies: --no-cache wins over --cache-dir."""
+    args = _run_main(monkeypatch, tmp_path, ["--cache-dir", str(tmp_path / "c"), "--no-cache"])
+    assert args.cache_dir is None
+
+
+def test_default_cache_dir_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without --no-cache the existing default and an explicit dir pass through."""
+    args = _run_main(monkeypatch, tmp_path, [])
+    assert args.cache_dir == Path("/tmp/z3bcc-vexcache")
+    args = _run_main(monkeypatch, tmp_path, ["--cache-dir", str(tmp_path / "kept")])
+    assert args.cache_dir == tmp_path / "kept"
+
+
+def test_load32_verified_none_loads_without_cache_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cache_dir=None returns the plain load and touches no cache artifact."""
+    exe = tmp_path / "m.exe"
+    exe.write_bytes(b"MZ" + b"\0" * 64)
+    sentinel = object()
+    monkeypatch.setattr(flat32_fast_pe, "load32", lambda *a, **k: sentinel)
+    monkeypatch.setattr(
+        flat32_fast_pe, "_read_certificate", lambda _p: pytest.fail("cache read reached")
+    )
+    monkeypatch.setattr(
+        flat32_fast_pe, "_write_certificate", lambda *_a: pytest.fail("cache write reached")
+    )
+    assert flat32_fast_pe.load32_verified(exe, None) is sentinel
+    assert [p.name for p in tmp_path.iterdir()] == ["m.exe"]
+
+
+def test_cached_listing_none_parses_directly_without_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cache_dir=None returns the parse and never opens a lock or cache file."""
+    listing = tmp_path / "module.lst"
+    listing.write_text(LISTING)
+    monkeypatch.setattr(
+        fcntl, "flock", lambda *_a, **_k: pytest.fail("cache lock reached")
+    )
+    monkeypatch.setattr(
+        tempfile, "NamedTemporaryFile",
+        lambda *_a, **_k: pytest.fail("cache write reached"),
+    )
+    assert cached_lst_functions(listing, None) == {"sub_401000": (0x401000, 0x401002)}
+    assert cached_lst_data_symbols(listing, None) == {
+        "jump_table": 0x402000, "data_label": 0x403000
+    }
+    assert [p.name for p in tmp_path.iterdir()] == ["module.lst"]
+
+
+def test_cached_listing_enabled_path_unchanged(tmp_path: Path) -> None:
+    """An explicit cache dir still writes and reuses lst-v* artifacts."""
+    listing = tmp_path / "module.lst"
+    listing.write_text(LISTING)
+    cache_dir = tmp_path / "cache"
+    assert cached_lst_functions(listing, cache_dir) == {"sub_401000": (0x401000, 0x401002)}
+    assert len(list(cache_dir.glob("lst-v*-functions-*.json"))) == 1
+    assert cached_lst_data_symbols(listing, cache_dir)["data_label"] == 0x403000
+    assert len(list(cache_dir.glob("lst-v*-data-*.json"))) == 1
+
+
+def test_lower_document_none_never_touches_vex_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lowering layer already honors cache_dir=None with zero cache I/O."""
+    exe = tmp_path / "prog.exe"
+    exe.write_bytes(b"\x90\xc3")
+    project = SimpleNamespace(
+        filename=str(exe),
+        loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x400000)),
+    )
+    monkeypatch.setattr(
+        straightline_ssa, "_load_vex_cache", lambda **_kw: pytest.fail("vex cache read reached")
+    )
+    monkeypatch.setattr(
+        straightline_ssa, "_save_vex_cache", lambda **_kw: pytest.fail("vex cache write reached")
+    )
+    monkeypatch.setattr(
+        straightline_ssa, "_lower_function", lambda **_kw: ([], [], 0)
+    )
+    catalog = {
+        "functions": [{
+            "id": "oracle:sub_1", "names": ["sub_1"], "return_kind": "near", "size": 2,
+            "entry": {"kind": "module_relative", "linear": "0x401000", "offset": "0x1000"},
+        }]
+    }
+    document = straightline_ssa.lower_straightline_ssa_document(
+        exe_path=exe, functions_catalog=catalog, cache_dir=None, lifter_project=project,
+    )
+    assert document["parameters"]["cache_dir"] is None
+    assert document["counters"]["lifter_cache_hits"] == 0
+    assert document["counters"]["lifter_cache_writes"] == 0
+    assert document["counters"]["functions_refused"] == 1

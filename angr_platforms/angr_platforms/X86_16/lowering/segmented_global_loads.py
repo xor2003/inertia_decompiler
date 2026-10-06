@@ -3161,7 +3161,11 @@ def _walk_statement_container_children_8616(
     node: object,
     visit: Callable[[object], None],
 ) -> None:
-    """Recurse into the dynamic third-party container child surfaces."""
+    """Visit optional children at the dynamic third-party angr C-AST boundary.
+
+    Loop, conditional and switch containers expose different child slots;
+    absent slots are not traversed. This traversal does not recover facts.
+    """
     for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
         child = getattr(node, attr, None)
         if child is not None:
@@ -3193,7 +3197,12 @@ def _replace_matches_in_node_8616(
     try_match: Callable[[list[object], int], DwordUpdateMatch8616],
     changed: list[bool],
 ) -> None:
-    """Rewrite matched statements then recurse into dynamic children."""
+    """Rewrite matched statements then recurse into dynamic children.
+
+    Dynamic boundary: third-party angr containers do not all own a statements
+    list. Mutate only an observed list; other node variants retain their
+    representation and pass through the declared child traversal.
+    """
     statements = getattr(node, "statements", None)
     if isinstance(statements, list):
         index = 0
@@ -11581,7 +11590,7 @@ def _capstone_disasm_function_code_8616(
 
 
 def _word_global_load_disp_8616(insn: object) -> int | None:
-    """Return the displacement when one insn is a direct word global load."""
+    """Return a direct word-load displacement only with complete address fields."""
 
     # Dynamic boundary: third-party Capstone instructions expose mnemonic/operands.
     if str(getattr(insn, "mnemonic", "")).lower() != "mov":
@@ -11589,17 +11598,18 @@ def _word_global_load_disp_8616(insn: object) -> int | None:
     operands = _capstone_operands_8616(insn)
     if len(operands) < 2:
         return None
-    dst, src = operands[0], operands[1]
-    if int(getattr(dst, "type", -1)) != 1 or int(getattr(src, "type", -1)) != 3:
+    dst = _capstone_operand_view_8616(operands[0])
+    src = _capstone_operand_view_8616(operands[1])
+    if dst.kind != X86_OP_REG or src.kind != X86_OP_MEM:
         return None
-    if getattr(src, "size", None) != 2:
+    if src.size != 2:
         return None
-    mem = getattr(src, "mem", None)
+    mem = src.memory
     if mem is None:
         return None
-    if int(getattr(mem, "base", 0) or 0) != 0 or int(getattr(mem, "index", 0) or 0) != 0:
+    if mem.base != X86_REG_INVALID or mem.index != X86_REG_INVALID:
         return None
-    disp = getattr(mem, "disp", None)
+    disp = mem.displacement
     if isinstance(disp, int) and disp >= 0:
         return disp & 0xFFFF
     return None

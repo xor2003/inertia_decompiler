@@ -11,15 +11,22 @@ import argparse
 import concurrent.futures
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+from xml.etree import ElementTree
+
+if TYPE_CHECKING or __package__:
+    from .compiler_coverage_provenance import KVMAccessStatus, kvm_access_evidence
+else:
+    from compiler_coverage_provenance import KVMAccessStatus, kvm_access_evidence
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 DEFAULT_OUT: Path = REPO_ROOT / "angr_platforms" / ".cache" / "test_pipeline" / "summary.json"
@@ -32,6 +39,39 @@ BUDGETED_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_dosunit_transitive_callees.py",
 )
 
+SPLIT_CONTROL_TEST_FILES: tuple[str, ...] = (
+    "angr_platforms/tests/test_fork_owner_death.py",
+    "angr_platforms/tests/test_pytest_live_failures.py",
+    "angr_platforms/tests/test_compiler_coverage_runner.py",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py",
+)
+SERIAL_PYTEST_TARGETS: tuple[str, ...] = (
+    "angr_platforms/tests/test_pytest_live_failures.py::test_live_failures_preserve_reports_and_emit_before_session_end",
+)
+LINUX_PROCESS_CASE_COUNTS: dict[str, int] = {
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_real_timeout_stops_descendants_and_retains_both_output_streams": 2,
+    "angr_platforms/tests/test_fork_owner_death.py::test_work_requires_live_supervision": 4,
+    "angr_platforms/tests/test_fork_owner_death.py::test_owner_death_stops_owned_descendants": 2,
+}
+LINUX_PROCESS_PYTEST_TARGETS: tuple[str, ...] = tuple(LINUX_PROCESS_CASE_COUNTS)
+GP_NATIVE_PYTEST_TARGETS: tuple[str, ...] = (
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_msc6_word_runtime_compiles_and_executes",
+)
+
+GNU_MAKE_ORACLE_TEST_FILE: str = "angr_platforms/tests/test_makefile_gnu_oracle.py"
+GNU_MAKE_ORACLE_CASE_COUNTS: dict[str, int] = {
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_supported_cases_match_gnu_make': 10,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_override_undefine_match_gnu_make': 19,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_skipped_include_override_oracle_proves_flag_needed': 1,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_conditional_override_undefine_oracle': 1,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_include_cases_match_gnu_make': 1,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_conditional_override_oracle_both_branches': 2,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_conditional_override_undefine_oracle_both_branches': 1,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_define_override_matches_gnu_make': 2,
+    'angr_platforms/tests/test_makefile_gnu_oracle.py::test_unknown_global_assignment_gnu_oracle_proves_refusal_needed': 6,
+}
+GNU_MAKE_ORACLE_PYTEST_TARGETS: tuple[str, ...] = tuple(GNU_MAKE_ORACLE_CASE_COUNTS)
+
 FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_compact_paths.py",
     "angr_platforms/tests/test_ordered_io_environment.py",
@@ -41,7 +81,9 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_flat32_loop_calls.py",
     "angr_platforms/tests/test_replay_capture_vectors.py",
     "angr_platforms/tests/test_pytest_directory_cache.py",
-    "angr_platforms/tests/test_pytest_live_failures.py",
+    "angr_platforms/tests/test_pytest_live_failures.py::test_registration_only_owns_controller_terminal",
+    "angr_platforms/tests/test_pytest_live_failures.py::test_failure_flushes_immediately_without_mutating_report",
+    "angr_platforms/tests/test_pytest_live_failures.py::test_nonfailure_reports_are_quiet",
     "angr_platforms/tests/test_native_relift_scope.py",
     "angr_platforms/tests/test_dosunit_kvikdos_strict.py",
     "angr_platforms/tests/test_dosunit_kvikdos_worker.py",
@@ -54,6 +96,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_dosunit_io_read_state.py",
     "angr_platforms/tests/test_real16_control_target_proof.py",
     "angr_platforms/tests/test_binary_callee_control_target.py",
+    "angr_platforms/tests/test_binary_callee_relative_call_coordinates.py",
     "angr_platforms/tests/test_real16_program_boot.py",
     "angr_platforms/tests/test_real16_program_resize.py",
     "angr_platforms/tests/test_real16_program_memory.py",
@@ -164,6 +207,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_flat32_proof_seal.py",
     "angr_platforms/tests/test_flat32_concrete_replay.py",
     "angr_platforms/tests/test_dosunit_guarded_capture.py",
+    "angr_platforms/tests/test_real16_write_readback.py",
     "angr_platforms/tests/test_flat32_replay_full_state.py",
     "angr_platforms/tests/test_flat32_replay_cli.py",
     "angr_platforms/tests/test_flat32_file_permissions.py",
@@ -180,6 +224,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_batch_decompile_result_contract.py",
     "angr_platforms/tests/test_x86_16_c_ast_utils.py",
     "angr_platforms/tests/test_cli_semantic_rollback.py",
+    "angr_platforms/tests/test_cli_retry_outcome.py",
     "angr_platforms/tests/test_cli_c_text_postprocess.py::test_known_helper_signature_text_preserves_recovered_signature",
     "angr_platforms/tests/test_x86_16_cod_samples.py::test_dosfunc_cod_sample_process_helpers_stay_empty",
     "angr_platforms/tests/test_cod_stability_sweep.py",
@@ -272,9 +317,20 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_compiler_coverage_csmith.py",
     "angr_platforms/tests/test_compiler_coverage_pointer_oracle.py",
     "angr_platforms/tests/test_compiler_coverage_provenance.py",
+    "angr_platforms/tests/test_kvm_marker_policy.py",
+    "angr_platforms/tests/test_x86_16_confidence_and_assumptions.py",
     "angr_platforms/tests/test_msc6_memory_model.py",
     "angr_platforms/tests/test_compiler_coverage_result.py",
-    "angr_platforms/tests/test_compiler_coverage_runner.py",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_invalid_deadline_rejected_before_creating_artifacts",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_existing_artifacts_cannot_be_reused",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_external_fixture_uses_existing_owner_and_fingerprints_headers",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_source_identity_is_retained_and_changes_refuse_acceptance",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_environment_drift_refuses_an_otherwise_passing_roundtrip",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_invalid_runtime_header_destinations_fail_before_launch",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_timeout_kills_group_and_reaps_child",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_launch_failure_retains_structured_result",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_missing_report_is_not_success",
+    "angr_platforms/tests/test_compiler_coverage_runner.py::test_interruption_kills_group_and_propagates",
     "angr_platforms/tests/test_compiler_coverage_suite.py",
     "angr_platforms/tests/test_x86_16_nested_cdecl_arguments.py",
     "angr_platforms/tests/test_msc6_compat_headers.py",
@@ -349,6 +405,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_cfg_direct_jump.py",
     "angr_platforms/tests/test_x86_16_cfg_direct_call.py",
     "angr_platforms/tests/test_x86_16_frontend_function_boundary_index.py",
+    "angr_platforms/tests/test_x86_16_mapped_backward_boundary.py",
     "angr_platforms/tests/test_x86_16_frontend_instruction_reachability.py",
     "angr_platforms/tests/test_x86_16_status_flag_cfg_liveness.py",
     "angr_platforms/tests/test_x86_16_status_flag_cfg_projection.py",
@@ -516,6 +573,9 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_ir_boundary_cfg.py",
     "angr_platforms/tests/test_x86_16_segment_effect_closure.py",
     "angr_platforms/tests/test_x86_16_scoped_ir_view.py",
+    "angr_platforms/tests/test_x86_16_near_call_frame_width.py",
+    "angr_platforms/tests/test_x86_16_local_call_evidence.py",
+    "angr_platforms/tests/test_x86_16_local_evidence_epoch.py",
     "angr_platforms/tests/test_x86_16_invocation_inventory_budgets.py",
     "angr_platforms/tests/test_x86_16_scoped_ir_view_counters.py",
     "angr_platforms/tests/test_x86_16_scoped_ir_coverage.py",
@@ -550,6 +610,17 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_vex_import.py",
     "angr_platforms/tests/test_x86_16_entry_jump_domain.py",
     "angr_platforms/tests/test_x86_16_invocation_domain.py",
+    "angr_platforms/tests/test_x86_16_invocation_edge_feasibility.py",
+    "angr_platforms/tests/test_x86_16_edge_known_bits_soundness.py",
+    "angr_platforms/tests/test_x86_16_unary_value_contract.py",
+    "angr_platforms/tests/test_x86_16_unary_fold_contract.py",
+    "angr_platforms/tests/test_x86_16_unary_storage_guards.py",
+    "angr_platforms/tests/test_x86_16_unary_call_binding.py",
+    "angr_platforms/tests/test_x86_16_unary_address_capture.py",
+    "angr_platforms/tests/test_x86_16_unary_constant_flow.py",
+    "angr_platforms/tests/test_x86_16_invocation_refusal_site.py",
+    "angr_platforms/tests/test_x86_16_declared_interrupt_boundary.py",
+    "angr_platforms/tests/test_x86_16_declared_interrupt_collision.py",
     "angr_platforms/tests/test_x86_16_invocation_domain_boundaries.py",
     "angr_platforms/tests/test_x86_16_invocation_partition_census.py",
     "angr_platforms/tests/test_x86_16_boot_call_prefix.py",
@@ -598,6 +669,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_access_trait_runtime_factory.py",
     "angr_platforms/tests/test_frame_carrier_type_contracts.py",
     "angr_platforms/tests/test_makefile_inventory.py",
+    "angr_platforms/tests/test_makefile_variable_expansion.py",
     "angr_platforms/tests/test_mypy_import_contracts.py",
     "angr_platforms/tests/test_x86_16_layer_boundaries.py::"
     "test_quality_and_diagnostics_modules_are_wired_into_production_paths",
@@ -694,7 +766,12 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_sleep_behavior.py",
     "angr_platforms/tests/test_x86_16_insertionsort_behavior.py",
     "angr_platforms/tests/test_x86_16_swapbars_behavior.py",
-    "angr_platforms/tests/test_x86_16_gp_word_runtime.py",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_lowering_initializes_fresh_codegen_and_preserves_explicit_legacy_abi",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_default_msc6_provider_matches_production_lowering",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_lowering_rejects_corrupt_existing_abi_before_processing_ast",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_final_result_cache_tracks_gp_runtime_and_projection_owners",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_word_runtime_covers_existing_architectural_lanes",
+    "angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_compiled_shared_views_preserve_upper_words_and_wrap",
     "angr_platforms/tests/test_x86_16_gp_word_assignment.py",
     "angr_platforms/tests/test_x86_16_sortdemo_regressions.py::test_sortd_sidecar_free_swapbars_recovers_binary_stack_arguments",
     "angr_platforms/tests/test_x86_16_reinitbars_execution.py",
@@ -793,6 +870,7 @@ RELATIONAL_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_binary_callee_intake_review.py",
     "angr_platforms/tests/test_real16_uncatalogued_calls.py",
     "angr_platforms/tests/test_recursive_call_continuation_binding.py",
+    "angr_platforms/tests/test_real16_admission_control_domains.py",
     "angr_platforms/tests/test_recursive_joint_actual_binary.py",
     "angr_platforms/tests/test_flat32_pe32_recursive_joint.py",
     "angr_platforms/tests/test_real16_recursive_public.py",
@@ -821,6 +899,7 @@ RELATIONAL_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_real16_symbolic_call_control.py",
     "angr_platforms/tests/test_real16_symbolic_successors.py",
     "angr_platforms/tests/test_x86_16_relative_control_edge.py",
+    "angr_platforms/tests/test_unicorn_engine_bounds.py",
     "angr_platforms/tests/test_x86_16_relative_condition_producers.py",
     "angr_platforms/tests/test_real16_native_control_scope.py",
     "angr_platforms/tests/test_real16_native_control_scope_edges.py",
@@ -828,6 +907,12 @@ RELATIONAL_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_real16_loader_arch.py",
     "angr_platforms/tests/test_real16_direct_jmp_coordinates.py",
     "angr_platforms/tests/test_direct_near_call_target_binding.py",
+    "angr_platforms/tests/test_x86_16_declared_call_consumption.py",
+    "angr_platforms/tests/test_declared_call_transport.py",
+    "angr_platforms/tests/test_projected_call_consumption.py",
+    "angr_platforms/tests/test_declared_call_admission.py",
+    "angr_platforms/tests/test_declared_call_schema.py",
+    "angr_platforms/tests/test_declared_call_binding.py",
     "angr_platforms/tests/test_x86_16_native_helper_call_retention.py",
     "angr_platforms/tests/test_segment_call_binding_regression.py",
     "angr_platforms/tests/test_segment_nonleaf_native.py",
@@ -885,11 +970,15 @@ LANE_BUDGET_SECONDS: dict[str, float] = {
 }
 
 PIPELINE_TIERS: dict[str, tuple[str, ...]] = {
-    "fast": ("binary-budgeted", "unit-focused"),
-    "default": ("binary-budgeted", "unit-focused", "binary-relational", "ultra-quickc-fixtures", "msc6-tiny-full-pipeline"),
+    "fast": ("binary-budgeted", "unit-focused", "pytest-serial", "linux-process-controls"),
+    "default": ("binary-budgeted", "unit-focused", "pytest-serial", "linux-process-controls", "makefile-gnu-oracle", "gp-word-native", "binary-relational", "ultra-quickc-fixtures", "msc6-tiny-full-pipeline"),
     "expanded": (
         "binary-budgeted",
         "unit-focused",
+        "pytest-serial",
+        "linux-process-controls",
+        "makefile-gnu-oracle",
+        "gp-word-native",
         "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
@@ -1077,6 +1166,98 @@ def _unit_lane(workers: int = PYTEST_WORKER_COUNT) -> LaneResult:
             *FOCUSED_PYTEST_TARGETS,
         ],
     )
+
+
+def _guarded_pytest_lane(
+    name: str, targets: tuple[str, ...], *, expected_cases: int = 1, require_available: bool = False, strict_count: bool = False,
+) -> LaneResult:
+    """Run guarded controls serially and retain skipped or absent coverage."""
+    with tempfile.TemporaryDirectory(prefix="inertia-control-") as directory:
+        receipt = Path(directory) / "junit.xml"
+        command = [
+            sys.executable, "-m", "pytest", "-p", "scripts.pytest_live_failures",
+            "-q", "--tb=short", "-n", "0", "-o", "addopts=", "--durations=10",
+            "--junitxml", str(receipt), *targets,
+        ]
+        environment = {**os.environ, "PYTEST_ADDOPTS": ""}
+        environment.pop("PYTEST_XDIST_WORKER", None)
+        result = _run_command(name, command, env=environment)
+        if result.status is not LaneStatus.PASSED:
+            return result
+        if not receipt.is_file():
+            return replace(result, status=LaneStatus.FAILED, reason="pytest did not retain its control receipt")
+        try:
+            cases = ElementTree.parse(receipt).findall(".//testcase")
+        except ElementTree.ParseError as error:
+            return replace(result, status=LaneStatus.FAILED, reason=f"invalid pytest control receipt: {error}")
+        skipped = [item for case in cases if (item := case.find("skipped")) is not None]
+        failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
+        details: dict[str, object] = {
+            "collected": len(cases), "passed": len(cases) - len(skipped) - failed,
+            "skipped": len(skipped), "failed": failed,
+            "skip_reasons": [item.attrib.get("message", "") for item in skipped],
+        }
+        if failed or not cases or ((strict_count or not skipped) and len(cases) != expected_cases):
+            return replace(result, status=LaneStatus.FAILED, reason="pytest control coverage incomplete or failed", details=details)
+        if skipped:
+            return replace(
+                result, status=LaneStatus.FAILED if require_available else LaneStatus.SKIPPED,
+                reason="pytest control skipped required coverage" if require_available else "pytest control unavailable",
+                details=details,
+            )
+        return replace(result, details=details)
+
+
+def _serial_pytest_lane(targets: tuple[str, ...] = SERIAL_PYTEST_TARGETS) -> LaneResult:
+    """Execute both nested-pytest cases after every outer worker has exited."""
+    expected_cases = sum(1 if "[" in target else 2 for target in targets)
+    return _guarded_pytest_lane("pytest-serial", targets, expected_cases=expected_cases, require_available=True)
+
+
+def _linux_process_lane(targets: tuple[str, ...] = LINUX_PROCESS_PYTEST_TARGETS) -> LaneResult:
+    """Execute descendant controls on Linux and account for unsupported hosts."""
+    if sys.platform != "linux":
+        return LaneResult("linux-process-controls", LaneStatus.SKIPPED, [], 0.0, reason=f"requires Linux, got {sys.platform}")
+    expected_cases = sum(1 if "[" in target else LINUX_PROCESS_CASE_COUNTS[target] for target in targets)
+    return _guarded_pytest_lane("linux-process-controls", targets, expected_cases=expected_cases, require_available=True)
+
+
+def _gp_word_native_lane(args: argparse.Namespace, targets: tuple[str, ...] = GP_NATIVE_PYTEST_TARGETS) -> LaneResult:
+    """Require real DOS GP-word execution or report unavailable external evidence."""
+    name = "gp-word-native"
+    command = [sys.executable, "-m", "pytest", "-n", "0", *targets]
+    if args.kvikdos != DEFAULT_KVIKDOS or args.msc6_root != DEFAULT_MSC6_ROOT:
+        return LaneResult(name, LaneStatus.FAILED, command, 0.0, reason="GP-word control requires the default compiler/runtime paths")
+    available, reason = _external_tools_available(DEFAULT_KVIKDOS, DEFAULT_MSC6_ROOT)
+    if not available:
+        return _missing_external_lane(name, command, reason=reason, require_external=args.require_external)
+    evidence = kvm_access_evidence()
+    if evidence.status is not KVMAccessStatus.READ_WRITE:
+        return _missing_external_lane(
+            name, command, reason=f"requires writable /dev/kvm ({evidence.status.value}, errno={evidence.error_number})",
+            require_external=args.require_external,
+        )
+    return _guarded_pytest_lane(name, targets, require_available=args.require_external)
+
+
+def _makefile_gnu_oracle_lane(
+    args: argparse.Namespace, targets: tuple[str, ...] = GNU_MAKE_ORACLE_PYTEST_TARGETS,
+) -> LaneResult:
+    """Retain exact GNU oracle coverage or an explicit unavailable-tool result."""
+    name = "makefile-gnu-oracle"
+    command = [sys.executable, "-m", "pytest", "-n", "0", *targets]
+    if any(target.partition("[")[0] not in GNU_MAKE_ORACLE_CASE_COUNTS for target in targets):
+        return LaneResult(name, LaneStatus.FAILED, command, 0.0, reason="unknown GNU Make oracle selector")
+    if shutil.which("make") is None:
+        return _missing_external_lane(name, command, reason="make oracle unavailable", require_external=args.require_external)
+    expected_cases = sum(1 if "[" in target else GNU_MAKE_ORACLE_CASE_COUNTS[target] for target in targets)
+    return _guarded_pytest_lane(name, targets, expected_cases=expected_cases, require_available=args.require_external, strict_count=True)
+
+
+def _selected_control_targets(selected: list[str] | None, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """Retain explicitly selected guarded cases instead of widening their scope."""
+    matching = tuple(target for target in selected or () if target.partition("[")[0] in defaults)
+    return matching or defaults
 
 
 def _relational_binary_lane(workers: int = PYTEST_WORKER_COUNT) -> LaneResult:
@@ -1492,6 +1673,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=(
             "binary-budgeted",
             "unit-focused",
+            "pytest-serial",
+            "linux-process-controls",
+            "makefile-gnu-oracle",
+            "gp-word-native",
             "binary-relational",
             "ultra-quickc-fixtures",
             "msc6-tiny-smoke",
@@ -1501,6 +1686,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "sortd-sidecar-free",
         ),
     )
+    parser.add_argument("--print-host-controls", action="store_true")
+    parser.add_argument("--control-target", action="append")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--msc6-out-dir", type=Path, default=REPO_ROOT / "examples" / "build_msc6_tiny")
     parser.add_argument("--ultra-quickc-root", type=Path, default=DEFAULT_ULTRA_QUICKC_ROOT)
@@ -1561,10 +1748,17 @@ def main(argv: list[str] | None = None) -> int:
     """Run selected pipeline lanes and write the structured summary report."""
 
     args = _parse_args(argv)
+    if args.print_host_controls:
+        print(" ".join(target for target in FOCUSED_PYTEST_TARGETS if target.partition("::")[0] in SPLIT_CONTROL_TEST_FILES))
+        return 0
     lane_names = _selected_lanes(args)
     lane_fns: dict[str, Callable[[], LaneResult]] = {
         "binary-budgeted": lambda: _budgeted_binary_lane(args.pytest_workers),
         "unit-focused": lambda: _unit_lane(args.pytest_workers),
+        "pytest-serial": lambda: _serial_pytest_lane(_selected_control_targets(args.control_target, SERIAL_PYTEST_TARGETS)),
+        "linux-process-controls": lambda: _linux_process_lane(_selected_control_targets(args.control_target, LINUX_PROCESS_PYTEST_TARGETS)),
+        "makefile-gnu-oracle": lambda: _makefile_gnu_oracle_lane(args, tuple(target for target in args.control_target or () if target.partition("::")[0] == GNU_MAKE_ORACLE_TEST_FILE) or GNU_MAKE_ORACLE_PYTEST_TARGETS),
+        "gp-word-native": lambda: _gp_word_native_lane(args, _selected_control_targets(args.control_target, GP_NATIVE_PYTEST_TARGETS)),
         "binary-relational": lambda: _relational_binary_lane(args.pytest_workers),
         "ultra-quickc-fixtures": lambda: _ultra_quickc_fixtures_lane(args),
         "msc6-tiny-smoke": lambda: _msc6_tiny_lane(args, name="msc6-tiny-smoke", constructs=MSC6_TINY_SMOKE_CONSTRUCTS),

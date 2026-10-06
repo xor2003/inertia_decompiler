@@ -21,6 +21,7 @@ from .indexed_address_copy_contracts import (
     IndexedAddressCopyStep8616,
     IndexedAddressCopyStepKind8616,
     IndexedAddressCopyValuePath8616,
+    indexed_copy_source_operand_8616,
 )
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
 from .logical_memory_value_trace import (
@@ -126,7 +127,8 @@ def _step_kind_8616(
         if (
             destination.size == 1
             and source.size == 2
-            and source_expression.expr == ("Iop_16to8",)
+            and (source_expression.active_unary is not None
+                 or source_expression.expr == ("Iop_16to8",))
         ):
             return IndexedAddressCopyStepKind8616.LOW_BYTE_EXTRACT, None
         return None, None
@@ -239,13 +241,14 @@ def _trace_value_to_load_8616(
             block_addr=block_addr,
         )
     source_expression = _copy_source_expression_8616(instruction)
-    if source_expression is None:
+    source_operand = None if source_expression is None else indexed_copy_source_operand_8616(source_expression)
+    if source_expression is None or source_operand is None:
         return _failed_trace_8616(
             IndexedAddressCopyFailureKind8616.VALUE_OPERATION_UNSUPPORTED,
             f"value path operation {instruction.op!r} is not an exact copy operation",
         )
     source_trace = _trace_value_to_load_8616(
-        source_expression,
+        source_operand,
         definitions,
         logical_memory,
         function_addr=function_addr,

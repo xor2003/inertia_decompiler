@@ -6,6 +6,8 @@ segment-preservation and transfer proofs. Establish only that the caller's
 dereference selector uses the DS value present at the near CALL and preserved by its
 callee. No source-pointer representation, pointee, C AST or prototype is
 published. DS==SS is neither assumed nor required for this result-use theorem.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

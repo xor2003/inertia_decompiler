@@ -6,6 +6,8 @@ consumers while projecting its proven low-word write into the shared runtime
 ABI. No upper bits are deleted and no independent word state is introduced.
 The current AST is checked on every rendering; stale shapes and effectful
 values retain their explicit assignment. No rendered-C recovery occurs here.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

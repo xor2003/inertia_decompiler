@@ -5,6 +5,8 @@ Responsibility: carry the Types/Lowering service through an angr codegen object;
 the compatibility consumer must not import or implement pointer semantics.
 """
 
+from __future__ import annotations
+
 from typing import Protocol, cast
 
 from .pipeline.errors import PipelineHardError

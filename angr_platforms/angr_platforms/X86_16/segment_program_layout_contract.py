@@ -9,10 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from .ir.segment_contract import SegmentFactVerdict
 from .pipeline.errors import PipelineHardError
 from .segment_function_summary import SegmentControlTransferFact8616
+
+if TYPE_CHECKING:
+    from .declared_external_call_evidence import DeclaredCallEffectConsumption8616
 
 _COUNT_FIELDS = (
     "raw_fact_count",
@@ -116,6 +120,7 @@ class SegmentProgramFunctionEvidence8616:
     restored_registers: tuple[str, ...]
     control_transfers: tuple[SegmentControlTransferFact8616, ...]
     summary: dict[str, int] = field(default_factory=dict)
+    declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -127,6 +132,9 @@ class SegmentProgramFunctionEvidence8616:
             "local_clobbered_registers": list(self.local_clobbered_registers),
             "restored_registers": list(self.restored_registers),
             "control_transfers": [fact.to_dict() for fact in self.control_transfers],
+            "declared_call_consumptions": [
+                consumption.to_record() for consumption in self.declared_call_consumptions
+            ],
             "summary": dict(self.summary),
         }
 

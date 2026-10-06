@@ -30,6 +30,10 @@ from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationRefusal,
 )
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import LoadedRelationProof
+from tools.dosunit.recursive_proofs.native_model_hash_snapshot import (
+    native_model_hash_snapshot,
+    native_model_hash_snapshot_active,
+)
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import (
     BoundDomainReason,
     ImageBoundReal16Domain,
@@ -220,6 +224,14 @@ class Real16NormalOutcomeScope:
 
 def outcome_scope_model_hash() -> str:
     """Seal this owner, the loaded environment classifiers and consumed owners."""
+    if native_model_hash_snapshot_active():
+        return _outcome_scope_model_hash()
+    with native_model_hash_snapshot():
+        return _outcome_scope_model_hash()
+
+
+def _outcome_scope_model_hash() -> str:
+    """Read the classifier and consumed-owner digests within one native capture."""
     digest = hashlib.sha256(image_bound_domain_model_hash().encode("ascii"))
     digest.update(physical_access_model_hash().encode("ascii"))
     digest.update(native_binding_model_hash().encode("ascii"))

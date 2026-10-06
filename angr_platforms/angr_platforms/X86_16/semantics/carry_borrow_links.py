@@ -122,13 +122,17 @@ def _carry_chain(
     if isinstance(extend, CarryBorrowFailure8616):
         return extend
     narrow = _chain_definition_8616(
-        conversion_source_8616(extend, CarryBorrowConversion8616.WIDEN_BIT_TO_WORD),
+        conversion_source_8616(
+            extend, CarryBorrowConversion8616.WIDEN_BIT_TO_WORD, definitions
+        ),
         definitions,
     )
     if isinstance(narrow, CarryBorrowFailure8616):
         return narrow
     mask = _chain_definition_8616(
-        conversion_source_8616(narrow, CarryBorrowConversion8616.NARROW_TO_BIT),
+        conversion_source_8616(
+            narrow, CarryBorrowConversion8616.NARROW_TO_BIT, definitions
+        ),
         definitions,
     )
     if isinstance(mask, CarryBorrowFailure8616):

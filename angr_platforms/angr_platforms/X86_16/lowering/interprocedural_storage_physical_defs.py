@@ -11,8 +11,16 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..callsite_summary import CallsitePushSourceKind8616
 from ..ir import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
+from ..ir.scalar_value_projection import (
+    ScalarProjectionKind8616,
+    scalar_active_unary_projection_8616,
+    scalar_produced_decoration_8616,
+    scalar_read_projection_8616,
+)
 from .interprocedural_storage_contracts import (
     StorageIdentity8616,
     StorageIdentityKind8616,
@@ -83,6 +91,17 @@ def _logical_source_slice_8616(
     key = (value.space, value.name, value.version, value.source_tmp, value.size)
     if key in seen:
         return None
+    unary = value.active_unary
+    if unary is not None:
+        projection = scalar_active_unary_projection_8616(value)
+        if (projection is None or projection.signed
+                or projection.target_bits >= projection.source_bits
+                or projection.target_bits != 8):
+            return None
+        return _logical_source_slice_8616(
+            site, unary.operand, logical_width, seen | {key},
+            follow_register_definitions=follow_register_definitions,
+        )
     if value.const is not None or (
         value.space is MemSpace.REG
         and value.size >= logical_width
@@ -167,25 +186,49 @@ def _bp_affine_8616(
     return None
 
 
+def _captured_root_producer_8616(
+    site: SSAInstructionSite8616, value: IRValue,
+) -> IRInstr | None:
+    """Authenticate an unchanged capture against its exact prior producer."""
+    definition = _prior_value_definition_8616(site, value)
+    if definition is None or definition.dst is None or value.active_unary is not None:
+        return None
+    if value.size != definition.dst.size or definition.size != value.size:
+        return None
+    projection = scalar_read_projection_8616(
+        read_expr=value.expr, read_bits=value.size * 8,
+        produced=scalar_produced_decoration_8616(definition),
+        produced_bits=definition.size * 8,
+    )
+    if projection is None or projection.kind is ScalarProjectionKind8616.CONVERSION:
+        return None
+    return definition
+
+
 def _same_logical_root_8616(
-    left: IRValue,
-    right: IRValue,
-    width: int,
+    left: IRValue, right: IRValue, width: int,
+    left_site: SSAInstructionSite8616, right_site: SSAInstructionSite8616,
 ) -> bool:
-    """Return whether two physical traces identify one logical scalar root."""
+    """Bind captures to the same actual producer; compare bare roots exactly."""
+    if left.active_unary is not None or right.active_unary is not None:
+        return False
     if left.const is not None or right.const is not None:
         mask = (1 << (width * 8)) - 1
         return bool(
-            isinstance(left.const, int)
-            and isinstance(right.const, int)
+            isinstance(left.const, int) and isinstance(right.const, int)
             and left.const & mask == right.const & mask
         )
-    return bool(
-        left.space is right.space
-        and left.name == right.name
-        and left.offset == right.offset
-        and left.version == right.version
-    )
+    if left.source_tmp is not None or right.source_tmp is not None:
+        if left.source_tmp is None or left.source_tmp != right.source_tmp:
+            return False
+        producer = _captured_root_producer_8616(left_site, left)
+        return bool(
+            producer is not None
+            and producer is _captured_root_producer_8616(right_site, right)
+            and replace(left, version=right.version) == right
+            and left.memory_access_insn == right.memory_access_insn
+        )
+    return bool(left == right and left.memory_access_insn == right.memory_access_insn)
 
 
 def logical_push_value_8616(
@@ -234,7 +277,10 @@ def logical_push_value_8616(
         source_offset += address.size
     if source_offset != piece.width:
         return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
-    if any(not _same_logical_root_8616(roots[0], root, piece.width) for root in roots[1:]):
+    if any(
+        not _same_logical_root_8616(roots[0], root, piece.width, slices[0].site, item.site)
+        for root, item in zip(roots[1:], slices[1:], strict=True)
+    ):
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
     root = next((item for item in roots if item.size == piece.width), roots[0])
     result = LogicalPushValue8616(root, piece.width, tuple(slices))

@@ -23,6 +23,7 @@ from tools.dosunit.real16_replay_model import (
     Real16Vector,
     SegOffset,
 )
+from tools.dosunit.unicorn_engine import make_guest
 
 if TYPE_CHECKING:
     import unicorn
@@ -208,7 +209,7 @@ def _initialize_guest(
 ) -> Uc:
     """Create a fresh guest seeded with the relocated image and contract."""
     regs, segments, highs = _checked_vector(image, entry, vector, policy)
-    guest = Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_16)
+    guest = make_guest(unicorn.UC_ARCH_X86, unicorn.UC_MODE_16)
     _map_guest(guest, image, vector, policy)
     for address, data in image.chunks:
         guest.mem_write(address, data)

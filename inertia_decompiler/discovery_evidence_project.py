@@ -7,7 +7,7 @@ Responsibility: keep caller-evidence discovery mutations out of the target decom
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Protocol, cast
 
 import angr
 from angr_platforms.X86_16.lst_extract import LSTMetadata
@@ -15,10 +15,26 @@ from angr_platforms.X86_16.lst_extract import LSTMetadata
 from inertia_decompiler.project_loading import _build_project_cached
 
 
+class _DiscoverySignaturePolicy(Protocol):
+    """Owned optional policy attachments on a third-party angr project."""
+
+    _inertia_lst_metadata: object
+    _inertia_include_library_functions: object
+
+
 def _copy_signature_policy(source: angr.Project, target: angr.Project) -> None:
     """Copy matched-address evidence, never mutable source/debug metadata."""
-    # angr projects carry Inertia extension fields at this third-party boundary.
-    metadata = getattr(source, "_inertia_lst_metadata", None)
+    source_policy = cast(_DiscoverySignaturePolicy, source)
+    target_policy = cast(_DiscoverySignaturePolicy, target)
+    # Either attachment may be absent on a partially initialized angr project.
+    try:
+        metadata = source_policy._inertia_lst_metadata
+    except AttributeError:
+        metadata = None
+    try:
+        include_libraries = source_policy._inertia_include_library_functions
+    except AttributeError:
+        include_libraries = False
     copied = None
     if isinstance(metadata, LSTMetadata) and metadata.signature_code_addrs:
         addresses = metadata.signature_code_addrs
@@ -29,10 +45,8 @@ def _copy_signature_policy(source: angr.Project, target: angr.Project) -> None:
             signature_code_addrs=addresses, absolute_addrs=metadata.absolute_addrs,
             source_format=metadata.source_format,
         )
-    cast(Any, target)._inertia_lst_metadata = copied
-    cast(Any, target)._inertia_include_library_functions = bool(
-        getattr(source, "_inertia_include_library_functions", False)
-    )
+    target_policy._inertia_lst_metadata = copied
+    target_policy._inertia_include_library_functions = bool(include_libraries)
 
 
 def isolated_discovery_evidence_project_8616(project: angr.Project) -> angr.Project:

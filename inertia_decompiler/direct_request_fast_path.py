@@ -97,6 +97,9 @@ def _emit_fast_cache_artifact_8616(
 def try_direct_request_fast_path_8616(argv: list[str] | None = None) -> int | None:
     """Return a cache-hit exit status, or None to run the full decompiler."""
     args, signature_catalog = _prepare_fast_path_args_8616(argv)
+    # No live project exists here to reauthenticate declared-call authority.
+    if args.declared_call_effects:
+        return None
     inputs = DirectRequestCacheInputs8616.from_cli(
         args,
         signature_catalog=signature_catalog,
@@ -109,4 +112,11 @@ def try_direct_request_fast_path_8616(argv: list[str] | None = None) -> int | No
     )
     if lookup.verdict is not DirectRequestCacheVerdict8616.HIT or lookup.artifact is None:
         return None
+    record = lookup.artifact.segment_program_function_evidence_record
+    if isinstance(record, dict) and "declared_call_consumptions" in record:
+        receipts = record["declared_call_consumptions"]
+        if type(receipts) is not list or receipts:
+            return None
     return _emit_fast_cache_artifact_8616(args, lookup.artifact)
+
+

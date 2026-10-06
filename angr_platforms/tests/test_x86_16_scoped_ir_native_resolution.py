@@ -8,10 +8,44 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 import test_x86_16_scoped_native_inputs as native
 from angr_platforms.X86_16.ir import entry_domain_call_preservation as resolver
-from angr_platforms.X86_16.ir import real16_invocation_domain
+from angr_platforms.X86_16.ir import ir_boundary_cfg, real16_invocation_domain, vex_import
+from angr_platforms.X86_16.ir.core import IRRefusal
+from angr_platforms.X86_16.ir.entry_jump_domain import (
+    EntryJumpDomainApplicationStatus8616,
+    EntryJumpDomainRefusal8616,
+)
 from test_x86_16_scoped_native_inputs import LEAF, _view, world  # noqa: F401
+
+
+def test_failed_optional_application_keeps_raw_refusals_and_diagnostics(world: tuple) -> None:  # noqa: F811
+    """Failed discharge keeps raw native facts plus its separate typed diagnostic."""
+    _boot, project, _sb, _sa, _index, boundary, held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    assert held.refusals == raw.refusals
+    assert held.refusals, "pending native edges must remain refused"
+    assert not ir_boundary_cfg.prove_ir_boundary_coverage_8616(project, boundary, held).complete
+    application = held.summary["entry_jump_domain_application"]
+    assert application["status"] == EntryJumpDomainApplicationStatus8616.STALE_INPUT.value
+    assert application["refusals"], "failed application diagnostic must remain visible"
+
+
+def test_native_census_stale_refusal_is_never_waived(
+    world: tuple, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    """Even a familiar application reason cannot hide a native-census failure."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    marker = IRRefusal(EntryJumpDomainRefusal8616.APPLICATION_INPUT_STALE.value,
+                       "injected independent native-census failure")
+    corrupt_census = replace(raw, refusals=(*raw.refusals, marker))
+    monkeypatch.setattr(real16_invocation_domain, "real16_native_census_import_8616",
+                        lambda *_: corrupt_census)
+    assert ir_boundary_cfg._scoped_native_failure_8616(
+        project, boundary, raw,
+    ) is ir_boundary_cfg.IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
 
 
 def test_native_resolver_closes_scoped_body_and_revalidates_cache(world: tuple) -> None:  # noqa: F811

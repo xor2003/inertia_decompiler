@@ -837,6 +837,7 @@ class _StackBpDispCollect8616:
     found_stack_ref: bool = False
 
     def collect(self, term: object) -> None:
+        """Fold one address term into the displacement total and stack-offset list."""
         term = _resolve_stack_bp_term_8616(term, self.project, self.codegen, self.seen)
 
         if isinstance(term, CTypeCast):

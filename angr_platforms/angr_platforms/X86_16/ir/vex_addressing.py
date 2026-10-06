@@ -15,7 +15,20 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
-from .core import AddressStatus, IRAddress, IRCondition, IRValue, MemSpace, SegmentOrigin
+from .core import (
+    AddressStatus,
+    IRActiveUnary8616,
+    IRAddress,
+    IRCondition,
+    IRValue,
+    MemSpace,
+    SegmentOrigin,
+)
+from .scalar_value_projection import (
+    ScalarProjection8616,
+    ScalarProjectionKind8616,
+    scalar_read_projection_8616,
+)
 
 __all__ = [
     "block_segment_hints",
@@ -230,6 +243,123 @@ def _wrapped_displacement_8616(value: int, op: str) -> int:
     return value
 
 
+_UNARY_FOLD_DEPTH_LIMIT_8616 = 8
+_UNARY_COMPLEMENT_OPS_8616: dict[str, int] = {
+    f"Iop_Not{bits}": bits for bits in (8, 16, 32, 64)
+}
+
+
+def _unary_conversion_8616(unary: IRActiveUnary8616, operand_bits: int) -> ScalarProjection8616 | None:
+    """Authenticate an active unary as an exact conversion via the adapter.
+
+    The scalar-projection adapter owns the single conversion-name truth;
+    ``produced=()`` forces the declaration path so the op's declared source
+    width must equal the operand's actual width and the declared target must
+    equal the authoritative VEX result width.
+    """
+    decision = scalar_read_projection_8616(
+        read_expr=(unary.op,),
+        read_bits=unary.result_bits,
+        produced=(),
+        produced_bits=operand_bits,
+    )
+    if decision is None or decision.kind is not ScalarProjectionKind8616.CONVERSION:
+        return None
+    return decision
+
+
+def _fold_const_conversion_8616(
+    operand: IRValue, decision: ScalarProjection8616, size: int,
+) -> IRValue | None:
+    """Fold one exact-constant operand through an authenticated conversion."""
+    const = operand.const
+    if operand.source_tmp is not None or const is None or const < 0:
+        return None
+    low_mask = (1 << decision.source_bits) - 1
+    if const & ~low_mask:
+        return None
+    if decision.target_bits < decision.source_bits:
+        folded = const & ((1 << decision.target_bits) - 1)
+    elif decision.signed and const & (1 << (decision.source_bits - 1)):
+        folded = const | (((1 << decision.target_bits) - 1) & ~low_mask)
+    else:
+        folded = const
+    return IRValue(MemSpace.CONST, const=folded, size=size)
+
+
+def _fold_unary_operand_8616(unary: IRActiveUnary8616, operand: IRValue, size: int) -> IRValue | None:
+    """Fold one authenticated unary over a resolved operand.
+
+    Over an exact constant the operation folds to its exact integer at the
+    declared widths. Over a symbolic operand only unsigned widening passes
+    the operand through unchanged — it preserves the numeric value; sign
+    extension and truncation alter it and refuse.
+    """
+    decision = _unary_conversion_8616(unary, operand.size * 8)
+    if decision is not None:
+        if operand.space is MemSpace.CONST and operand.const is not None and operand.offset == 0:
+            return _fold_const_conversion_8616(operand, decision, size)
+        if decision.signed or decision.target_bits <= decision.source_bits:
+            return None
+        return operand
+    bits = _UNARY_COMPLEMENT_OPS_8616.get(unary.op)
+    if bits is None or unary.result_bits != bits or operand.size * 8 != bits:
+        return None
+    if operand.space is not MemSpace.CONST or operand.const is None or operand.offset != 0:
+        return None
+    mask = (1 << bits) - 1
+    if operand.const < 0 or operand.const & ~mask:
+        return None
+    return IRValue(MemSpace.CONST, const=(~operand.const) & mask, size=size)
+
+
+def _resolved_active_operand_8616(value: IRValue, depth: int) -> IRValue | None:
+    """Resolve one operand to a view carrying no pending unary operation.
+
+    A ``source_tmp``-pinned value names an already-computed definition and
+    passes through with capture identity intact; a pending ``active_unary``
+    must be consumed here, never read from the projected REG/CONST fields.
+    Contradictory or unsupported operations refuse instead of guessing.
+    """
+    if (value.index is not None or value.call_output is not None
+            or (value.space is MemSpace.CONST and value.source_tmp is not None)):
+        # CONST is a producer projection, not the captured result.
+        return None
+    unary = value.active_unary
+    if unary is None:
+        return value
+    if value.source_tmp is not None or depth >= _UNARY_FOLD_DEPTH_LIMIT_8616:
+        return None
+    if value.expr is not None and value.expr != (unary.op,):
+        return None
+    operand = _resolved_active_operand_8616(unary.operand, depth + 1)
+    if operand is None:
+        return None
+    return _fold_unary_operand_8616(unary, operand, value.size)
+
+
+def _base_capture_8616(value: IRValue) -> IRValue:
+    """Return the address-base evidence view of one operand.
+
+    The ``offset`` field is displacement provenance folded into the address
+    offset (unpinned) or inside the captured temporary definition (pinned);
+    the retained base value keeps the rest of the operand's typed identity —
+    including ``source_tmp`` — so later consumers bind the exact captured
+    version rather than the register's current contents.
+    """
+    return replace(value, offset=0)
+
+
+def _operand_displacement_8616(value: IRValue) -> int:
+    """Return the offset contribution of one base operand.
+
+    A pinned operand's offset is provenance inside its captured temporary
+    result; adding it again would replay arithmetic already consumed by the
+    capture. Only unpinned operands contribute their displacement.
+    """
+    return 0 if value.source_tmp is not None else value.offset
+
+
 def _combine_add_8616(
     left: _AddressParts8616,
     right: _AddressParts8616,
@@ -270,14 +400,15 @@ def _decompose_rdtmp_8616(
                     ))
                 return decomposed
     tmp_value = ctx.tmps.get(tmp_id)
-    if tmp_value is None:
+    if tmp_value is None or tmp_value.active_unary is not None:
         return None
     if tmp_value.space == MemSpace.REG and tmp_value.name is not None:
         return _AddressParts8616(
-            base=(tmp_value.name,), offset=tmp_value.offset,
-            base_values=(IRValue(MemSpace.REG, name=tmp_value.name, size=2),),
+            base=(tmp_value.name,), offset=_operand_displacement_8616(tmp_value),
+            base_values=(_base_capture_8616(tmp_value),),
         )
-    if tmp_value.space == MemSpace.CONST and tmp_value.const is not None:
+    if (tmp_value.space == MemSpace.CONST and tmp_value.const is not None
+            and tmp_value.source_tmp is None):
         return _AddressParts8616(offset=int(tmp_value.const))
     return None
 
@@ -338,20 +469,59 @@ def _decompose_address_8616(
         return _decompose_rdtmp_8616(ctx, current, seen_tmps)
     if current_tag == "Iex_Get":
         value = ctx.expr_to_value(current, ctx.tmps, ctx.conditions)
+        if value.active_unary is not None:
+            return None
         return None if value.name is None else _AddressParts8616(
             base=(value.name,), offset=value.offset, base_values=(replace(value, offset=0),),
         )
     if current_tag == "Iex_Const":
         return _AddressParts8616(offset=_vex_const_value(current))
     if current_tag == "Iex_Unop":
-        op = _vex_op(current)
         args = _vex_args(current)
-        if len(args) == 1 and "to" in op:
-            return _decompose_address_8616(ctx, args[0], seen_tmps)
-        return None
+        # A genuine producer can establish a constant; a captured reference's
+        # display literal cannot establish the value of that capture.
+        resolved = _resolved_active_operand_8616(
+            ctx.expr_to_value(current, ctx.tmps, ctx.conditions), 0,
+        )
+        if (resolved is not None and resolved.space is MemSpace.CONST
+                and resolved.source_tmp is None and resolved.const is not None):
+            return _AddressParts8616(offset=resolved.const)
+        if len(args) != 1 or not _zero_extension_8616(ctx, current, args[0]):
+            return None
+        return _decompose_address_8616(ctx, args[0], seen_tmps)
     if current_tag != "Iex_Binop":
         return None
     return _decompose_binop_8616(ctx, current, seen_tmps)
+
+
+def _zero_extension_8616(ctx: _VexAddressContext8616, current: object, operand_expr: object) -> bool:
+    """Whether one Unop is an exact value-preserving zero extension.
+
+    Only unsigned widening keeps every decomposed lane exact; sign extension
+    and truncation change the numeric offset or base. The conversion name and
+    widths are authenticated by the scalar-projection adapter against the
+    converted operand width and the authoritative VEX result width — never
+    the rendered operation text alone.
+    """
+    operand = ctx.expr_to_value(operand_expr, ctx.tmps, ctx.conditions)
+    wrapper = ctx.expr_to_value(current, ctx.tmps, ctx.conditions)
+    result_bits = (
+        wrapper.active_unary.result_bits
+        if wrapper.active_unary is not None
+        else wrapper.size * 8
+    )
+    decision = scalar_read_projection_8616(
+        read_expr=(_vex_op(current),),
+        read_bits=result_bits,
+        produced=(),
+        produced_bits=operand.size * 8,
+    )
+    return (
+        decision is not None
+        and decision.kind is ScalarProjectionKind8616.CONVERSION
+        and not decision.signed
+        and decision.target_bits > decision.source_bits
+    )
 
 
 def _address_from_rdtmp_8616(ctx: _VexAddressContext8616, expr: object) -> IRAddress:
@@ -360,29 +530,46 @@ def _address_from_rdtmp_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
     tmp_value = ctx.tmps.get(tmp_id)
     if tmp_value is None:
         return _vex_unknown_8616(ctx, ("rdtmp", f"t{tmp_id}"))
+    if tmp_value.active_unary is not None:
+        return _vex_unknown_8616(ctx, ("active_tmp", f"t{tmp_id}"))
     if tmp_value.space == MemSpace.REG and tmp_value.name is not None:
         return _address_from_parts(
             (tmp_value.name,),
-            tmp_value.offset,
+            _operand_displacement_8616(tmp_value),
             size=ctx.size,
             expr=("register_base", tmp_value.name),
             segment_hints=ctx.segment_hints,
+            base_values=(_base_capture_8616(tmp_value),),
         )
     if tmp_value.expr and tmp_value.expr[:1] == ("Iop_Add16",) and len(tmp_value.expr) == 3:
         return _address_from_parts(
-            (tmp_value.expr[1], tmp_value.expr[2]), 0, size=ctx.size, expr=tmp_value.expr, segment_hints=ctx.segment_hints
+            (tmp_value.expr[1], tmp_value.expr[2]), 0, size=ctx.size, expr=tmp_value.expr,
+            segment_hints=ctx.segment_hints, base_values=(_base_capture_8616(tmp_value),),
         )
     return _vex_unknown_8616(ctx, ("tmp_expr", tmp_value.name or "tmp"))
 
 
 def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAddress:
-    """Lift one undecomposed VEX binary expression into a typed IR address."""
+    """Lift one undecomposed VEX binary expression into a typed IR address.
+
+    Both operands are resolved to views carrying no pending unary operation:
+    exact constants fold, value-preserving zero extensions pass through, and
+    anything else produces a typed unknown rather than projecting guessed
+    REG/CONST fields. Base values keep their temporary capture identity so
+    consumers bind the captured register version, not current storage.
+    """
     op = _vex_op(expr)
     args = _vex_args(expr)
     if len(args) != 2:
         return _vex_unknown_8616(ctx, (op,))
-    left = ctx.expr_to_value(args[0], ctx.tmps, ctx.conditions)
-    right = ctx.expr_to_value(args[1], ctx.tmps, ctx.conditions)
+    left = _resolved_active_operand_8616(
+        ctx.expr_to_value(args[0], ctx.tmps, ctx.conditions), 0,
+    )
+    right = _resolved_active_operand_8616(
+        ctx.expr_to_value(args[1], ctx.tmps, ctx.conditions), 0,
+    )
+    if left is None or right is None:
+        return _vex_unknown_8616(ctx, (op, "active_operand"))
     if (
         "Add" in op
         and left.space == MemSpace.REG
@@ -392,10 +579,11 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
     ):
         return _address_from_parts(
             (left.name,),
-            left.offset + int(right.const),
+            _operand_displacement_8616(left) + _wrapped_displacement_8616(int(right.const), op),
             size=ctx.size,
             expr=(op, left.name),
             segment_hints=ctx.segment_hints,
+            base_values=(_base_capture_8616(left),),
         )
     if (
         "Sub" in op
@@ -406,18 +594,21 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
     ):
         return _address_from_parts(
             (left.name,),
-            left.offset - int(right.const),
+            _operand_displacement_8616(left) - _wrapped_displacement_8616(int(right.const), op),
             size=ctx.size,
             expr=(op, left.name),
             segment_hints=ctx.segment_hints,
+            base_values=(_base_capture_8616(left),),
         )
     if "Add" in op and left.space == MemSpace.REG and right.space == MemSpace.REG and left.name and right.name:
+        ordered = sorted((left, right), key=lambda operand: operand.name or "")
         return _address_from_parts(
-            tuple(sorted((left.name, right.name))),
-            0,
+            (ordered[0].name or "", ordered[1].name or ""),
+            _operand_displacement_8616(left) + _operand_displacement_8616(right),
             size=ctx.size,
             expr=(op, left.name, right.name),
             segment_hints=ctx.segment_hints,
+            base_values=(_base_capture_8616(ordered[0]), _base_capture_8616(ordered[1])),
         )
     return _vex_unknown_8616(ctx, (op,))
 

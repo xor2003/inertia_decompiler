@@ -13,9 +13,15 @@ from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from .frontend_instruction_reachability import collect_instruction_reachability_8616
+from .frontend_near_return_continuation import (
+    NearCallFramePremise8616,
+    NearReturnContinuationArtifact8616,
+    prove_near_return_continuations_8616,
+)
 
 __all__ = [
     "ExactFunctionRangeBoundary8616",
+    "bounded_entry_function_boundary_8616",
     "exact_function_range_boundary_8616",
     "mapped_entry_function_boundary_8616",
 ]
@@ -33,6 +39,21 @@ class ExactFunctionRangeBoundary8616:
     successor_edges: tuple[tuple[int, int], ...]
     blocks: tuple[object, ...] = field(default=(), compare=False, repr=False)
     info: dict[str, object] = field(default_factory=dict, compare=False, repr=False)
+    near_return_continuations: NearReturnContinuationArtifact8616 | None = field(
+        default=None, compare=False, repr=False
+    )
+
+    decode_lower_bound: int | None = None
+
+    @property
+    def decode_start(self) -> int:
+        """Return the independently supplied lower decoding bound."""
+        return self.addr if self.decode_lower_bound is None else self.decode_lower_bound
+
+    @property
+    def decode_end(self) -> int:
+        """Return the exclusive upper decoding bound, independent of entry."""
+        return self.addr + self.size
 
     @property
     def predecessors_by_block(self) -> dict[int, frozenset[int]]:
@@ -49,26 +70,100 @@ def exact_function_range_boundary_8616(
     project: object,
     start: int,
     end: int,
+    *,
+    premise: NearCallFramePremise8616 | None = None,
 ) -> ExactFunctionRangeBoundary8616 | None:
-    """Materialize a range only when every reachable block is classified."""
+    """Materialize a range only when every reachable block is classified.
+
+    ``premise`` is the independently supplied source-bound entry-frame
+    premise: a proven near-CALL row binds ``SS:[SP]`` to its return word
+    for this exact head, so an indirect terminal that demonstrably
+    transfers to that word is a closed return edge. The proof runs over
+    the already-decoded census — never bytes, names, or helpers — and
+    only a fully proven candidate discharges its unresolved terminal;
+    every unproven terminal keeps reachability incomplete. The
+    premise-derived artifact rides the returned boundary so IR import
+    and the scoped continuation view can re-authenticate the identical
+    provenance without re-deriving it.
+    """
     if not isinstance(start, int) or not isinstance(end, int) or end <= start:
         return None
+    return _bounded_entry_function_boundary_8616(project, start, start, end, premise)
+
+
+def bounded_entry_function_boundary_8616(
+    project: object,
+    entry: int,
+    decode_start: int,
+    decode_end: int,
+) -> ExactFunctionRangeBoundary8616 | None:
+    """Close an independent entry inside supplied executable decoding bounds.
+
+    A caller supplies authority for the entry and bounds, such as verified
+    block-byte witnesses. Only complete native reachability becomes a boundary;
+    this route carries no invocation premise or conditional return authority.
+    Consumers remain responsible for checking that decoded extents belong to
+    their supplied witness rather than merely its enclosing interval.
+    """
+    if (
+        type(entry) is not int
+        or type(decode_start) is not int
+        or type(decode_end) is not int
+        or not 0 <= decode_start <= entry < decode_end
+    ):
+        return None
+    return _bounded_entry_function_boundary_8616(
+        project, entry, decode_start, decode_end, None
+    )
+
+
+def _bounded_entry_function_boundary_8616(
+    project: object,
+    entry: int,
+    lower: int,
+    end: int,
+    premise: NearCallFramePremise8616 | None,
+) -> ExactFunctionRangeBoundary8616 | None:
+    """Close the entry census within independently supplied decoding bounds.
+
+    Entry identity remains distinct from the mapped image's decoding floor.
+    Exact-range callers supply their start for both coordinates; mapped callers
+    permit backward direct edges while retaining every unresolved obligation.
+    """
     reachability = collect_instruction_reachability_8616(
         project,
-        entry=start,
-        region_start=start,
+        entry=entry,
+        region_start=lower,
         region_end=end,
     )
+    continuations: NearReturnContinuationArtifact8616 | None = None
+    if not reachability.complete and reachability.blocks:
+        continuations = prove_near_return_continuations_8616(
+            reachability.blocks,
+            reachability.successor_edges,
+            entry=entry,
+            premise=premise,
+        )
+        if continuations.proven_block_addrs:
+            reachability = collect_instruction_reachability_8616(
+                project,
+                entry=entry,
+                region_start=lower,
+                region_end=end,
+                proven_return_block_addrs=continuations.proven_block_addrs,
+            )
     if not reachability.complete or not reachability.reachable_block_addrs:
         return None
     return ExactFunctionRangeBoundary8616(
         project=project,
-        addr=start,
-        size=end - start,
+        addr=entry,
+        size=end - entry,
         block_addrs_set=frozenset(reachability.reachable_block_addrs),
         reachable_instruction_addrs=frozenset(reachability.reachable_instruction_addrs),
         successor_edges=reachability.successor_edges,
         blocks=reachability.blocks,
+        near_return_continuations=continuations,
+        decode_lower_bound=lower,
     )
 
 
@@ -93,13 +188,21 @@ class _MappedProject8616(Protocol):
     loader: _MappedLoader8616
 
 
-def mapped_entry_function_boundary_8616(project: object, entry: int) -> ExactFunctionRangeBoundary8616 | None:
+def mapped_entry_function_boundary_8616(
+    project: object,
+    entry: int,
+    *,
+    premise: NearCallFramePremise8616 | None = None,
+) -> ExactFunctionRangeBoundary8616 | None:
     """Close reachable binary instructions without optional function catalogs.
 
     The caller must independently prove this entry, for example from a mapped
     direct CALL. The image's inclusive upper bound limits decoding; it does not
     declare the whole image to be the function. Only closed entry reachability
-    becomes the boundary. Open paths and targets before entry still refuse.
+    becomes the boundary. Backward targets inside the mapped image are decoded;
+    open paths and targets outside that image still refuse.
+    ``premise`` is the caller's independently proven source-bound
+    entry-frame premise; it is forwarded verbatim and never invented here.
     """
     if type(entry) is not int or entry < 0:
         return None
@@ -113,4 +216,6 @@ def mapped_entry_function_boundary_8616(project: object, entry: int) -> ExactFun
         return None
     if type(lower) is not int or type(upper) is not int or not lower <= entry <= upper:
         return None
-    return exact_function_range_boundary_8616(project, entry, upper + 1)
+    return _bounded_entry_function_boundary_8616(
+        project, entry, lower, upper + 1, premise
+    )

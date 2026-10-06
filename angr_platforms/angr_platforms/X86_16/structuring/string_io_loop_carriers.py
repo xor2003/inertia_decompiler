@@ -57,7 +57,15 @@ class _StringIOCFunction8616(Protocol):
 
 
 class _StringIOCodegen8616(Protocol):
-    """Dynamic codegen boundary consumed by string-I/O structuring."""
+    """Dynamic codegen boundary consumed by string-I/O structuring.
+
+    ``_inertia_string_instruction_artifact`` is optional Inertia evidence: its
+    producer returns without attaching when no cfunc or function lookup is
+    available, so a partial codegen may lack the attribute physically. Readers
+    must treat ``AttributeError`` on that slot as absent evidence, never as a
+    typed artifact. ``_inertia_string_io_loop_carrier_stats_8616`` is this
+    module's own output attachment.
+    """
 
     project: _StringIOProject8616 | None
     cfunc: _StringIOCFunction8616 | None
@@ -220,8 +228,17 @@ def _string_io_artifact_8616(
     project: object,
     cfunc: _StringIOCFunction8616 | None,
 ) -> object:
-    """Return the cached artifact, building it from function evidence if absent."""
-    artifact = getattr(boundary, "_inertia_string_instruction_artifact", None)
+    """Return the cached artifact, building it from function evidence if absent.
+
+    The optional attachment is read with an owned dot access at an explicit
+    boundary: ``AttributeError`` means the producer never attached evidence,
+    while any other failure propagates. A present attribute of the wrong type
+    is treated as malformed evidence and rebuilt from binary function decode.
+    """
+    try:
+        artifact = boundary._inertia_string_instruction_artifact
+    except AttributeError:
+        artifact = None
     if cfunc is None or isinstance(artifact, StringInstructionArtifact):
         return artifact
     functions = getattr(getattr(project, "kb", None), "functions", None)

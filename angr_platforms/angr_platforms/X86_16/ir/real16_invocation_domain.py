@@ -101,14 +101,19 @@ conditional on its retained chain: it proves the transported entry state
 for the callee head *through the bound edges it names*; entries through
 other edges are outside the claim and are recorded as the typed
 ``CHAINED_CALL_ENTRY`` assumption.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import StrEnum
 from typing import Protocol, cast
 
@@ -116,6 +121,10 @@ from angr.errors import AngrError
 from capstone import CsError
 from pyvex.errors import PyVEXError
 
+from ...real16_resize_response8616 import (
+    ResizeRefusal8616,
+    resize_response_8616,
+)
 from ..frontend_block_inventory import decoded_block_instructions_8616
 from ..frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
@@ -126,11 +135,13 @@ from ..mz_invocation_source import (
     MzInvocationSource8616,
     mz_invocation_source_8616,
 )
+from ..mz_static_boot import MzStaticBoot8616
 from ..semantics.register_value_preservation import (
     register_value_family_8616,
     register_value_projection_8616,
 )
 from .core import (
+    IRActiveUnary8616,
     IRAddress,
     IRBinaryValue,
     IRBlock,
@@ -149,6 +160,43 @@ from .ir_boundary_cfg import (
     _instruction_census_matches_8616,
     closed_ir_boundary_cfg_8616,
 )
+from .real16_declared_interrupt8616 import (
+    DeclaredInterruptRefusal8616,
+    DeclaredInterruptService8616,
+    DeclaredResizeConsumption8616,
+    DeclaredResizeSurface8616,
+    DeclaredServiceConsumption8616,
+    declared_environment_digest_8616,
+    declared_resize_consumption_8616,
+    declared_service_arena_8616,
+    declared_service_consumption_8616,
+    interrupt_call_vector_8616,
+    service_relation_for_8616,
+)
+from .real16_edge_feasibility8616 import (
+    DirectionTracker8616,
+    Real16EdgeFeasibility8616,
+    invocation_feasible_scope_8616,
+)
+from .real16_initial_memory8616 import InvocationInitialMemory8616, invocation_initial_memory_8616
+from .real16_path_memory8616 import (
+    SEGMENT_BASE_NAME_8616,
+    PathMemory8616,
+    PathMemorySnapshot8616,
+    meet_path_memory_8616,
+    path_load_value_8616,
+    path_memory_initial_8616,
+    path_memory_tainted_8616,
+    restore_path_memory_8616,
+    snapshot_path_memory_8616,
+    store_atom_clean_8616,
+)
+from .real16_repeated_store8616 import (
+    RepeatedStoreStatus8616,
+    native_repeated_store_8616,
+    repeated_store_effect_8616,
+)
+from .real16_wide_multiply8616 import wide_multiply_value_8616
 from .scalar_instruction_effects import (
     ScalarInstructionClobber8616,
     ScalarInstructionEffectKind8616,
@@ -167,6 +215,7 @@ __all__ = [
     "Real16InvocationDomain8616",
     "Real16InvocationFailure8616",
     "Real16InvocationKind8616",
+    "Real16InvocationRefusalSite8616",
     "prove_real16_chained_invocation_domain_8616",
     "prove_real16_enclosed_invocation_domain_8616",
     "prove_real16_invocation_domain_8616",
@@ -222,11 +271,10 @@ _PATH_STATE_ITERATION_LIMIT_8616 = 64
 # re-derives its parent in full, so a cyclic or runaway chain must refuse
 # at a fixed depth rather than recursing unboundedly.
 _CHAIN_DEPTH_LIMIT_8616 = 16
-_SEGMENT_BASE_NAME_8616 = {
-    MemSpace.SS: "ss",
-    MemSpace.DS: "ds",
-    MemSpace.ES: "es",
-}
+# The effective-address segment bases this census resolves: owned by
+# ``real16_path_memory8616`` so the concrete evaluator and the known-bits
+# feasibility interpreter resolve spans identically.
+_SEGMENT_BASE_NAME_8616 = SEGMENT_BASE_NAME_8616
 
 
 class Real16InvocationFailure8616(StrEnum):
@@ -254,6 +302,7 @@ class Real16InvocationFailure8616(StrEnum):
     CALLEE_WRITE_UNPROVEN = "callee_write_unproven"
     CHAIN_LINK_UNPROVEN = "chain_link_unproven"
     ENCLOSED_LINK_UNPROVEN = "enclosed_link_unproven"
+    DECLARED_SERVICE_UNPROVEN = "declared_service_unproven"
     CENSUS_WORK_EXCEEDED = "census_work_exceeded"
     CENSUS_DEADLINE_EXCEEDED = "census_deadline_exceeded"
 
@@ -271,6 +320,10 @@ class Real16InvocationAssumption8616(StrEnum):
     MZ_HEADER_ENTRY = "mz_header_entry"
     #: Initial SS:SP projected from the same retained MZ header.
     MZ_HEADER_STACK = "mz_header_stack"
+    #: A static-header input carries no declared environment: the seed
+    #: contains only the header CS:IP/SS:SP, every other register stays
+    #: unknown, and path effects depending on unknown state must refuse.
+    STATIC_HEADER_STATE = "static_header_state"
     #: DS/ES seeded from the caller-declared PSP segment and the 16-bit GP
     #: lanes seeded from the declared 32-bit environment register file;
     #: the environment is a declared loader contract, not binary evidence.
@@ -295,12 +348,28 @@ class Real16InvocationAssumption8616(StrEnum):
     #: Entries into the enclosed head through edges outside the retained
     #: enclosing boundary are outside this premise's claim.
     ENCLOSED_ENTRY = "enclosed_entry"
+    #: The census crossed at least one interrupt-service boundary under an
+    #: explicitly declared, environment-bound relation
+    #: (``DeclaredInterruptService8616``). Every consumed relation is
+    #: retained on the domain's ``service_consumptions`` and replays
+    #: identically; the declaration is conditional caller evidence, never
+    #: a proven universal DOS model.
+    DECLARED_INTERRUPT_SERVICE = "declared_interrupt_service"
 
 
 _BOOT_ENTRY_ASSUMPTIONS_8616: tuple[Real16InvocationAssumption8616, ...] = (
     Real16InvocationAssumption8616.MZ_HEADER_ENTRY,
     Real16InvocationAssumption8616.MZ_HEADER_STACK,
     Real16InvocationAssumption8616.DECLARED_ENVIRONMENT,
+    Real16InvocationAssumption8616.DECLARED_CODE_SCOPE,
+    Real16InvocationAssumption8616.REPLAY_CORROBORATION,
+)
+
+
+_STATIC_ENTRY_ASSUMPTIONS_8616: tuple[Real16InvocationAssumption8616, ...] = (
+    Real16InvocationAssumption8616.MZ_HEADER_ENTRY,
+    Real16InvocationAssumption8616.MZ_HEADER_STACK,
+    Real16InvocationAssumption8616.STATIC_HEADER_STATE,
     Real16InvocationAssumption8616.DECLARED_CODE_SCOPE,
     Real16InvocationAssumption8616.REPLAY_CORROBORATION,
 )
@@ -331,8 +400,15 @@ class Real16InvocationKind8616(StrEnum):
 class _BootEntrySurface8616(Protocol):
     """Typed entry/stack contract consumed from the boot authority."""
 
-    segment: int
-    offset: int
+    @property
+    def segment(self) -> int:
+        """Read the source-authenticated segment without mutating the boot."""
+        ...
+
+    @property
+    def offset(self) -> int:
+        """Read the source-authenticated offset without mutating the boot."""
+        ...
 
     def linear(self) -> int:
         """Return the entry linear address."""
@@ -350,13 +426,40 @@ class _BootRangeSurface8616(Protocol):
 class _BootImageSurface8616(Protocol):
     """Typed loaded-image contract consumed from the boot authority."""
 
-    chunks: tuple[tuple[int, bytes], ...]
-    code_ranges: tuple[_BootRangeSurface8616, ...]
-    load_segment: int
-    file_sha256: str
-    image_sha256: str
-    reloc_sha256: str
-    code_scope: str
+    @property
+    def chunks(self) -> tuple[tuple[int, bytes], ...]:
+        """Read the retained relocated load-module chunks."""
+        ...
+
+    @property
+    def code_ranges(self) -> tuple[_BootRangeSurface8616, ...]:
+        """Read the declared fetch ranges through their containment contract."""
+        ...
+
+    @property
+    def load_segment(self) -> int:
+        """Read the paragraph used to relocate the retained module."""
+        ...
+
+    @property
+    def file_sha256(self) -> str:
+        """Read the retained MZ source identity."""
+        ...
+
+    @property
+    def image_sha256(self) -> str:
+        """Read the relocated image identity."""
+        ...
+
+    @property
+    def reloc_sha256(self) -> str:
+        """Read the source relocation-table identity."""
+        ...
+
+    @property
+    def code_scope(self) -> str:
+        """Read how the declared fetch ranges were selected."""
+        ...
 
 
 class _BootEnvironmentSurface8616(Protocol):
@@ -412,6 +515,15 @@ class _BootEvidence8616:
     image: _BootImageSurface8616
     boot_sha256: str
     register_seed: tuple[tuple[str, int], ...]
+    entry_assumptions: tuple[Real16InvocationAssumption8616, ...]
+    environment_digest: str | None
+    #: The declared environment object itself — the census re-derives the
+    #: canonical service surface from it at every consumption, never
+    #: trusting the presented relation's effect fields.
+    environment: object | None
+    #: Declared allocation ``[start, end)``; a DOS entry inside it is a
+    #: program-owned handler, not an external declared service.
+    arena: tuple[int, int] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,6 +545,19 @@ class _DerivedDomain8616:
     callsite_artifact: IRFunctionArtifact | None
     callsite_boundary: ExactFunctionRangeBoundary8616 | None
     callsite_call_state: tuple[tuple[str, int], ...]
+    #: The callsite-row memory overlay's frozen image — the identical
+    #: bytes the transported register state was proven under, so a
+    #: chained or enclosed seed consumes the same memory, never a
+    #: silently reset initial image. ``None`` when the census never
+    #: reached its callsite row.
+    callsite_memory: PathMemorySnapshot8616 | None
+    service_consumptions: tuple[
+        DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616, ...
+    ]
+    #: ``(block_addr, successor_addr)`` edges proven untraversable by the
+    #: invocation-local known-bits feasibility pass; empty when nothing
+    #: was proven dead.
+    infeasible_edges: tuple[tuple[int, int], ...] = ()
 
 
 class _DecodedNativeInstruction8616(Protocol):
@@ -457,12 +582,46 @@ class _CensusImportGuard8616(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class Real16InvocationRefusalSite8616:
+    """The exact classified census row that first returned a typed failure.
+
+    ``function_addr`` is the censused artifact's head — which may be a
+    nested replay's parent surface, never relabeled as the consuming
+    callsite — ``block_addr`` the IR block the row belongs to, and
+    ``instruction_addr`` the instruction's own machine address. The site
+    is recorded only when an actual instruction-level census row is
+    classified and refused; structural, binding, and budget refusals that
+    never reach a row keep ``None`` on the derivation.
+    """
+
+    function_addr: int
+    block_addr: int
+    instruction_addr: int
+
+
+@dataclass(frozen=True, slots=True)
+class _NestedRefusal8616:
+    """A link-seed refusal carrying the nested derivation's real row site.
+
+    A chained or enclosed parent replay that refuses at a classified
+    census row keeps that exact site so the outer derivation reports the
+    failing instruction instead of a bare ``*_LINK_UNPROVEN`` with the
+    location erased.
+    """
+
+    failure: Real16InvocationFailure8616
+    refusal_site: Real16InvocationRefusalSite8616 | None
+
+
+@dataclass(frozen=True, slots=True)
 class _Derivation8616:
     """One derivation attempt: the domain, the refusal, and real counts.
 
     The five stage counts are the actual census — real instruction rows
     seen, normalized, classified, materialized, refused — so a refusal
-    still reports how far the bounded census progressed.
+    still reports how far the bounded census progressed. ``refusal_site``
+    names the first classified row that failed; it stays ``None`` for
+    pre-census refusals that never observed an instruction row.
     """
 
     domain: _DerivedDomain8616 | None
@@ -472,17 +631,25 @@ class _Derivation8616:
     classified_fact_count: int
     materialized_count: int
     failure_count: int
+    refusal_site: Real16InvocationRefusalSite8616 | None = None
+    #: Edges the invocation-local feasibility pass proved untraversable
+    #: before the refusal; diagnostic evidence, never universal.
+    infeasible_edges: tuple[tuple[int, int], ...] = ()
 
 
 def _early_derivation_8616(
     failure: Real16InvocationFailure8616,
+    *,
+    refusal_site: Real16InvocationRefusalSite8616 | None = None,
 ) -> _Derivation8616:
     """Return a refused derivation before any census row was observed.
 
     ``failure_count`` is the classified-row refusal ledger: a pre-census
     refusal classified no rows, so it reports ``0`` — the typed
     ``failure`` field carries the refusal itself and
-    ``classified == materialized + failure`` stays closed.
+    ``classified == materialized + failure`` stays closed. A nested
+    replay may still supply a real ``refusal_site`` its own census
+    recorded; refusals with no classified row keep ``None``.
     """
     return _Derivation8616(
         domain=None,
@@ -492,6 +659,7 @@ def _early_derivation_8616(
         classified_fact_count=0,
         materialized_count=0,
         failure_count=0,
+        refusal_site=refusal_site,
     )
 
 
@@ -583,7 +751,26 @@ def _environment_seed_8616(environment: object) -> tuple[tuple[str, int], ...] |
         lane = dict(_ENVIRONMENT_WORD_REGISTERS_8616).get(name)
         if lane is not None:
             seed[lane] = value & _WORD_LIMIT_8616
+    _environment_byte_fanout_8616(seed)
     return tuple(sorted(seed.items()))
+
+
+def _environment_byte_fanout_8616(seed: dict[str, int]) -> None:
+    """Fan each declared 16-bit lane into its contained byte lanes.
+
+    The declaration is a complete constant, so ``al``/``ah`` projections are
+    pure evidence, not inference. Without them a proven ``mov ah,imm`` would
+    leave the declared AL unprovable at a later boundary.
+    """
+    for lane_name, lane_value in tuple(seed.items()):
+        if lane_name in ("ds", "es"):
+            continue
+        for member in register_value_family_8616(lane_name):
+            projection = register_value_projection_8616(lane_name, member)
+            if projection is None or member in seed:
+                continue
+            shift, bits = projection
+            seed[member] = (lane_value >> shift) & ((1 << bits) - 1)
 
 
 def _boot_point_valid_8616(point: object) -> bool:
@@ -699,7 +886,84 @@ def _boot_evidence_8616(boot: object) -> _BootEvidence8616 | Real16InvocationFai
         image=image,
         boot_sha256=digest,
         register_seed=register_seed,
+        entry_assumptions=_BOOT_ENTRY_ASSUMPTIONS_8616,
+        environment_digest=declared_environment_digest_8616(environment),
+        environment=environment,
+        arena=declared_service_arena_8616(environment),
     )
+
+
+def _static_boot_evidence_8616(
+    boot: MzStaticBoot8616,
+) -> _BootEvidence8616 | Real16InvocationFailure8616:
+    """Extract the source-authenticated surface of one static-header input.
+
+    The input authenticates the identical entry/stack/module/fingerprint
+    fields as a declared boot — entry and stack linear must re-derive from
+    retained source bytes and the claimed load paragraph, every relocated
+    module word must match, and the digests must bind — but carries no
+    environment. The register seed therefore contains only the header CS/SS/
+    SP lanes; every other register stays unknown so effects depending on it
+    refuse downstream. ``entry_assumptions`` records that distinction: the
+    premise declares ``STATIC_HEADER_STATE`` rather than
+    ``DECLARED_ENVIRONMENT``.
+    """
+    if type(boot) is not MzStaticBoot8616:
+        return Real16InvocationFailure8616.BOOT_UNBOUND
+    source = boot.source
+    digest = boot.boot_sha256
+    if type(source) is not bytes or not source:
+        return Real16InvocationFailure8616.BOOT_MALFORMED
+    if type(digest) is not str or not digest:
+        return Real16InvocationFailure8616.BOOT_MALFORMED
+    entry = boot.entry
+    stack = boot.stack
+    image = boot.image
+    if not _boot_point_valid_8616(entry) or not _boot_point_valid_8616(stack):
+        return Real16InvocationFailure8616.BOOT_MALFORMED
+    if not _boot_image_valid_8616(image):
+        return Real16InvocationFailure8616.BOOT_MALFORMED
+    try:
+        derived = mz_invocation_source_8616(bytes(source), image.load_segment)
+    except (TypeError, ValueError):
+        return Real16InvocationFailure8616.BOOT_NOT_REPRODUCED
+    if not _boot_fields_reproduced_8616(entry, stack, image, derived):
+        return Real16InvocationFailure8616.BOOT_NOT_REPRODUCED
+    return _BootEvidence8616(
+        source=bytes(source),
+        entry_segment=entry.segment,
+        entry_offset=entry.offset,
+        entry_linear=entry.linear(),
+        stack_segment=stack.segment,
+        stack_offset=stack.offset,
+        load_segment=image.load_segment,
+        image=image,
+        boot_sha256=digest,
+        register_seed=(
+            ("cs", entry.segment),
+            ("ss", stack.segment),
+            ("sp", stack.offset),
+        ),
+        entry_assumptions=_STATIC_ENTRY_ASSUMPTIONS_8616,
+        environment_digest=None,
+        environment=None,
+        arena=None,
+    )
+
+
+def _invocation_boot_evidence_8616(
+    boot: object,
+) -> _BootEvidence8616 | Real16InvocationFailure8616:
+    """Extract normalized boot evidence through the typed input's surface.
+
+    Declared ``ProgramBoot`` objects authenticate environment lanes through
+    ``_boot_evidence_8616``; static-header ``MzStaticBoot8616`` inputs go
+    through the header-only surface. Either path refuses rather than guess:
+    a malformed or unreproduced field is a typed failure, never a default.
+    """
+    if type(boot) is MzStaticBoot8616:
+        return _static_boot_evidence_8616(boot)
+    return _boot_evidence_8616(boot)
 
 
 def _recompute_boot_8616(
@@ -707,7 +971,7 @@ def _recompute_boot_8616(
     boot_recompute: Callable[[object], object] | None,
 ) -> Real16InvocationFailure8616 | None:
     """Require source-derived fields before any supplementary callback replay."""
-    source_evidence = _boot_evidence_8616(boot)
+    source_evidence = _invocation_boot_evidence_8616(boot)
     if isinstance(source_evidence, Real16InvocationFailure8616):
         return source_evidence
     if boot_recompute is None or not callable(boot_recompute):
@@ -778,6 +1042,14 @@ class _PathCensusContext8616:
     cannot carry coverage-bound proofs. Both pools bind the identical
     artifact/block/instruction objects and revalidate at consumption.
 
+    Memory writes are *not* kept on this context: they are path facts,
+    carried inside each ``_PathState8616``'s ``PathMemory8616`` overlay
+    and must-met per predecessor by ``_simulate_scope_8616`` — census
+    visitation order is never memory execution order. The union-of-spans
+    IVT/code guards are answered path-sensitively by the overlay itself
+    (any possibly-written byte revokes), which is strictly more precise
+    and no less conservative.
+
     The five counter sets key real instruction rows by
     ``(block_addr, instr_index)`` — rows seen, normalized, classified,
     materialized, refused — so reported census counts are the actual
@@ -806,9 +1078,25 @@ class _PathCensusContext8616:
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None
     call_preservations: tuple[SegmentCallPreservationResult8616, ...]
     entry_call_preservations: tuple[object, ...]
+    declared_services: tuple[DeclaredInterruptService8616, ...]
+    environment_digest: str | None
+    #: The boot's declared environment object — the consumption re-derives
+    #: the canonical service surface from it, so a relation whose effect
+    #: fields were replaced under an unchanged digest still refuses.
+    environment: object | None
+    #: Declared allocation ``[start, end)`` for program-owned-handler checks.
+    arena: tuple[int, int] | None
+    service_consumptions: list[
+        DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616
+    ]
     stop_block_addr: int | None
     callsite_addr: int | None
     callsite_call_state: dict[str, int] | None
+    #: The callsite-row memory overlay captured beside
+    #: ``callsite_call_state`` — the callee's exact entry memory, so a
+    #: transported premise's seed carries the same bytes the register
+    #: state was proven under.
+    callsite_memory: PathMemory8616 | None
     manifest: list[tuple[int, int]]
     machine_bytes: dict[int, bytes]
     native_blocks: dict[int, dict[int, IRBlock]]
@@ -823,6 +1111,14 @@ class _PathCensusContext8616:
     work_limit: int
     deadline: float
     accounted_work_units: int = 0
+    #: The first classified instruction row the census refused — real
+    #: diagnostic evidence for the exact failing site, never a guess.
+    first_failure_site: Real16InvocationRefusalSite8616 | None = None
+    #: Per-edge feasibility verdicts computed once between byte binding
+    #: and path-callee/effect simulation; ``live_blocks`` is the scope
+    #: both later phases consume.
+    edge_feasibility: Real16EdgeFeasibility8616 | None = None
+    initial_memory: InvocationInitialMemory8616 | None = None
 
 
 def _census_work_exceeded_8616(ctx: _PathCensusContext8616) -> bool:
@@ -950,9 +1246,10 @@ _IR_VALUE_FIELDS_8616 = frozenset(
     {
         "space", "name", "offset", "const", "size", "version", "expr",
         "index", "index_shift", "memory_access_size", "memory_access_insn",
-        "source_tmp", "call_output",
+        "source_tmp", "call_output", "active_unary",
     }
 )
+_IR_ACTIVE_UNARY_FIELDS_8616 = frozenset({"op", "operand", "result_bits"})
 _IR_BINARY_VALUE_FIELDS_8616 = frozenset({"op", "lhs", "rhs", "size"})
 _IR_ADDRESS_FIELDS_8616 = frozenset(
     {
@@ -1018,14 +1315,27 @@ def _native_value_equal_8616(left: IRValue, right: IRValue, depth: int) -> bool:
             left.space, left.name, left.offset, left.const, left.size,
             left.version, left.expr, left.index, left.index_shift,
             left.memory_access_size, left.memory_access_insn,
-            left.source_tmp, left.call_output,
+            left.source_tmp, left.call_output, left.active_unary,
         ),
         (
             right.space, right.name, right.offset, right.const, right.size,
             right.version, right.expr, right.index, right.index_shift,
             right.memory_access_size, right.memory_access_insn,
-            right.source_tmp, right.call_output,
+            right.source_tmp, right.call_output, right.active_unary,
         ),
+        depth + 1,
+    )
+
+
+def _native_active_unary_equal_8616(
+    left: IRActiveUnary8616, right: IRActiveUnary8616, depth: int
+) -> bool:
+    """All-field binding equality for one active unary evidence node."""
+    if not _native_fields_current_8616(left, _IR_ACTIVE_UNARY_FIELDS_8616):
+        return False
+    return _native_term_equal_8616(
+        (left.op, left.operand, left.result_bits),
+        (right.op, right.operand, right.result_bits),
         depth + 1,
     )
 
@@ -1179,6 +1489,7 @@ _NATIVE_COMPARATORS_8616: dict[type, Callable[..., bool]] = {
     IRCondition: _native_condition_equal_8616,
     IRCallStackEffect8616: _native_call_effect_equal_8616,
     IRCallOutputProvenance8616: _native_call_output_equal_8616,
+    IRActiveUnary8616: _native_active_unary_equal_8616,
     IRInstructionOrigin8616: _native_origin_equal_8616,
     IRRefusal: _native_refusal_equal_8616,
 }
@@ -1360,7 +1671,7 @@ def _eval_atom_8616(
         right = _eval_atom_8616(atom.rhs, registers, tmps)
         if left is None or right is None:
             return None
-        return _eval_binary_op_8616(atom.op, left, right)
+        return _eval_binary_op_8616(atom.op, left, right, operands=(atom.lhs, atom.rhs), result_size=atom.size)
     return None
 
 
@@ -1439,26 +1750,141 @@ def _register_read_8616(name: str, state: dict[str, int]) -> int | None:
     return _register_tile_8616(name, width, state)
 
 
+# Exact ``Iop_<src>to<dst>`` / ``Iop_<src><U|S|HI>to<dst>`` conversion or
+# ``Iop_Not<width>`` spellings — the only unary identities this evaluator
+# interprets. Anything else is unsupported and evaluates to unknown.
+_UNARY_CONVERT_OP_8616 = re.compile(r"^Iop_(\d+)(U|S|HI)?to(\d+)$")
+_UNARY_NOT_OP_8616 = re.compile(r"^Iop_Not(\d+)$")
+# Bound on nested active-unary evaluation; genuine VEX chains are shallow.
+_UNARY_DEPTH_LIMIT_8616 = 8
+
+
+def _eval_unary_op_8616(op: str, operand: int, result_bits: int) -> int | None:
+    """Apply one typed active unary op to a concrete operand value.
+
+    Only exact VEX op identities are interpreted: ``Not`` at its declared
+    width, ``<src>to<dst>`` low-half truncation, ``<src>Uto<dst>`` zero
+    extension, ``<src>Sto<dst>`` sign extension and ``<2n>HIto<n>`` high
+    half extraction. The op's declared result width must equal the
+    evidence's authoritative ``result_bits``; anything else is unknown.
+    """
+    if type(result_bits) is not int or result_bits <= 0:
+        return None
+    not_match = _UNARY_NOT_OP_8616.fullmatch(op)
+    if not_match is not None:
+        bits = int(not_match.group(1))
+        if bits != result_bits:
+            return None
+        return ~operand & ((1 << bits) - 1)
+    match = _UNARY_CONVERT_OP_8616.fullmatch(op)
+    if match is None:
+        return None
+    return _eval_convert_unary_8616(match, operand, result_bits)
+
+
+def _eval_convert_unary_8616(
+    match: re.Match[str], operand: int, result_bits: int
+) -> int | None:
+    """Apply one concrete ``<src>[U|S|HI]to<dst>`` conversion operand."""
+    src_bits = int(match.group(1))
+    sign = match.group(2)
+    dst_bits = int(match.group(3))
+    if dst_bits != result_bits:
+        return None
+    src_mask = (1 << src_bits) - 1
+    operand &= src_mask
+    if sign == "HI":
+        if src_bits != 2 * dst_bits:
+            return None
+        return (operand >> dst_bits) & ((1 << dst_bits) - 1)
+    if src_bits > dst_bits:
+        return operand & ((1 << dst_bits) - 1)
+    if src_bits == dst_bits or sign not in ("U", "S"):
+        return None
+    if sign == "S" and operand & (1 << (src_bits - 1)):
+        return operand | (((1 << dst_bits) - 1) ^ src_mask)
+    return operand
+
+
 def _eval_value_8616(
     value: IRValue,
     registers: dict[str, int],
     tmps: dict[int, int],
 ) -> int | None:
     """Evaluate one typed value against the abstract invocation state."""
+    return _eval_value_inner_8616(value, registers, tmps, 0)
+
+
+def _eval_value_inner_8616(
+    value: IRValue,
+    registers: dict[str, int],
+    tmps: dict[int, int],
+    depth: int,
+) -> int | None:
+    """Evaluate one typed value, honoring capture identity and unary ops.
+
+    ``source_tmp`` names the already-computed tmp result — an immutable
+    capture whose ``offset``/``expr`` are producer provenance and are
+    never replayed against a newer register value. ``active_unary`` is
+    the authoritative pending operation and is evaluated on its typed
+    operand first; both set at once is contradictory evidence and
+    refuses. Without either, ``expr`` tokens are provenance: whitelisted
+    binop fold tags pass, any other ``Iop_*`` unary projection cannot be
+    authenticated and refuses.
+    """
+    if depth > _UNARY_DEPTH_LIMIT_8616:
+        return None
     if value.index is not None or value.index_shift:
         return None
-    if value.space is MemSpace.CONST:
-        return value.const if type(value.const) is int else None
     if type(value.offset) is not int:
         return None
-    if value.space is MemSpace.REG:
+    if value.source_tmp is not None:
+        if value.active_unary is not None:
+            return None
+        captured = tmps.get(value.source_tmp)
+        if captured is None:
+            return None
+        mask = _value_mask_8616(value.size)
+        return None if mask is None else captured & mask
+    if value.active_unary is not None:
+        operand = _eval_value_inner_8616(
+            value.active_unary.operand, registers, tmps, depth + 1
+        )
+        if operand is None:
+            return None
+        return _eval_unary_op_8616(
+            value.active_unary.op, operand, value.active_unary.result_bits
+        )
+    return _eval_plain_value_8616(value, registers)
+
+
+def _expr_provenance_only_8616(value: IRValue) -> bool:
+    """Return whether every ``Iop_*`` ``expr`` token is a binop fold tag."""
+    for token in value.expr or ():
+        if token.startswith("Iop_") and token not in _BINARY_OPS_8616:
+            return False
+    return True
+
+
+def _eval_plain_value_8616(
+    value: IRValue, registers: dict[str, int]
+) -> int | None:
+    """Evaluate a provenance-only CONST/REG view plus its folded offset.
+
+    Any ``Iop_*`` ``expr`` token that is not a whitelisted binop fold tag
+    is an unauthenticated unary projection and refuses.
+    """
+    if not _expr_provenance_only_8616(value):
+        return None
+    base: int | None
+    if value.space is MemSpace.CONST:
+        if type(value.const) is not int:
+            return None
+        base = value.const
+    elif value.space is MemSpace.REG:
         if value.name is None:
             return None
         base = _register_read_8616(value.name, registers)
-    elif value.space is MemSpace.TMP:
-        if value.source_tmp is None:
-            return None
-        base = tmps.get(value.source_tmp)
     else:
         return None
     if base is None:
@@ -1491,10 +1917,13 @@ def _binary_parts_8616(op: str) -> tuple[str, int]:
     return op[4 : len(op) - len(digits)], int(digits)
 
 
-def _eval_binary_op_8616(op: str, left: int, right: int) -> int | None:
+def _eval_binary_op_8616(
+    op: str, left: int, right: int, *,
+    operands: tuple[object, object] | None = None, result_size: int | None = None,
+) -> int | None:
     """Apply an exact-whitelisted VEX integer binop at its declared width."""
     if op not in _BINARY_OPS_8616:
-        return None
+        return wide_multiply_value_8616(op, left, right, operands, result_size)
     name, width = _binary_parts_8616(op)
     mask = (1 << width) - 1
     left &= mask
@@ -1528,21 +1957,55 @@ def _eval_base_value_8616(
     instruction_entry: dict[str, int],
     dirty: frozenset[str] | set[str],
     tmps: dict[int, int],
+    depth: int = 0,
 ) -> int | None:
     """Evaluate one captured base-register read of a typed address.
 
     ``source_tmp`` pins the read to its exact VEX capture point (already
-    evaluated in instruction order); otherwise the read must be of a
-    register unmodified inside this machine instruction so the
-    instruction-entry state is the authoritative value.
+    evaluated in instruction order); the stored view's ``offset``/``expr``
+    are producer provenance and are never replayed. ``active_unary``
+    evidence is applied to its own operand — a converted base must not
+    silently read the unconverted register. Otherwise the read must be of
+    a register unmodified inside this machine instruction so the
+    instruction-entry state is the authoritative value; unauthenticated
+    unary ``expr`` projections on unpinned views refuse.
     """
+    if depth > _UNARY_DEPTH_LIMIT_8616:
+        return None
     if not isinstance(value, IRValue) or value.index is not None or value.index_shift:
         return None
     if type(value.offset) is not int:
         return None
     if value.source_tmp is not None:
+        if value.active_unary is not None:
+            return None
         base = tmps.get(value.source_tmp)
-        return None if base is None else (base + value.offset) & _WORD_LIMIT_8616
+        return None if base is None else base & _WORD_LIMIT_8616
+    if value.active_unary is not None:
+        operand = _eval_base_value_8616(
+            value.active_unary.operand, instruction_entry, dirty, tmps, depth + 1
+        )
+        if operand is None:
+            return None
+        evaluated = _eval_unary_op_8616(
+            value.active_unary.op, operand, value.active_unary.result_bits
+        )
+        return None if evaluated is None else evaluated & _WORD_LIMIT_8616
+    return _eval_base_plain_8616(value, instruction_entry, dirty)
+
+
+def _eval_base_plain_8616(
+    value: IRValue,
+    instruction_entry: dict[str, int],
+    dirty: frozenset[str] | set[str],
+) -> int | None:
+    """Evaluate a provenance-only address base against instruction-entry state.
+
+    A register modified inside the machine instruction cannot use the
+    entry snapshot; unauthenticated unary ``expr`` projections refuse.
+    """
+    if not _expr_provenance_only_8616(value):
+        return None
     if value.space is MemSpace.REG and value.name is not None:
         if value.name in dirty:
             return None
@@ -1603,6 +2066,34 @@ def _meet_registers_8616(states: Iterable[dict[str, int]]) -> dict[str, int]:
             if state.get(name) != merged[name]:
                 del merged[name]
     return merged
+
+
+@dataclass(slots=True)
+class _PathState8616:
+    """One abstract path position: proven register lanes + memory overlay.
+
+    The pair is the complete state the scope fixpoint meets per
+    predecessor and each block transfer consumes — a register constant
+    and a memory byte are proven under the identical must discipline, so
+    alternative branch histories can never collapse into whichever block
+    the census visited last. ``memory`` is the shared
+    ``PathMemory8616`` overlay from ``real16_path_memory8616``.
+    """
+
+    registers: dict[str, int]
+    memory: PathMemory8616
+    #: Proven DF only, independent of the unknown remainder of FLAGS.
+    direction: bool | None = None
+
+
+def _meet_path_state_8616(states: Iterable[_PathState8616]) -> _PathState8616:
+    """Meet whole path states componentwise under the must discipline."""
+    items = list(states)
+    return _PathState8616(
+        registers=_meet_registers_8616(state.registers for state in items),
+        memory=meet_path_memory_8616(state.memory for state in items),
+        direction=(items[0].direction if items and all(state.direction == items[0].direction for state in items) else None),
+    )
 
 
 def _apply_register_write_8616(
@@ -1684,16 +2175,42 @@ def _simulate_tmp_write_8616(
         left = _eval_atom_8616(instruction.args[0], registers, tmps)
         right = _eval_atom_8616(instruction.args[1], registers, tmps)
         if left is not None and right is not None:
-            evaluated = _eval_binary_op_8616(instruction.op, left, right)
+            evaluated = _eval_binary_op_8616(
+                instruction.op, left, right,
+                operands=(instruction.args[0], instruction.args[1]), result_size=dst.size,
+            )
     if evaluated is None:
         tmps.pop(dst.source_tmp, None)
     else:
         tmps[dst.source_tmp] = evaluated
 
 
+def _simulate_census_tmp_write_8616(
+    ctx: _PathCensusContext8616, instruction: IRInstr, dst: IRValue,
+    instruction_entry: dict[str, int], dirty: set[str], tmps: dict[int, int],
+    memory: PathMemory8616, registers: dict[str, int],
+) -> None:
+    """Transfer a native tmp row, reading only authenticated initialized bytes."""
+    if instruction.op != "LOAD":
+        _simulate_tmp_write_8616(instruction, dst, registers, tmps)
+        return
+    value = path_load_value_8616(
+        instruction,
+        _store_span_8616(instruction, instruction.args[0] if instruction.args else None,
+                         instruction_entry, dirty, tmps),
+        memory, ctx.initial_memory,
+    )
+    if type(dst.source_tmp) is int:
+        if value is None:
+            tmps.pop(dst.source_tmp, None)
+        else:
+            tmps[dst.source_tmp] = value
+
+
 def _transfer_row_failure_8616(
     ctx: _PathCensusContext8616,
     instruction: IRInstr,
+    block: IRBlock,
 ) -> Real16InvocationFailure8616 | None:
     """Classify one CJMP/JMP/RET row's effect on the path state.
 
@@ -1702,6 +2219,11 @@ def _transfer_row_failure_8616(
     obligation the premise discharges — its target is not an in-path
     effect. Any other symbolic (non-constant ``dst``) transfer refuses.
     """
+    if instruction.op == "CJMP" and instruction is not block.instrs[-1]:
+        # A single linear pass cannot establish effects after an internal
+        # exit (notably every iteration of REP). Require an authenticated
+        # complete transfer; visiting the rows once can miss later code writes.
+        return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     if instruction.addr == ctx.callsite_addr:
         return None
     if instruction.dst is not None:
@@ -1718,6 +2240,7 @@ def _simulate_instruction_8616(
     tmps: dict[int, int],
     instruction_entry: dict[str, int],
     dirty: set[str],
+    memory: PathMemory8616,
     row: tuple[int, int],
 ) -> Real16InvocationFailure8616 | None:
     """Apply one in-path instruction's typed effect to the abstract state.
@@ -1741,16 +2264,18 @@ def _simulate_instruction_8616(
         failure = Real16InvocationFailure8616.CS_PATH_UNPROVEN
     elif op == "STORE":
         failure = _census_store_8616(
-            ctx, instruction, instruction_entry, dirty, tmps
+            ctx, instruction, instruction_entry, dirty, tmps, memory
         )
     elif op == "CALL":
         failure = (
             Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
             if instruction.dst is not None
-            else _cross_call_8616(ctx, artifact, block, instruction, registers)
+            else _cross_call_8616(
+                ctx, artifact, block, instruction, registers, memory
+            )
         )
     elif op in ("CJMP", "JMP", "RET"):
-        failure = _transfer_row_failure_8616(ctx, instruction)
+        failure = _transfer_row_failure_8616(ctx, instruction, block)
     else:
         # Every other effect must be closed by the authoritative scalar
         # classifier before any destination is accepted: an UNKNOWN kind,
@@ -1774,7 +2299,9 @@ def _simulate_instruction_8616(
             and isinstance(dst, IRValue)
             and dst.space is MemSpace.TMP
         ):
-            _simulate_tmp_write_8616(instruction, dst, registers, tmps)
+            _simulate_census_tmp_write_8616(
+                ctx, instruction, dst, instruction_entry, dirty, tmps, memory, registers
+            )
             failure = None
         elif (
             effect.kind is ScalarInstructionEffectKind8616.NO_REGISTER_WRITE
@@ -1793,9 +2320,39 @@ def _simulate_instruction_8616(
         # stale materialization alongside its recorded failure.
         ctx.materialized_facts.discard(row)
         ctx.failures += 1
+        _record_first_failure_site_8616(ctx, artifact, block, instruction)
         return failure
     ctx.materialized_facts.add(row)
     return None
+
+
+def _record_first_failure_site_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    block: IRBlock,
+    instruction: IRInstr,
+) -> None:
+    """Retain the first classified row's exact site on the census.
+
+    Only the earliest refused row is kept — later failures on the same
+    census never overwrite it — and only rows whose machine address is a
+    real integer qualify, so a malformed row can never mint a site. The
+    artifact head is recorded verbatim: on a nested replay the site names
+    the parent surface that actually failed, not the consuming callsite.
+    """
+    if ctx.first_failure_site is not None:
+        return
+    if (
+        type(artifact.function_addr) is not int
+        or type(block.addr) is not int
+        or type(instruction.addr) is not int
+    ):
+        return
+    ctx.first_failure_site = Real16InvocationRefusalSite8616(
+        function_addr=artifact.function_addr,
+        block_addr=block.addr,
+        instruction_addr=instruction.addr,
+    )
 
 
 def _address_domain16_8616(encoded: bytes) -> bool:
@@ -1813,14 +2370,46 @@ def _address_domain16_8616(encoded: bytes) -> bool:
     return True
 
 
+def _store_data_bytes_8616(
+    instruction: IRInstr,
+    instruction_entry: dict[str, int],
+    dirty: set[str],
+    tmps: dict[int, int],
+    size: int,
+) -> bytes | None:
+    """Return the exact bytes one proven STORE writes, or ``None``.
+
+    The value is evaluated under the same instruction-entry state and
+    dirty-name discipline as the address: anything unproven — a memory
+    read, an unknown tmp, a register modified inside this machine
+    instruction — records ``None`` (span proven, bytes unknown) instead
+    of a guessed constant.
+    """
+    atom = instruction.args[1]
+    if not store_atom_clean_8616(atom, dirty):
+        return None
+    evaluated = _eval_atom_8616(atom, instruction_entry, tmps)
+    mask = _value_mask_8616(size)
+    if evaluated is None or mask is None:
+        return None
+    return (evaluated & mask).to_bytes(size, "little")
+
+
 def _census_store_8616(
     ctx: _PathCensusContext8616,
     instruction: IRInstr,
     instruction_entry: dict[str, int],
     dirty: set[str],
     tmps: dict[int, int],
+    memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
-    """Require one raw STORE to be provably disjoint from fetched code."""
+    """Require one raw STORE to be provably disjoint from fetched code.
+
+    On success the write commits to the *path's* memory overlay — known
+    bytes when the data atom evaluates, unknown bytes when only the span
+    is proven — so joins meet the store under the identical
+    per-predecessor must discipline as register facts.
+    """
     if len(instruction.args) != 2 or instruction.dst is not None:
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     if type(instruction.addr) is not int:
@@ -1840,6 +2429,11 @@ def _census_store_8616(
         if base < start + extent and base + size > start:
             return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
     ctx.checked_stores += 1
+    memory.apply_write(
+        base,
+        size,
+        _store_data_bytes_8616(instruction, instruction_entry, dirty, tmps, size),
+    )
     return None
 
 
@@ -2020,12 +2614,405 @@ def _call_boundary_proof_8616(
     return cast(_BoundaryProof8616, record)
 
 
+def _declared_service_frame_8616(
+    ctx: _PathCensusContext8616,
+    bound: DeclaredInterruptService8616,
+    registers: dict[str, int],
+    artifact: IRFunctionArtifact,
+) -> int | Real16InvocationFailure8616:
+    """Validate the architectural INT frame span against proven SS:SP.
+
+    The frame is a real 6-byte write below proven SP entering the same
+    store ledger as every censused STORE: it must not alias the declared
+    IVT slot for the vector (dispatch would be undefined) and must stay
+    disjoint from every instruction byte this surface may fetch — the
+    already-censused manifest and every instruction span in the artifact,
+    including bytes fetched after this crossing. Returns the frame's
+    linear base on success.
+    """
+    ss = _register_read_8616("ss", registers)
+    sp = _register_read_8616("sp", registers)
+    if ss is None or sp is None or sp < bound.frame_bytes:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    frame_linear = (ss << _SEGMENT_SHIFT_8616) + (sp - bound.frame_bytes)
+    frame_end = frame_linear + bound.frame_bytes
+    slot_linear = bound.vector * 4
+    if frame_linear < slot_linear + 4 and slot_linear < frame_end:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    if any(
+        frame_linear < start + extent and start < frame_end
+        for start, extent in ctx.manifest
+    ):
+        return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    for block in artifact.blocks:
+        for fetched in block.instrs:
+            if (
+                type(fetched.addr) is int
+                and type(fetched.size) is int
+                and fetched.size > 0
+                and frame_linear < fetched.addr + fetched.size
+                and fetched.addr < frame_end
+            ):
+                # The frame would clobber bytes fetched later — code must
+                # never share the stack frame's written span.
+                return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    entry_linear = (
+        bound.ivt_entry_segment << _SEGMENT_SHIFT_8616
+    ) + bound.ivt_entry_offset
+    if _image_slice_8616(ctx.image, entry_linear, 1) is not None:
+        # A DOS vector pointing inside the loaded module is a program-owned
+        # handler, not an external declared service.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    if (
+        ctx.arena is not None
+        and ctx.arena[0] <= entry_linear < ctx.arena[1]
+    ):
+        # The declared handler address lies inside the program's own
+        # allocated arena — that is program-owned code, never DOS.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    if ctx.arena is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    return frame_linear
+
+
+def _declared_service_crossing_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    instruction: IRInstr,
+    registers: dict[str, int],
+    memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Cross one interrupt-service boundary under an exact declared relation.
+
+    Ordinary call rows keep the unchanged ``CALL_BOUNDARY_UNPROVEN`` verdict.
+    For a CALL row that lifts to an interrupt vector, the crossing needs
+    every declared input bound to *proven* state: AH/AL constants at the
+    callsite equal to the declared function/selector, exactly one
+    structurally valid relation naming this caller head, callsite, vector
+    and the identical environment digest, and a proven SS/SP whose
+    architectural INT frame span is disjoint from every fetched byte and
+    from the declared IVT slot. The declared DOS entry must lie outside the
+    loaded module bytes. A bound resize relation (``bound.resize``) commits
+    through the canonical allocator model — proven ES/BX/AX inputs, current
+    MCB bytes, register/CF effects and the metadata write — instead of a
+    declared answer triple. On success the canonical answer is applied
+    through the lane model — ``eax``/``ebx``/``ecx`` upper halves are
+    invalidated — every lane the relation does not declare written or
+    preserved is dropped, and the consumption is recorded on the census.
+    Anything insufficient refuses; a declaration never proves itself.
+    """
+    vector = interrupt_call_vector_8616(instruction)
+    if vector is None:
+        return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+    if instruction.addr is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    ah = _register_read_8616("ah", registers)
+    al = _register_read_8616("al", registers)
+    if ah is None or al is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    bound = service_relation_for_8616(
+        ctx.declared_services,
+        caller_addr=artifact.function_addr,
+        callsite_addr=instruction.addr,
+        vector=vector,
+        function=ah,
+        selector=al,
+        environment_sha256=ctx.environment_digest,
+        environment=ctx.environment,
+    )
+    if type(bound) is not DeclaredInterruptService8616:
+        return (
+            Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+            if bound is DeclaredInterruptRefusal8616.RELATION_ABSENT
+            else Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+        )
+    if _declared_ivt_revoked_8616(memory, bound.vector):
+        # Any path may have written the declared slot's bytes: the live
+        # IVT may differ from the declared initial layout, so the
+        # declared dispatch evidence is revoked — even when the stored
+        # value was unknown.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    if bound.resize is not None:
+        return _declared_resize_service_apply_8616(
+            ctx, bound, bound.resize, registers, artifact, memory
+        )
+    frame_linear = _declared_service_frame_8616(
+        ctx, bound, registers, artifact
+    )
+    if isinstance(frame_linear, Real16InvocationFailure8616):
+        return frame_linear
+    _declared_version_service_apply_8616(
+        ctx, bound, registers, frame_linear, memory
+    )
+    return None
+
+
+def _declared_version_service_apply_8616(
+    ctx: _PathCensusContext8616,
+    bound: DeclaredInterruptService8616,
+    registers: dict[str, int],
+    frame_linear: int,
+    memory: PathMemory8616,
+) -> None:
+    """Commit one declared version crossing under the bound relation.
+
+    The architectural frame joins the path's memory overlay (span proven,
+    contents unmodeled), the declared answer triple is applied through
+    the lane model — containing lanes keep no false constant — and every
+    lane the relation neither writes nor declares preserved drops to
+    unknown.
+    """
+    # The architectural frame is a real write: it joins the path overlay
+    # exactly like a censused STORE so later evidence sees the six
+    # written bytes rather than stale initial memory. Its contents are
+    # never modeled — the overlay marks the span modified-unproven.
+    memory.apply_write(frame_linear, bound.frame_bytes, None)
+    ctx.checked_stores += 1
+    ctx.service_consumptions.append(
+        declared_service_consumption_8616(bound, frame_linear=frame_linear)
+    )
+    dirty: set[str] = set()
+    for name, answer in (
+        ("ax", bound.answer_ax),
+        ("bx", bound.answer_bx),
+        ("cx", bound.answer_cx),
+    ):
+        _apply_register_write_8616(name, 2, answer, registers, dirty)
+    accounted = (*bound.preserved, "ax", "bx", "cx")
+    for name in tuple(registers):
+        covered = any(
+            register_value_projection_8616(lane, name) is not None
+            for lane in accounted
+        )
+        if not covered:
+            # An unaccounted lane loses its constant honestly rather than
+            # surviving on an undeclared preservation claim.
+            del registers[name]
+
+
+def _declared_ivt_revoked_8616(
+    memory: PathMemory8616, vector: int
+) -> bool:
+    """Return whether any path may have written the declared IVT slot.
+
+    Conservative over the path overlay: a byte provably written on every
+    path (``known``), a byte possibly modified on some path or with
+    unproven contents (``unknown``), and any unbounded write boundary
+    (``tainted``) all revoke the declared initial-layout evidence — the
+    live IVT may differ from the declared slot, so the declared dispatch
+    evidence is revoked even when the stored value was never proven.
+    """
+    if memory.tainted:
+        return True
+    slot_linear = vector * 4
+    return any(
+        byte in memory.known or byte in memory.unknown
+        for byte in range(slot_linear, slot_linear + 4)
+    )
+
+
+def _resize_current_metadata_8616(
+    memory: PathMemory8616,
+    surface: DeclaredResizeSurface8616,
+) -> bytes | None:
+    """Recompute the current MCB bytes at a declared resize boundary.
+
+    Reads the *path's* must-meet byte overlay, never a visitation-order
+    ledger: a byte provably written on every path supplies its proven
+    value, a byte possibly modified or content-unproven leaves the
+    metadata incomplete, and an unmodified byte keeps the declared
+    initial value. ``None`` means the current metadata is incomplete:
+    the canonical owner is never fed guessed bytes.
+    """
+    if memory.tainted:
+        return None
+    mcb = bytearray(surface.metadata)
+    for offset in range(len(mcb)):
+        byte_addr = surface.metadata_linear + offset
+        if byte_addr in memory.known:
+            mcb[offset] = memory.known[byte_addr]
+        elif byte_addr in memory.unknown:
+            return None
+    return bytes(mcb)
+
+
+def _resize_metadata_write_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    bound: DeclaredInterruptService8616,
+    surface: DeclaredResizeSurface8616,
+    current: bytes,
+    updated: bytes,
+    memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Serialize the canonical MCB write into the path's memory overlay.
+
+    The response's replacement metadata is compared byte-for-byte; the
+    exact changed span must be disjoint from every fetched byte, the
+    module manifest and the declared IVT slot, then it commits to the
+    path overlay with its proven bytes so a repeated resize or later
+    evidence reads them rather than stale initial memory. An unchanged
+    response records no write.
+    """
+    if updated == current:
+        return None
+    changed = [
+        index for index in range(len(current)) if updated[index] != current[index]
+    ]
+    write_base = surface.metadata_linear + changed[0]
+    write = updated[changed[0] : changed[-1] + 1]
+    write_end = write_base + len(write)
+    for start, extent in ctx.manifest:
+        if write_base < start + extent and start < write_end:
+            return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    for block in artifact.blocks:
+        for fetched in block.instrs:
+            if (
+                type(fetched.addr) is int
+                and type(fetched.size) is int
+                and fetched.size > 0
+                and write_base < fetched.addr + fetched.size
+                and fetched.addr < write_end
+            ):
+                return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    slot_linear = bound.vector * 4
+    if write_base < slot_linear + 4 and slot_linear < write_end:
+        # The modeled metadata write would land on the declared
+        # dispatch slot — outside the declared service semantics.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    memory.apply_write(write_base, len(write), write)
+    ctx.checked_stores += 1
+    return None
+
+
+def _resize_register_effects_8616(
+    bound: DeclaredInterruptService8616,
+    response_ax: int,
+    response_bx: int,
+    carry: bool,
+    registers: dict[str, int],
+) -> None:
+    """Apply the canonical AX/BX/CF effects through the lane model.
+
+    ``ax``/``bx`` lane writes keep their proven high halves through the
+    family model — containing lanes (``eax``/``ebx``) lose the constant
+    honestly. The canonical contract writes only the carry flag: when a
+    flag lane is proven it is rewritten with CF applied and every other
+    bit preserved; when it is not, it stays unknown rather than surviving
+    on an undeclared preservation claim. Any lane the relation neither
+    writes nor declares preserved drops to unknown.
+    """
+    dirty: set[str] = set()
+    _apply_register_write_8616("ax", 2, response_ax, registers, dirty)
+    _apply_register_write_8616("bx", 2, response_bx, registers, dirty)
+    accounted = (*bound.preserved, "ax", "bx")
+    eflags = _register_read_8616("eflags", registers)
+    flags = _register_read_8616("flags", registers)
+    if eflags is not None:
+        _apply_register_write_8616(
+            "eflags", 4, (eflags & ~1) | int(carry), registers, dirty
+        )
+        accounted = (*accounted, "eflags")
+    elif flags is not None:
+        _apply_register_write_8616(
+            "flags", 2, (flags & ~1) | int(carry), registers, dirty
+        )
+        accounted = (*accounted, "flags")
+    for name in tuple(registers):
+        covered = any(
+            register_value_projection_8616(lane, name) is not None
+            for lane in accounted
+        )
+        if not covered:
+            del registers[name]
+
+
+def _declared_resize_service_apply_8616(
+    ctx: _PathCensusContext8616,
+    bound: DeclaredInterruptService8616,
+    surface: DeclaredResizeSurface8616,
+    registers: dict[str, int],
+    artifact: IRFunctionArtifact,
+    memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Commit one declared tail-resize crossing under the bound relation.
+
+    Requires the complete canonical input surface: proven full AX/ES/BX
+    lanes, the shared frame/IVT/handler checks, the architectural frame
+    disjoint from the modeled MCB, and complete *current* MCB bytes read
+    from this path's must-meet overlay over the declared initial bytes —
+    a repeated resize observes the previous response's metadata and an
+    earlier proven store's bytes, while a byte any predecessor path left
+    unproven refuses. The shared canonical owner then computes the
+    response: its typed OTHER_BLOCK/CHAIN refusals refuse the crossing,
+    its effects are serialized by the helpers above.
+    """
+    ax = _register_read_8616("ax", registers)
+    es = _register_read_8616("es", registers)
+    bx = _register_read_8616("bx", registers)
+    if ax is None or es is None or bx is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    frame_linear = _declared_service_frame_8616(
+        ctx, bound, registers, artifact
+    )
+    if isinstance(frame_linear, Real16InvocationFailure8616):
+        return frame_linear
+    metadata_end = surface.metadata_linear + len(surface.metadata)
+    if (
+        frame_linear < metadata_end
+        and surface.metadata_linear < frame_linear + bound.frame_bytes
+    ):
+        # The architectural entry frame would clobber modeled allocator
+        # metadata — the service read could not be authenticated.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    current = _resize_current_metadata_8616(memory, surface)
+    if current is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    response = resize_response_8616(
+        block_segment=surface.block_segment,
+        maximum=surface.maximum,
+        segment=es,
+        paragraphs=bx,
+        ax=ax,
+        metadata=current,
+    )
+    if isinstance(response, ResizeRefusal8616):
+        # OTHER_BLOCK/CHAIN are undeclared allocator state, never a DOS
+        # error result — the crossing keeps the typed refusal.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    # The architectural frame is a real write; its contents stay unmodeled.
+    memory.apply_write(frame_linear, bound.frame_bytes, None)
+    ctx.checked_stores += 1
+    failure = _resize_metadata_write_8616(
+        ctx, artifact, bound, surface, current, response.metadata, memory
+    )
+    if failure is not None:
+        return failure
+    ctx.service_consumptions.append(
+        declared_resize_consumption_8616(
+            bound,
+            frame_linear=frame_linear,
+            request_ax=ax,
+            answer_ax=response.ax,
+            answer_bx=response.bx,
+            carry=response.carry,
+            metadata_before=current,
+            metadata_after=response.metadata,
+        )
+    )
+    _resize_register_effects_8616(
+        bound, response.ax, response.bx, response.carry, registers
+    )
+    return None
+
+
 def _cross_call_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
     instruction: IRInstr,
     registers: dict[str, int],
+    memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Close one interior CALL boundary or the proved callsite itself."""
     if ctx.callsite_addr is None:
@@ -2034,23 +3021,29 @@ def _cross_call_8616(
         return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
     if instruction.addr == ctx.callsite_addr:
         # The proven callsite: its own stack push was already censused as a
-        # STORE row. The register state at this row — after that machine
-        # instruction's push effects — is the callee's exact entry state;
-        # retain it so a CALL_CHAINED premise can transport it, then the
-        # callee the call reaches is bound by the discharge check.
+        # STORE row. The register and memory state at this row — after that
+        # machine instruction's push effects — is the callee's exact entry
+        # state; retain both so a CALL_CHAINED premise can transport the
+        # identical state, then the callee the call reaches is bound by
+        # the discharge check.
         ctx.callsite_call_state = dict(registers)
+        ctx.callsite_memory = memory.copy()
         registers.clear()
         return None
     proof = _call_boundary_proof_8616(ctx, artifact, block, instruction)
-    callee = None if proof is None else proof.callee
-    scope: Real16InvocationDomain8616 | object | None = None
-    if proof is not None:
-        # Reauthenticate the consuming entry at the use itself: the
-        # projection may only be read under the scope the census derives.
-        scope = _ctx_consuming_scope_8616(ctx, artifact, proof)
+    if proof is None:
+        # No near-call boundary proof binds this row: either it lifts to an
+        # interrupt vector — where exactly one declared service relation may
+        # carry it — or it keeps the unchanged unproven-call verdict.
+        return _declared_service_crossing_8616(
+            ctx, artifact, instruction, registers, memory
+        )
+    callee = proof.callee
+    # Reauthenticate the consuming entry at the use itself: the projection
+    # may only be read under the scope the census derives.
+    scope = _ctx_consuming_scope_8616(ctx, artifact, proof)
     if (
-        proof is None
-        or scope is _CTX_SCOPE_REFUSE_8616
+        scope is _CTX_SCOPE_REFUSE_8616
         or not proof.complete_for(cast(Real16InvocationDomain8616 | None, scope))
         or type(callee) is not SegmentEffectClosureResult8616
         or type(callee.coverage.artifact) is not IRFunctionArtifact
@@ -2063,7 +3056,9 @@ def _cross_call_8616(
     window_base = ctx.selector << _SEGMENT_SHIFT_8616
     if not window_base <= callee_addr <= window_base + _WORD_LIMIT_8616:
         return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
-    callee_exits = _simulate_callee_8616(ctx, proof, dict(registers))
+    callee_exits = _simulate_callee_8616(
+        ctx, proof, _PathState8616(dict(registers), memory.copy())
+    )
     if isinstance(callee_exits, Real16InvocationFailure8616):
         return callee_exits
     preserved = set(proof.preserved_registers_for(preserved_scope))
@@ -2071,12 +3066,13 @@ def _cross_call_8616(
         if name not in preserved:
             del registers[name]
     registers.update(_post_call_registers_8616(callee, callee_exits))
+    memory.assign(_post_call_memory_8616(callee, callee_exits))
     return None
 
 
 def _post_call_registers_8616(
     callee: SegmentEffectClosureResult8616,
-    callee_exits: dict[int, dict[str, int]],
+    callee_exits: dict[int, _PathState8616],
 ) -> dict[str, int]:
     """Return the bound callee's must-met post-return continuation state.
 
@@ -2090,17 +3086,40 @@ def _post_call_registers_8616(
         return {}
     if any(
         return_addr not in callee_exits
-        or "sp" not in callee_exits[return_addr]
+        or "sp" not in callee_exits[return_addr].registers
         for return_addr in callee.return_block_addrs
     ):
         return {}
     sp = _meet_registers_8616(
         [
-            callee_exits[return_addr]
+            callee_exits[return_addr].registers
             for return_addr in callee.return_block_addrs
         ]
     ).get("sp")
     return {"sp": sp} if type(sp) is int else {}
+
+
+def _post_call_memory_8616(
+    callee: SegmentEffectClosureResult8616,
+    callee_exits: dict[int, _PathState8616],
+) -> PathMemory8616:
+    """Return the bound callee's must-met post-return memory overlay.
+
+    Mirrors the register rule: the caller-visible memory after the call
+    is the must-meet of every proven return exit — a byte some return
+    path leaves unproven, and a callee that never provably returns at
+    all, both degrade to the fully unproven overlay rather than keeping
+    stale pre-call bytes.
+    """
+    if not callee.return_block_addrs or any(
+        return_addr not in callee_exits
+        for return_addr in callee.return_block_addrs
+    ):
+        return path_memory_tainted_8616()
+    return meet_path_memory_8616(
+        callee_exits[return_addr].memory
+        for return_addr in callee.return_block_addrs
+    )
 
 
 def _census_callee_bytes_8616(
@@ -2141,16 +3160,19 @@ def _census_callee_bytes_8616(
 def _simulate_callee_8616(
     ctx: _PathCensusContext8616,
     proof: _BoundaryProof8616,
-    seed: dict[str, int],
-) -> dict[int, dict[str, int]] | Real16InvocationFailure8616:
+    seed: _PathState8616,
+) -> dict[int, _PathState8616] | Real16InvocationFailure8616:
     """Census a complete leaf callee's raw effects under the call state.
 
     The preservation result guarantees a leaf (no nested calls). Callee
     fetched bytes were already appended to the shared manifest by
-    ``_census_callee_bytes_8616`` before path simulation began. On
-    success the callee's own per-block exit registers are returned: the
-    post-call continuation state is evidence the bound simulation
-    computed, never a caller-side guess.
+    ``_census_callee_bytes_8616`` before path simulation began. The seed
+    carries the caller's live register *and* memory overlay — the callee
+    sees the bytes the caller provably wrote, and its own stores must
+    meet back into the caller's continuation under the identical must
+    discipline. On success the callee's own per-block exit states are
+    returned: the post-call continuation state is evidence the bound
+    simulation computed, never a caller-side guess.
     """
     callee = proof.callee
     if type(callee) is not SegmentEffectClosureResult8616:
@@ -2170,7 +3192,10 @@ def _simulate_callee_8616(
 
 
 def _refuse_unbound_block_rows_8616(
-    ctx: _PathCensusContext8616, block: IRBlock, stop_after: int | None
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    block: IRBlock,
+    stop_after: int | None,
 ) -> None:
     """Stage every in-scope row of an unbound block as classified-refused.
 
@@ -2180,7 +3205,10 @@ def _refuse_unbound_block_rows_8616(
     was refused, contributing exactly one ledger failure apiece — keeping
     ``classified == materialized + failures`` closed. Rows past
     ``stop_after`` or without an integer address mirror the simulation
-    loop's own boundary and are never staged.
+    loop's own boundary and are never staged. The earliest staged row
+    also records the census's first refusal site: these are real
+    classified refusals, so the diagnostic names the exact instruction
+    whose block failed native binding.
     """
     for index, instruction in enumerate(block.instrs):
         if type(instruction.addr) is not int:
@@ -2193,17 +3221,71 @@ def _refuse_unbound_block_rows_8616(
         ctx.classified_facts.add(row)
         ctx.materialized_facts.discard(row)
         ctx.failures += 1
+        _record_first_failure_site_8616(ctx, artifact, block, instruction)
+
+
+def _apply_repeated_store_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    registers: dict[str, int], memory: PathMemory8616, direction: bool | None,
+    *, count_store: bool = True,
+) -> tuple[RepeatedStoreStatus8616, Real16InvocationFailure8616 | None]:
+    """Bind and consume one whole REP effect, including all fetched-byte checks."""
+    encoded = ctx.machine_bytes.get(block.addr)
+    if encoded is None:
+        return RepeatedStoreStatus8616.NOT_APPLICABLE, None
+    repeat = native_repeated_store_8616(ctx.project, block, encoded)
+    if repeat is None:
+        return RepeatedStoreStatus8616.NOT_APPLICABLE, None
+    native = ctx.native_blocks.get(artifact.function_addr, {}).get(block.addr)
+    if not _native_block_bound_8616(native, block):
+        return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    effect = repeated_store_effect_8616(repeat, registers, direction)
+    if effect is None:
+        return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.STORE_ADDRESS_UNPROVEN
+    ctx.work_units += effect.size + len(block.instrs) + 1
+    if _census_work_exceeded_8616(ctx):
+        return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+    if time.monotonic() > ctx.deadline:
+        return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+    if effect.size and any(effect.base < start + size and start < effect.base + effect.size for start, size in ctx.manifest):
+        return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    memory.apply_write(effect.base, effect.size, effect.data)
+    if effect.size:
+        if count_store:
+            ctx.checked_stores += 1
+        assert effect.final_di is not None
+        _apply_register_write_8616("di", 2, effect.final_di, registers, set())
+    _apply_register_write_8616("cx", 2, 0, registers, set())
+    return RepeatedStoreStatus8616.APPLIED, None
+
+
+def _record_repeated_store_rows_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    failure: Real16InvocationFailure8616 | None,
+) -> None:
+    """Close the row ledger for a native instruction consumed as one effect."""
+    for index, instruction in enumerate(block.instrs):
+        row = (block.addr, index)
+        ctx.raw_facts.add(row)
+        ctx.normalized_facts.add(row)
+        ctx.classified_facts.add(row)
+        if failure is None:
+            ctx.materialized_facts.add(row)
+        else:
+            ctx.materialized_facts.discard(row)
+            ctx.failures += 1
+            _record_first_failure_site_8616(ctx, artifact, block, instruction)
 
 
 def _simulate_path_block_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
-    entry: dict[str, int],
+    entry: _PathState8616,
     *,
     stop_after: int | None,
-) -> dict[str, int] | Real16InvocationFailure8616:
-    """Bind then simulate one block's ordered effects; return exit registers."""
+) -> _PathState8616 | Real16InvocationFailure8616:
+    """Bind then simulate one block's ordered effects; return exit state."""
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     ctx.work_units += len(block.instrs) + 1
@@ -2223,9 +3305,17 @@ def _simulate_path_block_8616(
         # effect. The block's in-scope rows are real census rows, so each
         # is classified and individually refused to keep the ledger
         # closed rather than retaining phantom materializations.
-        _refuse_unbound_block_rows_8616(ctx, block, stop_after)
+        _refuse_unbound_block_rows_8616(ctx, artifact, block, stop_after)
         return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
-    registers = dict(entry)
+    registers = dict(entry.registers)
+    memory = entry.memory.copy()
+    status, failure = _apply_repeated_store_8616(
+        ctx, artifact, block, registers, memory, entry.direction,
+    )
+    if status is not RepeatedStoreStatus8616.NOT_APPLICABLE:
+        _record_repeated_store_rows_8616(ctx, artifact, block, failure)
+        return failure if failure is not None else _PathState8616(registers, memory, entry.direction)
+    direction = DirectionTracker8616(registers, entry.direction)
     tmps: dict[int, int] = {}
     dirty: set[str] = set()
     instruction_entry = dict(registers)
@@ -2241,12 +3331,13 @@ def _simulate_path_block_8616(
             dirty = set()
         failure = _simulate_instruction_8616(
             ctx, artifact, block, instruction,
-            registers, tmps, instruction_entry, dirty,
+            registers, tmps, instruction_entry, dirty, memory,
             (block.addr, index),
         )
         if failure is not None:
             return failure
-    return registers
+        direction.step(instruction, registers, tmps)
+    return _PathState8616(registers, memory, direction.direction())
 
 
 def _simulate_scope_8616(
@@ -2254,32 +3345,38 @@ def _simulate_scope_8616(
     artifact: IRFunctionArtifact,
     scope: frozenset[int],
     head: int,
-    seed: dict[str, int],
+    seed: _PathState8616,
     *,
     stop_after: int | None,
     callsite_addr: int | None,
-) -> dict[int, dict[str, int]] | Real16InvocationFailure8616:
+    infeasible_edges: frozenset[tuple[int, int]] = frozenset(),
+) -> dict[int, _PathState8616] | Real16InvocationFailure8616:
     """Fixpoint-simulate every in-scope block's effects under the seed.
 
-    Returns the per-block exit register map on success so a callee-scope
+    Returns the per-block exit state map on success so a callee-scope
     caller can recover the bound callee's proven return state; a typed
-    refusal otherwise.
+    refusal otherwise. Only the authenticated root census supplies
+    ``infeasible_edges``; nested callee scopes keep the empty default and
+    never inherit unrelated root pruning from the shared context.
 
-    Register facts join must-style (kept only when every contributing
-    predecessor exit agrees), so loops and alternative paths degrade to
-    explicit refusals instead of guessed constants. The head's entry is
-    the meet of ``seed`` *and every in-scope predecessor exit* — backedges
-    included — so a loop-carried mutation (``push`` shrinking ``sp``)
-    removes the carried constant instead of resurrecting the seed. A
-    non-head block waits until at least one predecessor exit exists;
-    chaotic iteration then converges to the must-fixpoint. Every scope
-    block must be simulated at least once: an unvisited block's effects
-    were never checked.
+    Register facts *and* memory bytes join must-style (kept only when
+    every contributing predecessor exit agrees), so loops and
+    alternative paths degrade to explicit refusals instead of guessed
+    constants — a STORE on one branch can never be hidden by another
+    branch's overwrite order because visitation order is not execution
+    order. The head's entry is the meet of ``seed`` *and every in-scope
+    predecessor exit* — backedges included — so a loop-carried mutation
+    (``push`` shrinking ``sp``, a store rewriting metadata) removes the
+    carried constant instead of resurrecting the seed. A non-head block
+    waits until at least one predecessor exit exists; chaotic iteration
+    then converges to the must-fixpoint. Every scope block must be
+    simulated at least once: an unvisited block's effects were never
+    checked.
     """
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
     predecessor_map = build_x86_16_ir_predecessor_map(artifact)
-    entries: dict[int, dict[str, int]] = {}
-    exits: dict[int, dict[str, int]] = {}
+    entries: dict[int, _PathState8616] = {}
+    exits: dict[int, _PathState8616] = {}
     scope_callsite = ctx.callsite_addr
     ctx.callsite_addr = callsite_addr
     try:
@@ -2289,11 +3386,16 @@ def _simulate_scope_8616(
             changed = False
             for addr in sorted(scope):
                 predecessors = [
-                    pred for pred in predecessor_map.get(addr, ()) if pred in scope
+                    pred for pred in predecessor_map.get(addr, ())
+                    if pred in scope and (pred, addr) not in infeasible_edges
                 ]
                 if addr == head:
-                    entry = _meet_registers_8616(
-                        [dict(seed)]
+                    entry = _meet_path_state_8616(
+                        [
+                            _PathState8616(
+                                dict(seed.registers), seed.memory, seed.direction
+                            )
+                        ]
                         + [exits[pred] for pred in predecessors if pred in exits]
                     )
                 else:
@@ -2305,7 +3407,7 @@ def _simulate_scope_8616(
                         # for blocks no in-scope path can reach, which the
                         # exits check below then refuses.
                         continue
-                    entry = _meet_registers_8616(ready)
+                    entry = _meet_path_state_8616(ready)
                 if entries.get(addr) == entry and addr in exits:
                     continue
                 entries[addr] = entry
@@ -2338,6 +3440,44 @@ def _invocation_seed_8616(evidence: _BootEvidence8616) -> dict[str, int]:
     return seed
 
 
+def _feasibility_apply_service_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    instruction: IRInstr,
+    registers: dict[str, int],
+    memory: PathMemory8616,
+) -> bool:
+    """Apply a declared interrupt-service answer for edge feasibility.
+
+    Runs the identical authenticated crossing — relation binding, IVT
+    slot, architectural frame disjointness, arena exclusion, *current*
+    metadata recompute — against a scratch census ledger, so the scratch
+    consumption never enters the real receipts. ``memory`` is the
+    feasibility pass's own must-meet overlay: the crossing reads the
+    metadata this path actually wrote, never initial bytes after a
+    store, and its modeled writes commit back so a second service sees
+    them. The crossing mutates ``registers`` and ``memory`` in place;
+    its work is charged back to the shared budget. ``True`` means the
+    declared lanes were applied; ``False`` means the crossing refused
+    and the caller must conservatively drop the state — the real census
+    will refuse the same row honestly if the block stays live.
+    """
+    before = ctx.work_units
+    scratch = replace(
+        ctx,
+        service_consumptions=[],
+        callsite_call_state=None,
+        callsite_memory=None,
+        first_failure_site=None,
+        edge_feasibility=None,
+    )
+    result = _declared_service_crossing_8616(
+        scratch, artifact, instruction, registers, memory
+    )
+    ctx.work_units += scratch.work_units - before
+    return result is None
+
+
 def _census_invocation_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -2345,7 +3485,7 @@ def _census_invocation_8616(
     dangerous: frozenset[int],
     call_block: IRBlock,
     callsite_addr: int,
-    seed: dict[str, int],
+    seed: _PathState8616,
 ) -> Real16InvocationFailure8616 | None:
     """Run the full root-to-callsite raw-effect census in three phases.
 
@@ -2378,17 +3518,73 @@ def _census_invocation_8616(
         )
         if failure is not None:
             return failure
-    failure = _census_path_callees_8616(ctx, artifact, blocks_by_addr, dangerous, callsite_addr)
+    # Invocation-local edge feasibility: a proven-infeasible branch edge
+    # removes its unreachable tail from the call/effect obligations below.
+    # Byte binding above stays over the full syntactic cone, and the row
+    # ledger in the simulation phases keeps every still-live row closed —
+    # pruning only skips obligations for blocks no converged must-state
+    # can reach. An unproven edge changes nothing.
+    load_rows = {
+        id(row): (row, native_row)
+        for addr in dangerous
+        if _native_block_bound_8616(native.get(addr), blocks_by_addr[addr])
+        for row, native_row in zip(blocks_by_addr[addr].instrs, native[addr].instrs, strict=True)
+        if row.op == "LOAD"
+    }
+
+    def read_load(
+        instruction: IRInstr, span: tuple[int, int] | None, memory: PathMemory8616,
+    ) -> int | None:
+        """Bind native LOAD identity before publishing any feasibility constant."""
+        pair = load_rows.get(id(instruction))
+        if pair is None or pair[0] is not instruction or not _native_instr_equal_8616(instruction, pair[1], 0):
+            return None
+        return path_load_value_8616(instruction, span, memory, ctx.initial_memory)
+
+    def apply_repeat(
+        block: IRBlock, registers: dict[str, int], memory: PathMemory8616,
+        direction: bool | None,
+    ) -> RepeatedStoreStatus8616:
+        """Consume the identical source-bound repeat before any edge pruning."""
+        status, _ = _apply_repeated_store_8616(ctx, artifact, block, registers, memory, direction, count_store=False)
+        return status
+
+    ctx.edge_feasibility = invocation_feasible_scope_8616(
+        artifact=artifact,
+        dangerous=dangerous,
+        predecessor_map=build_x86_16_ir_predecessor_map(artifact),
+        head_addr=artifact.function_addr,
+        call_block_addr=call_block.addr,
+        callsite_addr=callsite_addr,
+        seed=seed.registers,
+        seed_memory=seed.memory,
+        read_load=read_load,
+        apply_repeat=apply_repeat,
+        apply_service=(
+            lambda instruction, registers, memory: (
+                _feasibility_apply_service_8616(
+                    ctx, artifact, instruction, registers, memory
+                )
+            )
+        ),
+        iteration_limit=_PATH_STATE_ITERATION_LIMIT_8616,
+        deadline=ctx.deadline,
+        work_limit=max(0, ctx.work_limit - ctx.work_units),
+    )
+    ctx.work_units += ctx.edge_feasibility.work_units
+    live = ctx.edge_feasibility.live_blocks
+    failure = _census_path_callees_8616(ctx, artifact, blocks_by_addr, live, callsite_addr)
     if failure is not None:
         return failure
     exits = _simulate_scope_8616(
         ctx,
         artifact,
-        dangerous,
+        live,
         artifact.function_addr,
         seed,
         stop_after=callsite_addr,
         callsite_addr=callsite_addr,
+        infeasible_edges=frozenset(ctx.edge_feasibility.infeasible_edges),
     )
     if isinstance(exits, Real16InvocationFailure8616):
         return exits
@@ -2519,11 +3715,8 @@ class Real16CallChainLink8616:
             or callee_boundary.addr != callee_artifact.function_addr
         ):
             return False
-        if not any(
-            row is callsite
-            for row in self.callsite_index.for_target(
-                callee_artifact.function_addr
-            )
+        if not _bound_callsite_entry_8616(
+            parent, self.callsite_index, callsite, callee_artifact.function_addr,
         ):
             return False
         if not _chain_edge_bound_8616(
@@ -2549,9 +3742,9 @@ class Real16EnclosedEntryLink8616:
     - the caller edge: ``parent`` premise, retained index row
       ``callsite``, the identical caller ``callsite_artifact`` /
       ``callsite_boundary`` the parent censused, and the captured
-      ``call_state`` transported to the row's raw ``target_addr``;
+      ``call_state`` transported to the destination decoded from the row's bytes;
     - the enclosing surface: ``enclosing_artifact`` /
-      ``enclosing_boundary`` rooted *exactly* at ``callsite.target_addr``,
+      ``enclosing_boundary`` rooted *exactly* at that encoded destination,
       whose closed CFG and instruction census must contain the enclosed
       callee head and every callee block;
     - the enclosed anchor: ``callee_artifact`` / ``callee_boundary`` — the
@@ -2605,16 +3798,14 @@ class Real16EnclosedEntryLink8616:
             is not ExactFunctionRangeBoundary8616
             or enclosing_boundary.project is not parent.project
             or enclosing_boundary.addr != enclosing_artifact.function_addr
-            or callsite.target_addr != enclosing_boundary.addr
         ):
             return False
         if not _enclosed_surface_bound_8616(
             enclosing_boundary, self.callee_artifact, self.callee_boundary
         ):
             return False
-        if not any(
-            row is callsite
-            for row in self.callsite_index.for_target(enclosing_boundary.addr)
+        if not _bound_callsite_entry_8616(
+            parent, self.callsite_index, callsite, enclosing_boundary.addr,
         ):
             return False
         if not _chain_edge_bound_8616(
@@ -2660,6 +3851,28 @@ def _enclosed_parent_bound_8616(
     return (
         callsite.callsite_addr == parent.callsite_addr
         and callsite.caller_start == parent.coverage.artifact.function_addr
+    )
+
+
+
+def _bound_callsite_entry_8616(
+    parent: Real16InvocationDomain8616,
+    index: DecodedDirectCallsiteIndex8616,
+    callsite: DecodedDirectCallsite8616,
+    entry: int,
+) -> bool:
+    """Bind lookup membership and execution target to the parent's native CALL.
+
+    A normalized lookup row cannot certify entry after an unexecuted prefix.
+    A counterfeit index cannot replace bytes from the parent's native census.
+    The caller separately replays the parent against its source-bound boot.
+    """
+    if parent.coverage is None:
+        return False
+    encoded = callsite.bound_near_coordinates(parent.coverage.boundary)
+    return (
+        encoded is not None and encoded[1] == entry
+        and any(row is callsite for row in index.for_target(callsite.target_addr))
     )
 
 
@@ -2863,13 +4076,10 @@ def _chain_link_identity_8616(
         or chain.callee_boundary is not boundary
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    # Index membership under the callee head's normalized identity binds
-    # the raw decoded target to the canonical callee entry the retained
-    # caller-entry identities prove — a row forged into the index or one
-    # targeting a different normalized callee cannot satisfy `is`.
-    if not any(
-        row is callsite
-        for row in chain.callsite_index.for_target(artifact.function_addr)
+    # Lookup membership alone cannot prove the executed destination. Bind
+    # the retained encoding to the parent census and require exact entry.
+    if not _bound_callsite_entry_8616(
+        parent, chain.callsite_index, callsite, artifact.function_addr,
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     if not _chain_edge_bound_8616(
@@ -2885,7 +4095,11 @@ def _chain_link_seed_8616(
     boundary: ExactFunctionRangeBoundary8616,
     chain: Real16CallChainLink8616,
     chain_depth: int,
-) -> dict[str, int] | Real16InvocationFailure8616:
+) -> (
+    tuple[dict[str, int], PathMemory8616]
+    | Real16InvocationFailure8616
+    | _NestedRefusal8616
+):
     """Validate one retained chain edge and return the transported seed.
 
     Every leg of the edge is independently replayed: the parent premise
@@ -2920,10 +4134,14 @@ def _chain_link_seed_8616(
         parent.call_preservations,
         chain=parent.chain,
         entry_call_preservations=parent.entry_call_preservations,
+        declared_services=parent.declared_services,
         chain_depth=chain_depth + 1,
     )
     if derived.failure is not None or derived.domain is None:
-        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+        return _NestedRefusal8616(
+            Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN,
+            derived.refusal_site,
+        )
     replayed = derived.domain
     if not _replayed_domain_equal_8616(derived, parent):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
@@ -2937,7 +4155,15 @@ def _chain_link_seed_8616(
         # parent premise proved; anything else means the path state
         # diverged from the premise's own claim.
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    return captured
+    if replayed.callsite_memory is None:
+        # The replayed census reached the callsite without a captured
+        # memory overlay — the transported seed cannot pretend initial
+        # bytes.
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    # Memory transports from the *freshly replayed* capture, never a
+    # retained field: the replayed equality above binds it to the same
+    # callsite row the registers were captured at.
+    return captured, restore_path_memory_8616(replayed.callsite_memory)
 
 
 def _chain_link_depth_exceeded_8616(chain_depth: int) -> bool:
@@ -2954,8 +4180,8 @@ def _enclosed_link_identity_8616(
     """Bind the retained enclosed link's identities before any replay.
 
     The census surface is the *enclosing* pair: it must be the identical
-    objects the link retains, rooted exactly at the decoded row's raw
-    ``target_addr``, and the enclosed callee pair must sit strictly inside
+    objects the link retains, rooted exactly at the destination decoded from
+    the row's native bytes, and the enclosed callee pair must sit strictly inside
     that closed boundary. Every other leg — parent premise, typed index,
     exact near row, bound-edge proof — matches the chained rule. Any
     divergence refuses ``enclosed_link_unproven``.
@@ -2990,19 +4216,16 @@ def _enclosed_link_identity_8616(
         link.enclosing_artifact is not artifact
         or link.enclosing_boundary is not boundary
         or boundary.addr != artifact.function_addr
-        or callsite.target_addr != boundary.addr
     ):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     if not _enclosed_surface_bound_8616(
         boundary, link.callee_artifact, link.callee_boundary
     ):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
-    # Index membership under the enclosing head's normalized identity
-    # binds the raw decoded target the same way the chained callee-head
-    # membership does — a forged row cannot satisfy `is`.
-    if not any(
-        row is callsite
-        for row in link.callsite_index.for_target(boundary.addr)
+    # Bind the indexed row to native bytes before transporting the prefix;
+    # normalized lookup identities cannot replace its execution destination.
+    if not _bound_callsite_entry_8616(
+        parent, link.callsite_index, callsite, boundary.addr,
     ):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     if not _chain_edge_bound_8616(
@@ -3018,7 +4241,11 @@ def _enclosed_link_seed_8616(
     boundary: ExactFunctionRangeBoundary8616,
     link: Real16EnclosedEntryLink8616,
     chain_depth: int,
-) -> dict[str, int] | Real16InvocationFailure8616:
+) -> (
+    tuple[dict[str, int], PathMemory8616]
+    | Real16InvocationFailure8616
+    | _NestedRefusal8616
+):
     """Validate one retained enclosed edge and return the transported seed.
 
     The replay contract is the chained one verbatim — the parent premise
@@ -3050,10 +4277,14 @@ def _enclosed_link_seed_8616(
         parent.call_preservations,
         chain=parent.chain,
         entry_call_preservations=parent.entry_call_preservations,
+        declared_services=parent.declared_services,
         chain_depth=chain_depth + 1,
     )
     if derived.failure is not None or derived.domain is None:
-        return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
+        return _NestedRefusal8616(
+            Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN,
+            derived.refusal_site,
+        )
     replayed = derived.domain
     if not _replayed_domain_equal_8616(derived, parent):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
@@ -3067,7 +4298,9 @@ def _enclosed_link_seed_8616(
         # parent premise proved; anything else means the path state
         # diverged from the premise's own claim.
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
-    return captured
+    if replayed.callsite_memory is None:
+        return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
+    return captured, restore_path_memory_8616(replayed.callsite_memory)
 
 
 def _replayed_domain_equal_8616(
@@ -3091,6 +4324,8 @@ def _replayed_domain_equal_8616(
         and replayed.checked_store_count == domain.checked_store_count
         and replayed.assumptions == domain.assumptions
         and replayed.callsite_call_state == tuple(domain.callsite_call_state)
+        and replayed.callsite_memory == domain.callsite_memory
+        and replayed.service_consumptions == tuple(domain.service_consumptions)
         and derived.raw_fact_count == domain.raw_fact_count
         and derived.normalized_fact_count == domain.normalized_fact_count
         and derived.classified_fact_count == domain.classified_fact_count
@@ -3192,7 +4427,7 @@ def _invocation_entry_seed_8616(
 ) -> (
     tuple[
         int,
-        dict[str, int],
+        _PathState8616,
         int,
         int,
         int,
@@ -3200,13 +4435,17 @@ def _invocation_entry_seed_8616(
         tuple[Real16InvocationAssumption8616, ...],
     ]
     | Real16InvocationFailure8616
+    | _NestedRefusal8616
 ):
     """Resolve the census selector/seed/entry coordinate for this domain.
 
     A ``None`` chain keeps the boot-entry rule: the source-authenticated
     MZ entry must equal the censused function head, and the seed is the
-    initialized invocation state. A retained chain instead replays the
-    complete edge and seeds the transported call-row state; the chain
+    initialized invocation state over initial memory. A retained chain
+    instead replays the complete edge and seeds the transported call-row
+    register state *and the replayed callsite memory overlay* — the
+    callee census consumes the identical bytes the parent's callsite row
+    was proven under, never a silently reset initial image; the chain
     surface head — the callee head, or the enclosing head for an
     ``ENCLOSED_ENTRY`` link — must sit inside the transported selector's
     addressable band.
@@ -3216,12 +4455,14 @@ def _invocation_entry_seed_8616(
             return Real16InvocationFailure8616.ENTRY_NOT_FUNCTION_HEAD
         return (
             evidence.entry_segment,
-            _invocation_seed_8616(evidence),
+            _PathState8616(
+                _invocation_seed_8616(evidence), path_memory_initial_8616()
+            ),
             evidence.entry_segment,
             evidence.entry_offset,
             evidence.stack_segment,
             evidence.stack_offset,
-            _BOOT_ENTRY_ASSUMPTIONS_8616,
+            evidence.entry_assumptions,
         )
     if boundary.addr != artifact.function_addr:
         return Real16InvocationFailure8616.ENTRY_NOT_FUNCTION_HEAD
@@ -3229,7 +4470,7 @@ def _invocation_entry_seed_8616(
         seed = _chain_link_seed_8616(
             project, artifact, boundary, chain, chain_depth
         )
-        if isinstance(seed, Real16InvocationFailure8616):
+        if isinstance(seed, _NestedRefusal8616 | Real16InvocationFailure8616):
             return seed
         assumption = Real16InvocationAssumption8616.CHAINED_CALL_ENTRY
         link_failure = Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
@@ -3237,24 +4478,38 @@ def _invocation_entry_seed_8616(
         seed = _enclosed_link_seed_8616(
             project, artifact, boundary, chain, chain_depth
         )
-        if isinstance(seed, Real16InvocationFailure8616):
+        if isinstance(seed, _NestedRefusal8616 | Real16InvocationFailure8616):
             return seed
         assumption = Real16InvocationAssumption8616.ENCLOSED_ENTRY
         link_failure = Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     else:
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    selector = seed["cs"]
+    seed_registers, seed_memory = seed
+    selector = seed_registers["cs"]
     entry_offset = artifact.function_addr - (selector << _SEGMENT_SHIFT_8616)
-    if not 0 <= entry_offset <= _WORD_LIMIT_8616 or "ss" not in seed:
+    if not 0 <= entry_offset <= _WORD_LIMIT_8616 or "ss" not in seed_registers:
         return link_failure
     return (
         selector,
-        seed,
+        _PathState8616(seed_registers, seed_memory),
         selector,
         entry_offset,
-        seed["ss"],
-        seed["sp"],
+        seed_registers["ss"],
+        seed_registers["sp"],
         (*chain.parent.assumptions, assumption),
+    )
+
+
+def _service_assumption_8616(
+    assumptions: tuple[Real16InvocationAssumption8616, ...],
+    consumptions: tuple[DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616, ...],
+) -> tuple[Real16InvocationAssumption8616, ...]:
+    """Mark the consumed declared-service evidence on the proven premise."""
+    if not consumptions:
+        return assumptions
+    return (
+        *assumptions,
+        Real16InvocationAssumption8616.DECLARED_INTERRUPT_SERVICE,
     )
 
 
@@ -3268,6 +4523,7 @@ def _derive_invocation_domain_8616(
     *,
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None = None,
     entry_call_preservations: tuple[object, ...] = (),
+    declared_services: tuple[DeclaredInterruptService8616, ...] = (),
     chain_depth: int = 0,
 ) -> _Derivation8616:
     """Keep all nested domain derivations inside one shared replay budget."""
@@ -3279,8 +4535,26 @@ def _derive_invocation_domain_8616(
         return _derive_invocation_domain_body_8616(
             project, coverage, callsite_addr, boot, boot_recompute, call_preservations,
             chain=chain, entry_call_preservations=entry_call_preservations,
+            declared_services=declared_services,
             chain_depth=chain_depth,
         )
+
+
+def _seeded_refusal_derivation_8616(
+    seeded: Real16InvocationFailure8616 | _NestedRefusal8616,
+) -> _Derivation8616:
+    """Project a refused entry-seed union into a typed derivation.
+
+    A link-seed refusal may carry the nested replay's real census site;
+    surface it rather than collapsing to a bare enum. A plain
+    ``Real16InvocationFailure8616`` is a structural refusal with no row
+    site. Callers must pass only the refusal members of the seed union.
+    """
+    if isinstance(seeded, _NestedRefusal8616):
+        return _early_derivation_8616(
+            seeded.failure, refusal_site=seeded.refusal_site
+        )
+    return _early_derivation_8616(seeded)
 
 
 def _derive_invocation_domain_body_8616(
@@ -3293,6 +4567,7 @@ def _derive_invocation_domain_body_8616(
     *,
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None = None,
     entry_call_preservations: tuple[object, ...] = (),
+    declared_services: tuple[DeclaredInterruptService8616, ...] = (),
     chain_depth: int = 0,
 ) -> _Derivation8616:
     """Derive the exact CS selector domain, or a typed refusal + counts.
@@ -3314,7 +4589,7 @@ def _derive_invocation_domain_body_8616(
         return _early_derivation_8616(Real16InvocationFailure8616.PROJECT_MISMATCH)
     if callsite_addr not in boundary.reachable_instruction_addrs:
         return _early_derivation_8616(Real16InvocationFailure8616.CALLSITE_UNREACHABLE)
-    evidence = _boot_evidence_8616(boot)
+    evidence = _invocation_boot_evidence_8616(boot)
     if isinstance(evidence, Real16InvocationFailure8616):
         return _early_derivation_8616(evidence)
     failure = _recompute_boot_8616(boot, boot_recompute)
@@ -3328,8 +4603,8 @@ def _derive_invocation_domain_body_8616(
     seeded = _invocation_entry_seed_8616(
         project, artifact, boundary, evidence, chain, chain_depth
     )
-    if isinstance(seeded, Real16InvocationFailure8616):
-        return _early_derivation_8616(seeded)
+    if isinstance(seeded, _NestedRefusal8616 | Real16InvocationFailure8616):
+        return _seeded_refusal_derivation_8616(seeded)
     (
         selector,
         seed,
@@ -3346,14 +4621,23 @@ def _derive_invocation_domain_body_8616(
     ctx = _PathCensusContext8616(
         project=project,
         selector=selector,
+        initial_memory=invocation_initial_memory_8616(
+            evidence.environment, evidence.environment_digest, evidence.image.chunks
+        ),
         image=evidence.image,
         boot=boot,
         chain=chain,
         call_preservations=call_preservations,
         entry_call_preservations=entry_call_preservations,
+        declared_services=declared_services,
+        environment_digest=evidence.environment_digest,
+        environment=evidence.environment,
+        arena=evidence.arena,
+        service_consumptions=[],
         stop_block_addr=call_block.addr,
         callsite_addr=callsite_addr,
         callsite_call_state=None,
+        callsite_memory=None,
         manifest=[],
         machine_bytes={},
         native_blocks={},
@@ -3367,6 +4651,7 @@ def _derive_invocation_domain_body_8616(
         work_units=0,
         work_limit=_CENSUS_WORK_LIMIT_8616,
         deadline=_census_deadline_8616(),
+        first_failure_site=None,
     )
     failure = _census_invocation_8616(
         ctx, artifact, boundary, dangerous, call_block, callsite_addr, seed
@@ -3387,7 +4672,20 @@ def _derive_invocation_domain_body_8616(
             classified_fact_count=classified_fact_count,
             materialized_count=materialized_count,
             failure_count=failure_count,
+            refusal_site=ctx.first_failure_site,
+            infeasible_edges=(
+                ()
+                if ctx.edge_feasibility is None
+                else ctx.edge_feasibility.infeasible_edges
+            ),
         )
+    consumptions = tuple(ctx.service_consumptions)
+    assumptions = _service_assumption_8616(assumptions, consumptions)
+    path_blocks = (
+        dangerous
+        if ctx.edge_feasibility is None
+        else ctx.edge_feasibility.live_blocks
+    )
     return _Derivation8616(
         domain=_DerivedDomain8616(
             minimum_selector=selector,
@@ -3398,7 +4696,7 @@ def _derive_invocation_domain_body_8616(
             stack_offset=stack_offset,
             load_segment=evidence.load_segment,
             source_sha256=evidence.image.file_sha256,
-            path_block_addrs=tuple(sorted(dangerous)),
+            path_block_addrs=tuple(sorted(path_blocks)),
             fetched_range_count=len(ctx.manifest),
             checked_store_count=ctx.checked_stores,
             assumptions=assumptions,
@@ -3409,6 +4707,17 @@ def _derive_invocation_domain_body_8616(
                 if ctx.callsite_call_state is None
                 else tuple(sorted(ctx.callsite_call_state.items()))
             ),
+            callsite_memory=(
+                None
+                if ctx.callsite_memory is None
+                else snapshot_path_memory_8616(ctx.callsite_memory)
+            ),
+            service_consumptions=consumptions,
+            infeasible_edges=(
+                ()
+                if ctx.edge_feasibility is None
+                else ctx.edge_feasibility.infeasible_edges
+            ),
         ),
         failure=None,
         raw_fact_count=raw_fact_count,
@@ -3417,6 +4726,42 @@ def _derive_invocation_domain_body_8616(
         materialized_count=materialized_count,
         failure_count=failure_count,
     )
+
+
+def _service_consumption_dict_8616(
+    consumption: DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616,
+) -> dict[str, object]:
+    """Serialize one consumed declared-service record with its kind tag."""
+    if isinstance(consumption, DeclaredServiceConsumption8616):
+        return {
+            "kind": "version",
+            "callsite_addr": consumption.callsite_addr,
+            "vector": consumption.vector,
+            "function": consumption.function,
+            "selector": consumption.selector,
+            "answer_ax": consumption.answer_ax,
+            "answer_bx": consumption.answer_bx,
+            "answer_cx": consumption.answer_cx,
+            "frame_linear": consumption.frame_linear,
+            "frame_bytes": consumption.frame_bytes,
+            "relation_sha256": consumption.relation_sha256,
+        }
+    return {
+        "kind": "resize",
+        "callsite_addr": consumption.callsite_addr,
+        "vector": consumption.vector,
+        "function": consumption.function,
+        "request_ax": consumption.request_ax,
+        "answer_ax": consumption.answer_ax,
+        "answer_bx": consumption.answer_bx,
+        "carry": consumption.carry,
+        "metadata_linear": consumption.metadata_linear,
+        "metadata_before_hex": consumption.metadata_before.hex(),
+        "metadata_after_hex": consumption.metadata_after.hex(),
+        "frame_linear": consumption.frame_linear,
+        "frame_bytes": consumption.frame_bytes,
+        "relation_sha256": consumption.relation_sha256,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -3463,6 +4808,22 @@ class Real16InvocationDomain8616:
         default=(), compare=False
     )
     callsite_call_state: tuple[tuple[str, int], ...] = ()
+    #: Frozen callsite-row memory overlay captured beside
+    #: ``callsite_call_state``; replayed-equality transport evidence for
+    #: chained and enclosed seeds.
+    callsite_memory: PathMemorySnapshot8616 | None = None
+    declared_services: tuple[DeclaredInterruptService8616, ...] = ()
+    service_consumptions: tuple[
+        DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616, ...
+    ] = ()
+    #: The exact classified census row that first failed, when the census
+    #: reached one; ``None`` on success and on structural/budget refusals
+    #: that never classified a row.
+    refusal_site: Real16InvocationRefusalSite8616 | None = None
+    #: ``(block_addr, successor_addr)`` edges proven untraversable under
+    #: this exact invocation by the converged known-bits feasibility pass.
+    #: Invocation-local evidence only — never a universal dead-code claim.
+    infeasible_edges: tuple[tuple[int, int], ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -3515,6 +4876,7 @@ class Real16InvocationDomain8616:
             self.call_preservations,
             chain=self.chain,
             entry_call_preservations=self.entry_call_preservations,
+            declared_services=self.declared_services,
         )
         if derived.failure is not None or derived.domain is None:
             return False
@@ -3534,6 +4896,15 @@ class Real16InvocationDomain8616:
         return {
             "verdict": "proven" if self.complete else "unknown_refuse",
             "failure": self.failure.value if self.failure else None,
+            "refusal_site": (
+                None
+                if self.refusal_site is None
+                else {
+                    "function_addr": self.refusal_site.function_addr,
+                    "block_addr": self.refusal_site.block_addr,
+                    "instruction_addr": self.refusal_site.instruction_addr,
+                }
+            ),
             "kind": self.kind.value,
             "callsite_addr": self.callsite_addr,
             "entry_segment": self.entry_segment,
@@ -3545,10 +4916,24 @@ class Real16InvocationDomain8616:
             "minimum_selector": self.minimum_selector,
             "maximum_selector": self.maximum_selector,
             "path_block_addrs": list(self.path_block_addrs),
+            "infeasible_edges": [list(edge) for edge in self.infeasible_edges],
             "fetched_range_count": self.fetched_range_count,
             "checked_store_count": self.checked_store_count,
             "chained": self.chain is not None,
             "callsite_call_state": dict(self.callsite_call_state),
+            "callsite_memory": (
+                None
+                if self.callsite_memory is None
+                else {
+                    "known": [list(pair) for pair in self.callsite_memory.known],
+                    "unknown": list(self.callsite_memory.unknown),
+                    "tainted": self.callsite_memory.tainted,
+                }
+            ),
+            "service_consumptions": [
+                _service_consumption_dict_8616(consumption)
+                for consumption in self.service_consumptions
+            ],
             "assumptions": [assumption.value for assumption in self.assumptions],
             "raw_fact_count": self.raw_fact_count,
             "normalized_fact_count": self.normalized_fact_count,
@@ -3637,6 +5022,7 @@ def _domain_from_derivation_8616(
     boot_recompute: Callable[[object], object] | None,
     preservations: tuple[SegmentCallPreservationResult8616, ...],
     entry_preservations: tuple[object, ...],
+    declared_services: tuple[DeclaredInterruptService8616, ...],
     kind: Real16InvocationKind8616,
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None,
     derived: _Derivation8616,
@@ -3675,6 +5061,9 @@ def _domain_from_derivation_8616(
             project=project,
             chain=chain,
             entry_call_preservations=entry_preservations,
+            declared_services=declared_services,
+            refusal_site=derived.refusal_site,
+            infeasible_edges=derived.infeasible_edges,
         )
     domain = derived.domain
     return Real16InvocationDomain8616(
@@ -3706,6 +5095,10 @@ def _domain_from_derivation_8616(
         chain=chain,
         entry_call_preservations=entry_preservations,
         callsite_call_state=domain.callsite_call_state,
+        callsite_memory=domain.callsite_memory,
+        declared_services=declared_services,
+        service_consumptions=domain.service_consumptions,
+        infeasible_edges=domain.infeasible_edges,
     )
 
 
@@ -3718,6 +5111,7 @@ def prove_real16_invocation_domain_8616(
     boot_recompute: Callable[[object], object] | None,
     call_preservations: Sequence[SegmentCallPreservationResult8616] = (),
     entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
     kind: Real16InvocationKind8616 = Real16InvocationKind8616.BOOT_ENTRY_PATH,
 ) -> Real16InvocationDomain8616:
     """Prove the exact invocation CS domain for one direct near CALL site.
@@ -3733,10 +5127,15 @@ def prove_real16_invocation_domain_8616(
     ``entry_call_preservations`` is the in-flight entry-domain pool
     collected for the identical censused artifact — a boot-entry prefix
     may itself contain interior near calls whose bound evidence is the
-    only sound way across.
+    only sound way across. ``declared_services`` carries the caller's
+    explicitly declared interrupt-service relations: each must bind an
+    exact callsite, vector, proven AH/AL selectors and the identical
+    declared environment before the census consumes it — conditional
+    declared evidence, never a universal DOS model.
     """
     preservations = tuple(call_preservations)
     entry_preservations = tuple(entry_call_preservations)
+    services = tuple(declared_services)
     derived = _derive_invocation_domain_8616(
         project,
         coverage,
@@ -3745,6 +5144,7 @@ def prove_real16_invocation_domain_8616(
         boot_recompute,
         preservations,
         entry_call_preservations=entry_preservations,
+        declared_services=services,
     )
     return _domain_from_derivation_8616(
         project,
@@ -3754,6 +5154,7 @@ def prove_real16_invocation_domain_8616(
         boot_recompute,
         preservations,
         entry_preservations,
+        services,
         kind,
         None,
         derived,
@@ -3770,6 +5171,7 @@ def prove_real16_chained_invocation_domain_8616(
     chain: Real16CallChainLink8616 | None,
     call_preservations: Sequence[SegmentCallPreservationResult8616] = (),
     entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
 ) -> Real16InvocationDomain8616:
     """Prove a callee-head CS domain transported across one bound edge.
 
@@ -3789,6 +5191,7 @@ def prove_real16_chained_invocation_domain_8616(
     """
     preservations = tuple(call_preservations)
     entry_preservations = tuple(entry_call_preservations)
+    services = tuple(declared_services)
     derived = _derive_invocation_domain_8616(
         project,
         coverage,
@@ -3798,6 +5201,7 @@ def prove_real16_chained_invocation_domain_8616(
         preservations,
         chain=chain,
         entry_call_preservations=entry_preservations,
+        declared_services=services,
     )
     return _domain_from_derivation_8616(
         project,
@@ -3807,6 +5211,7 @@ def prove_real16_chained_invocation_domain_8616(
         boot_recompute,
         preservations,
         entry_preservations,
+        services,
         Real16InvocationKind8616.CALL_CHAINED,
         chain,
         derived,
@@ -3823,6 +5228,7 @@ def prove_real16_enclosed_invocation_domain_8616(
     chain: Real16EnclosedEntryLink8616 | None,
     call_preservations: Sequence[SegmentCallPreservationResult8616] = (),
     entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
 ) -> Real16InvocationDomain8616:
     """Prove a callee CS domain transported into an enclosing entry.
 
@@ -3844,6 +5250,7 @@ def prove_real16_enclosed_invocation_domain_8616(
     """
     preservations = tuple(call_preservations)
     entry_preservations = tuple(entry_call_preservations)
+    services = tuple(declared_services)
     derived = _derive_invocation_domain_8616(
         project,
         coverage,
@@ -3853,6 +5260,7 @@ def prove_real16_enclosed_invocation_domain_8616(
         preservations,
         chain=chain,
         entry_call_preservations=entry_preservations,
+        declared_services=services,
     )
     return _domain_from_derivation_8616(
         project,
@@ -3862,6 +5270,7 @@ def prove_real16_enclosed_invocation_domain_8616(
         boot_recompute,
         preservations,
         entry_preservations,
+        services,
         Real16InvocationKind8616.ENCLOSED_ENTRY,
         chain,
         derived,

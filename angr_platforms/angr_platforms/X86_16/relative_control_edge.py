@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
+from typing import NoReturn
 
 from .control_coordinates import (
     ControlAddressDomain,
@@ -343,3 +344,50 @@ def decode_relative_edge(
 
 
 type RelativeEdgeDecode = DecodedRelativeEdge | RelativeEdgeRefusal
+
+
+class RelativeDestinationVerdict(StrEnum):
+    """Whether exact relative bytes select one full loaded target for all fetch CS."""
+
+    PROVEN = "proven"
+    EMPTY_FETCH_DOMAIN = "empty_fetch_domain"
+    SELECTOR_DEPENDENT = "selector_dependent"
+
+
+@dataclass(frozen=True, slots=True)
+class RelativeDestination:
+    """Constant-time selector-interval evidence, without a native IR binding claim."""
+
+    verdict: RelativeDestinationVerdict
+    target: int | None
+    selector_min: int
+    selector_max: int
+
+
+def _concrete_projection_only(value: object, width: object) -> NoReturn:
+    """Reject accidental symbolic input at the concrete interval boundary."""
+    raise TypeError(f"expected concrete coordinate, received {value!r}:{width!r}")
+
+
+def invariant_relative_destination(edge: DecodedRelativeEdge) -> RelativeDestination:
+    """Project a decoded edge under every CS capable of fetching its head.
+
+    WORD offsets are modular *inside* CS, never in loader coordinates.
+    Fetch selectors form an interval whose base span is less than 65536.
+    Across that interval the WORD destination is a monotone step function:
+    base + ((next + displacement - base) mod 65536). Equal endpoint values
+    therefore prove invariance without enumerating selectors. DWORD
+    composition cancels the base modulo 2**32, so its endpoints also agree.
+    This proves byte coordinates only; consumers must separately bind IR.
+    """
+    minimum = max(0, (edge.head - 0xFFFF + 15) // 16)
+    maximum = min(0xFFFF, edge.head // 16)
+    if minimum > maximum:
+        return RelativeDestination(RelativeDestinationVerdict.EMPTY_FETCH_DOMAIN, None, minimum, maximum)
+    first = edge.taken_control(minimum, _concrete_projection_only)
+    last = edge.taken_control(maximum, _concrete_projection_only)
+    if not isinstance(first, int) or not isinstance(last, int):
+        raise TypeError("concrete selector projection produced a symbolic destination")
+    if first != last:
+        return RelativeDestination(RelativeDestinationVerdict.SELECTOR_DEPENDENT, None, minimum, maximum)
+    return RelativeDestination(RelativeDestinationVerdict.PROVEN, first, minimum, maximum)

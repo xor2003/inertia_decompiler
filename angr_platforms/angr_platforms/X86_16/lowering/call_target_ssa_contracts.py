@@ -7,6 +7,8 @@ Responsibility: owns the verdict/stage/result contract, the bound-producer
 record both routes return, and the five-stage evidence-accounting
 convention every binder refusal follows, so both lowerer gates consume one
 typed proof surface.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

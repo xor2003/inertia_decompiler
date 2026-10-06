@@ -19,7 +19,7 @@ import os
 import typing
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
@@ -72,6 +72,44 @@ def _typed_ir_address_spaces_8616(codegen: object) -> tuple[tuple[str, ...], tup
     return tuple(sorted(str(key) for key in address_counts)), tuple(sorted(str(key) for key in stable_counts))
 
 
+class _SegmentedMemoryCodegenSurface8616(Protocol):
+    """Owned optional Inertia evidence attached to the dynamic angr codegen boundary."""
+
+    _inertia_segment_assignments: object
+
+
+class _SegmentedMemoryProjectSurface8616(Protocol):
+    """Owned optional Inertia settings attached to the dynamic angr project boundary."""
+
+    _inertia_c_target: object
+    _inertia_decompiler_stage: object
+
+
+def _segment_assignments_or_empty_8616(codegen: object) -> object:
+    """Return attached segment-assignment evidence or ``()`` when the codegen attachment is absent."""
+    try:
+        assignments = cast(_SegmentedMemoryCodegenSurface8616, codegen)._inertia_segment_assignments
+    except AttributeError:
+        return ()
+    return assignments or ()
+
+
+def _project_c_target_value_8616(project: object) -> object:
+    """Return the attached generated-C target policy or the ``portable-flat`` fallback when absent."""
+    try:
+        return cast(_SegmentedMemoryProjectSurface8616, project)._inertia_c_target
+    except AttributeError:
+        return "portable-flat"
+
+
+def _project_decompiler_stage_value_8616(project: object) -> object:
+    """Return the attached decompiler-stage marker or ``""`` when the project attachment is absent."""
+    try:
+        return cast(_SegmentedMemoryProjectSurface8616, project)._inertia_decompiler_stage
+    except AttributeError:
+        return ""
+
+
 class SegmentRegister(Enum):
     """x86-16 segment registers."""
 
@@ -94,6 +132,7 @@ class SegmentAssignment:
     confidence: float  # 0.0-1.0
 
     def __repr__(self) -> str:
+        """Render the segment assignment and its recorded confidence."""
         val_str = f"0x{self.value:04x}" if self.value is not None else "unknown"
         return f"{self.segment_reg.name}={val_str} ({self.confidence:.1%})"
 
@@ -120,6 +159,7 @@ class SegmentAssociation:
         self.stability = min(1.0, 0.5 + (self.evidence_count * 0.05))
 
     def __repr__(self) -> str:
+        """Render the segment association and its evidence summary."""
         return (
             f"{self.segment_reg.name}→{self.associated_space}"
             f" [{self.classification}]"
@@ -138,6 +178,7 @@ class SegmentedPointer:
     confidence: float  # 0.0-1.0 based on evidence
 
     def __repr__(self) -> str:
+        """Render the far-pointer expression using its known or symbolic segment."""
         seg_str = f"0x{self.known_base:04x}" if self.known_base else self.segment_reg.name
         return f"MK_FP({seg_str}, {self.offset_expr})"
 
@@ -153,6 +194,7 @@ class FarPointerRecovery:
     functions: set[str] = field(default_factory=set)
 
     def __repr__(self) -> str:
+        """Render the recovered far pointer and its function-use count."""
         return f"FarPtr({self.name}: {self.segment_part}, {len(self.functions)} functions)"
 
 
@@ -433,7 +475,7 @@ def _can_lower_ss_address_to_stack_slot_8616(codegen: object, analyzer: SegmentA
     def _impl() -> bool:
         """Read optional segment assignments at the dynamic angr codegen boundary."""
         assignments = list(
-            cast(tuple[SegmentAssignment, ...], getattr(codegen, "_inertia_segment_assignments", ()) or ())
+            cast(tuple[SegmentAssignment, ...], _segment_assignments_or_empty_8616(codegen))
         )
         if not assignments or analyzer is None:
             typed_spaces, stable_spaces = _typed_ir_address_spaces_8616(codegen)
@@ -543,6 +585,7 @@ def _apply_ss_stack_slot_recovery_8616(codegen: object, analyzer: SegmentAssocia
         return node
 
     codegen_dynamic = cast(Any, codegen)
+    # Dynamic codegen boundary: angr CFunction.statements is optional on partially built codegen.
     root = getattr(codegen_dynamic.cfunc, "statements", None)
     if root is not None:
         new_root = transform(root)
@@ -567,7 +610,7 @@ def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
     }
 
     assignments = list(
-        cast(tuple[SegmentAssignment, ...], getattr(codegen, "_inertia_segment_assignments", ()) or ())
+        cast(tuple[SegmentAssignment, ...], _segment_assignments_or_empty_8616(codegen))
     )
     analyzer = SegmentAssociationAnalyzer()
     if assignments:
@@ -595,11 +638,10 @@ def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
         )
 
     changed = False
-    target = str(
-        getattr(getattr(codegen, "project", None), "_inertia_c_target", "portable-flat") or "portable-flat"
-    )
+    # Dynamic codegen boundary: angr codegen exposes ``project`` only when fully initialized.
     project = getattr(codegen, "project", None)
-    current_stage = str(getattr(project, "_inertia_decompiler_stage", "") or "")
+    target = str(_project_c_target_value_8616(project) or "portable-flat")
+    current_stage = str(_project_decompiler_stage_value_8616(project) or "")
     if current_stage.startswith("structuring:"):
         # Structuring must remain validation-stable. Defer all segmented-memory
         # AST rewrites to post-structuring layers.
@@ -636,6 +678,7 @@ def apply_x86_16_segmented_memory_reasoning(codegen: object) -> bool:
         Phase 3 establishes conservative association reasoning before
         later phases attempt pointer lowering or object recovery.
     """
+    # Dynamic codegen boundary: angr codegen exposes ``cfunc`` only after structuring produces a C function.
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -668,7 +711,7 @@ def _apply_segmented_memory_analysis_only_8616(codegen: object) -> bool:
         # Dynamic codegen boundary: pass status is optional metadata on angr codegen.
         typing.cast(typing.Any, codegen)._inertia_segmented_memory_applied = True
         assignments = list(
-            cast(tuple[SegmentAssignment, ...], getattr(codegen, "_inertia_segment_assignments", ()) or ())
+            cast(tuple[SegmentAssignment, ...], _segment_assignments_or_empty_8616(codegen))
         )
         analyzer = SegmentAssociationAnalyzer()
         if assignments:

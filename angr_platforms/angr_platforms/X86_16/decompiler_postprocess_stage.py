@@ -5956,6 +5956,7 @@ class _VoidTailCallGuardRun8616:
                 index = self._tail_call_arm(block, statements, index, stmt, cond)
 
     def run(self, root: StructuredAstValue) -> bool:
+        """Scan each statement block once for tail-call guard repairs; return changed."""
         seen_blocks: set[int] = set()
         for block in [root, *[node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements)]]:
             block_id = id(block)
@@ -7630,6 +7631,7 @@ class _StackBytePairScan8616:
         return _jcc._stack_slot_expr_8616(self.codegen, int(disp), 1)
 
     def scan(self, insns: StructuredAstValue) -> None:
+        """Classify each instruction's byte-store facts for the pair-return materializer."""
         for insn in insns:
             self._classify(insn)
 
@@ -12204,6 +12206,7 @@ class _CNodeMetadataRepair8616:
     seen: set[int] = field(default_factory=set)
 
     def run(self, root: StructuredAstValue) -> int:
+        """Walk the structured tree backfilling missing codegen metadata; return repairs."""
         self._walk(root)
         return self.repaired
 

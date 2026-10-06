@@ -21,6 +21,7 @@ from .logical_constant_word_receipt import (
     prove_logical_constant_word_write_8616,
 )
 from .logical_memory_value_trace import LogicalMemoryValueTrace8616, trace_logical_word_load_8616
+from .scalar_value_projection import scalar_active_unary_projection_8616
 from .ssa import SSABlock
 from .ssa_function import SSAFunctionArtifact
 
@@ -193,6 +194,21 @@ def _definition_site_8616(definition: scalar_defs.ScalarDefinition8616) -> Index
     )
 
 
+def _stored_projection_operand_8616(value: IRValue, sites: _ProofSites8616) -> IRValue:
+    """Follow one authenticated pending word extraction without losing capture identity."""
+    unary = value.active_unary
+    if unary is None:
+        return value
+    projection = scalar_active_unary_projection_8616(value)
+    _require_8616(
+        projection is not None and (projection.source_bits, projection.target_bits) == (16, 8),
+        _Failure.UNKNOWN_EXPRESSION,
+        sites,
+    )
+    _require_8616(unary.operand.active_unary is None, _Failure.UNKNOWN_EXPRESSION, sites)
+    return unary.operand
+
+
 def _trace_lane_8616(
     block: SSABlock,
     execution_slice: logical.IRMemoryExecutionSlice8616,
@@ -213,7 +229,11 @@ def _trace_lane_8616(
     sites: list[IndexedAddressDefinitionSite8616] = []
     seen: set[tuple[str, str | None, int, int, int | None]] = set()
     saw_extract, saw_shift = current.expr == ("Iop_16to8",), False
-    while current.space is not MemSpace.CONST:
+    while True:
+        saw_extract |= current.active_unary is not None
+        current = _stored_projection_operand_8616(current, tuple(sites))
+        if current.space is MemSpace.CONST:
+            break
         key = scalar_defs.scalar_definition_key_8616(current)
         _require_8616(key not in seen, _Failure.DEFINITION_CONFLICT, tuple(sites))
         seen.add(key)

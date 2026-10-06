@@ -6,6 +6,10 @@ every supplied predecessor path, consuming explicit Semantics CALL preservation.
 This bounded transport proof does not infer missing CFG edges, register effects,
 frame coordinates, aliases, pointer types, or a compiler ABI. The upstream
 function artifact remains responsible for its binary CFG census.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

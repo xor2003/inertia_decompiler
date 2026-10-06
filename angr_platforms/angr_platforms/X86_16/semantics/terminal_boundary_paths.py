@@ -4,6 +4,9 @@ Layer: Semantics.
 Responsibility: consume typed executable extents and successor edges without
 requiring a mutable angr graph. Instruction loading and effect interpretation
 remain with the existing callbacks and terminal-path proof.
+Owns instruction effects, flags, branch meaning, and expression interpretation.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

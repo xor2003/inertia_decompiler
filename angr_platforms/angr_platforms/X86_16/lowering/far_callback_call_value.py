@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: consume IR logical READ/WRITE and callee ABI proofs to classify
 one direct far callback argument by CFG predecessor. This owner does not infer
 a four-byte caller storage object or mutate a generated C call.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

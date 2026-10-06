@@ -4,6 +4,10 @@ Layer: IR.
 Responsibility: invert a typed INC/DEC result-zero predicate with exact width
 and producer binding. This is a comparison proof, not permission to remove the
 register update or its flags. CFG ownership still determines branch polarity.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

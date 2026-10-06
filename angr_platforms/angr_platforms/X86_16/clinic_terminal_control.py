@@ -41,7 +41,7 @@ __all__ = (
 # Typed report ledger stashed on the third-party Clinic instance so the
 # per-block transport census survives for diagnostics without owning angr
 # state. Tuple-append keeps earlier decisions immutable.
-CLINIC_TERMINAL_TRANSPORT_ATTR_8616 = "_inertia_terminal_jump_transports_8616"
+CLINIC_TERMINAL_TRANSPORT_ATTR_8616: str = "_inertia_terminal_jump_transports_8616"
 
 
 class ClinicTerminalControlRefusal8616(StrEnum):

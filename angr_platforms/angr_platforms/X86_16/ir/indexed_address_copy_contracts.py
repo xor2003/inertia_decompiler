@@ -22,6 +22,7 @@ from .indexed_address_contracts import (
 )
 from .logical_memory_value_trace import LogicalMemoryValueTrace8616
 from .scalar_definitions import scalar_definition_key_8616
+from .scalar_value_projection import scalar_active_unary_projection_8616
 
 
 class IndexedAddressCopyLane8616(StrEnum):
@@ -57,6 +58,22 @@ class IndexedAddressCopyFailureKind8616(StrEnum):
     LOGICAL_MEMORY_EVIDENCE_CONFLICT = "logical_memory_evidence_conflict"
 
 
+def indexed_copy_source_operand_8616(value: IRValue) -> IRValue | None:
+    """Return the exact source operand of an allowed copy-lane expression.
+
+    A pending word extraction has its own result view, not the captured source
+    identity. Authenticate its operation and widths before exposing the operand;
+    all other pending computations refuse rather than impersonate a definition.
+    """
+    unary = value.active_unary
+    if unary is None:
+        return value
+    projection = scalar_active_unary_projection_8616(value)
+    if projection is None or (projection.source_bits, projection.target_bits) != (16, 8):
+        return None
+    return unary.operand
+
+
 @dataclass(frozen=True, slots=True)
 class IndexedAddressCopyStep8616:
     """One exact backward SSA edge from a definition to its source."""
@@ -74,9 +91,16 @@ class IndexedAddressCopyStep8616:
     @property
     def complete(self) -> bool:
         """Return whether the operation proves its declared value relation."""
+        source_operand = indexed_copy_source_operand_8616(self.source_expression)
         identity_matches = (
-            scalar_definition_key_8616(self.source_expression)
+            source_operand is not None
+            and scalar_definition_key_8616(source_operand)
             == scalar_definition_key_8616(self.source_definition)
+        )
+        projection_widths_match = self.source_expression.active_unary is None or (
+            self.defined_value.size == self.source_expression.size
+            and source_operand is not None
+            and source_operand.size == self.source_definition.size
         )
         common = bool(
             self.block_addr >= 0
@@ -85,6 +109,7 @@ class IndexedAddressCopyStep8616:
             and self.defined_value.space not in {MemSpace.CONST, MemSpace.UNKNOWN}
             and self.source_definition.space not in {MemSpace.CONST, MemSpace.UNKNOWN}
             and identity_matches
+            and projection_widths_match
         )
         if self.kind is IndexedAddressCopyStepKind8616.MOVE:
             relation = (
@@ -98,7 +123,8 @@ class IndexedAddressCopyStep8616:
                 and self.constant is None
                 and self.defined_value.size == 1
                 and self.source_definition.size == 2
-                and self.source_expression.expr == ("Iop_16to8",)
+                and (self.source_expression.active_unary is not None
+                     or self.source_expression.expr == ("Iop_16to8",))
             )
         else:
             relation = (

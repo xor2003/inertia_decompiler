@@ -556,6 +556,12 @@ If the function naturally executes HLT, distinguish:
 
 Use trap address validation.
 
+Real16 final write snapshots contain only bytes read successfully from guest
+memory. An unreadable span carries its address, size and backend cause; it must
+not be filled with zeros or cause later fragments to acquire earlier addresses.
+Lost write-snapshot evidence prevents complete replay/program agreement and successful
+boundary capture, even when execution reached the requested return or boundary.
+
 ### 7.5 Call Handling
 
 Supported modes:
@@ -2077,11 +2083,16 @@ conditions can prune unreachable arms; a path cut at the unroll bound refuses
 with `loop_bound_incomplete`. Equality of completed prefixes cannot establish
 whole-function equivalence.
 
-The staged MSC8/BC5 `z3cmp32.py --mode auto` drivers use the same obligation
-accounting and retry bounded direct-call composition and finite CFG reblocking.
-Call composition uses actual callee effects and proves saved return targets;
-recursive or indirect target coverage remains refused. Matched closed loops
-use induction rather than successful bounded exploration as their oracle.
+The MSC8/BC5 `z3cmp32.py --mode auto` drivers use the same obligation
+accounting and retry bounded call composition and finite CFG reblocking.
+Call composition uses actual callee effects and proves saved return targets.
+Finite indirect calls require complete proved target coverage and validated
+mapped callee bodies; unknown targets, incomplete coverage and resource
+exhaustion remain refusals. Recursive dependencies are not discharged by
+ordinary call composition: the separate opt-in recursive-component reports
+in section 7.10 retain their declared premises and conditional status.
+Matched closed loops use induction rather than successful bounded exploration
+as their oracle.
 
 Flat32 call composition shares one absolute monotonic deadline across both
 images, block lifting, state substitution, callee return proofs and the final

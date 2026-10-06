@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import cast
 
+from .declared_external_call_evidence import (
+    declared_call_effect_consumption_from_record_8616,
+)
 from .ir.segment_contract import SegmentFactVerdict
 from .segment_function_summary import (
     SegmentControlTransferDistance8616,
@@ -49,6 +52,9 @@ def segment_program_function_evidence_8616(
         restored_registers=tuple(sorted(local.restored_registers)),
         control_transfers=tuple(sorted(summary.control_transfers, key=lambda fact: fact.instruction_addr)),
         summary=counts,
+        declared_call_consumptions=tuple(
+            sorted(summary.declared_call_consumptions, key=lambda fact: fact.callsite_addr)
+        ),
     )
 
 
@@ -124,6 +130,15 @@ def segment_program_function_evidence_from_record_8616(record: object) -> Segmen
     )
     if len(transfers) != len(raw_transfers):
         raise ValueError("segment program function evidence has a non-object transfer")
+    raw_consumptions = record.get("declared_call_consumptions")
+    if not isinstance(raw_consumptions, list):
+        raise ValueError("segment program function evidence has invalid declared consumptions")
+    consumptions = tuple(
+        declared_call_effect_consumption_from_record_8616(item)
+        for item in raw_consumptions
+    )
+    if len({fact.callsite_addr for fact in consumptions}) != len(consumptions):
+        raise ValueError("segment program function evidence has duplicate declared consumptions")
     counts = validated_segment_program_counts_8616(
         record.get("summary"),
         owner="transported segment function",
@@ -139,4 +154,7 @@ def segment_program_function_evidence_from_record_8616(record: object) -> Segmen
         restored_registers=_strings_8616(record.get("restored_registers"), field_name="restores"),
         control_transfers=tuple(sorted(transfers, key=lambda fact: fact.instruction_addr)),
         summary=counts,
+        declared_call_consumptions=tuple(
+            sorted(consumptions, key=lambda fact: fact.callsite_addr)
+        ),
     )

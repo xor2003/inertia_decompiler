@@ -95,7 +95,10 @@ from tools.dosunit.real16_program_video_state import (
 from tools.dosunit.real16_replay import (
     _classified,
     _coalesced_writes,
+    _ReadbackGap,
     _result_registers,
+    _snapshot_gap_detail,
+    _try_read_span,
     backend_available,
 )
 from tools.dosunit.real16_replay_model import PAGE_SIZE, LinearRange, SegOffset
@@ -105,6 +108,7 @@ from tools.dosunit.real16_video_state_boundary import (
     VIDEO_STATE_BYTES,
     video_state_buffer_refusal,
 )
+from tools.dosunit.unicorn_engine import make_guest
 
 if TYPE_CHECKING:
     import capstone
@@ -587,7 +591,7 @@ def _interrupt(guest: Uc, vector: int, state: _ProgramState) -> None:
 def _initialize(boot: ProgramBoot) -> Uc:
     """Load declared RAM/code and read-only, non-executable ROM without a frame."""
     environment = boot.environment
-    guest = Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_16)
+    guest = make_guest(unicorn.UC_ARCH_X86, unicorn.UC_MODE_16)
     layout = environment.memory_layout()
     for address in layout.pages:
         guest.mem_map(address, PAGE_SIZE)
@@ -641,6 +645,38 @@ def _identities(boot: ProgramBoot) -> tuple[str, str]:
     return boot.boot_sha256, environment_identity
 
 
+def _final_snapshot(
+    guest: Uc, state: _ProgramState, observations: tuple[ProgramObservation, ...],
+) -> tuple[tuple[tuple[str, bytes], ...], tuple[tuple[int, bytes], ...]]:
+    """Read back declared outputs and recorded writes; disclose refused spans.
+
+    A terminated or faulted program publishes complete declared evidence, so
+    a named readback failure downgrades the outcome to ``UNSUPPORTED`` and
+    retains the first refused span as a typed event; truncated or refused
+    runs keep their typing. Only genuinely read bytes are emitted.
+    """
+    outputs: list[tuple[str, bytes]] = []
+    gaps: list[_ReadbackGap] = []
+    for item in observations:
+        read = _try_read_span(guest, item.region.address, item.region.size)
+        if isinstance(read, _ReadbackGap):
+            gaps.append(read)
+        else:
+            outputs.append((item.name, read))
+    snapshot = _coalesced_writes(guest, state.writes)
+    gaps.extend(snapshot.gaps)
+    if gaps:
+        detail = _snapshot_gap_detail(tuple(gaps))
+        state.events.append(ProgramEvent(ProgramEventKind.UNDECLARED_ACCESS, gaps[0].address,
+                                         detail.encode()))
+        if state.status in (ProgramStatus.TERMINATED, ProgramStatus.FAULTED):
+            state.status = ProgramStatus.UNSUPPORTED
+            state.detail = detail
+        else:
+            state.detail = state.detail or detail
+    return tuple(outputs), snapshot.writes
+
+
 def replay_program(
     boot: ProgramBoot, *, observations: tuple[ProgramObservation, ...] = (), instruction_limit: int = 100000,
 ) -> ProgramResult:
@@ -687,9 +723,9 @@ def replay_program(
         if state.status is ProgramStatus.BUDGET_EXHAUSTED:
             state.status = ProgramStatus.UNSUPPORTED
             state.detail = f"unicorn_error:{error.errno}"
-    outputs = tuple((item.name, bytes(guest.mem_read(item.region.address, item.region.size))) for item in observations)
+    outputs, writes = _final_snapshot(guest, state, observations)
     result = ProgramResult(state.status, state.exit_code, _result_registers(guest), outputs, denominator,
-                           _coalesced_writes(guest, state.writes), tuple(state.events), state.instructions,
+                           writes, tuple(state.events), state.instructions,
                            boot_identity, environment_identity, state.detail, streams, requested_files,
                            () if state.input_runtime is None else tuple(sorted(state.input_runtime.cursors.items())),
                            tuple(state.file_receipts))

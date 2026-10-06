@@ -6,7 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from angr_platforms.X86_16.borland_mangling import (
+    BorlandSignature,
     BorlandSpecial,
+    BorlandType,
     BorlandTypeKind,
     demangle_borland_name,
     render_borland_signature,
@@ -97,3 +99,18 @@ def test_non_mangled_name_passthrough() -> None:
     sig = demangle_borland_name("_main")
     assert sig.parse_error
     assert render_borland_signature(sig) == "_main"
+
+
+def test_missing_optional_type_children_remain_unknown() -> None:
+    """Incomplete optional debug types render unknown children without guessing."""
+    cases = (
+        (BorlandType(BorlandTypeKind.POINTER, space="near"), "? near *"),
+        (BorlandType(BorlandTypeKind.REFERENCE, space="near"), "? near &"),
+        (BorlandType(BorlandTypeKind.FUNCTION), "(void) -> ?"),
+        (BorlandType(BorlandTypeKind.ARRAY, array_size=3), "?[3]"),
+        (BorlandType(BorlandTypeKind.MEMBER_POINTER, member_of="Owner"), "? Owner::*"),
+        (BorlandType(BorlandTypeKind.POINTER, space="near", target=BorlandType(BorlandTypeKind.FUNCTION)), "?(near*)()"),
+    )
+    for node, expected in cases:
+        sig = BorlandSignature("raw", (), "example", BorlandSpecial.NONE, params=(node,))
+        assert render_borland_signature(sig) == f"example({expected})"

@@ -8,6 +8,8 @@ generated ``return`` owns the frame boundary instead of program-visible frame
 reads. Incomplete evidence refuses and keeps every assignment.
 Consumes alias facts, IR terminal control flow, and terminal decode evidence.
 Do not infer return boundaries from opcodes, assembly text, or rendered C.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 
 Dynamic boundary: third-party angr C-AST statements and codegen attachments
 expose version-dependent tags and child containers.

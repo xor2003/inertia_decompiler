@@ -20,8 +20,10 @@ from angr_platforms.X86_16.relative_control_edge import (
     RelativeEdgeRefusalReason,
     decode_relative_edge,
 )
-from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_16, Uc
+from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_16
 from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_EFLAGS, UC_X86_REG_EIP, UC_X86_REG_IP
+
+from tools.dosunit.unicorn_engine import make_guest
 
 
 def _concrete_only(*args):
@@ -94,7 +96,7 @@ def test_word_conditional_projections_match_unicorn(ip, encoding, taken):
     edge = decode_relative_edge(head, raw)
     assert isinstance(edge, DecodedRelativeEdge)
     projected = edge.project(cs, _concrete_only)
-    guest = Uc(UC_ARCH_X86, UC_MODE_16)
+    guest = make_guest(UC_ARCH_X86, UC_MODE_16)
     guest.mem_map(0, 0x100000)
     guest.mem_write(head, raw)
     guest.reg_write(UC_X86_REG_CS, cs)

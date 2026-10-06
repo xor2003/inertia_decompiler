@@ -133,6 +133,10 @@ def test_default_tier_keeps_full_msc6_tiny_pipeline():
     assert test_pipeline._selected_lanes(args) == (
         "binary-budgeted",
         "unit-focused",
+        "pytest-serial",
+        "linux-process-controls",
+        "makefile-gnu-oracle",
+        "gp-word-native",
         "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
@@ -142,7 +146,7 @@ def test_default_tier_keeps_full_msc6_tiny_pipeline():
 def test_fast_tier_keeps_budgeted_proofs_and_regular_local_units():
     args = test_pipeline._parse_args(["--tier", "fast"])
 
-    assert test_pipeline._selected_lanes(args) == ("binary-budgeted", "unit-focused")
+    assert test_pipeline._selected_lanes(args) == ("binary-budgeted", "unit-focused", "pytest-serial", "linux-process-controls")
 
 
 def test_unit_lane_excludes_broad_slow_corpus_pytest_targets():
@@ -174,6 +178,10 @@ def test_expanded_tier_adds_sidecar_free_and_sortdemo_status_lanes():
     assert test_pipeline._selected_lanes(args) == (
         "binary-budgeted",
         "unit-focused",
+        "pytest-serial",
+        "linux-process-controls",
+        "makefile-gnu-oracle",
+        "gp-word-native",
         "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
@@ -1097,6 +1105,7 @@ def test_relational_binary_lane_keeps_expensive_proofs_in_default_pipeline(monke
         "angr_platforms/tests/test_binary_callee_intake_review.py",
         "angr_platforms/tests/test_real16_uncatalogued_calls.py",
         "angr_platforms/tests/test_recursive_call_continuation_binding.py",
+        "angr_platforms/tests/test_real16_admission_control_domains.py",
         "angr_platforms/tests/test_recursive_joint_actual_binary.py",
         "angr_platforms/tests/test_flat32_pe32_recursive_joint.py",
     "angr_platforms/tests/test_real16_recursive_public.py",
@@ -1119,6 +1128,12 @@ def test_relational_binary_lane_keeps_expensive_proofs_in_default_pipeline(monke
         "angr_platforms/tests/test_real16_loader_arch.py",
         "angr_platforms/tests/test_real16_direct_jmp_coordinates.py",
         "angr_platforms/tests/test_direct_near_call_target_binding.py",
+        "angr_platforms/tests/test_x86_16_declared_call_consumption.py",
+        "angr_platforms/tests/test_declared_call_transport.py",
+        "angr_platforms/tests/test_projected_call_consumption.py",
+        "angr_platforms/tests/test_declared_call_admission.py",
+        "angr_platforms/tests/test_declared_call_schema.py",
+        "angr_platforms/tests/test_declared_call_binding.py",
         "angr_platforms/tests/test_segment_call_binding_regression.py",
         "angr_platforms/tests/test_segment_nonleaf_native.py",
         "angr_platforms/tests/test_nop_census_8616.py",
@@ -1192,3 +1207,314 @@ def test_capture_cohort_collection_preserves_one_shared_fixture(tmp_path: Path) 
     rows = json.loads(receipt.read_text())
     assert len(rows) == 4 and len({row["name"] for row in rows}) == 4
     assert all(row["groups"] == ["replay_capture_cohorts"] and row["scope"] == "session" for row in rows)
+
+
+def test_guarded_controls_partition_complete_source_inventory():
+    """Host and guarded lanes retain every original test exactly once."""
+    import ast
+    from collections import Counter
+
+    all_targets = (*test_pipeline.FOCUSED_PYTEST_TARGETS,
+                   *test_pipeline.SERIAL_PYTEST_TARGETS,
+                   *test_pipeline.LINUX_PROCESS_PYTEST_TARGETS,
+                   *test_pipeline.GP_NATIVE_PYTEST_TARGETS)
+    for path in test_pipeline.SPLIT_CONTROL_TEST_FILES:
+        expected = {
+            f"{path}::{node.name}"
+            for node in ast.parse((REPO_ROOT / path).read_text()).body
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+        }
+        selected = [target for target in all_targets if target.partition("::")[0] == path]
+        assert Counter(selected) == Counter(expected)
+        assert path not in test_pipeline.FOCUSED_PYTEST_TARGETS
+
+
+def test_guarded_control_lanes_follow_worker_pool():
+    """Nested subprocesses start only after the outer worker pool exits."""
+    for tier, lanes in test_pipeline.PIPELINE_TIERS.items():
+        assert lanes.index("unit-focused") < lanes.index("pytest-serial") < lanes.index("linux-process-controls")
+        assert ("gp-word-native" in lanes) == (tier != "fast")
+
+
+def test_gnu_oracle_lane_is_routine_external_coverage():
+    for tier, lanes in test_pipeline.PIPELINE_TIERS.items():
+        assert ("makefile-gnu-oracle" in lanes) == (tier != "fast")
+        if tier != "fast":
+            assert lanes.index("linux-process-controls") < lanes.index("makefile-gnu-oracle") < lanes.index("gp-word-native")
+
+
+@pytest.mark.parametrize("required,status", [(False, "skipped"), (True, "failed")])
+def test_gnu_oracle_unavailable_does_not_pass(monkeypatch, required, status):
+    monkeypatch.setattr(test_pipeline.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(test_pipeline, "_run_command", lambda *_args, **_kwargs: pytest.fail("must not launch"))
+    result = test_pipeline._makefile_gnu_oracle_lane(test_pipeline._parse_args(["--require-external"] if required else []))
+    assert result.status.value == status
+
+
+@pytest.mark.parametrize("count,skipped,status", [(43, False, "passed"), (43, True, "skipped"), (0, False, "failed"), (42, False, "failed"), (1, True, "failed")])
+def test_gnu_oracle_receipt_requires_exact_coverage(monkeypatch, count, skipped, status):
+    monkeypatch.setattr(test_pipeline.shutil, "which", lambda _name: "/usr/bin/make")
+    def capture(name, command, *, env=None):
+        child = '<skipped message="make unavailable"/>' if skipped else ''
+        Path(command[command.index("--junitxml") + 1]).write_text('<testsuites><testsuite>' + f'<testcase>{child}</testcase>' * count + '</testsuite></testsuites>')
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, command, 0.1, returncode=0)
+    monkeypatch.setattr(test_pipeline, "_run_command", capture)
+    result = test_pipeline._makefile_gnu_oracle_lane(test_pipeline._parse_args([]))
+    assert result.status.value == status
+
+
+def test_selected_gnu_oracle_parameter_has_one_case(monkeypatch):
+    monkeypatch.setattr(test_pipeline.shutil, "which", lambda _name: "/usr/bin/make")
+    calls = []
+    def capture(name, targets, **options):
+        calls.append((name, targets, options))
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, [], 0.0)
+    monkeypatch.setattr(test_pipeline, "_guarded_pytest_lane", capture)
+    target = test_pipeline.GNU_MAKE_ORACLE_PYTEST_TARGETS[0] + "[selected]"
+    test_pipeline._makefile_gnu_oracle_lane(test_pipeline._parse_args([]), (target,))
+    assert calls[0][1] == (target,)
+    assert calls[0][2]["expected_cases"] == 1
+    assert calls[0][2]["strict_count"] is True
+
+
+def test_gnu_oracle_split_keeps_host_controls_without_skip_and_all_external_functions():
+    import ast
+
+    host = ast.parse((REPO_ROOT / "angr_platforms/tests/test_makefile_variable_expansion.py").read_text())
+    oracle = ast.parse((REPO_ROOT / test_pipeline.GNU_MAKE_ORACLE_TEST_FILE).read_text())
+    oracle_names = {
+        node.name for node in oracle.body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+    }
+    assert len(oracle_names) == 9
+    assert {target.split("::")[1] for target in test_pipeline.GNU_MAKE_ORACLE_PYTEST_TARGETS} == oracle_names
+    assert sum(test_pipeline.GNU_MAKE_ORACLE_CASE_COUNTS.values()) == 43
+    assert test_pipeline.GNU_MAKE_ORACLE_TEST_FILE not in test_pipeline.FOCUSED_PYTEST_TARGETS
+    assert "angr_platforms/tests/test_makefile_variable_expansion.py" in test_pipeline.FOCUSED_PYTEST_TARGETS
+    for node in host.body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+            assert node.name not in oracle_names
+            assert not any("skip" in ast.unparse(decorator) for decorator in node.decorator_list)
+
+
+@pytest.mark.parametrize("parameter", [False, True])
+def test_make_profile_routes_only_selected_gnu_oracle_controls(parameter):
+    target = test_pipeline.GNU_MAKE_ORACLE_PYTEST_TARGETS[0] + "[selected]" if parameter else test_pipeline.GNU_MAKE_ORACLE_TEST_FILE
+    result = subprocess.run(
+        ["make", "-n", "pytest-profile", f"PYTHON={sys.executable}",
+         f"PYTEST_PROFILE_TARGETS={target}", "CONTROL_HOST_TARGETS_COMMAND=false"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "scripts/pytest_profile.py" not in result.stdout
+    assert "--lane makefile-gnu-oracle" in result.stdout
+    assert "--lane pytest-serial" not in result.stdout
+    assert (f"--control-target {target!r}" in result.stdout) is parameter
+
+
+def test_make_host_inventory_excludes_guarded_gnu_oracle_file():
+    text = (REPO_ROOT / "Makefile").read_text()
+    assert "QA_HOST_PYTEST_TARGETS = $(filter-out $(SPLIT_CONTROL_TEST_FILES) $(GNU_MAKE_ORACLE_TEST_FILE)," in text
+    recipe = text.split("\npytest-files:\n", 1)[1].split("\npytest-all:", 1)[0]
+    assert '$(GNU_MAKE_ORACLE_TEST_FILE)) control_lanes="$$control_lanes makefile-gnu-oracle"' in recipe
+    assert '$(GNU_MAKE_ORACLE_TEST_FILE)::*) control_lanes="$$control_lanes makefile-gnu-oracle"; guarded_targets=' in recipe
+
+
+@pytest.mark.parametrize("parameter", [False, True])
+def test_make_selected_files_execute_only_selected_gnu_oracle_lane(tmp_path, parameter):
+    """Selected oracle files and cases bypass the host pool without widening selection."""
+    import json
+
+    target = test_pipeline.GNU_MAKE_ORACLE_PYTEST_TARGETS[0] + "[selected]" if parameter else test_pipeline.GNU_MAKE_ORACLE_TEST_FILE
+    log = tmp_path / "calls.jsonl"
+    wrapper = tmp_path / "python-wrapper"
+    wrapper.write_text(
+        f"#!{sys.executable}\nimport json, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "if args[:1] == ['-c']:\n"
+        "    print(sys.executable)\n"
+        "elif '--print-host-controls' in args:\n"
+        f"    print({test_pipeline.SERIAL_PYTEST_TARGETS[0].split('::')[0] + '::test_nonfailure_reports_are_quiet'!r})\n"
+        "elif args and args[0].endswith('test_ownership_manifest.py'):\n"
+        "    print('')\n"
+        "else:\n"
+        f"    with pathlib.Path({str(log)!r}).open('a') as stream:\n"
+        "        stream.write(json.dumps(args) + '\\n')\n"
+    )
+    wrapper.chmod(0o755)
+    result = subprocess.run(
+        ["make", "pytest-files", f"PYTHON={wrapper}", "FILES=", f"PYTEST_FILES={target}"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    commands = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[:3] == ["scripts/test_pipeline.py", "--lane", "makefile-gnu-oracle"]
+    assert ("--control-target" in command) is parameter
+    if parameter:
+        assert command[command.index("--control-target") + 1] == target
+
+
+@pytest.mark.parametrize("xml,status", [
+    ("<testsuites><testsuite><testcase/><testcase/></testsuite></testsuites>", "passed"),
+    ("<testsuites><testsuite><testcase><skipped message=\"KVM denied\"/></testcase></testsuite></testsuites>", "skipped"),
+    ("<testsuites><testsuite/></testsuites>", "failed"),
+])
+def test_serial_control_receipt_does_not_launder_missing_coverage(monkeypatch, xml, status):
+    """A zero exit needs executed test cases; skipped coverage stays visible."""
+    commands = []
+
+    def capture(name, command, *, env=None):
+        commands.append(command)
+        Path(command[command.index("--junitxml") + 1]).write_text(xml)
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, command, 0.1, returncode=0)
+
+    monkeypatch.setattr(test_pipeline, "_run_command", capture)
+    result = test_pipeline._guarded_pytest_lane("pytest-serial", test_pipeline.SERIAL_PYTEST_TARGETS, expected_cases=2)
+    assert result.status.value == status
+    assert commands[0][commands[0].index("-n") + 1] == "0"
+    assert commands[0][commands[0].index("-o") + 1] == "addopts="
+    assert commands[0][-1] == test_pipeline.SERIAL_PYTEST_TARGETS[0]
+    assert result.details is not None
+    assert result.details["collected"] == (0 if status == "failed" else 1 if status == "skipped" else 2)
+
+
+def test_linux_control_refuses_unsupported_host_before_launch(monkeypatch):
+    """A platform-only control cannot pass just because pytest skips it."""
+    monkeypatch.setattr(test_pipeline.sys, "platform", "win32")
+    monkeypatch.setattr(test_pipeline, "_run_command", lambda *_args, **_kwargs: pytest.fail("must not launch"))
+    assert test_pipeline._linux_process_lane().status is test_pipeline.LaneStatus.SKIPPED
+
+
+@pytest.mark.parametrize("required,status", [(False, "skipped"), (True, "failed")])
+def test_native_word_control_missing_device_is_accounted(monkeypatch, required, status):
+    """Missing KVM is optional refusal or required failure, never host acceptance."""
+    from scripts.compiler_coverage_provenance import KVMAccessEvidence, KVMAccessStatus
+
+    monkeypatch.setattr(test_pipeline, "_external_tools_available", lambda *_args: (True, None))
+    monkeypatch.setattr(test_pipeline, "kvm_access_evidence", lambda: KVMAccessEvidence(KVMAccessStatus.DENIED, 13))
+    monkeypatch.setattr(test_pipeline, "_run_command", lambda *_args, **_kwargs: pytest.fail("must not launch"))
+    args = test_pipeline._parse_args(["--require-external"] if required else [])
+    result = test_pipeline._gp_word_native_lane(args)
+    assert result.status.value == status
+    assert "denied" in result.reason
+
+
+def test_make_focused_coverage_sequences_guarded_controls():
+    """Routine Make runs preserve guarded controls after its outer pytest pool."""
+    text = (REPO_ROOT / "Makefile").read_text()
+    recipe = text.split("\npytest:\n", 1)[1].split("\npytest-profile:", 1)[0]
+    assert "$(QA_HOST_PYTEST_TARGETS)" in recipe
+    assert recipe.index("-m pytest") < recipe.index("--lane pytest-serial")
+    assert "--lane linux-process-controls" in recipe
+    assert "--lane gp-word-native" in recipe
+
+
+@pytest.mark.parametrize("required,status", [(False, "skipped"), (True, "failed")])
+def test_native_control_accounts_for_runtime_skip_after_precheck(monkeypatch, required, status):
+    """A race after prerequisite checks cannot turn skipped DOS coverage green."""
+    def capture(name, command, *, env=None):
+        assert "PYTEST_XDIST_WORKER" not in env
+        assert env["PYTEST_ADDOPTS"] == ""
+        Path(command[command.index("--junitxml") + 1]).write_text(
+            "<testsuites><testsuite><testcase><skipped message=\"runtime unavailable\"/></testcase></testsuite></testsuites>",
+        )
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, command, 0.1, returncode=0)
+
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+    monkeypatch.setattr(test_pipeline, "_run_command", capture)
+    result = test_pipeline._guarded_pytest_lane(
+        "gp-word-native", test_pipeline.GP_NATIVE_PYTEST_TARGETS, require_available=required,
+    )
+    assert result.status.value == status
+    assert result.details["skipped"] == 1
+    assert result.details["skip_reasons"] == ["runtime unavailable"]
+
+
+@pytest.mark.parametrize("receipt", [None, "<invalid", "<testsuites><testsuite><testcase/></testsuite></testsuites>"])
+def test_required_serial_control_rejects_missing_invalid_or_partial_receipt(monkeypatch, receipt):
+    """Missing evidence and a dropped parameter case must fail closed."""
+    def capture(name, command, *, env=None):
+        if receipt is not None:
+            Path(command[command.index("--junitxml") + 1]).write_text(receipt)
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, command, 0.1, returncode=0)
+
+    monkeypatch.setattr(test_pipeline, "_run_command", capture)
+    assert test_pipeline._serial_pytest_lane().status is test_pipeline.LaneStatus.FAILED
+
+
+def test_host_control_selector_cli_derives_from_focused_owner(capsys):
+    """Make reads its split inventory from the pipeline authoritative owner."""
+    assert test_pipeline.main(["--print-host-controls"]) == 0
+    assert capsys.readouterr().out.split() == [
+        target for target in test_pipeline.FOCUSED_PYTEST_TARGETS
+        if target.partition("::")[0] in test_pipeline.SPLIT_CONTROL_TEST_FILES
+    ]
+
+
+def test_make_selected_files_route_guarded_nodes_after_host_tests():
+    """Explicit whole-file and guarded-node requests keep their serial controls."""
+    text = (REPO_ROOT / "Makefile").read_text()
+    recipe = text.split("\npytest-files:\n", 1)[1].split("\npytest-all:", 1)[0]
+    for targets in (test_pipeline.SERIAL_PYTEST_TARGETS, test_pipeline.LINUX_PROCESS_PYTEST_TARGETS, test_pipeline.GP_NATIVE_PYTEST_TARGETS):
+        assert targets[0] + "*" in recipe
+    assert recipe.index("-m pytest") < recipe.index("scripts/test_pipeline.py $$lane_args")
+
+
+@pytest.mark.parametrize("provider,error", [("false", "provider command failed"), ("true", "provider returned an empty inventory")])
+def test_make_host_control_provider_failure_refuses_omitted_tests(provider, error):
+    """Make must not silently turn a failed selector provider into lost tests."""
+    result = subprocess.run(
+        ["make", "-n", "pytest", f"PYTHON={sys.executable}", f"CONTROL_HOST_TARGETS_COMMAND={provider}"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode != 0
+    assert error in result.stderr
+
+
+@pytest.mark.parametrize("target", [
+    "angr_platforms/tests/test_compact_paths.py",
+    "angr_platforms/tests/test_pytest_live_failures.py::test_nonfailure_reports_are_quiet",
+])
+def test_make_profile_keeps_explicit_unrelated_or_host_selector(target):
+    """Custom profile requests must not acquire unrelated control tests."""
+    result = subprocess.run(
+        ["make", "-n", "pytest-profile", f"PYTHON={sys.executable}",
+         f"PYTEST_PROFILE_TARGETS={target}", "CONTROL_HOST_TARGETS_COMMAND=false"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert target in result.stdout
+    assert "--lane" not in result.stdout
+    assert "test_compiler_coverage_runner.py::" not in result.stdout
+    assert "test_x86_16_gp_word_runtime.py::" not in result.stdout
+
+
+def test_make_profile_preserves_explicit_guarded_parameter_case():
+    """A selected nested case goes to its serial lane without broad collection."""
+    target = test_pipeline.SERIAL_PYTEST_TARGETS[0] + "[2]"
+    result = subprocess.run(
+        ["make", "-n", "pytest-profile", f"PYTHON={sys.executable}",
+         f"PYTEST_PROFILE_TARGETS={target}", "CONTROL_HOST_TARGETS_COMMAND=false"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "scripts/pytest_profile.py" not in result.stdout
+    assert "--lane pytest-serial" in result.stdout
+    assert f"--control-target {target!r}" in result.stdout
+    assert "--lane gp-word-native" not in result.stdout
+
+
+def test_selected_serial_parameter_keeps_exact_command_and_expected_count(monkeypatch):
+    """An explicit single case must not silently expand into the other case."""
+    captured = []
+    target = test_pipeline.SERIAL_PYTEST_TARGETS[0] + "[2]"
+
+    def capture(name, targets, *, expected_cases, require_available):
+        captured.append((targets, expected_cases, require_available))
+        return test_pipeline.LaneResult(name, test_pipeline.LaneStatus.PASSED, [], 0.0)
+
+    monkeypatch.setattr(test_pipeline, "_guarded_pytest_lane", capture)
+    test_pipeline._serial_pytest_lane(test_pipeline._selected_control_targets([target], test_pipeline.SERIAL_PYTEST_TARGETS))
+    assert captured == [((target,), 1, True)]

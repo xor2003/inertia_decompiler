@@ -582,7 +582,7 @@ _CLI_AST_LEAF_TYPES_8616: frozenset[type] = frozenset({str, bytes, int, float, c
 
 def _structured_slot_names_8616(value: StructuredAstValue) -> tuple[str, ...]:
     """Reuse class layouts and read every instance's current public fields."""
-    base_attrs = _structured_slot_names_for_type_8616(type(value), _CLI_AST_NON_CHILD_ATTRS_8616)
+    base_attrs: tuple[str, ...] = _structured_slot_names_for_type_8616(type(value), _CLI_AST_NON_CHILD_ATTRS_8616)
     # __dict__ is the dynamic third-party codegen boundary, not owned state.
     dynamic_attrs = getattr(value, "__dict__", None)
     if not dynamic_attrs:
@@ -1115,6 +1115,39 @@ def _replace_c_children(
     return changed
 
 
+def _emit_c_node_children_8616(value: StructuredAstValue, node_stack: list[StructuredAstValue]) -> None:
+    """Emit node descendants of one field's container value onto the walk stack.
+
+    Same traversal as ``_iter_c_node_children_8616`` (reverse-DFS pop order with
+    a per-expansion ``seen_values`` keeping each object's last DFS occurrence),
+    but appends emitted nodes directly instead of building a tuple, so the
+    caller's ``extend`` produces byte-identical stack contents for less
+    allocation. Exact builtin containers extend without a ``tuple()`` copy;
+    any other iterable still materializes through ``tuple()`` under the same
+    exception suppression as ``_push_iterable_children_8616``.
+    """
+
+    seen_values: set[int] = set()
+    stack: list[StructuredAstValue] = [value]
+    while stack:
+        current = stack.pop()
+        current_id = id(current)
+        if current_id in seen_values:
+            continue
+        seen_values.add(current_id)
+        if _structured_codegen_node(current):
+            node_stack.append(current)
+            continue
+        current_type = type(current)
+        if current_type is dict:
+            stack.extend(current.values())
+            continue
+        if current_type is list or current_type is tuple or current_type is set:
+            stack.extend(current)
+            continue
+        _push_iterable_children_8616(current, stack)
+
+
 def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -> Iterator[StructuredAstValue]:
     """Walk current AST children without allocating containers for leaf fields."""
     if seen is None:
@@ -1142,7 +1175,7 @@ def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -
             if _structured_codegen_node(value):
                 node_stack.append(value)
             else:
-                node_stack.extend(_iter_c_node_children_8616(value))
+                _emit_c_node_children_8616(value, node_stack)
 
 
 def _same_c_function_call_8616(
@@ -1816,6 +1849,7 @@ def _simplify_basic_algebraic_identities(codegen: StructuredCodegenValue) -> boo
     changed = False
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
+        """Apply the algebraic-identity rewrite arms to one node."""
         return _algebraic_identity_transform_8616(node, codegen)
 
     root = codegen.cfunc.statements
@@ -2830,6 +2864,7 @@ class _StructuredSimplifyRun8616:
         return None
 
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        """Run the simplification arms for one node; identity when none match."""
         result = self._transform_typecast_8616(node)
         if result is not None:
             return result
@@ -3312,6 +3347,7 @@ class _StructuredSimplifyRun8616:
         return changed
 
     def prune_dead_stack_address_inits(self, node: StructuredAstValue) -> bool:
+        """Drop dead stack-address initializers under a statement container."""
         changed = False
         if isinstance(node, structured_c.CStatements):
             return self._prune_dead_inits_in_statements_8616(node)
@@ -3546,6 +3582,7 @@ def _attach_cod_global_names(
     created: dict[tuple[int, int], structured_c.CVariable] = {}
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
+        """Rename a global variable or dereference node from COD synthetic symbols."""
         if isinstance(node, structured_c.CVariable):
             arm_result = _cod_global_var_arm_8616(node, created, synthetic_globals, project, codegen)
             if arm_result is not _COD_GLOBAL_ARM_CONTINUE_8616:
@@ -3834,7 +3871,7 @@ def _access_trait_profile_for_key(
     evidence_profiles: Mapping[tuple[object, ...], _AccessTraitEvidenceProfile],
     base_key: tuple[object, ...],
 ) -> _AccessTraitEvidenceProfile | None:
-    return cast(_AccessTraitEvidenceProfile | None, _cli_access_profiles.access_trait_profile_for_key(evidence_profiles, base_key))  # type: ignore[redundant-cast]
+    return cast(_AccessTraitEvidenceProfile | None, _cli_access_profiles.access_trait_profile_for_key(evidence_profiles, base_key))
 
 
 @dataclass(frozen=True)
@@ -3870,7 +3907,7 @@ class _AccessTraitRewriteDecision:
 def _build_access_trait_evidence_profiles(
     traits: dict[str, dict[tuple[object, ...], object]],
 ) -> dict[tuple[object, ...], _AccessTraitEvidenceProfile]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         dict[tuple[object, ...], _AccessTraitEvidenceProfile],
         _cli_access_profiles.build_access_trait_evidence_profiles(traits),
     )
@@ -4034,14 +4071,14 @@ def _access_trait_member_candidates(
     traits: dict[str, dict[tuple[object, ...], int]],
 ) -> dict[tuple[object, ...], list[tuple[int, int, int]]]:
     compatible_traits = cast(dict[str, dict[tuple[object, ...], object]], traits)
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         dict[tuple[object, ...], list[tuple[int, int, int]]],
         _cli_access_profiles.access_trait_member_candidates(compatible_traits),
     )
 
 
 def _should_attach_access_trait_names(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_access_trait_rewrite._should_attach_access_trait_names(
         codegen,
@@ -4059,7 +4096,7 @@ def _should_attach_access_trait_names(codegen: StructuredCodegenValue) -> bool:
 
 
 def _attach_access_trait_field_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_access_trait_rewrite._attach_access_trait_field_names(
         project,
@@ -4087,7 +4124,7 @@ def _attach_access_trait_field_names(project: AngrProjectValue, codegen: Structu
 
 
 def _attach_pointer_member_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_access_trait_rewrite._attach_pointer_member_names(
         project,
@@ -4305,6 +4342,7 @@ def _attach_lst_data_names(
     temp_const_aliases = _lst_collect_temp_aliases_8616(codegen.cfunc.statements)
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
+        """Rename a variable or dereference node from LST data labels."""
         if isinstance(node, structured_c.CVariable):
             return _lst_var_arm_8616(node, created, lst_metadata, project, codegen)
         if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
@@ -4649,7 +4687,7 @@ def _attach_register_names(project: AngrProjectValue, codegen: StructuredCodegen
     return changed
 
 def _elide_redundant_segment_pointer_dereferences(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_segmented_elision._elide_redundant_segment_pointer_dereferences(
             project,
@@ -4669,7 +4707,7 @@ def _elide_redundant_segment_pointer_dereferences(project: AngrProjectValue, cod
 
 
 def _collect_access_traits(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_access_traits._collect_access_traits(
             project,
@@ -4686,7 +4724,7 @@ def _collect_access_traits(project: AngrProjectValue, codegen: StructuredCodegen
 
 
 def _prune_unused_unnamed_memory_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_memory_prune._prune_unused_unnamed_memory_declarations(
             codegen,
@@ -4696,7 +4734,7 @@ def _prune_unused_unnamed_memory_declarations(codegen: StructuredCodegenValue) -
 
 
 def _prune_unused_linear_register_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_local_prune._prune_unused_linear_register_declarations(
             codegen,
@@ -4706,7 +4744,7 @@ def _prune_unused_linear_register_declarations(codegen: StructuredCodegenValue) 
 
 
 def _prune_unused_local_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_local_prune._prune_unused_local_declarations(
             codegen,
@@ -4717,7 +4755,7 @@ def _prune_unused_local_declarations(codegen: StructuredCodegenValue) -> bool:
 
 
 def _prune_dead_local_assignments(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_dead_local_prune._prune_dead_local_assignments(
             codegen,
@@ -4730,7 +4768,7 @@ def _prune_dead_local_assignments(codegen: StructuredCodegenValue) -> bool:
 
 
 def _materialize_missing_stack_local_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_local_rewrites._materialize_missing_stack_local_declarations(
             codegen,
@@ -4743,7 +4781,7 @@ def _materialize_missing_stack_local_declarations(codegen: StructuredCodegenValu
 
 
 def _dedupe_codegen_variable_names_8616(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_local_rewrites._dedupe_codegen_variable_names_8616(
             codegen,
@@ -4753,7 +4791,7 @@ def _dedupe_codegen_variable_names_8616(codegen: StructuredCodegenValue) -> bool
 
 
 def _materialize_missing_register_local_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_local_rewrites._materialize_missing_register_local_declarations(
             codegen,
@@ -4766,7 +4804,7 @@ def _materialize_missing_register_local_declarations(codegen: StructuredCodegenV
 
 
 def _prune_void_function_return_values(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_local_rewrites._prune_void_function_return_values(
             codegen,
@@ -4776,7 +4814,7 @@ def _prune_void_function_return_values(codegen: StructuredCodegenValue) -> bool:
 
 
 def _coalesce_far_pointer_stack_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_far_pointer_stack._coalesce_far_pointer_stack_expressions(
             project,
@@ -4798,7 +4836,7 @@ def _coalesce_far_pointer_stack_expressions(project: AngrProjectValue, codegen: 
 
 
 def _simplify_nested_mk_fp_calls(codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_mkfp_simplify._simplify_nested_mk_fp_calls(
             codegen,
@@ -4810,7 +4848,7 @@ def _simplify_nested_mk_fp_calls(codegen: StructuredCodegenValue) -> bool:
 
 
 def _attach_ss_stack_variables(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_stack_locals._attach_ss_stack_variables(
             project,
@@ -4824,7 +4862,7 @@ def _attach_ss_stack_variables(project: AngrProjectValue, codegen: StructuredCod
 
 
 def _rewrite_ss_stack_byte_offsets(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_stack_byte_offsets._rewrite_ss_stack_byte_offsets(
             project,
@@ -4849,7 +4887,7 @@ def _rewrite_ss_stack_byte_offsets(project: AngrProjectValue, codegen: Structure
 def _promote_direct_stack_cvariable(
     codegen: StructuredCodegenValue, cvar: StructuredAstValue, size: int, type_: StructuredAstValue
 ) -> bool:
-    return cast(bool, _cli_stack_locals._promote_direct_stack_cvariable(codegen, cvar, size, type_))  # type: ignore[redundant-cast]
+    return cast(bool, _cli_stack_locals._promote_direct_stack_cvariable(codegen, cvar, size, type_))
 
 
 def _stack_type_for_size(size: int) -> StructuredAstValue:
@@ -4946,7 +4984,7 @@ def _coalesce_direct_ss_local_word_statements(project: AngrProjectValue, codegen
 
 
 def _seed_adjacent_byte_pair_aliases(project: AngrProjectValue, codegen: StructuredCodegenValue) -> dict[int, object]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         dict[int, object],
         _cli_linear_aliases._seed_adjacent_byte_pair_aliases(
         project,
@@ -4962,7 +5000,7 @@ def _seed_adjacent_byte_pair_aliases(project: AngrProjectValue, codegen: Structu
 
 
 def _coalesce_linear_recurrence_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_linear_recurrence._coalesce_linear_recurrence_statements(
             project,
@@ -5096,7 +5134,7 @@ def _split_expr_const_offset(node: StructuredAstValue) -> StructuredAstValue:
 
 
 def _same_expression_list(lhs_terms: StructuredAstValue, rhs_terms: StructuredAstValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_segmented_compare._same_expression_list(
         lhs_terms,
@@ -5109,7 +5147,7 @@ def _same_expression_list(lhs_terms: StructuredAstValue, rhs_terms: StructuredAs
 def _addr_exprs_are_same(
     low_addr_expr: StructuredAstValue, high_addr_expr: StructuredAstValue, project: AngrProjectValue
 ) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_segmented_compare._addr_exprs_are_same(
         low_addr_expr,
@@ -5126,7 +5164,7 @@ def _addr_exprs_are_same(
 def _addr_exprs_are_byte_pair(
     low_addr_expr: StructuredAstValue, high_addr_expr: StructuredAstValue, project: AngrProjectValue = None
 ) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_segmented_compare._addr_exprs_are_byte_pair(
         low_addr_expr,
@@ -5351,7 +5389,7 @@ def _synthetic_word_global_variable(
 def _coalesce_cod_word_global_loads(
     project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
 ) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_cod_globals._coalesce_cod_word_global_loads(
         project,
@@ -5372,7 +5410,7 @@ def _coalesce_cod_word_global_loads(
 
 
 def _coalesce_segmented_word_load_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_segmented_load_coalesce._coalesce_segmented_word_load_expressions(
         project,
@@ -5395,7 +5433,7 @@ def _coalesce_segmented_word_load_expressions(project: AngrProjectValue, codegen
 def _coalesce_cod_word_global_statements(
     project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
 ) -> bool:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         bool,
         _cli_cod_global_statements._coalesce_cod_word_global_statements(
         project,
@@ -5411,7 +5449,7 @@ def _coalesce_cod_word_global_statements(
 def _int21_call_replacements(
     project: AngrProjectValue, function: StructuredAstValue, api_style: str, binary_path: Path | None
 ) -> list[str]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         list[str],
         _cli_helper_modeling._int21_call_replacements(
         project,
@@ -5427,7 +5465,7 @@ def _int21_call_replacements(
 def _interrupt_call_replacement_map(
     project: AngrProjectValue, function: StructuredAstValue, api_style: str, binary_path: Path | None
 ) -> dict[str, tuple[str, ...]]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         dict[str, tuple[str, ...]],
         _cli_helper_modeling._interrupt_call_replacement_map(
         project,
@@ -5444,7 +5482,7 @@ def _interrupt_call_replacement_map(
 
 
 def _dos_helper_declarations(function: StructuredAstValue, api_style: str, binary_path: Path | None) -> list[str]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         list[str],
         _cli_helper_modeling._dos_helper_declarations(
         function,
@@ -5457,7 +5495,7 @@ def _dos_helper_declarations(function: StructuredAstValue, api_style: str, binar
 
 
 def _interrupt_helper_declarations(function: StructuredAstValue, api_style: str, binary_path: Path | None) -> list[str]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         list[str],
         _cli_helper_modeling._interrupt_helper_declarations(
         function,
@@ -5470,7 +5508,7 @@ def _interrupt_helper_declarations(function: StructuredAstValue, api_style: str,
 
 
 def _known_helper_declarations(cod_metadata: CODProcMetadata | None) -> list[str]:
-    return cast(  # type: ignore[redundant-cast]
+    return cast(
         list[str],
         _cli_helper_modeling._known_helper_declarations(
         cod_metadata,
@@ -5586,6 +5624,7 @@ def _rewrite_staging_statements(
     changed = False
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
+        """Substitute a staging-local variable use with its staged replacement."""
         if isinstance(node, structured_c.CVariable):
             variable = node.variable
             replacement = staging_replacements.get(id(variable))

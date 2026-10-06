@@ -47,6 +47,9 @@ from angr_platforms.X86_16.cod_extract import (
     infer_cod_logic_start,
 )
 from angr_platforms.X86_16.compiler_helpers import is_x86_16_stack_probe_name_8616
+from angr_platforms.X86_16.declared_external_call_evidence import (
+    admit_declared_external_call_files_8616,
+)
 from angr_platforms.X86_16.lowering.c_runtime_header import render_c_runtime_header_8616
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 from angr_platforms.X86_16.pipeline.errors import PipelineHardError
@@ -94,6 +97,10 @@ from inertia_decompiler.cli_timeout import (
     retry_timeout_after_failed_attempt,
 )
 from inertia_decompiler.cod_module_caller_evidence import record_cod_module_caller_return_use_evidence_8616
+from inertia_decompiler.declared_call_transport import (
+    declared_call_diagnostic_lines_8616,
+    declared_call_receipts_current_8616,
+)
 from inertia_decompiler.decompilation_quality import assess_decompiled_c_text, assess_final_generated_c_text
 from inertia_decompiler.decompile_file_summary import emit_file_decompilation_summary
 from inertia_decompiler.default_signature_catalog import default_signature_catalog_path
@@ -2110,6 +2117,33 @@ def _function_work_result_for_fork_ipc(result: FunctionWorkResult) -> FunctionWo
 
 _SERIAL_CLEAN_WORKER_RESULT_ENV_8616 = "INERTIA_SERIAL_CLEAN_WORKER_RESULT"
 _SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616 = 4
+
+
+def _report_declared_call_consumptions_8616(result: FunctionWorkResult) -> None:
+    """Report consumed assumptions without changing the typed validation verdict."""
+    evidence = result.segment_program_function_evidence
+    if evidence is not None:
+        for line in declared_call_diagnostic_lines_8616(evidence.declared_call_consumptions):
+            print(line, file=sys.stderr, flush=True)
+
+
+def _declared_call_dependency_retained_8616(
+    project: object,
+    function: object,
+    evidence: SegmentProgramFunctionEvidence8616 | None,
+    *, declarations_requested: bool = False,
+) -> bool:
+    """Replay exact current admissions before accepting transported receipts."""
+    # Dynamic angr Function boundary; the result evidence is an owned contract.
+    function_addr = getattr(function, "addr", None)
+    if type(function_addr) is not int:
+        return False
+    if evidence is not None and evidence.function_addr != function_addr:
+        return False
+    receipts = () if evidence is None else evidence.declared_call_consumptions
+    return declared_call_receipts_current_8616(
+        project, function_addr, receipts, require_registry=declarations_requested
+    )
 
 
 def _direct_addr_work_requires_parent_lock_8616(lock_key: dict[str, object] | None) -> bool:
@@ -5172,6 +5206,7 @@ def _prepare_main_project_8616(
     lst_metadata = None
     prefer_fast_recovery = False
     proc_resolved_to_linked_binary = False
+    declarations_admitted = False
     if args.proc is not None:
         binary_path = Path(args.binary)
         cod_path = _resolve_cod_path_8616(binary_path)
@@ -5195,6 +5230,7 @@ def _prepare_main_project_8616(
                 synthetic_globals,
                 function_label,
             ) = _proc_cod_image_lane_8616(args, binary_path, cod_path, lst_metadata)
+            declarations_admitted = True
             prefer_fast_recovery = True
     else:
         project = _build_project(
@@ -5240,6 +5276,12 @@ def _prepare_main_project_8616(
     typing.cast(typing.Any, project)._inertia_dump_layers = bool(args.dump_layers)
     typing.cast(typing.Any, project)._inertia_dump_layer_root = args.dump_layer_dir
     typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
+    if args.declared_call_effects and not declarations_admitted:
+        raise ValueError(
+            "--declared-call-effects requires the --proc COD image lane; "
+            "declarations bind the analysis image, not a linked binary or "
+            "raw --addr lane"
+        )
     return _MainProjectSetup8616(
         project=project,
         function_label=function_label,
@@ -5366,6 +5408,12 @@ def _proc_cod_image_lane_8616(
         project,
         frozenset(args.base_addr + offset for offset in cod_image.call_target_offsets),
     )
+    admit_declared_external_call_files_8616(
+        project,
+        image_code=proc_code,
+        image_base=args.base_addr,
+        paths=args.declared_call_effects,
+    )
     record_cod_module_caller_return_use_evidence_8616(cod_metadata, args.entry_point, project)
     for target_offset, target_name in cod_image.call_target_offsets.items():
         annotate_function(project, args.base_addr + target_offset, name=target_name)
@@ -5431,6 +5479,16 @@ def _direct_request_cache_artifact_for_result_8616(
             "and quick function-entry scans. */"
         )
     startup_diagnostic_lines.append(_recovery_evidence_line(context.args.binary, context.lst_metadata))
+    evidence = result.segment_program_function_evidence
+    if not _declared_call_dependency_retained_8616(
+        context.project, SimpleNamespace(addr=function_addr), evidence,
+        declarations_requested=bool(context.args.declared_call_effects),
+    ):
+        return None
+    if evidence is not None:
+        startup_diagnostic_lines.extend(
+            declared_call_diagnostic_lines_8616(evidence.declared_call_consumptions)
+        )
     return DirectRequestCacheArtifact8616(
         function_addr=function_addr,
         function_name=function_name,
@@ -5507,6 +5565,7 @@ def _emit_direct_cache_hit_8616(
         flush=True,
     )
     print("[dbg] direct function cache hit validation=passed", file=sys.stderr, flush=True)
+    _report_declared_call_consumptions_8616(result)
     assert result.failure_family_snapshot is not None
     print(f"[dbg] direct failure family: {result.failure_family_snapshot.label()}", file=sys.stderr)
     if _complete_serial_clean_worker_result_8616(result, project=project_for_worker_result):
@@ -6104,8 +6163,21 @@ class _DirectAddrCliRun8616:
                 self.cached_segment_evidence = None
                 print("[dbg] direct request cache refused: segment_evidence", file=sys.stderr, flush=True)
             else:
-                self.expected_runtime_header = render_c_runtime_header_8616(self.args.c_target)
-                if (
+                declared_consumption_ok = _declared_call_dependency_retained_8616(
+                    self.project, SimpleNamespace(addr=self.artifact.function_addr),
+                    self.cached_segment_evidence,
+                    declarations_requested=bool(self.args.declared_call_effects),
+                )
+                if not declared_consumption_ok:
+                    self.cached_segment_evidence = None
+                    print(
+                        "[dbg] direct request cache refused: declared_call_consumptions",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                else:
+                    self.expected_runtime_header = render_c_runtime_header_8616(self.args.c_target)
+                if declared_consumption_ok and (
                     self.artifact.arch_name == self.project.arch.name
                     and self.artifact.entry_point == self.project.entry
                     and self.artifact.runtime_header == self.expected_runtime_header
@@ -6863,6 +6935,23 @@ class _DirectAddrCliRun8616:
             byte_count=self._byte_count,
             segment_program_function_evidence=self.direct_segment_program_evidence,
         )
+        if self.direct_result.status == WorkItemStatus.OK.value and not _declared_call_dependency_retained_8616(
+            self.direct_project,
+            self.func,
+            self.direct_result.segment_program_function_evidence,
+            declarations_requested=bool(self.args.declared_call_effects),
+        ):
+            print(
+                "[tail-validation] declared external-call consumption receipt "
+                "missing or stale; result cannot be accepted",
+                file=sys.stderr,
+                flush=True,
+            )
+            self.direct_result = replace(
+                self.direct_result,
+                status=WorkItemStatus.VALIDATION_FAILED.value,
+                failure_stage="declared_call_dependency",
+            )
         self.direct_acceptance = _validated_generated_c_acceptance_8616(
             status=self.direct_result.status,
             payload=self.direct_result.payload,
@@ -6913,6 +7002,7 @@ class _DirectAddrCliRun8616:
             print(f"[tail-validation] {self.integrity.diagnostic()}", file=sys.stderr, flush=True)
             return 4
         _emit_tail_validation_console_summary([self.direct_item], {1: self.direct_result}, binary_path=self.args.binary)
+        _report_declared_call_consumptions_8616(self.direct_result)
         _store_direct_request_result_8616(
             self.context,
             self.direct_request_cache_lookup,

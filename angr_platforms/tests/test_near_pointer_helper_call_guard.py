@@ -106,6 +106,7 @@ def _cli_state(codegen, statements):
     run = cli_decompilation._DecompileRun8616
     state._is_semantic_codegen_call = lambda node: run._is_semantic_codegen_call(state, node)
     state._codegen_call_expr_count = lambda: run._codegen_call_expr_count(state)
+    state._codegen_call_inventory_8616 = lambda with_names: run._codegen_call_inventory_8616(state, with_names=with_names)
     state._snapshot_codegen_cfunc = lambda: run._snapshot_codegen_cfunc(state)
     state._restore_codegen_cfunc = lambda snapshot: run._restore_codegen_cfunc(state, snapshot)
     state._rewrite_round_guarded_evidence_8616 = lambda index, changed: (

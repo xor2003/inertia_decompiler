@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
 
 from scripts.check_sortd_sidecar_free import mz_executable_image
@@ -18,6 +19,7 @@ SORTDEMO_EXE = REPO_ROOT / "SORTDEMO.EXE"
 EXPECTED_CLOCK_SITES = 2
 
 
+@pytest.mark.requires_kvm
 def test_sortd_sleep_preserves_both_wide_clock_calls_sidecar_free(
     tmp_path: Path,
 ) -> None:

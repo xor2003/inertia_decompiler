@@ -741,6 +741,7 @@ class _StackCvarCanonicalize8616:
         return None
 
     def run_8616_part0(self) -> tuple[bool, object]:
+        """Phase 0: strip casts, seed run state, and apply cycle/depth refusals."""
         while isinstance(self.expr, structured_c.CTypeCast) and not isinstance(
             self.expr, CSemanticCast8616
         ):
@@ -1072,6 +1073,7 @@ class _StackCvarCanonicalize8616:
         return _is_linear_temp_name_8616(name)
 
     def run_8616_part1(self) -> tuple[bool, object]:
+        """Phase 1: initialize the single-assignment caches in the analysis context."""
         self._UNRESOLVED_SINGLE_ASSIGNMENT = self.analysis_context.setdefault("unresolved_single_assignment_sentinel", object())
         self.dirty_expr_single_assignment_cache = self.analysis_context.setdefault("dirty_expr_single_assignment_cache", {})
         if not isinstance(self.dirty_expr_single_assignment_cache, dict):
@@ -1369,6 +1371,7 @@ class _StackCvarCanonicalize8616:
                 active_dirty_varids.discard(varid)
 
     def run_8616_part2(self) -> tuple[bool, object]:
+        """Phase 2: canonicalize a dirty expression; done when it changes."""
         self.dirtyized = self._canonicalize_dirty_expression(self.expr)
         if self.dirtyized is not self.expr:
             self.active_expr_ids.discard(self.expr_id)
@@ -1806,6 +1809,7 @@ class _StackCvarCanonicalize8616:
         return None
 
     def run_8616_part3(self) -> tuple[bool, object]:
+        """Phase 3: run the cvar/indexed/deref/stack-addr lanes, then the tail lane."""
         done, result = self._part3_cvar_lane_8616()
         if done:
             return True, result

@@ -131,7 +131,7 @@ def _write_project_awareness_docs(tmp_path: Path) -> None:
                 "dosunit.py",
                 "signature_catalog.py",
                 "scripts/test_pipeline.py",
-                "fast tier is unit-focused only",
+                "binary-budgeted",
                 "scripts/build_msc6_examples.py",
                 "examples/msc6_constructs/",
                 "reference/dosunit-execution-spec.md",
@@ -148,7 +148,7 @@ def _write_project_awareness_docs(tmp_path: Path) -> None:
                 "Ownership-manifest tests are fast-only",
                 "make quality-fast",
                 "make test-pipeline-fast",
-                "must stay unit-focused",
+                "proof budgets stay unchanged",
                 "make test-pipeline",
                 "make test-pipeline-expanded",
                 "libdosbox",
@@ -4035,7 +4035,7 @@ def test_architecture_check_requires_project_map_ratchet_marker(tmp_path):
                 "dosunit.py",
                 "signature_catalog.py",
                 "scripts/test_pipeline.py",
-                "fast tier is unit-focused only",
+                "binary-budgeted",
                 "scripts/build_msc6_examples.py",
                 "examples/msc6_constructs/",
                 "reference/dosunit-execution-spec.md",
@@ -4045,7 +4045,7 @@ def test_architecture_check_requires_project_map_ratchet_marker(tmp_path):
                 "make check-files",
                 "make quality-fast",
                 "make test-pipeline-fast",
-                "must stay unit-focused",
+                "proof budgets stay unchanged",
                 "make test-pipeline",
                 "make test-pipeline-expanded",
                 "libdosbox",
@@ -5945,7 +5945,7 @@ def test_architecture_check_requires_postprocess_stage_pipeline_contract_gate(tm
     (root / "decompiler_postprocess_stage.py").write_text(
         "from __future__ import annotations\n"
         "from .pipeline.contracts import assert_pipeline_contracts_8616\n\n"
-        "def _run_pipeline_contract_gate():\n"
+        "def _run_pipeline_contract_gate_8616():\n"
         "    return None\n",
         encoding="utf-8",
     )

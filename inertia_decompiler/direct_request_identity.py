@@ -40,6 +40,7 @@ class DirectRequestCacheInputs8616:
     proc_name: str | None
     proc_kind: str
     signature_catalog: Path | None
+    declared_call_effects: tuple[Path, ...] = ()
 
     @classmethod
     def from_cli(
@@ -69,6 +70,7 @@ class DirectRequestCacheInputs8616:
             proc_name=args.proc,
             proc_kind=args.proc_kind,
             signature_catalog=signature_catalog,
+            declared_call_effects=tuple(args.declared_call_effects),
         )
 
 
@@ -105,7 +107,11 @@ def direct_request_cache_enabled_8616(args: CliArguments) -> bool:
 def build_direct_request_cache_key_8616(
     inputs: DirectRequestCacheInputs8616,
 ) -> dict[str, object] | None:
-    """Build the content-addressed key for one direct request."""
+    """Build request identity; declaration fingerprints never prove consumption.
+
+    A matching key still requires current live admission authentication before
+    a receipt-bearing artifact may be emitted by the ordinary CLI path.
+    """
     key = _recovery_cache_key(
         binary_path=inputs.binary_path,
         kind=DIRECT_REQUEST_CACHE_NAMESPACE_8616,
@@ -127,6 +133,9 @@ def build_direct_request_cache_key_8616(
             "proc_name": inputs.proc_name,
             "proc_kind": inputs.proc_kind,
             "signature_catalog": _cache_file_fingerprint(inputs.signature_catalog),
+            "declared_call_effects": [
+                _cache_file_fingerprint(path) for path in inputs.declared_call_effects
+            ],
         },
     )
     if not isinstance(key, dict):

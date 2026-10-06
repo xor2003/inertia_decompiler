@@ -360,9 +360,11 @@ def _build_schedules(
 ) -> list[tuple[tuple[ScheduledWorkerSpec, ...], int]]:
     """Build ordered schedule waves from light, heavy, and exclusive workers."""
 
+    concurrent_light_paths = tuple(path for path in lane_paths["light"] if path not in exclusive_paths)
+    exclusive_light_paths = sorted(path for path in lane_paths["light"] if path in exclusive_paths)
     light_specs = [
         WorkerSpec(name=f"light-{index}", paths=paths)
-        for index, paths in enumerate(partition_paths(lane_paths["light"], path_weights, light_slots))
+        for index, paths in enumerate(partition_paths(concurrent_light_paths, path_weights, light_slots))
     ]
     schedules: list[tuple[tuple[ScheduledWorkerSpec, ...], int]] = []
     if light_specs:
@@ -400,6 +402,10 @@ def _build_schedules(
             )
         )
     schedules.extend((schedule, 1) for schedule in exclusive_schedules)
+    schedules.extend(
+        ((ScheduledWorkerSpec(WorkerSpec(f"light-exclusive-{index}", (path,)), 1),), 1)
+        for index, path in enumerate(exclusive_light_paths)
+    )
     return schedules
 
 

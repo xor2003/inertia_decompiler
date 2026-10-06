@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Test the pipeline contracts: SemanticLaneState and assert_closed_loop."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from angr_platforms.angr_platforms.X86_16.pipeline.contracts import (
@@ -137,6 +139,15 @@ class TestSemanticLaneState:
 
 class TestAssertPipelineContracts:
     """Test integration: assert_pipeline_contracts_8616."""
+
+    @pytest.mark.parametrize("lane_name", ["_inertia_stack_lane", "_inertia_condition_lane"])
+    def test_absent_other_lane_does_not_hide_broken_lane(self, lane_name: str) -> None:
+        """A missing attachment cannot erase another lane's unconsumed facts."""
+        broken = SemanticLaneState(name="retained", raw=1, normalized=1,
+                                   classified=1, materialized=0)
+        codegen = SimpleNamespace(**{lane_name: broken})
+        with pytest.raises(PipelineHardError, match="classified but 0 materialized"):
+            assert_pipeline_contracts_8616(codegen)
 
     def test_no_lanes_no_error(self):
         """When no lanes are set, no error should be raised."""

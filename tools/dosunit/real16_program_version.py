@@ -21,18 +21,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from angr_platforms.real16_version_response8616 import (
+    INT21_VERSION_FUNCTION_8616,
+    INT21_VERSION_MINIMUM_MAJOR_8616,
+    INT21_VERSION_SELECTOR_8616,
+    INT21_VERSION_SERIAL_MASK_8616,
+    INT21_VERSION_VECTOR_8616,
+    version_response_words_8616,
+)
+
 # INT21/AH=30 is Get DOS Version; AL=00 is the only admitted selector. Other
 # AL subfunctions (version flags, OEM-dependent variants) are never modeled.
-VERSION_FUNCTION: int = 0x30
-VERSION_SELECTOR: int = 0x00
+# The identity constants and the AX/BX/CX response encoding are projections
+# of the shared ``real16_version_response8616`` owner — this module keeps
+# its public names but never re-implements them.
+VERSION_FUNCTION: int = INT21_VERSION_FUNCTION_8616
+VERSION_SELECTOR: int = INT21_VERSION_SELECTOR_8616
 
 # DOS 2.0 introduced the documented return convention (minor in AH, OEM in
 # BH, 24-bit serial in BL:CX); a declared major below 2 would publish a
 # minor/serial whose meaning the contract does not define.
-MINIMUM_MAJOR: int = 2
+MINIMUM_MAJOR: int = INT21_VERSION_MINIMUM_MAJOR_8616
 
 # BL:CX carries a 24-bit serial: BL holds bits 16..23, CX bits 0..15.
-SERIAL_MASK: int = 0xFFFFFF
+SERIAL_MASK: int = INT21_VERSION_SERIAL_MASK_8616
 
 # The deterministic report payload for one answered query:
 # vector, function, selector, major, minor, oem, then serial little-endian.
@@ -151,11 +163,10 @@ def program_version_query(policy: VersionPolicy, *, selector: int) -> VersionCal
     _checked_u8(selector, "version selector")
     if selector != VERSION_SELECTOR:
         return VersionRefused(selector, VersionRefusal.UNSUPPORTED_SELECTOR)
-    return VersionAnswered(
-        ax=(policy.minor << 8) | policy.major,
-        bx=(policy.oem << 8) | (policy.serial >> 16),
-        cx=policy.serial & _U16_MAX,
+    ax, bx, cx = version_response_words_8616(
+        policy.major, policy.minor, policy.oem, policy.serial
     )
+    return VersionAnswered(ax=ax, bx=bx, cx=cx)
 
 
 def version_event_data(policy: VersionPolicy) -> bytes:
@@ -168,7 +179,7 @@ def version_event_data(policy: VersionPolicy) -> bytes:
     if not isinstance(policy, VersionPolicy):
         raise ValueError("version event data requires a declared VersionPolicy")
     return (
-        bytes((0x21, VERSION_FUNCTION, VERSION_SELECTOR, policy.major, policy.minor, policy.oem))
+        bytes((INT21_VERSION_VECTOR_8616, VERSION_FUNCTION, VERSION_SELECTOR, policy.major, policy.minor, policy.oem))
         + policy.serial.to_bytes(3, "little")
     )
 
@@ -178,7 +189,7 @@ def version_receipt_complete(data: bytes) -> bool:
     return (
         type(data) is bytes
         and len(data) == VERSION_EVENT_BYTES
-        and data[:3] == bytes((0x21, VERSION_FUNCTION, VERSION_SELECTOR))
+        and data[:3] == bytes((INT21_VERSION_VECTOR_8616, VERSION_FUNCTION, VERSION_SELECTOR))
         and data[3] >= MINIMUM_MAJOR
     )
 

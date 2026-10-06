@@ -15,6 +15,12 @@ from enum import StrEnum
 
 from ..ir import IRAddress, IRInstr, IRValue, MemSpace
 from ..ir.logical_memory_contracts import IRMemoryAccessKind8616
+from ..ir.scalar_value_projection import (
+    ScalarProjectionKind8616,
+    scalar_active_unary_projection_8616,
+    scalar_produced_decoration_8616,
+    scalar_read_projection_8616,
+)
 from ..ir.ssa_function import SSAFunctionArtifact
 from .carry_borrow_projection import (
     CarryBorrowAliasEvidence8616,
@@ -109,6 +115,22 @@ class CarryBorrowDestinationAliasEvidence8616:
         return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
 
 
+def _captured_lane_read_matches_8616(value: IRValue, definition: IRInstr) -> bool:
+    """Require a width-preserving read of the exact retained producer."""
+    destination = definition.dst
+    if destination is None or destination.active_unary is not None:
+        return False
+    if value.size != destination.size or definition.size != value.size:
+        return False
+    if value.offset != 0 or value.index is not None:
+        return False
+    projection = scalar_read_projection_8616(
+        read_expr=value.expr, read_bits=value.size * 8,
+        produced=scalar_produced_decoration_8616(definition), produced_bits=definition.size * 8,
+    )
+    return projection is not None and projection.kind is not ScalarProjectionKind8616.CONVERSION
+
+
 def _value_reaches_result_lane(
     instructions: tuple[IRInstr, ...],
     before_index: int,
@@ -119,7 +141,24 @@ def _value_reaches_result_lane(
     visited: frozenset[int] = frozenset(),
 ) -> bool:
     """Trace one byte value to an exact register version and byte lane."""
+    unary = value.active_unary
+    if unary is not None:
+        projection = scalar_active_unary_projection_8616(value)
+        if projection is None or (projection.source_bits, projection.target_bits) != (16, 8):
+            return False
+        return _value_reaches_result_lane(
+            instructions, before_index, unary.operand, expected,
+            expected_domain, required_shift, visited,
+        )
+    plain_register = (
+        value.source_tmp is None
+        and value.size == expected.size
+        and value.offset == 0
+        and value.index is None
+        and value.expr in {None, ()}
+    )
     if (
+        plain_register and
         value.space is MemSpace.REG
         and register_domain_for_name(value.name) == expected_domain
         and value.version == expected.version
@@ -136,6 +175,8 @@ def _value_reaches_result_lane(
     if len(definitions) != 1:
         return False
     definition_index, definition = definitions[0]
+    if not _captured_lane_read_matches_8616(value, definition):
+        return False
     next_visited = visited | {source_tmp}
     if definition.op == "MOV" and len(definition.args) == 1 and isinstance(definition.args[0], IRValue):
         return _value_reaches_result_lane(

@@ -14,7 +14,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, StrEnum
 from types import SimpleNamespace
-from typing import Any, Protocol, cast
+from typing import Any, ClassVar, Protocol, cast
 
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeBottom, SimTypeFunction
@@ -2028,7 +2028,7 @@ class _RegisterScanStep8616:
 class _RegisterSourceScan8616:
     """Backward scan state for decoded register-source tracing."""
 
-    max_skips = 8
+    max_skips: ClassVar[int] = 8
 
     insns: tuple[object, ...]
     reg_name: str
@@ -2245,7 +2245,7 @@ class _RegisterSourceScan8616:
 class _PushArgSourceScan8616(_RegisterSourceScan8616):
     """Backward scan for a pushed register, with push/call-aware barriers."""
 
-    max_skips = 6
+    max_skips: ClassVar[int] = 6
 
     def _mov_dest_arm(
         self, insn: object, mnemonic: str, operands: tuple[object, ...],

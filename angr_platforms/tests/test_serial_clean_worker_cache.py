@@ -63,6 +63,7 @@ def _segment_evidence_record() -> dict[str, object]:
         "local_clobbered_registers": [],
         "restored_registers": [],
         "control_transfers": [],
+        "declared_call_consumptions": [],
         "summary": {
             "raw_fact_count": 0,
             "normalized_fact_count": 0,
@@ -219,6 +220,7 @@ def test_clean_worker_parent_reuses_validated_result_without_second_process(monk
         blob=False,
         signature_catalog=None,
         trace_c_stages=False,
+        declared_call_effects=(),
         dump_layers=False,
         dump_layer_dir=tmp_path / "layers",
         dump_layer_filter="",

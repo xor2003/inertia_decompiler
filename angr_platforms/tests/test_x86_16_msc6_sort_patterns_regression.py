@@ -38,6 +38,7 @@ def _decompile_sort_pattern(function_name: str) -> subprocess.CompletedProcess[s
     )
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
     not SORT_PATTERNS_EXE.is_file(),
     reason="SORTPAT MS C example binary is not available in this workspace.",
@@ -55,6 +56,7 @@ def test_msc6_sortdemo_global_pair_sum_joins_split_word_load() -> None:
     assert not re.search(r"\+ g_work;", combined)
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
     not SORT_PATTERNS_EXE.is_file(),
     reason="SORTPAT MS C example binary is not available in this workspace.",
@@ -78,6 +80,7 @@ def test_msc6_sortdemo_single_pass_swap_rejects_wrapped_local_arguments() -> Non
     assert not re.search(r"\b(?:v8|v9|v10|arg)\b", combined)
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
     not SORT_PATTERNS_EXE.is_file(),
     reason="SORTPAT MS C example binary is not available in this workspace.",
@@ -101,6 +104,7 @@ def test_msc6_sortdemo_exchange_sort_keeps_indexed_word_condition() -> None:
     assert not re.search(r"\b(?:flags|v13|v14|v15|SEG_U16)\b", function_text)
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.skipif(
     not SORT_PATTERNS_EXE.is_file(),
     reason="SORTPAT MS C example binary is not available in this workspace.",

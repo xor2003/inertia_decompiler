@@ -38,6 +38,7 @@ def _args(binary: Path) -> CliArguments:
     args.dump_layer_filter = ""
     args.proc = None
     args.proc_kind = "NEAR"
+    args.declared_call_effects = ()
     args.timeout = 60
     args.window = 0x200
     args.max_memory_mb = 2048

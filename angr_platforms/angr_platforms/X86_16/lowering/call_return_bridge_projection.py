@@ -4,7 +4,11 @@ Layer: Types/Lowering.
 Responsibility: expose both assignments of an unchanged adjacent bridge to
 callsite replay consumers. This neither discovers calls nor repairs arguments
 or placement. Consumers must still match their authoritative callsite fact.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
+
+from __future__ import annotations
 
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeShort

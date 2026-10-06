@@ -81,12 +81,14 @@ callee, region-boundary or environment proofs.
   Every corresponding block must pass. This is induction over matching graphs,
   including cycles; no loop-unroll bound is treated as a proof. Shape changes,
   indirect jumps, calls, exception edges, and effects after conditional exits
-  refuse. A mismatched edge or changed loop body fails the regression controls.
+  refuse in this initial lane; the shared retries below may discharge them.
+  A mismatched edge or changed loop body fails the regression controls.
 * `region` composes every reachable path of a bounded, acyclic PE32 function
   through full-width linear successor addresses, then compares the return and
   memory effects with dosunit Z3. It can prove equal behavior across different
   CFG shapes. Calls, loops, indirect edges, incomplete scans, and exhausted
-  budgets refuse. The defaults cap each side at 64 blocks, 128 block
+  budgets refuse in this initial lane. Shared retries can discharge supported
+  calls and loops. The defaults cap each side at 64 blocks, 128 block
   compositions, 12,000 expression nodes, 64 solver inputs, and 128 memory
   stores. A SAT result involving uninterpreted lazy flags remains a refusal.
 * `auto` runs `region` first and retries its loop refusals with the
@@ -114,8 +116,9 @@ callee, region-boundary or environment proofs.
   initialized data, or arbitrary address-valued integers. Review `globals.json`.
   It is not enabled in the unnormalized batch or matched-CFG mode. Inferred
   16-bit layout heuristics and binary-equality shortcuts are disabled.
-* Whole-region modes also retry incomplete evidence through the shared flat32
-  direct-call composer and closed CFG reblocking. Direct acyclic callees use
+* Non-leaf modes also retry incomplete evidence through the shared flat32
+  call composer, closed CFG reblocking, checked call-loop induction and
+  macro-step induction. Direct acyclic callees use
   their actual binary effects; the composer proves the full saved return
   target before continuing. Unconditional statically resolved transfers to
   declared foreign entries also compose the destination's full effects,
@@ -124,8 +127,14 @@ callee, region-boundary or environment proofs.
   tail work is reserved before nested composition. Interior, undeclared,
   conditional outside edges and cycles still refuse. Reports retain
   `oracle_tail_transfers`, `candidate_tail_transfers` and `tail_sites`; tail-only
-  premise-dependent proofs receive the same environment checks as calls. Indirect/recursive targets, unproved return-slot
-  preservation and exhausted limits refuse. Strict memory includes stack
+  premise-dependent proofs receive the same environment checks as calls.
+  Finite indirect calls compose every admitted target's validated body and
+  prove complete target coverage. Unknown or incomplete targets, ordinary
+  recursive dependencies, unproved return-slot preservation and exhausted
+  limits refuse. `--recursive` separately reports an image-bound component
+  proof with explicit premises; it does not discharge ordinary function rows.
+  See the [execution specification](../../reference/dosunit-execution-spec.md#710-pe32-public-recursive-component-reports)
+  for its access-domain contract. Strict memory includes stack
   stores. Refused retries remain in `additional_proof_attempts`; their
   `calls.return_proof_failure` retains the comparison side, CALL instruction
   address (`callsite`), owning block (`call_block`), callee, continuation and

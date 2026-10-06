@@ -1,7 +1,11 @@
-"""Layer: frontend condition IR provenance.
+"""Layer: IR (frontend condition IR provenance).
 
 Responsibility: attach complete decoded conditional-control bytes before facts
 enter frontend caches. This owner never resolves CS or invents CFG targets.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 from __future__ import annotations
 

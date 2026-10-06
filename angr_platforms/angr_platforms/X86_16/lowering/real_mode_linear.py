@@ -5107,6 +5107,7 @@ class _DsEsGlobalDerefRun8616:
         return None
 
     def global_cvar_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
+        """Return a reused or fresh global memory cvar for the access displacement."""
         addr = access.displacement & 0xFFFF
         name = f"g_{addr:04X}"
         scalar_width = min(access.width or 1, 2)
@@ -5129,6 +5130,7 @@ class _DsEsGlobalDerefRun8616:
             unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
     def global_expr_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
+        """Build the global dereference expression, including residual index terms."""
         if not access.residual_terms:
             return self.global_cvar_8616(access)
         target_type = _type_for_access_width_8616(access.width)
@@ -5151,6 +5153,7 @@ class _DsEsGlobalDerefRun8616:
             codegen=self.codegen,
         )
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        """Lower a stable DS/ES linear dereference to a global; node when refused."""
         access = match_stable_ds_es_linear_global_access_8616(node, self.project, self.codegen)
         if access is not None:
             if not may_lower_codegen_access_to_entry_ds_object_8616(
@@ -5166,6 +5169,7 @@ class _DsEsGlobalDerefRun8616:
             return self.global_expr_8616(access)
         return node
     def replace_children(self, root_node: StructuredAstValue) -> bool:
+        """Walk the structured tree applying the transform; True when any node changed."""
         return _replace_children_walk_8616(root_node, self.seen, self.transform)
 def lower_stable_ds_es_linear_global_dereferences_8616(
     codegen: StructuredAstValue, project: StructuredAstValue | None = None
@@ -5219,6 +5223,7 @@ class _DsEsGlobalAddrRun8616:
     seen: set[int] = field(default_factory=set)
 
     def global_address_cvar_8616(self, displacement: int) -> StructuredAstValue:
+        """Return a reused or fresh byte global cvar for the displacement."""
         addr = displacement & 0xFFFF
         name = f"g_{addr:04X}"
         target_type = SimTypeChar(False)
@@ -5251,6 +5256,7 @@ class _DsEsGlobalAddrRun8616:
         return cvar
 
     def reference_expr_8616(self, displacement: int) -> StructuredAstValue:
+        """Build a Reference expression over the displacement's global cvar."""
         base_cvar = self.global_address_cvar_8616(displacement)
         return structured_c.CUnaryOp(
             "Reference",
@@ -5259,6 +5265,7 @@ class _DsEsGlobalAddrRun8616:
         )
 
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        """Lower a stable DS/ES linear address to a typed global reference; node when refused."""
         access = match_stable_ds_es_linear_global_address_8616(node, self.project, self.codegen)
         if access is None:
             return node
@@ -5281,6 +5288,7 @@ class _DsEsGlobalAddrRun8616:
         self.changed = True
         return structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=self.codegen)
     def replace_children(self, root_node: StructuredAstValue) -> bool:
+        """Walk the structured tree applying the transform; True when any node changed."""
         return _replace_children_walk_8616(root_node, self.seen, self.transform)
 def lower_stable_ds_es_linear_global_addresses_8616(
     codegen: StructuredCodegenValue, project: AngrProjectValue = None
@@ -10181,6 +10189,7 @@ class _TaggedAssignmentReplacer8616:
         return node
 
     def is_duplicate_tagged_assignment(self, node: StructuredAstValue) -> bool:
+        """Return whether the node is a later duplicate tagged assignment to drop."""
         return (
             self.remove_duplicate_tagged_assignments
             and self.materialized

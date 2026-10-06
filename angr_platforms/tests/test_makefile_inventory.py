@@ -40,3 +40,42 @@ def test_appended_duplicate_and_missing_targets_are_checked(tmp_path: Path) -> N
     violations = architecture._check_makefile_gate_targets(tmp_path)
     assert any(item.rule == "makefile-duplicate-qa-target" for item in violations)
     assert any(item.rule == "makefile-missing-qa-target" for item in violations)
+
+
+def test_included_expanded_inventory_retains_duplicate_checks(tmp_path: Path) -> None:
+    (tmp_path / "present.py").write_text("", encoding="utf-8")
+    (tmp_path / "qa.mk").write_text(
+        "OWNERS := present.py\nQA_TYPED_FILES := $(OWNERS) $(OWNERS)\n", encoding="utf-8"
+    )
+    (tmp_path / "Makefile").write_text("include qa.mk\n", encoding="utf-8")
+    violations = architecture._check_makefile_gate_targets(tmp_path)
+    assert any(item.rule == "makefile-duplicate-qa-target" for item in violations)
+    assert not any(item.rule == "makefile-inventory-refused" for item in violations)
+
+
+@pytest.mark.parametrize("source", ["include missing.mk\n", "private QA_TYPED_FILES = hidden.py\n"])
+def test_uncertain_inventory_is_refused(tmp_path: Path, source: str) -> None:
+    (tmp_path / "Makefile").write_text(source, encoding="utf-8")
+    violations = architecture._check_makefile_gate_targets(tmp_path)
+    assert any(item.rule == "makefile-inventory-refused" for item in violations)
+
+
+def test_optional_absent_include_is_not_a_refusal(tmp_path: Path) -> None:
+    (tmp_path / "Makefile").write_text("-include missing.mk\n", encoding="utf-8")
+    violations = architecture._check_makefile_gate_targets(tmp_path)
+    assert not any(item.rule == "makefile-inventory-refused" for item in violations)
+
+
+@pytest.mark.parametrize("selector,missing", [("test_present", False), ("test_missing", True)])
+def test_whole_file_qa_covers_only_existing_pipeline_selectors(
+    tmp_path: Path, selector: str, missing: bool
+) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "test_present.py").write_text("def test_present():\n    pass\n", encoding="utf-8")
+    (tmp_path / "scripts" / "test_pipeline.py").write_text(
+        f"FOCUSED_PYTEST_TARGETS = ('test_present.py::{selector}',)\n", encoding="utf-8"
+    )
+    (tmp_path / "Makefile").write_text("QA_PYTEST_TARGETS := test_present.py\n", encoding="utf-8")
+    violations = architecture._check_makefile_gate_targets(tmp_path)
+    assert not any(item.rule == "makefile-pipeline-fast-target" for item in violations)
+    assert any(item.rule == "makefile-missing-qa-node" for item in violations) is missing

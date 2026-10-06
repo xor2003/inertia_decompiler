@@ -111,6 +111,7 @@ def test_direct_indexed_push_refuses_non_ds_or_unknown_segment(segment: int) -> 
     assert evidence == ()
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.xdist_group("sortd-initmenu")
 def test_sortd_initmenu_materializes_indexed_near_pointer_table(tmp_path: Path) -> None:
     isolated_binary = tmp_path / "SORTD.EXE"

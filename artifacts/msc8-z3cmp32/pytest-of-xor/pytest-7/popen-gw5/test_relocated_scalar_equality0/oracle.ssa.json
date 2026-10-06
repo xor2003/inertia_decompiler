@@ -1,0 +1,244 @@
+{
+  "schema": "dosunit.ssa.v1",
+  "exe": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-7/popen-gw5/test_relocated_scalar_equality0/oracle.bin",
+  "source_ir": "vex",
+  "module": "oracle",
+  "parameters": {
+    "output_regs": [
+      "eax",
+      "edx",
+      "esp",
+      "ebx",
+      "ebp",
+      "esi",
+      "edi",
+      "eip",
+      "d",
+      "cs",
+      "ds",
+      "es",
+      "fs",
+      "gs",
+      "ss"
+    ],
+    "source_ir": "vex",
+    "max_blocks_per_function": 1,
+    "max_insns_per_function": 1024,
+    "max_assignments_per_function": 4096,
+    "scan_limit": 8192,
+    "cache_dir": null,
+    "follow_call_fallthrough": false
+  },
+  "functions": [
+    {
+      "function": {
+        "id": "oracle:sub_test",
+        "name": "sub_test"
+      },
+      "part": {
+        "kind": "block",
+        "index": 0,
+        "entry_delta": "0x0"
+      },
+      "function_entry": {
+        "linear": "0x100000"
+      },
+      "entry": {
+        "linear": "0x100000"
+      },
+      "source": {
+        "ir": "vex",
+        "jumpkind": "Ijk_Ret",
+        "machine_code_size": 6
+      },
+      "inputs": [
+        {
+          "name": "cs",
+          "width": 16
+        },
+        {
+          "name": "d",
+          "width": 32
+        },
+        {
+          "name": "ds",
+          "width": 16
+        },
+        {
+          "name": "ebp",
+          "width": 32
+        },
+        {
+          "name": "ebx",
+          "width": 32
+        },
+        {
+          "name": "edi",
+          "width": 32
+        },
+        {
+          "name": "edx",
+          "width": 32
+        },
+        {
+          "name": "es",
+          "width": 16
+        },
+        {
+          "name": "esi",
+          "width": 32
+        },
+        {
+          "name": "esp",
+          "width": 32
+        },
+        {
+          "name": "fs",
+          "width": 16
+        },
+        {
+          "name": "gs",
+          "width": 16
+        },
+        {
+          "kind": "memory",
+          "name": "mem",
+          "addr_width": 32,
+          "value_width": 8
+        },
+        {
+          "name": "ss",
+          "width": 16
+        }
+      ],
+      "outputs": {
+        "eax": {
+          "op": "const",
+          "value": "0x1234",
+          "width": 32
+        },
+        "edx": {
+          "op": "input",
+          "name": "edx",
+          "width": 32
+        },
+        "esp": {
+          "ref": "v0"
+        },
+        "ebx": {
+          "op": "input",
+          "name": "ebx",
+          "width": 32
+        },
+        "ebp": {
+          "op": "input",
+          "name": "ebp",
+          "width": 32
+        },
+        "esi": {
+          "op": "input",
+          "name": "esi",
+          "width": 32
+        },
+        "edi": {
+          "op": "input",
+          "name": "edi",
+          "width": 32
+        },
+        "eip": {
+          "ref": "v1"
+        },
+        "d": {
+          "op": "input",
+          "name": "d",
+          "width": 32
+        },
+        "cs": {
+          "op": "input",
+          "name": "cs",
+          "width": 16
+        },
+        "ds": {
+          "op": "input",
+          "name": "ds",
+          "width": 16
+        },
+        "es": {
+          "op": "input",
+          "name": "es",
+          "width": 16
+        },
+        "fs": {
+          "op": "input",
+          "name": "fs",
+          "width": 16
+        },
+        "gs": {
+          "op": "input",
+          "name": "gs",
+          "width": 16
+        },
+        "ss": {
+          "op": "input",
+          "name": "ss",
+          "width": 16
+        }
+      },
+      "assignments": [
+        {
+          "id": "v0",
+          "op": "add",
+          "width": 32,
+          "args": [
+            {
+              "op": "input",
+              "name": "esp",
+              "width": 32
+            },
+            {
+              "op": "const",
+              "value": "0x4",
+              "width": 32
+            }
+          ]
+        },
+        {
+          "id": "v1",
+          "op": "loadle",
+          "width": 32,
+          "args": [
+            {
+              "op": "mem_input",
+              "name": "mem",
+              "addr_width": 32,
+              "value_width": 8
+            },
+            {
+              "op": "input",
+              "name": "esp",
+              "width": 32
+            }
+          ]
+        }
+      ],
+      "id": "ssa-function:1c3ad922771031dc7e3c368574263008f62256d4025e91822ca6ddced59b7e69"
+    }
+  ],
+  "refusals": [],
+  "counters": {
+    "functions_seen": 1,
+    "functions_attempted": 1,
+    "functions_lowered": 1,
+    "functions_refused": 0,
+    "ssa_parts_lowered": 1,
+    "ssa_parts_refused": 0,
+    "lifter_blocks_lifted": 1,
+    "lifter_cache_hits": 0,
+    "lifter_cache_misses": 0,
+    "lifter_cache_writes": 0,
+    "lifter_cache_errors": 0,
+    "assignments_emitted": 2,
+    "refusals_by_reason": {}
+  },
+  "id": "ssa:6466a342dec4fc580d474b51d46df649db8b040d20a2ea6fab2dee3aaac14534"
+}

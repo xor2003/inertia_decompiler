@@ -4,6 +4,9 @@ Layer: Alias.
 Responsibility: consume Frontend/IR coverage and Semantics call identity while
 retaining the local storage theorem. Proves a contextual input at callee entry,
 not a stable callee LOAD, complete caller census, callee effect or ABI signature.
+Owns storage identity.
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting
+work here.
 """
 
 from __future__ import annotations

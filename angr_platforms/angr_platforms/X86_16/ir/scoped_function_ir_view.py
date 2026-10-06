@@ -23,9 +23,11 @@ effect-transfer and call-proof binding surface — admitted
 blocks are reconstructed by the application owner, so consumers must
 take instruction identity from ``source_block``/``source_artifact``, not
 from the effective projection. There is no context-free ``complete`` and
-no conversion to a universally publishable artifact. Do not perform
-alias, widening, lowering/materialization, structuring, rewrite,
-postprocess, or CLI/reporting work here.
+no conversion to a universally publishable artifact.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

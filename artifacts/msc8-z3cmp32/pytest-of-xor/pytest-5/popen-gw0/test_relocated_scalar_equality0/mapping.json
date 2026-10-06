@@ -1,0 +1,16 @@
+{
+  "schema": "dosunit.mapping.v1",
+  "oracle_module": "oracle",
+  "candidate_module": "candidate",
+  "functions": [
+    {
+      "oracle_id": "oracle:sub_test",
+      "oracle_name": "sub_test",
+      "candidate_id": "candidate:sub_test",
+      "candidate_name": "sub_test",
+      "sources": [
+        "name_match"
+      ]
+    }
+  ]
+}

@@ -46,7 +46,8 @@ def test_signature_loader_keeps_debug_fields_empty(tmp_path, monkeypatch, matche
 def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypatch, capsys):
     project = SimpleNamespace()
     args = SimpleNamespace(
-        binary=tmp_path / "APP.EXE", proc=None, blob=False, base_addr=0x1000,
+        binary=tmp_path / "APP.EXE", proc=None, declared_call_effects=(),
+        blob=False, base_addr=0x1000,
         entry_point=0x1000, c_target="portable-flat", trace_c_stages=False,
         dump_layers=False, dump_layer_dir=None, dump_layer_filter=None,
         ignore_local_sidecar_hints=True, pat_backend="python_regex",

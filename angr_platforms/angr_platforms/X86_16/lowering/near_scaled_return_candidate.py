@@ -10,6 +10,7 @@ decide pointer type, pointee family, segment binding, source signedness, or
 representable C, and it never mutates the project contract, codegen, callsite
 state, C AST, or the accepted storage contract.
 Consumes frontend, IR, and Semantics facts through owned typed interfaces only.
+Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 

@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +14,7 @@ CLI_PATH = REPO_ROOT / "decompile.py"
 SORTD_EXE = REPO_ROOT / "SORTD.EXE"
 
 
+@pytest.mark.requires_kvm
 def test_sortd_indexed_aggregate_load_and_store_recompile_sidecar_free(
     tmp_path: Path,
 ) -> None:

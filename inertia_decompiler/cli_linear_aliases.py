@@ -125,8 +125,8 @@ class _BytePairSeedVisitor:
         # Dynamic codegen boundary: older/newer angr versions differ on loop node classes.
         for_loop_type = getattr(structured_c, "CForLoop", None)
         if for_loop_type is not None and isinstance(node, for_loop_type):
-            # Dynamic codegen boundary: for-loop payload fields vary across angr C AST nodes.
             for attr in ("init", "condition", "iteration", "body"):
+                # Dynamic codegen boundary: for-loop payload fields vary across angr C AST nodes.
                 self.visit(getattr(node, attr, None))
 
     def visit_statements(self, node: structured_c.CStatements) -> None:
@@ -210,10 +210,10 @@ def _seed_adjacent_byte_pair_aliases(
     dereference_counts: Counter[int] = Counter()
     for node in iter_c_nodes_deep(statements):
         if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
-            # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
             _count_variable_ids_8616(
                 unwrap_c_casts,
                 structured_codegen_node,
+                # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
                 getattr(node, "operand", None),
                 dereference_counts,
             )

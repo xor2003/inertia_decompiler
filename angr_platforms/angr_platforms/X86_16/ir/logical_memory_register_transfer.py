@@ -30,6 +30,7 @@ from .scalar_definitions import (
     build_scalar_definition_index_8616,
     reaching_scalar_definitions_8616,
 )
+from .scalar_value_projection import scalar_active_unary_projection_8616
 from .ssa_function import SSAFunctionArtifact
 
 
@@ -42,6 +43,14 @@ class _LaneTrace8616:
     saw_extract: bool
     saw_shift: bool
     failure: LogicalMemoryRegisterTransferFailure8616 | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReloadMovCandidate8616:
+    """Internal word-register MOV proven to sit at one logical read site."""
+
+    source: IRValue
+    destination: IRValue
 
 
 def _site_8616(definition: ScalarDefinition8616) -> IndexedAddressDefinitionSite8616 | None:
@@ -78,6 +87,37 @@ def _unique_definition_8616(
     return candidates[0], None
 
 
+def _trace_store_projection_8616(
+    value: IRValue,
+    definitions: ScalarDefinitionIndex8616,
+    *,
+    block_addr: int,
+    before_index: int,
+    saw_extract: bool,
+    saw_shift: bool,
+    path: tuple[IndexedAddressDefinitionSite8616, ...],
+    depth: int,
+) -> _LaneTrace8616:
+    """Consume only an exact pending word-to-byte extraction at this use site."""
+    unary = value.active_unary
+    projection = scalar_active_unary_projection_8616(value)
+    if unary is None or projection is None or (projection.source_bits, projection.target_bits) != (16, 8):
+        return _LaneTrace8616(
+            None, path, saw_extract, saw_shift,
+            LogicalMemoryRegisterTransferFailure8616.VALUE_OPERATION_UNSUPPORTED,
+        )
+    return _trace_store_lane_8616(
+        unary.operand,
+        definitions,
+        block_addr=block_addr,
+        before_index=before_index,
+        saw_extract=True,
+        saw_shift=saw_shift,
+        path=path,
+        depth=depth + 1,
+    )
+
+
 def _trace_store_lane_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
@@ -97,6 +137,11 @@ def _trace_store_lane_8616(
             saw_extract,
             saw_shift,
             LogicalMemoryRegisterTransferFailure8616.VALUE_DEFINITION_CONFLICT,
+        )
+    if value.active_unary is not None:
+        return _trace_store_projection_8616(
+            value, definitions, block_addr=block_addr, before_index=before_index,
+            saw_extract=saw_extract, saw_shift=saw_shift, path=path, depth=depth,
         )
     definition, failure = _unique_definition_8616(
         definitions,
@@ -129,7 +174,8 @@ def _trace_store_lane_8616(
                 LogicalMemoryRegisterTransferFailure8616.VALUE_OPERATION_UNSUPPORTED,
             )
         if (
-            source.space is MemSpace.REG
+            source.active_unary is None
+            and source.space is MemSpace.REG
             and source.size == destination.size == 2
             and bool(source.name)
         ):
@@ -153,19 +199,18 @@ def _trace_store_lane_8616(
             path=next_path,
             depth=depth + 1,
         )
-    if instruction.op == "Iop_Shr16" and not saw_shift:
-        source = _shr16_high_byte_source_8616(instruction)
-        if source is not None:
-            return _trace_store_lane_8616(
-                source,
-                definitions,
-                block_addr=block_addr,
-                before_index=definition.instr_index,
-                saw_extract=saw_extract,
-                saw_shift=True,
-                path=next_path,
-                depth=depth + 1,
-            )
+    shifted_source = _shr16_high_byte_source_8616(instruction) if instruction.op == "Iop_Shr16" else None
+    if not saw_shift and shifted_source is not None:
+        return _trace_store_lane_8616(
+            shifted_source,
+            definitions,
+            block_addr=block_addr,
+            before_index=definition.instr_index,
+            saw_extract=saw_extract,
+            saw_shift=True,
+            path=next_path,
+            depth=depth + 1,
+        )
     return _LaneTrace8616(
         None,
         next_path,
@@ -271,15 +316,23 @@ def _word_register_destination_8616(instruction: IRInstr) -> bool:
     )
 
 
-def _reload_mov_candidate_8616(instruction: IRInstr, insn_addr: int) -> bool:
-    """Return whether the instruction is a word-register MOV at the read site."""
-    return (
+def _reload_mov_candidate_8616(
+    instruction: IRInstr,
+    insn_addr: int,
+) -> _ReloadMovCandidate8616 | None:
+    """Return the typed candidate when the instruction is a word-register MOV at the read site."""
+    if not (
         instruction.addr == insn_addr
         and instruction.op == "MOV"
         and _word_register_destination_8616(instruction)
         and len(instruction.args) == 1
-        and isinstance(instruction.args[0], IRValue)
-    )
+    ):
+        return None
+    destination = instruction.dst
+    source = instruction.args[0]
+    if destination is None or not isinstance(source, IRValue):
+        return None
+    return _ReloadMovCandidate8616(source, destination)
 
 
 def _trace_reload_8616(
@@ -297,12 +350,12 @@ def _trace_reload_8616(
         )
     candidates: list[LogicalMemoryRegisterTransfer8616] = []
     for instr_index, instruction in enumerate(block.instrs):
-        if not _reload_mov_candidate_8616(instruction, access.key.insn_addr):
+        candidate = _reload_mov_candidate_8616(instruction, access.key.insn_addr)
+        if candidate is None:
             continue
-        destination = instruction.dst
         source_definition, _failure = _unique_definition_8616(
             definitions,
-            instruction.args[0],
+            candidate.source,
             block_addr=block.addr,
             before_index=instr_index,
         )
@@ -323,7 +376,7 @@ def _trace_reload_8616(
                 LogicalMemoryRegisterTransfer8616(
                     LogicalMemoryRegisterTransferKind8616.RELOAD,
                     access,
-                    destination,
+                    candidate.destination,
                     move_site,
                     (*trace.definition_path, site, move_site),
                 )

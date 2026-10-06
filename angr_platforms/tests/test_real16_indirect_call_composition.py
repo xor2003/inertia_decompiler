@@ -305,9 +305,9 @@ def test_corrupt_far_return_frame_refuses_or_fails(tmp_path: Path, callee_body: 
 
 
 def test_near_indirect_call_refuses(tmp_path: Path) -> None:
-    """call ax cannot close a finite target set across the CS alias interval."""
+    """An uninitialized CALL AX cannot close catalog target coverage."""
     image = bytearray(0x400)
-    image[CALLER : CALLER + 6] = bytes.fromhex("bb4002ffd0c3")  # mov bx,0x240; call bx; ret
+    image[CALLER : CALLER + 6] = bytes.fromhex("bb4002ffd0c3")  # mov bx,0x240; call ax; ret
     image[CALLEE : CALLEE + 4] = bytes.fromhex("bb0100c3")
     oracle = _lower(tmp_path, bytes(image), _catalog(caller_size=6), "oracle")
     candidate = _lower(tmp_path, bytes(image), _catalog(caller_size=6), "candidate")
@@ -316,6 +316,36 @@ def test_near_indirect_call_refuses(tmp_path: Path) -> None:
     )
     assert result["status"] == "refused", result
     assert result["reason"] == "call_target_unresolved", result
+
+
+@pytest.mark.parametrize(
+    "callee_hex,expected_status",
+    [("bb0100c3", "passed"), ("c7c30100c3", "passed"), ("bb0200c3", "failed")],
+    ids=["self", "equivalent_encoding", "changed_effect"],
+)
+def test_near_indirect_cs_relative_target_composes(
+    tmp_path: Path, callee_hex: str, expected_status: str,
+) -> None:
+    """A target proved constant across admitted CS aliases composes a near frame."""
+    # BX = loaded callee linear address - (CS << 4), then CALL BX.
+    # This low MZ range has no offset wrap across the caller's admitted aliases.
+    target = IMAGE_LOAD_BASE + CALLEE
+    caller = bytes.fromhex("8ccb c1e304 f7db 81c3") + target.to_bytes(2, "little") + bytes.fromhex("ffd3 c3")
+    image = bytearray(0x400)
+    image[CALLER:CALLER + len(caller)] = caller
+    original = bytes.fromhex("bb0100c3")
+    changed = bytes.fromhex(callee_hex)
+    oracle, candidate = _lower_pair(
+        tmp_path, bytes(image), bytes(image), {CALLEE: original}, {CALLEE: changed},
+        _catalog(callee_body=original, caller_size=len(caller)),
+        _catalog(callee_body=changed, caller_size=len(caller)),
+    )
+    result = compare_real16_with_calls(oracle, candidate, "demo.exe:caller", timeout_ms=20000)
+    assert result["status"] == expected_status, result
+    for counter in ("indirect_call_sites", "indirect_targets_proved", "return_targets_proved", "cs_preserved_proved"):
+        assert result["calls"][counter] == 2, result
+    if expected_status == "failed":
+        assert result["reason"] == "observable_mismatch", result
 
 
 def test_stale_callee_bytes_refuse(tmp_path: Path) -> None:

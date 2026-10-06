@@ -104,14 +104,28 @@ def direct_near_call_target_is_bound_8616(
     This establishes the call coordinate only, not any callee effect or ABI.
     Synthetic targets and absent/malformed third-party loader surfaces refuse.
     """
+    synthetic = synthetic_call_stub_registry_8616(project)
+    if synthetic is not None and (not synthetic.closes_evidence or target_addr in synthetic.addresses):
+        return False
+    return direct_near_call_encoding_is_bound_8616(
+        project, callsite_addr, return_addr, target_addr, frame_kind
+    )
+
+
+def direct_near_call_encoding_is_bound_8616(
+    project: object, callsite_addr: int | None, return_addr: int | None,
+    target_addr: int | None, frame_kind: CallsiteMachineFrameKind8616 | None,
+) -> bool:
+    """Bind current E8 bytes to an exact same-image target, without effects.
+
+    This neutral encoding predicate does not authorize synthetic behavior or
+    prove a real callee body. Its consumer must enforce its target policy.
+    """
     if frame_kind is not CallsiteMachineFrameKind8616.NEAR:
         return False
     if type(callsite_addr) is not int or callsite_addr < 0 or return_addr != callsite_addr + 3:
         return False
     if type(target_addr) is not int or target_addr < 0:
-        return False
-    synthetic = synthetic_call_stub_registry_8616(project)
-    if synthetic is not None and (not synthetic.closes_evidence or target_addr in synthetic.addresses):
         return False
     boundary = cast(_ProjectSurface8616, project)
     try:
@@ -164,6 +178,7 @@ def prove_direct_near_ret_only_effect_8616(
 __all__ = [
     "DirectRetCallEffect8616",
     "DirectRetCallEffectVerdict8616",
+    "direct_near_call_encoding_is_bound_8616",
     "direct_near_call_target_is_bound_8616",
     "prove_direct_near_ret_only_effect_8616",
 ]

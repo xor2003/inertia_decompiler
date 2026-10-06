@@ -662,15 +662,25 @@ def _try_ite_condition_8616(
     expr_to_value: _ExprToValue,
     tmp_exprs: _TmpExprs | None,
 ) -> IRCondition | None:
-    """Lift one ITE 1/0 arm to its branch condition, possibly inverted."""
+    """Retain a Boolean ITE's guard, preserving richer recovered conditions.
+
+    Exact 1/0 arms have the guard's truth value even when the partial
+    recognizer cannot recover a comparison. In that case the existing total
+    converter retains the guard as a typed scalar predicate, including its
+    captured temporary and conversion metadata.
+    """
     cond_expr = _expr_cond(expr)
     iftrue = _expr_iftrue(expr)
     iffalse = _expr_iffalse(expr)
-    cond = _try_expr_to_condition(cond_expr, tmps, conditions, expr_to_value=expr_to_value, tmp_exprs=tmp_exprs)
-    if cond is None:
-        return None
     iftrue_const = _const_value(iftrue)
     iffalse_const = _const_value(iffalse)
+    if (iftrue_const, iffalse_const) not in ((1, 0), (0, 1)):
+        return None
+    cond = _try_expr_to_condition(cond_expr, tmps, conditions, expr_to_value=expr_to_value, tmp_exprs=tmp_exprs)
+    if cond is None:
+        cond = _expr_to_condition_impl_8616(
+            cond_expr, tmps, conditions, expr_to_value=expr_to_value, tmp_exprs=tmp_exprs
+        )
     if (iftrue_const, iffalse_const) == (1, 0):
         return cond
     if (iftrue_const, iffalse_const) == (0, 1):

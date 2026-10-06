@@ -56,12 +56,18 @@ def lst_functions(path: Path) -> dict[str, tuple[int, int]]:
 
 def _cached_listing[ListingValue](
     path: Path,
-    cache_dir: Path,
+    cache_dir: Path | None,
     kind: str,
     parser: Callable[[Path], dict[str, ListingValue]],
     decode: Callable[[object], dict[str, ListingValue] | None],
 ) -> dict[str, ListingValue]:
-    """Share parsed listing metadata across shards with content-based invalidation."""
+    """Share parsed listing metadata across shards with content-based invalidation.
+
+    ``cache_dir=None`` bypasses the cache outright: the parser result is
+    returned directly with no read, write or lock of any cache artifact.
+    """
+    if cache_dir is None:
+        return parser(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"lst-v{_LISTING_CACHE_VERSION}-{kind}-{digest}.json"
@@ -115,7 +121,7 @@ def _decode_cached_functions(entries: object) -> dict[str, tuple[int, int]] | No
     return {name: (bounds[0], bounds[1]) for name, bounds in entries.items()}
 
 
-def cached_lst_functions(path: Path, cache_dir: Path) -> dict[str, tuple[int, int]]:
+def cached_lst_functions(path: Path, cache_dir: Path | None) -> dict[str, tuple[int, int]]:
     """Load function bounds from a validated cache or parse the listing."""
     return _cached_listing(path, cache_dir, "functions", lst_functions, _decode_cached_functions)
 
@@ -222,7 +228,7 @@ def _decode_cached_data_symbols(entries: object) -> dict[str, int] | None:
     return entries
 
 
-def cached_lst_data_symbols(path: Path, cache_dir: Path) -> dict[str, int]:
+def cached_lst_data_symbols(path: Path, cache_dir: Path | None) -> dict[str, int]:
     """Load data labels from a validated cache or parse the listing."""
     return _cached_listing(path, cache_dir, "data", lst_data_symbols, _decode_cached_data_symbols)
 

@@ -5,6 +5,8 @@ Tests segment classification, far pointer detection,
 and segment association building across functions.
 """
 
+from types import SimpleNamespace
+
 import pytest
 from angr_platforms.X86_16.segmented_memory_reasoning import (
     FarPointerRecovery,
@@ -15,8 +17,31 @@ from angr_platforms.X86_16.segmented_memory_reasoning import (
     SegmentedPointer,
     SegmentLoweringDecision,
     SegmentRegister,
+    _segment_assignments_or_empty_8616,
     apply_x86_16_segmented_memory_reasoning,
 )
+
+
+@pytest.mark.parametrize("evidence", [None, (), []])
+def test_optional_segment_assignments_preserve_empty_evidence(evidence: object) -> None:
+    """Absent and empty attachments must not fabricate segment assignments."""
+    assert _segment_assignments_or_empty_8616(object()) == ()
+    assert _segment_assignments_or_empty_8616(
+        SimpleNamespace(_inertia_segment_assignments=evidence)
+    ) == ()
+
+
+@pytest.mark.parametrize("error_type", [AttributeError, ValueError])
+def test_segment_assignment_truthiness_errors_propagate(error_type: type[Exception]) -> None:
+    """Only attachment lookup may treat AttributeError as absent evidence."""
+    class BrokenEvidence:
+        def __bool__(self) -> bool:
+            raise error_type("sentinel truthiness failure")
+
+    with pytest.raises(error_type, match="sentinel truthiness failure"):
+        _segment_assignments_or_empty_8616(
+            SimpleNamespace(_inertia_segment_assignments=BrokenEvidence())
+        )
 
 
 class TestSegmentRegister:

@@ -1797,7 +1797,9 @@ def _run_decompile_proc(
     analysis_timeout: int = 10,
     subprocess_timeout: int = 30,
     scale_for_xdist: bool = True,
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
+    """Run one CLI procedure with explicit extra contracts and existing budgets."""
     if scale_for_xdist:
         analysis_timeout = scaled_decompile_timeout(analysis_timeout)
         subprocess_timeout = scaled_decompile_timeout(subprocess_timeout)
@@ -1812,6 +1814,7 @@ def _run_decompile_proc(
             proc_kind,
             "--timeout",
             str(analysis_timeout),
+            *extra_args,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -5866,9 +5869,23 @@ def test_coalesce_segmented_word_store_statements_accepts_stable_ds_segment_cons
     assert replacement.rhs is word_rhs
 
 
-def test_coalesce_segmented_word_store_statements_joins_indexed_runtime_ds_byte_pair(monkeypatch):
+@pytest.mark.parametrize(
+    "offsets,expected_join",
+    [(None, False), ((0x120, 0x121), True), ((0xFFFF, 0), False)],
+    ids=["unproved-index", "adjacent-identities", "segment-wrap"],
+)
+def test_coalesce_segmented_word_store_statements_requires_proven_ds_byte_pair(
+    monkeypatch: pytest.MonkeyPatch,
+    offsets: tuple[int, int] | None,
+    expected_join: bool,
+) -> None:
+    """Expression adjacency cannot replace alias identity or a no-wrap proof."""
     from angr_platforms.X86_16.ir.core import MemSpace
     from angr_platforms.X86_16.widening import widening_rules
+    from angr_platforms.X86_16.widening.segmented_load_identity import (
+        SegmentedLoadIdentity8616,
+        segmented_load_tags_8616,
+    )
 
     project = SimpleNamespace(arch=SimpleNamespace(byte_width=8, bits=16, name="X86"))
     cfunc = SimpleNamespace(addr=0x10010)
@@ -5879,10 +5896,19 @@ def test_coalesce_segmented_word_store_statements_joins_indexed_runtime_ds_byte_
         next_node_idx=lambda: 0,
     )
     segment = object()
-    low_offset = object()
-    high_offset = object()
+    low_offset = object() if offsets is None else structured_c.CConstant(
+        offsets[0], SimTypeShort(False), codegen=codegen
+    )
+    high_offset = object() if offsets is None else structured_c.CConstant(
+        offsets[1], SimTypeShort(False), codegen=codegen
+    )
     low_lhs = structured_c.CFunctionCall("SEG_U8", None, [segment, low_offset], codegen=codegen)
     high_lhs = structured_c.CFunctionCall("SEG_U8", None, [segment, high_offset], codegen=codegen)
+    if offsets is not None:
+        for expression, offset in zip((low_lhs, high_lhs), offsets, strict=True):
+            expression.tags = segmented_load_tags_8616(
+                SegmentedLoadIdentity8616(MemSpace.DS, offset, 1, cfunc.addr)
+            )
     low_rhs = structured_c.CConstant(0x400, SimTypeShort(False), codegen=codegen)
     high_rhs = structured_c.CConstant(4, SimTypeChar(False), codegen=codegen)
     root = structured_c.CStatements(
@@ -5894,6 +5920,7 @@ def test_coalesce_segmented_word_store_statements_joins_indexed_runtime_ds_byte_
         codegen=codegen,
     )
     cfunc.statements = root
+    original_statements = tuple(root.statements)
 
     monkeypatch.setattr(
         widening_rules,
@@ -5910,7 +5937,14 @@ def test_coalesce_segmented_word_store_statements_joins_indexed_runtime_ds_byte_
 
     changed = decompile._coalesce_segmented_word_store_statements(project, codegen)
 
-    assert changed is True
+    assert changed is expected_join
+    if not expected_join:
+        assert len(root.statements) == 2
+        assert all(
+            actual is original
+            for actual, original in zip(root.statements, original_statements, strict=True)
+        )
+        return
     assert len(root.statements) == 1
     replacement = root.statements[0]
     assert isinstance(replacement, structured_c.CAssignment)
@@ -15561,6 +15595,7 @@ def test_recover_blob_entry_function_enables_data_references(monkeypatch):
     assert [entry["data_references"] for entry in captured] == [False, True]
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_reports_monoprin_partial_validation_without_source_fallback():
     result = _run_decompile_proc(
         MONOPRIN_COD,
@@ -15898,6 +15933,7 @@ def test_format_known_helper_calls_handles_missing_cod_metadata(monkeypatch):
     )
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_prunes_void_returns_for_multiline_headers(tmp_path):
     result = _run_decompile_proc(DOSFUNC_COD, "_dos_free")
 
@@ -15918,6 +15954,7 @@ def test_decompile_cli_prunes_void_returns_for_multiline_headers(tmp_path):
     assert "return;" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.parametrize(
     ("proc_name", "header_anchor"),
     (
@@ -15937,33 +15974,40 @@ def test_decompile_cli_recovers_dos_process_id_helpers(proc_name: str, header_an
     assert "return;" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_dos_load_program_pointer_stores(tmp_path: Path) -> None:
     """Require the wrapper's actual call/error/output behavior, not return-temp spelling."""
-    from x86_16_loadprogram_behavior import assert_loadprogram_behavior
+    from x86_16_loadprogram_behavior import LoadProgramAbi, assert_loadprogram_behavior
 
-    result = _run_decompile_proc(DOSFUNC_COD, "_dos_loadProgram")
+    result = _run_decompile_proc(
+        DOSFUNC_COD, "_dos_loadProgram",
+        extra_args=(
+            "--declared-call-effects",
+            "angr_platforms/tests/fixtures/declared_calls/loadprogram-declarations.json",
+        ),
+    )
     assert result.returncode == 0, result.stderr + result.stdout
-    # The binary proves file/cmdline widths but not character-pointer classes.
-    # Keep their honest scalar types while requiring the two dereferenced output
-    # parameters that are proven by register-indirect stores.
-    assert "unsigned short file, unsigned long cmdline, unsigned short *cs, unsigned short *ss" in result.stdout
+    # Each command word remains a scalar; the dereferenced output parameters
+    # retain their binary-proven pointer classes. The harness checks their ABI.
     assert "if (err)" in result.stdout
     assert "validation=passed" in result.stderr
-    assert_loadprogram_behavior(result.stdout, tmp_path)
-    assert "cs[0] = exeLoadParams[10];" in result.stdout
-    assert "ss[0] = exeLoadParams[8];" in result.stdout
+    assert "assumption_consumed=true" in result.stderr
+    assert_loadprogram_behavior(result.stdout, tmp_path, abi=LoadProgramAbi.BINARY)
+    assert "arg_a[0] = exeLoadParams[10];" in result.stdout
+    assert "arg_c[0] = exeLoadParams[8];" in result.stdout
     assert "return 0;" in result.stdout
-    assert "cs[1]" not in result.stdout
-    assert "ss[1]" not in result.stdout
+    assert "arg_a[1]" not in result.stdout
+    assert "arg_c[1]" not in result.stdout
     assert "SEG_U" not in result.stdout[result.stdout.index("short _dos_loadProgram") :]
     assert "g_0000" not in result.stdout
     assert "ds * 16 +" not in result.stdout
-    assert "*file =" not in result.stdout
+    assert "*arg_4 =" not in result.stdout
     assert "ds * 16 +" not in result.stdout
     assert "if (&err)" not in result.stdout
     assert "ax = exeLoadParams" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_skips_chkstk_thunk_for_small_cod_logic():
     result = subprocess.run(
         [sys.executable, str(CLI_PATH), str(MAX_COD), "--proc", "_max", "--timeout", "10"],
@@ -15983,6 +16027,7 @@ def test_decompile_cli_skips_chkstk_thunk_for_small_cod_logic():
     assert "return" in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_small_cod_byte_condition_logic(tmp_path: Path) -> None:
     from test_x86_16_mouse_position_behavior import assert_mouse_position_behavior
 
@@ -16001,6 +16046,7 @@ def test_decompile_cli_recovers_small_cod_byte_condition_logic(tmp_path: Path) -
     assert "vvar_" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_configcrts_copy_loop(tmp_path: Path) -> None:
     from test_x86_16_configcrts_behavior import assert_configcrts_behavior
 
@@ -16017,6 +16063,7 @@ def test_decompile_cli_recovers_configcrts_copy_loop(tmp_path: Path) -> None:
     assert_configcrts_behavior(result.stdout, tmp_path)
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_rotate_pt_logic():
     try:
         result = _run_decompile_proc(
@@ -16041,6 +16088,7 @@ def test_decompile_cli_recovers_rotate_pt_logic():
     assert "CosB(OurRoll);" in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_sethook_branch_logic():
     result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "CARR.COD", "_SetHook")
 
@@ -16066,6 +16114,7 @@ def test_decompile_cli_recovers_sethook_branch_logic():
     assert "s_" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_setgear_guard_logic(tmp_path):
     """Require binary-equivalent decisions and calls, independent of branch layout."""
     result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "CARR.COD", "_SetGear", analysis_timeout=20)
@@ -16083,6 +16132,7 @@ def test_decompile_cli_recovers_setgear_guard_logic(tmp_path):
     assert "whole-tail validation clean" in result.stderr
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_setdlc_state_store():
     result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "CARR.COD", "_SetDLC")
 
@@ -16096,6 +16146,7 @@ def test_decompile_cli_recovers_setdlc_state_store():
     assert "return DLC;" in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_keeps_query_interrupts_wrapper_calls_classified_in_matrix_corpus():
     if not IMOD_COD.exists():
         pytest.skip("IMOD.COD fixture is not available")
@@ -16126,6 +16177,7 @@ def test_decompile_cli_keeps_query_interrupts_wrapper_calls_classified_in_matrix
     assert "return outregs;" in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_tidshowrange_layout_logic(tmp_path):
     """Require complete display behavior, not merely surviving call names."""
     from x86_16_tidshowrange_behavior import assert_tidshowrange_behavior
@@ -16147,6 +16199,7 @@ def test_decompile_cli_recovers_tidshowrange_layout_logic(tmp_path):
     assert_tidshowrange_behavior(result.stdout, tmp_path)
 
 
+@pytest.mark.requires_kvm
 def test_decompile_cli_recovers_drawradaralt_branch_logic():
     """Check recovered logic or the explicitly permitted bounded terminal timeout."""
     try:
@@ -16182,6 +16235,7 @@ def test_decompile_cli_recovers_drawradaralt_branch_logic():
     assert "MapInEMSSprite(MISCSPRTSEG,0);" in result.stdout
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.parametrize(
     ("path", "proc_kind", "shape_tokens"),
     [
@@ -16210,6 +16264,7 @@ def test_decompile_cli_main_matrix(path: Path, proc_kind: str, shape_tokens: tup
     assert "Decompiler timeout" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.parametrize(
     ("path", "proc_kind"),
     [
@@ -16238,6 +16293,7 @@ def test_decompile_cli_show_summary_matrix(path: Path, proc_kind: str):
     assert "Decompiler timeout" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.parametrize(
     ("path", "proc", "proc_kind", "analysis_timeout", "subprocess_timeout", "expected_tokens", "forbidden_tokens"),
     [
@@ -16509,6 +16565,7 @@ def test_decompile_cli_small_cod_logic_batch(
         assert token not in result.stdout, result.stdout
 
 
+@pytest.mark.requires_kvm
 @requires_icomdo_com
 def test_decompile_cli_names_known_dos_interrupt_helpers_in_com_output():
     result = subprocess.run(
@@ -16532,6 +16589,7 @@ def test_decompile_cli_names_known_dos_interrupt_helpers_in_com_output():
     assert "dos_int21();" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 @requires_icomdo_com
 def test_decompile_cli_supports_dos_api_style_for_known_helpers():
     result = subprocess.run(
@@ -16564,6 +16622,7 @@ def test_decompile_cli_supports_dos_api_style_for_known_helpers():
     assert "_dos_exit(0);" in result.stdout
 
 
+@pytest.mark.requires_kvm
 @requires_icomdo_com
 def test_decompile_cli_supports_raw_api_style_for_known_helpers():
     result = subprocess.run(
@@ -16591,6 +16650,7 @@ def test_decompile_cli_supports_raw_api_style_for_known_helpers():
     assert "dos_int21();" in result.stdout
 
 
+@pytest.mark.requires_kvm
 @requires_icomdo_com
 def test_decompile_cli_supports_pseudo_api_style_for_known_helpers():
     result = subprocess.run(
@@ -16623,6 +16683,7 @@ def test_decompile_cli_supports_pseudo_api_style_for_known_helpers():
     assert "dos_exit(0);" in result.stdout
 
 
+@pytest.mark.requires_kvm
 @requires_icomdo_com
 def test_decompile_cli_supports_msc_api_style_alias_for_known_helpers():
     result = subprocess.run(

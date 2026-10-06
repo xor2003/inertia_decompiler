@@ -5,6 +5,11 @@ Responsibility: model INT21/AH4A for a declared single final Kvikdos MCB,
 including metadata writes, carry/errors and preserved register halves. This
 is an opt-in backend environment profile, not a general DOS allocator.
 Other blocks and nonterminal chains require additional state and refuse.
+The service identity, native MCB invariants and the pure response
+computation project the single shared platform-neutral owner
+``angr_platforms.real16_resize_response8616`` — this module keeps its
+public names and the policy/receipt plumbing but never re-implements the
+canonical semantics.
 """
 
 from __future__ import annotations
@@ -12,13 +17,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-MCB_BYTES: int = 16
-NATIVE_PROCESS_ID: int = 0x192
-NATIVE_PSP_SEGMENT: int = 0x100
-NATIVE_SIGNATURE: bytes = b"\xb2KV1KPR0G"
-CONVENTIONAL_END: int = 0xA000
+from angr_platforms.real16_resize_response8616 import (
+    INT21_RESIZE_FUNCTION_8616,
+    RESIZE_CONVENTIONAL_END_8616,
+    RESIZE_MCB_BYTES_8616,
+    RESIZE_NATIVE_PROCESS_ID_8616,
+    RESIZE_NATIVE_PSP_SEGMENT_8616,
+    RESIZE_NATIVE_SIGNATURE_8616,
+    ResizeRefusal8616,
+    resize_metadata_error_8616,
+    resize_response_8616,
+)
+
+MCB_BYTES: int = RESIZE_MCB_BYTES_8616
+NATIVE_PROCESS_ID: int = RESIZE_NATIVE_PROCESS_ID_8616
+NATIVE_PSP_SEGMENT: int = RESIZE_NATIVE_PSP_SEGMENT_8616
+NATIVE_SIGNATURE: bytes = RESIZE_NATIVE_SIGNATURE_8616
+CONVENTIONAL_END: int = RESIZE_CONVENTIONAL_END_8616
 RECEIPT_BYTES: int = 45
 
+# INT21/AH4A identity constant, projected once from the shared owner — the
+# resize twin of ``VERSION_FUNCTION`` in real16_program_version.
+RESIZE_FUNCTION: int = INT21_RESIZE_FUNCTION_8616
 
 def _word(value: int, field: str) -> None:
     """Reject truncated or Boolean machine-word declarations."""
@@ -28,14 +48,7 @@ def _word(value: int, field: str) -> None:
 
 def _metadata_error(mcb: bytes, maximum: int) -> bool:
     """Check the native first/final MCB invariants, before any update."""
-    return (
-        len(mcb) != MCB_BYTES
-        or mcb[7:] != NATIVE_SIGNATURE
-        or int.from_bytes(mcb[1:3], "little") != NATIVE_PROCESS_ID
-        or mcb[5:7] != b"\0\0"
-        or int.from_bytes(mcb[3:5], "little") > maximum
-        or mcb[0] not in (ord("Z"), ord("M"))
-    )
+    return bool(resize_metadata_error_8616(mcb, maximum))
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,23 +118,26 @@ class ResizeAccepted:
 def program_resize_call(
     policy: TailResizePolicy, *, segment: int, paragraphs: int, ax: int, metadata: bytes,
 ) -> ResizeAccepted | ResizeRefused:
-    """Stage native final-block resize or an exact DOS error without mutation."""
-    for field, value in (("ES", segment), ("BX", paragraphs), ("AX", ax)):
-        _word(value, field)
-    if ax >> 8 != 0x4A:
-        raise ValueError("resize requires INT21/AH4A")
-    if len(metadata) != MCB_BYTES:
-        raise ValueError("resize requires every current MCB byte")
-    if segment != policy.segment:
-        return ResizeRefused(ResizeRefusal.OTHER_BLOCK)
-    if _metadata_error(metadata, policy.maximum):
-        return ResizeAccepted(7, paragraphs, True, metadata)
-    if metadata[0] != ord("Z"):
-        return ResizeRefused(ResizeRefusal.CHAIN)
-    if paragraphs > policy.maximum:
-        return ResizeAccepted(8, policy.maximum, True, metadata)
-    changed = metadata[:3] + paragraphs.to_bytes(2, "little") + metadata[5:]
-    return ResizeAccepted(ax, paragraphs, False, changed)
+    """Stage native final-block resize or an exact DOS error without mutation.
+
+    The response itself is computed once by the shared platform-neutral
+    owner ``resize_response_8616``; this adapter only binds the declared
+    policy's block segment and capacity and wraps the shared records in
+    the established public types.
+    """
+    result = resize_response_8616(
+        block_segment=policy.segment,
+        maximum=policy.maximum,
+        segment=segment,
+        paragraphs=paragraphs,
+        ax=ax,
+        metadata=metadata,
+    )
+    if isinstance(result, ResizeRefusal8616):
+        return ResizeRefused(ResizeRefusal(result.value))
+    return ResizeAccepted(
+        ax=result.ax, bx=result.bx, carry=result.carry, metadata=result.metadata
+    )
 
 
 def resize_event_data(

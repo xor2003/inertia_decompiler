@@ -83,7 +83,8 @@ def test_boundary_index_requires_the_exact_reachable_census(corruption: str | No
     first = _Instruction(0x2000, 0x1000)
     second = _Instruction(None, 0x1003)
     block = SimpleNamespace(addr=0x1000, capstone=SimpleNamespace(insns=(first, second)))
-    boundary = ExactFunctionRangeBoundary8616(object(), 0x1000, 4,
+    # Boundary indexing retains its census on the project-owned registry.
+    boundary = ExactFunctionRangeBoundary8616(SimpleNamespace(), 0x1000, 4,
         frozenset({0x1000}), frozenset({0x1000, 0x1003}), (), (block,))
     if corruption == "missing_block":
         boundary = replace(boundary, blocks=())

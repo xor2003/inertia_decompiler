@@ -349,3 +349,72 @@ def test_far_return_entry_range_accepts_retf_cs_read_in_final_validation():
     )
 
     assert report.def_use.passed, report.def_use.issue_tokens()
+
+
+def test_absent_optional_attachments_yield_no_far_return_range():
+    codegen = _codegen()
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+    assert collection.stats.complete is True
+
+
+def test_restore_artifact_without_ir_yields_no_far_return_range():
+    codegen = _codegen()
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+    codegen._inertia_segment_stack_restore_artifact = (
+        SegmentStackRestoreArtifact8616(facts=(_far_return_fact(0x100B),))
+    )
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+    assert collection.stats.complete is True
+
+
+@pytest.mark.parametrize("malformed", [object(), "artifact", 0])
+def test_malformed_restore_attachment_yields_no_far_return_range(malformed):
+    codegen = _codegen()
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+    codegen._inertia_segment_stack_restore_artifact = malformed
+    codegen._inertia_vex_ir_artifact = _ir_artifact_with_terminal_ret(0x100B)
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+    assert collection.stats.complete is True
+
+
+@pytest.mark.parametrize("malformed", [object(), "artifact", 0])
+def test_malformed_ir_attachment_yields_no_far_return_range(malformed):
+    codegen = _codegen()
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+    codegen._inertia_segment_stack_restore_artifact = (
+        SegmentStackRestoreArtifact8616(facts=(_far_return_fact(0x100B),))
+    )
+    codegen._inertia_vex_ir_artifact = malformed
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+    assert collection.stats.complete is True
+
+
+class _AttachmentBoundaryError:
+    """Codegen whose optional attachment slot fails for a non-absence reason."""
+
+    def __init__(self) -> None:
+        """Record the minimal structured-function surface."""
+        self.cfunc = SimpleNamespace(arg_list=[])
+
+    @property
+    def _inertia_segment_stack_restore_artifact(self) -> object:
+        """Raise a failure that physical-absence handling must not swallow."""
+        raise RuntimeError("attachment boundary failure")
+
+
+def test_non_absence_attachment_failure_propagates():
+    with pytest.raises(RuntimeError, match="attachment boundary failure"):
+        entry_stack_ranges_from_codegen_8616(_AttachmentBoundaryError())

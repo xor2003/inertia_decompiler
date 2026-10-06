@@ -33,6 +33,7 @@ class CliArguments(argparse.Namespace):
     dump_layer_filter: str
     proc: str | None
     proc_kind: str
+    declared_call_effects: tuple[Path, ...]
     timeout: int
     catalog_timeout: int
     window: int
@@ -156,6 +157,21 @@ def _build_cli_argument_parser() -> argparse.ArgumentParser:
         "--proc-kind",
         default="NEAR",
         help="Procedure kind for --proc lookup in .COD files. Defaults to NEAR.",
+    )
+    parser.add_argument(
+        "--declared-call-effects",
+        type=Path,
+        action="append",
+        default=None,
+        metavar="DECLARATION_JSON",
+        help=(
+            "Typed JSON declarations authorizing exact enumerated segment "
+            "relations across bound analysis-only external call stubs. Each "
+            "declaration binds an image digest, caller byte range/digest, "
+            "decoded callsite, registered synthetic-stub target, and call "
+            "distance; it never becomes a universal callee summary. May be "
+            "repeated; repeat admissions refuse."
+        ),
     )
     parser.add_argument(
         "--timeout",
@@ -344,4 +360,10 @@ def parse_cli_arguments(argv: list[str] | None = None) -> CliArguments:
     parsed = parser.parse_args(argv, namespace=CliArguments())
     if not isinstance(parsed, CliArguments):
         raise TypeError("CLI parser returned an unexpected namespace type")
+    declared = parsed.declared_call_effects
+    parsed.declared_call_effects = (
+        ()
+        if declared is None
+        else tuple(Path(path) for path in declared)
+    )
     return parsed

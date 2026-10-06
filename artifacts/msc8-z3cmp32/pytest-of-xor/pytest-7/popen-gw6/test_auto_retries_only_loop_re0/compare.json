@@ -1,0 +1,65 @@
+{
+  "schema": "msc8.z3cmp32.v2",
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "refused": 0,
+    "conditional": 0
+  },
+  "results": [
+    {
+      "function": {
+        "id": "oracle:f",
+        "name": "f"
+      },
+      "status": "failed",
+      "reason": "matched_cfg_induction"
+    }
+  ],
+  "evidence": {
+    "raw_fact_count": 1,
+    "normalized_fact_count": 1,
+    "classified_fact_count": 1,
+    "materialized_count": 1,
+    "failure_count": 1
+  },
+  "proof_contract": {
+    "control_flow": "complete acyclic PE32 region, or closed matched CFG induction for at most eight blocks",
+    "calls": "refused until a proven flat32 callee summary is available",
+    "loops": "matched CFG fallback: eight blocks and 250 ms per block; unsupported loops refuse",
+    "outputs": [
+      "eax",
+      "edx",
+      "esp",
+      "ebx",
+      "ebp",
+      "esi",
+      "edi",
+      "eip",
+      "d",
+      "cs",
+      "ds",
+      "es",
+      "fs",
+      "gs",
+      "ss"
+    ],
+    "memory": "entire unconstrained flat byte array",
+    "global_normalization": null
+  },
+  "inputs": {
+    "oracle": {
+      "path": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-7/popen-gw6/test_auto_retries_only_loop_re0/sample.exe",
+      "sha256": "9b8db510ef42b8ed54a3712636fda55a4f8cfcd5493e20b74ab00cd4f3979f2d"
+    },
+    "candidate": {
+      "path": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-7/popen-gw6/test_auto_retries_only_loop_re0/sample.exe",
+      "sha256": "9b8db510ef42b8ed54a3712636fda55a4f8cfcd5493e20b74ab00cd4f3979f2d"
+    }
+  },
+  "lowering_refusals": {
+    "oracle": [],
+    "candidate": []
+  }
+}

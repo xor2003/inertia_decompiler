@@ -8,6 +8,7 @@ array syntax or the equivalent segmented 16-bit near-pointer load form.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeGuard
 
 from pycparser import c_ast
 
@@ -109,27 +110,23 @@ class IndexedArgumentUseRequirement:
         minimum_count = raw.get("minimum_count")
         guard_call = raw.get("guard_call")
         required_arguments = raw.get("required_guard_arguments")
-        if not _valid_requirement_fields(base_name, index_name, minimum_count, guard_call, required_arguments):
+        if not isinstance(base_name, str) or not isinstance(index_name, str):
+            return None
+        if not isinstance(minimum_count, int) or isinstance(minimum_count, bool) or minimum_count < 1:
+            return None
+        if not isinstance(guard_call, str):
+            return None
+        if not _valid_requirement_arguments(required_arguments):
             return None
         return cls(base_name, index_name, minimum_count, guard_call, tuple(required_arguments))
 
 
-def _valid_requirement_fields(
-    base_name: object,
-    index_name: object,
-    minimum_count: object,
-    guard_call: object,
+def _valid_requirement_arguments(
     required_arguments: object,
-) -> bool:
-    """Return True when parsed requirement fields have valid shapes."""
+) -> TypeGuard[list[int]]:
+    """Return whether parsed guard-argument fields are a nonempty int list."""
     return (
-        isinstance(base_name, str)
-        and isinstance(index_name, str)
-        and isinstance(minimum_count, int)
-        and not isinstance(minimum_count, bool)
-        and minimum_count >= 1
-        and isinstance(guard_call, str)
-        and isinstance(required_arguments, list)
+        isinstance(required_arguments, list)
         and bool(required_arguments)
         and all(isinstance(value, int) and not isinstance(value, bool) for value in required_arguments)
     )

@@ -4,6 +4,8 @@ Layer: CLI/fallback/reporting.
 Responsibility: validate the independent function-discovery time budget.
 """
 
+from __future__ import annotations
+
 import argparse
 
 DEFAULT_CATALOG_TIMEOUT: int = 60

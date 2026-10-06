@@ -1,0 +1,199 @@
+{
+  "schema": "msc8.z3cmp32.v2",
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 0,
+    "refused": 0,
+    "conditional": 1
+  },
+  "results": [
+    {
+      "function": {
+        "id": "oracle:sub_test",
+        "name": "sub_test"
+      },
+      "oracle_function": "ssa-function:1c3ad922771031dc7e3c368574263008f62256d4025e91822ca6ddced59b7e69",
+      "candidate_function": "ssa-function:09838ede3e64f469ba59e54f9ebab67685aef7c8a35b024448fa558c081cfdfd",
+      "mapped_candidate": {
+        "id": "candidate:sub_test",
+        "name": "sub_test",
+        "entry": null,
+        "sources": [
+          "name_match"
+        ]
+      },
+      "oracle_detail": {
+        "part": {
+          "kind": "block",
+          "index": 0,
+          "entry_delta": "0x0"
+        },
+        "function_entry": {
+          "linear": "0x100000"
+        },
+        "entry": {
+          "linear": "0x100000"
+        },
+        "jumpkind": "Ijk_Ret",
+        "transfer": null,
+        "instruction_count": 0,
+        "instructions": [],
+        "instructions_truncated": 0,
+        "function_machine_code_sha256": null,
+        "function_machine_code_size": null,
+        "machine_code_sha256": null,
+        "machine_code_size": 6,
+        "inputs": [
+          "cs",
+          "d",
+          "ds",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "memory",
+          "ss"
+        ],
+        "outputs": [
+          "cs",
+          "d",
+          "ds",
+          "eax",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "eip",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "ss"
+        ],
+        "input_count": 14,
+        "assignment_count": 2
+      },
+      "candidate_detail": {
+        "part": {
+          "kind": "block",
+          "index": 0,
+          "entry_delta": "0x0"
+        },
+        "function_entry": {
+          "linear": "0x100000"
+        },
+        "entry": {
+          "linear": "0x100000"
+        },
+        "jumpkind": "Ijk_Ret",
+        "transfer": null,
+        "instruction_count": 0,
+        "instructions": [],
+        "instructions_truncated": 0,
+        "function_machine_code_sha256": null,
+        "function_machine_code_size": null,
+        "machine_code_sha256": null,
+        "machine_code_size": 6,
+        "inputs": [
+          "cs",
+          "d",
+          "ds",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "memory",
+          "ss"
+        ],
+        "outputs": [
+          "cs",
+          "d",
+          "ds",
+          "eax",
+          "ebp",
+          "ebx",
+          "edi",
+          "edx",
+          "eip",
+          "es",
+          "esi",
+          "esp",
+          "fs",
+          "gs",
+          "ss"
+        ],
+        "input_count": 14,
+        "assignment_count": 2
+      },
+      "call_compare": null,
+      "status": "conditional",
+      "reason": "relocation_assumptions",
+      "layout_normalization": null,
+      "output_projection": null,
+      "mismatches": [],
+      "skipped_layout_outputs": [],
+      "backend_status": "passed",
+      "backend_reason": null,
+      "assumptions": {
+        "constant_relocation_count": 1,
+        "scope": "equality of rewritten SSA; original memory/alias relation unproved"
+      }
+    }
+  ],
+  "evidence": {
+    "raw_fact_count": 1,
+    "normalized_fact_count": 1,
+    "classified_fact_count": 1,
+    "materialized_count": 1,
+    "failure_count": 1
+  },
+  "proof_contract": {
+    "output_regs": [
+      "eax",
+      "edx",
+      "esp",
+      "ebx",
+      "ebp",
+      "esi",
+      "edi",
+      "eip",
+      "d",
+      "cs",
+      "ds",
+      "es",
+      "fs",
+      "gs",
+      "ss"
+    ],
+    "memory": "entire byte array including stack writes",
+    "control_flow": "complete single-block near return; 32-bit return target observed",
+    "flags": "pure uninterpreted x86g_calculate_condition; SAT can be spurious",
+    "global_normalization": "conditional value relocation; not a pointer-alias or data-initialization proof"
+  },
+  "inputs": {
+    "oracle": {
+      "path": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-7/popen-gw5/test_relocated_scalar_equality0/oracle.bin",
+      "sha256": "a1806108b52e1f7cb69075319f12ce73a05ddcd41b09efb6f5a4a587237acb91"
+    },
+    "candidate": {
+      "path": "/home/xor/vextest/artifacts/msc8-z3cmp32/pytest-of-xor/pytest-7/popen-gw5/test_relocated_scalar_equality0/candidate.bin",
+      "sha256": "a74843593ae3162a99aa43b9549c9eb0eb144358748b0940563d179f01c43c04"
+    }
+  },
+  "lowering_refusals": {
+    "oracle": [],
+    "candidate": []
+  }
+}

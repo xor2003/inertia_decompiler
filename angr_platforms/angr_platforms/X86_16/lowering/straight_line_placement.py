@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: allow existing expressions to move across transparent statement
 groups only. Conditionals, loops, labels and every other statement remain
 opaque boundaries; a generic recursive AST walk cannot prove adjacency.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

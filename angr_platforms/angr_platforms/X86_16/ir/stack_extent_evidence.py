@@ -15,11 +15,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
+from .scalar_value_projection import (
+    ScalarProjectionKind8616,
+    scalar_produced_decoration_8616,
+    scalar_read_projection_8616,
+)
 from .ssa import SSABlock
 
 _WORD_BYTES = 2
 _OFFSET_MODULUS = 1 << 16
 type _RegisterKey = tuple[str, int]
+type _CapturedCoordinates = dict[int, tuple[IRInstr, int | None]]
 
 
 class StackExtentRefusal8616(StrEnum):
@@ -115,7 +121,7 @@ class StackExtentEvidence8616:
         for coordinate in self.coordinates:
             if (coordinate.name, coordinate.version) == (base.name, base.version):
                 if coordinate.definition_index < instruction_index:
-                    return coordinate.entry_offset + address.offset
+                    return int(coordinate.entry_offset + address.offset)
                 return None
         return None
 
@@ -148,23 +154,73 @@ def _register_key(value: IRValue) -> _RegisterKey | None:
     return value.name, value.version
 
 
-def _source_coordinate(instruction: IRInstr, coordinates: dict[_RegisterKey, int]) -> int | None:
-    """Consume normalized copy/add/sub displacement without parsing text."""
-    if instruction.op != "MOV" or len(instruction.args) != 1:
+def _value_coordinate(
+    source: IRValue, coordinates: dict[_RegisterKey, int], captures: _CapturedCoordinates,
+) -> int | None:
+    """Resolve a captured result before considering a bare register descriptor."""
+    if source.active_unary is not None or source.index is not None or source.size != _WORD_BYTES:
         return None
-    source = instruction.args[0]
-    if not isinstance(source, IRValue):
-        return None
-    # A normalized value may still carry a scaled index. Its constant offset
-    # is not the entire displacement, even when the outer operation is Add16.
-    if source.index is not None:
-        return None
+    if source.source_tmp is not None:
+        captured = captures.get(source.source_tmp)
+        if captured is None or source.offset != 0:
+            return None
+        producer, coordinate = captured
+        projection = scalar_read_projection_8616(
+            read_expr=source.expr, read_bits=16,
+            produced=scalar_produced_decoration_8616(producer), produced_bits=producer.size * 8,
+        )
+        if projection is None or projection.kind is ScalarProjectionKind8616.CONVERSION:
+            return None
+        return coordinate
     key = _register_key(source)
     if key is None or key not in coordinates:
         return None
     if source.expr not in {None, (), ("Iop_Add16",), ("Iop_Sub16",)}:
         return None
-    return coordinates[key] + source.offset
+    return int(coordinates[key] + source.offset)
+
+
+def _source_coordinate(
+    instruction: IRInstr, coordinates: dict[_RegisterKey, int], captures: _CapturedCoordinates,
+) -> int | None:
+    """Evaluate exact word copies and literal displacement arithmetic."""
+    if instruction.size != _WORD_BYTES or not instruction.args:
+        return None
+    source = instruction.args[0]
+    if not isinstance(source, IRValue):
+        return None
+    coordinate = _value_coordinate(source, coordinates, captures)
+    if instruction.op == "MOV" and len(instruction.args) == 1:
+        return coordinate
+    if coordinate is None or instruction.op not in {"Iop_Add16", "Iop_Sub16"} or len(instruction.args) != 2:
+        return None
+    displacement = instruction.args[1]
+    if not isinstance(displacement, IRValue):
+        return None
+    plain_literal = (
+        displacement.space is MemSpace.CONST and displacement.size == _WORD_BYTES
+        and displacement.source_tmp is None and displacement.active_unary is None
+        and displacement.index is None and displacement.offset == 0
+        and displacement.expr in {None, ()}
+    )
+    if not plain_literal or not isinstance(displacement.const, int) or not 0 <= displacement.const < 0x8000:
+        return None
+    delta = displacement.const if instruction.op == "Iop_Add16" else -displacement.const
+    return coordinate + delta
+
+
+def _record_capture(
+    instruction: IRInstr, coordinates: dict[_RegisterKey, int], captures: _CapturedCoordinates,
+) -> None:
+    """Retain one producer per capture; ambiguous and nonword results stay unknown."""
+    destination = instruction.dst
+    if destination is None or destination.source_tmp is None:
+        return
+    number = destination.source_tmp
+    coordinate = None
+    if number not in captures and destination.size == _WORD_BYTES and destination.active_unary is None:
+        coordinate = _source_coordinate(instruction, coordinates, captures)
+    captures[number] = (instruction, coordinate)
 
 
 def _release_extents(
@@ -190,17 +246,19 @@ def _stack_coordinates(
     if block.refusals:
         return None
     coordinates: dict[_RegisterKey, int] = {("sp", 0): 0}
+    captures: _CapturedCoordinates = {}
     definitions = set(coordinates)
     writes = []
     records = [StackRegisterCoordinate8616("sp", 0, -1, 0)]
     for index, instruction in enumerate(block.instrs):
         if instruction.op in {"CALL", "BRANCH", "CBRANCH", "JUMP", "CJUMP", "JMP", "CJMP"}:
             return None
+        _record_capture(instruction, coordinates, captures)
         destination = instruction.dst
         if destination is None or destination.space is not MemSpace.REG or destination.name not in {"sp", "bp", "esp", "ebp"}:
             continue
         key = _register_key(destination)
-        coordinate = _source_coordinate(instruction, coordinates)
+        coordinate = _source_coordinate(instruction, coordinates, captures)
         if key is None or key in definitions:
             return None
         definitions.add(key)

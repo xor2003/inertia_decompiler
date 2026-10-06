@@ -4,7 +4,11 @@ Layer: Types/Lowering.
 Responsibility: retain an Alias-proven register effect beside its exact surviving
 segment publication. Consume typed machine evidence, never infer deadness from
 the absence of a C assignment or from rendered expressions.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
+
+from __future__ import annotations
 
 from enum import Enum
 

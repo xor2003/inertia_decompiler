@@ -29,6 +29,7 @@ caller/callsite inside the admitted target relation.
 No constant is fabricated, no operand rewritten, no annotation erased to
 compare, no VEX/IR rebuilt per call, and every missing or conflicting link
 is a typed refusal.
+Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 

@@ -5,6 +5,8 @@ Responsibility: classify structured selector expressions without segment or
 pointer authority. Refuse volatile reads, unbounded shifts and integer overflow
 under both DOS int16 and host int32 promotions. Literal metadata is not a C
 unsigned suffix; left-shift literals require a signed-int16-safe numeric bound.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 from __future__ import annotations
 

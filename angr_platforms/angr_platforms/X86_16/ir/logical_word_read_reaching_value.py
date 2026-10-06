@@ -4,6 +4,10 @@ Layer: IR.
 Responsibility: prove constant word values on each immediate CFG predecessor
 from exact logical WRITE facts, STORE versions, and memory-phi inputs. This
 owner does not infer pointer types or join separate storage objects.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

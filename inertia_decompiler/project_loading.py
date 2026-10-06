@@ -30,6 +30,7 @@ from angr_platforms.X86_16.packed_mz import (
 )
 from angr_platforms.X86_16.pklite import unpack_pklite
 
+from inertia_decompiler.mz_static_intake import MzStaticIntakeRequest8616
 from inertia_decompiler.telemetry import trace_function
 
 _IDA_BASE_ADDRESS_RE = re.compile(r"Base Address:\s*([0-9A-Fa-f]+)h", re.IGNORECASE)
@@ -168,6 +169,10 @@ class _PackedProjectMarker(Protocol):
     _inertia_packed_exe: str
 
 
+class _MzStaticRequestMarker(Protocol):
+    _inertia_mz_static_invocation_request_8616: MzStaticIntakeRequest8616
+
+
 def _decoded_packed_stream(path: Path, detection: PackerDetection) -> io.BytesIO:
     """Return a normal MZ stream only for a packer whose decoder is proven."""
     decoder: Callable[[bytes], UnpackedMZImage]
@@ -205,6 +210,41 @@ def _mark_packed_project(project: angr.Project, detection: PackerDetection | Non
     """Attach packer provenance without changing the normal project contract."""
     if detection is not None:
         cast(_PackedProjectMarker, project)._inertia_packed_exe = detection.label
+    return project
+
+
+def _defer_mz_static_invocation_8616(
+    project: angr.Project, project_input: Path | io.BytesIO
+) -> angr.Project:
+    """Retain a deferred static-MZ intake request on the built project.
+
+    This is the real intake seam for P1: every DOS MZ project carries an
+    ``mz_load_segment`` and a byte source it was built from, so the typed
+    intake can authenticate the mapped image on demand without any
+    caller-declared environment. The bounded corpus traversal is NOT run
+    here — it is demand-driven: the project keeps a
+    ``MzStaticIntakeRequest8616`` under
+    ``_inertia_mz_static_invocation_request_8616`` and the first
+    invocation-source consumer attempt authenticates against the mapped
+    image at that time, so an MZ load never pays for inventory work no
+    consumer requested. Non-MZ backends have no ``mz_load_segment`` and
+    skip the file read. ``loader.main_object``/``mz_load_segment`` are
+    angr/CLE attributes, so the gate is a dynamic boundary read —
+    presence plus type decides.
+    """
+    main_object = getattr(project.loader, "main_object", None)
+    if getattr(main_object, "mz_load_segment", None) is None:
+        return project
+    if isinstance(project_input, io.BytesIO):
+        source = project_input.getvalue()
+    else:
+        try:
+            source = project_input.read_bytes()
+        except OSError:
+            return project
+    cast(_MzStaticRequestMarker, project)._inertia_mz_static_invocation_request_8616 = (
+        MzStaticIntakeRequest8616(source=source)
+    )
     return project
 
 
@@ -264,6 +304,7 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
                 )
                 _debug_print(f"[dbg] {exe_backend} load base={hex(explicit_base)}")
                 _debug_print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
+                proj = _defer_mz_static_invocation_8616(proj, project_input)
                 return _finalize_x86_16_project(_mark_packed_project(proj, packed_detection))
             except Exception as ex:
                 _debug_print(
@@ -289,6 +330,7 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
             else:
                 raise
         _debug_print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
+        proj = _defer_mz_static_invocation_8616(proj, project_input)
         return _finalize_x86_16_project(_mark_packed_project(proj, packed_detection))
 
     return _impl()

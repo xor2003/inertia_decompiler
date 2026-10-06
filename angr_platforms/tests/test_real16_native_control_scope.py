@@ -15,7 +15,7 @@ import pytest
 import pyvex
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
-from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_16, Uc
+from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_16
 from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_IP, UC_X86_REG_SP, UC_X86_REG_SS
 
 from tools.dosunit import straightline_ssa as S
@@ -24,6 +24,7 @@ from tools.dosunit.real16_call_contracts import initial_state, prove_terms_equal
 from tools.dosunit.recursive_proofs.real16_entry_domain import Real16ScalarDomain
 from tools.dosunit.recursive_proofs.real16_native_control_scope import prove_native_control_scope
 from tools.dosunit.recursive_proofs.real16_physical_access_bounds import PHYSICAL_MODEL_LIMIT
+from tools.dosunit.unicorn_engine import make_guest
 
 
 class NearKind(StrEnum):
@@ -100,7 +101,7 @@ def _receipt(vector: Vector, kind: NearKind) -> SourceReceipt:
 
 def _native(receipt: SourceReceipt, kind: NearKind) -> NativeStep:
     """Execute one native instruction with a valid mapped near CALL frame."""
-    guest = Uc(UC_ARCH_X86, UC_MODE_16)
+    guest = make_guest(UC_ARCH_X86, UC_MODE_16)
     # Unicorn fetches ahead across the first-MiB boundary before executing the
     # three-byte transfer. Map the architectural real-mode address envelope.
     guest.mem_map(0, 0x110000)
@@ -189,7 +190,7 @@ def test_high_address_call_consumes_symbolic_selector_domain() -> None:
 def test_high_address_call_return_leaves_first_mib_model() -> None:
     """A valid in-model CALL target does not bound the caller's terminal PC."""
     receipt = _receipt(VECTORS[0], NearKind.CALL_REL16)
-    guest = Uc(UC_ARCH_X86, UC_MODE_16)
+    guest = make_guest(UC_ARCH_X86, UC_MODE_16)
     guest.mem_map(0, 0x110000)
     guest.mem_write(receipt.loaded_head, receipt.code)
     guest.mem_write(0xFFFF0, b"\xc3")

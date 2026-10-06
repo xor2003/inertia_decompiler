@@ -431,7 +431,23 @@ def test_e8cbff_high_selector_counterexample_refuses(tmp_path: Path) -> None:
         bound_values={0x1000}, logical_ip=0x0000, current_cs=caller["outputs"].get("cs"),
     )
     assert not outcome.proven
-    assert outcome.failure is rt.ControlDomainFailure.DESTINATION_UNPROVED
+    assert outcome.failure is rt.ControlDomainFailure.TERMINAL_DECODE_MISMATCH
+    assert outcome.stats.queries == 0
+    transfer = caller["source"]["transfer"]
+    assert "target" not in transfer
+    assert transfer["target_refusal"] == "native_refused"
+    assert transfer["native_target_refusal"] == "terminal_jump_selector_window_unproved"
+
+    # The producer now refuses before the solver boundary. Independently
+    # replay the retained SSA so the original high-selector counterexample
+    # remains tested, rather than only asserting an earlier diagnostic.
+    inputs = ssa._z3_inputs({"inputs": _leaf_specs(caller, term)}, {"inputs": []}, z3)
+    encoded = _encoder(caller, inputs)(term)
+    selector, _width = inputs["cs"]
+    for cs, destination in ((0, 0x1000), (0x100, 0x1000), (0x103, 0x11000)):
+        concrete = z3.simplify(z3.substitute(encoded, (selector, z3.BitVecVal(cs, 16))))
+        assert z3.is_bv_value(concrete)
+        assert concrete.as_long() == destination
 
 
 def test_shifted_call_negative_mutations(tmp_path: Path) -> None:
@@ -597,5 +613,4 @@ def test_branch_negative_mutations(tmp_path: Path) -> None:
         assert constant_bitvector(normalized["args"][2]) == (0x120C, 32)
     else:
         assert not outcome.proven
-
 

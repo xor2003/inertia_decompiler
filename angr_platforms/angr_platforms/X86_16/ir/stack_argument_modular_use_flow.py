@@ -23,6 +23,7 @@ from .scalar_definitions import (
     build_scalar_definition_index_8616,
     reaching_scalar_definitions_8616,
 )
+from .scalar_value_projection import scalar_active_unary_projection_8616
 from .ssa import SSABlock
 from .ssa_function import SSAFunctionArtifact
 from .stack_argument_modular_use_contracts import (
@@ -41,6 +42,55 @@ _SIGN_DEPENDENT_OPERATIONS_8616 = frozenset({
 })
 
 
+def _captured_operand_bits_8616(
+    value: IRValue, definitions: ScalarDefinitionIndex8616,
+    *, block_addr: int, before_index: int,
+) -> int | None:
+    """Recover bit width from one exact pending-MOV or word-equality producer."""
+    reaching = reaching_scalar_definitions_8616(
+        definitions, value, block_addr=block_addr, before_index=before_index,
+    )
+    if len(reaching) != 1:
+        return None
+    instruction = reaching[0].instruction
+    byte_result = (instruction.size == value.size == 1
+                   and instruction.dst is not None and instruction.dst.size == 1)
+    word_operands = (len(instruction.args) == 2
+                     and all(isinstance(arg, IRValue) and arg.size == 2 for arg in instruction.args))
+    if (instruction.op == "Iop_CmpEQ16" and byte_result and word_operands
+            and value.expr == (instruction.op,)):
+        return 1
+    if (instruction.op != "MOV" or len(instruction.args) != 1
+            or instruction.size != value.size or instruction.dst is None
+            or instruction.dst.size != value.size):
+        return None
+    source = instruction.args[0]
+    if not isinstance(source, IRValue):
+        return None
+    projection = scalar_active_unary_projection_8616(source)
+    if projection is None or source.size != value.size or source.expr != value.expr:
+        return None
+    return int(projection.target_bits)
+
+
+def _bitwise_not_use_8616(value: IRValue, operand_bits: int | None) -> bool:
+    """Authenticate bitwise complement for dependence only, never equality."""
+    unary = value.active_unary
+    if unary is None or value.source_tmp is not None:
+        return False
+    if value.expr is not None and value.expr != (unary.op,):
+        return False
+    bits = unary.result_bits
+    if bits not in {1, 8, 16, 32, 64} or unary.op != f"Iop_Not{bits}":
+        return False
+    source = unary.operand
+    if source.active_unary is not None:
+        source_bits = source.active_unary.result_bits
+    else:
+        source_bits = source.size * 8 if operand_bits is None else operand_bits
+    return bool(source_bits == bits and source.size == value.size == (bits + 7) // 8)
+
+
 def _scalar_use_tainted_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
@@ -50,6 +100,22 @@ def _scalar_use_tainted_8616(
     before_index: int,
 ) -> tuple[bool, bool]:
     """Resolve a typed SSA use to one local definition or an incoming value."""
+    unary = value.active_unary
+    if unary is not None:
+        operand_bits = _captured_operand_bits_8616(
+            unary.operand, definitions, block_addr=block_addr,
+            before_index=before_index,
+        )
+        projection = scalar_active_unary_projection_8616(value, proven_operand_bits=operand_bits)
+        # This census proves bit-pattern use only. Signed extension requires
+        # a separate sign-dependent-use proof and cannot disappear here.
+        if ((projection is None and not _bitwise_not_use_8616(value, operand_bits))
+                or (projection is not None and projection.signed)):
+            return False, False
+        return _scalar_use_tainted_8616(
+            unary.operand, definitions, tainted_sites,
+            block_addr=block_addr, before_index=before_index,
+        )
     if value.space is MemSpace.CONST:
         return False, True
     if value.space is MemSpace.UNKNOWN:

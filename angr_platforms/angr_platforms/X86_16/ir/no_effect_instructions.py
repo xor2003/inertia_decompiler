@@ -9,6 +9,8 @@ the marked extent are the canonical x86 NOP encoding; every other
 empty span stays uncovered so the instruction census, block refusals, and
 effect gates keep refusing unsupported, lost, faulting, control, or unknown
 instructions. Missing IR is never itself evidence of no effect.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
 Do not perform alias-state ownership, widening, lowering/materialization,
 structuring, rewrite, postprocess, or CLI/reporting work here.
 

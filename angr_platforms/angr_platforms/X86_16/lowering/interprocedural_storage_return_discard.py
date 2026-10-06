@@ -5,6 +5,8 @@ Responsibility: distinguish an exact unused-result observation from absent
 return collection. A closed caller census with an independent discard witness
 can seed an empty SCC output; missing observations never constitute proof.
 Consumes typed caller-use facts, not instruction text or generated C.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

@@ -10,6 +10,7 @@ through the retained capture: missing or out-of-block producers, non-MOV or
 unknown producers, register or version mismatches, and decorated views all
 refuse closed. The captured word survives later writes to the source register;
 TMP producer scope stays strictly block-local.
+Consumes alias-proven storage identity.
 Do not join values from rendered text, cosmetic shape, postprocess, or CLI/reporting evidence.
 """
 

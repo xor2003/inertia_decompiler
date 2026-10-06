@@ -10,10 +10,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from .analysis_helpers import CallTargetKind8616, CallTargetSeed, collect_neighbor_call_targets
 from .ir.segment_contract import SegmentFactVerdict, SegmentFunctionContract
+
+if TYPE_CHECKING:
+    from .declared_external_call_evidence import DeclaredCallEffectConsumption8616
 
 __all__ = [
     "SegmentCalleeEffectFact8616", "SegmentControlTransferDistance8616",
@@ -49,6 +52,7 @@ class _CodegenBoundary8616(Protocol):
 
     _inertia_segment_function_contract: SegmentFunctionContract
     _inertia_segment_function_summary_8616: SegmentFunctionSummary8616
+    _inertia_segment_state_artifact: object
 
 
 class _ProjectBoundary8616(Protocol):
@@ -138,6 +142,7 @@ class SegmentFunctionSummary8616:
     unresolved_effect_sites: tuple[int, ...] = ()
     summary: dict[str, int] = field(default_factory=dict)
     local_effects_complete: bool = False
+    declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -148,6 +153,9 @@ class SegmentFunctionSummary8616:
             "callee_effects": [fact.to_dict() for fact in self.callee_effects],
             "effective_clobbered_registers": list(self.effective_clobbered_registers),
             "unresolved_effect_sites": list(self.unresolved_effect_sites),
+            "declared_call_consumptions": [
+                consumption.to_record() for consumption in self.declared_call_consumptions
+            ],
             "summary": dict(self.summary),
             "local_effects_complete": self.local_effects_complete,
         }
@@ -411,4 +419,7 @@ def apply_x86_16_segment_function_summary(project: object, codegen: object) -> b
     project_boundary._inertia_segment_function_summaries_8616 = summaries
     summary = summaries[local.function_addr]
     codegen_boundary._inertia_segment_function_summary_8616 = summary
+    from .ir.segment_state import republish_declared_call_consumptions_8616
+
+    republish_declared_call_consumptions_8616(project, codegen, local.function_addr)
     return False

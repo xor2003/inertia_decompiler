@@ -81,7 +81,7 @@ class _ProjectBoundary8616(Protocol):
     """Dynamic angr project boundary used by frontend traversal."""
 
     _inertia_instruction_reachability_cache_8616: dict[
-        tuple[int, int, int],
+        tuple[int, int, int, frozenset[int]],
         InstructionReachabilityEvidence8616,
     ]
 
@@ -119,7 +119,7 @@ class InstructionReachabilityEvidence8616:
 
 def _reachability_cache_8616(
     project: object,
-) -> dict[tuple[int, int, int], InstructionReachabilityEvidence8616]:
+) -> dict[tuple[int, int, int, frozenset[int]], InstructionReachabilityEvidence8616]:
     """Return immutable byte-reachability evidence cached on one project."""
     boundary = cast(_ProjectBoundary8616, project)
     try:
@@ -156,11 +156,18 @@ def x86_16_block_successors_from_capstone_8616(
     block: object,
     region_start: int,
     region_end: int,
+    *,
+    proven_return_block_addrs: frozenset[int] = frozenset(),
 ) -> tuple[set[int], bool]:
     """Return bounded successors, refusing unknown or out-of-region edges.
 
     Excluding an edge from this inventory does not prove a function return.
     Consumers must retain conservative liveness for every omitted edge.
+    ``proven_return_block_addrs`` carries the independently proven
+    near-return continuation block set from
+    ``prove_near_return_continuations_8616``: an indirect ``jmp`` terminal
+    in that set is a closed return edge, exactly like a decoded ``ret`` —
+    never an inferred edge and never a blanket indirect-jump exemption.
     """
     boundary = cast(_BlockBoundary8616, block)
     if isinstance(block, DirectCapstoneBlock8616):
@@ -174,8 +181,27 @@ def x86_16_block_successors_from_capstone_8616(
         return set(), True
 
     last = cast(_InstructionBoundary8616, instructions[-1])
-    mnemonic = last.mnemonic.lower()
-    block_end = boundary.addr + boundary.size
+    return _terminal_successors_8616(
+        boundary,
+        last.mnemonic.lower(),
+        last,
+        boundary.addr + boundary.size,
+        region_start,
+        region_end,
+        proven_return_block_addrs,
+    )
+
+
+def _terminal_successors_8616(
+    boundary: _BlockBoundary8616,
+    mnemonic: str,
+    last: object,
+    block_end: int,
+    region_start: int,
+    region_end: int,
+    proven_return_block_addrs: frozenset[int],
+) -> tuple[set[int], bool]:
+    """Classify the decoded terminal into bounded edges or refusals."""
     successors: set[int] = set()
     unresolved = False
 
@@ -184,6 +210,12 @@ def x86_16_block_successors_from_capstone_8616(
         nonlocal unresolved
         if isinstance(target, int) and region_start <= target < region_end:
             successors.add(target)
+        elif target is None and boundary.addr in proven_return_block_addrs:
+            # A proven near-return continuation contributes no in-region
+            # edge, exactly like a decoded ``ret``; the proven set only
+            # ever names indirect ``jmp`` terminals, so conditional and
+            # call fallthroughs can never borrow this discharge.
+            return
         else:
             unresolved = True
 
@@ -193,8 +225,7 @@ def x86_16_block_successors_from_capstone_8616(
         add_target(block_end)
         return successors, unresolved
     if mnemonic in {"jmp", "ljmp"}:
-        target = _direct_target_8616(last)
-        add_target(target)
+        add_target(_direct_target_8616(last))
         return successors, unresolved
     if mnemonic.startswith("j") or mnemonic in {"loop", "loope", "loopne", "loopnz", "loopz"}:
         target = _direct_target_8616(last)
@@ -214,6 +245,7 @@ def _visit_reachable_block_8616(
     reachable_blocks: dict[int, object],
     unresolved: set[int],
     successor_edges: set[tuple[int, int]],
+    proven_return_block_addrs: frozenset[int] = frozenset(),
 ) -> tuple[int, ...]:
     """Decode one block and fold its proven successors into the traversal."""
     try:
@@ -246,6 +278,7 @@ def _visit_reachable_block_8616(
         block_boundary,
         region_start,
         region_end,
+        proven_return_block_addrs=proven_return_block_addrs,
     )
     if successor_unresolved:
         unresolved.add(block_addr)
@@ -259,13 +292,19 @@ def collect_instruction_reachability_8616(
     entry: int,
     region_start: int,
     region_end: int,
+    proven_return_block_addrs: frozenset[int] = frozenset(),
 ) -> InstructionReachabilityEvidence8616:
-    """Traverse binary-proven successors inside one bounded loaded image."""
+    """Traverse binary-proven successors inside one bounded loaded image.
+
+    ``proven_return_block_addrs`` is part of the cache identity: a
+    premise-derived closed census is never served to a request that did
+    not supply the same independently proven set.
+    """
     if not (region_start <= entry < region_end):
         return InstructionReachabilityEvidence8616((), (), (), (), 0, 0, 0, 0, 0)
 
     cache = _reachability_cache_8616(project)
-    cache_key = (entry, region_start, region_end)
+    cache_key = (entry, region_start, region_end, proven_return_block_addrs)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -289,6 +328,7 @@ def collect_instruction_reachability_8616(
             reachable_blocks,
             unresolved,
             successor_edges,
+            proven_return_block_addrs,
         )
         for successor in sorted(successors):
             if successor not in visited:

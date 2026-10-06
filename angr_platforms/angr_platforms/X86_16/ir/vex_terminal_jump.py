@@ -10,7 +10,11 @@ invariant across every segment selector capable of fetching the instruction
 under the native architectural fetch domain; otherwise the retained jump
 keeps its symbolic operand and the block records a typed refusal.
 Conditional, call, far, indirect, and fallthrough block tails never become
-jumps here. Do not perform alias, widening, lowering/materialization,
+jumps here. A separate CALL evidence API reuses the native destination proof
+without synthesizing a jump instruction.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
 structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
@@ -25,15 +29,18 @@ from ..relative_control_edge import (
     DecodedRelativeEdge,
     RelativeEdgeForm,
     decode_relative_edge,
+    invariant_relative_destination,
 )
 from .core import IRRefusal
 from .regs import register_name_from_offset
 from .vex_types import vex_expr_size_bytes
 
 __all__ = (
+    "NativeRelativeCallEvidence8616",
     "TerminalJumpEvidence8616",
     "TerminalJumpEvidenceStats8616",
     "TerminalJumpRefusalReason8616",
+    "native_relative_call_evidence_8616",
     "terminal_direct_jump_evidence_8616",
 )
 
@@ -48,7 +55,7 @@ _UNCONDITIONAL_JUMP_FORMS_8616: frozenset[RelativeEdgeForm] = frozenset(
     }
 )
 _WORD_JUMP_FORMS_8616: frozenset[RelativeEdgeForm] = frozenset(
-    {RelativeEdgeForm.JMP_REL8, RelativeEdgeForm.JMP_REL16}
+    {RelativeEdgeForm.JMP_REL8, RelativeEdgeForm.JMP_REL16, RelativeEdgeForm.CALL_REL16}
 )
 _MAX_NEXT_ALIAS_DEPTH_8616 = 16
 _CS_SEGMENT_REGISTER_8616 = "cs"
@@ -352,7 +359,7 @@ def _segment_base_register_8616(
         return None
     if vex_expr_size_bytes(leaf, type_environment=type_environment, default=0) != 2:
         return None
-    return cast(str, register_name_from_offset(offset, size=2))
+    return register_name_from_offset(offset, size=2)
 
 
 def _match_word_continuation_8616(
@@ -443,26 +450,6 @@ def _signed_8616(value: int, bits: int) -> int:
     """Interpret a masked operand with its explicit sign, never modulo."""
     sign = 1 << (bits - 1)
     return value - (1 << bits) if value & sign else value
-
-
-def _target_fetch_invariant_8616(head: int, target: int) -> bool:
-    """Require one target under every selector capable of fetching the head.
-
-    A selector ``s`` can execute an instruction at loader-linear ``head``
-    only when ``(s << 4) <= head <= (s << 4) + 0xFFFF``. When ``target``
-    lies in the intersection of all such windows, the retained composition
-    ``CS<<4 + ((next - CS<<4 + disp) mod 2^16)`` collapses to the same
-    loader-linear value for every admissible CS, so the constant is proven
-    by the fetch domain rather than assumed. The premise mirrors the shared
-    selector-window contract used by the direct near-call binding proof.
-    """
-    minimum_selector = max(0, (head - 0xFFFF + 15) // 16)
-    maximum_selector = min(0xFFFF, head // 16)
-    return bool(
-        minimum_selector <= maximum_selector
-        and (maximum_selector << 4) <= target
-        and target <= (minimum_selector << 4) + 0xFFFF
-    )
 
 
 def _block_bytes_8616(block: object) -> bytes | None:
@@ -626,8 +613,16 @@ def _proven_terminal_target_8616(
     block_addr: int | None,
 ) -> TerminalJumpEvidence8616:
     """Prove the decoded jump's loader-linear destination or refuse it."""
-    head = decoded.head
-    linear_target = decoded.next_head + decoded.displacement
+    destination = invariant_relative_destination(decoded)
+    linear_target = destination.target
+    if linear_target is None:
+        return _evidence_8616(
+            retain=True, proven_target=None,
+            failure=TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED,
+            block_addr=block_addr, classified=True,
+            detail=f"relative destination is unresolved: {destination.verdict.value}",
+            decoded=decoded,
+        )
     constant_next = _const_value_8616(next_expr)
     if constant_next is not None:
         if constant_next == linear_target:
@@ -673,10 +668,12 @@ def _proven_terminal_target_8616(
             detail=f"control width {shape.control_bits} is not dword",
             decoded=decoded,
         )
-    if shape.segment_register is not None and (
-        shape.segment_register != _CS_SEGMENT_REGISTER_8616
-        or shape.second_segment_register != shape.segment_register
-    ):
+    word_form = decoded.form in _WORD_JUMP_FORMS_8616
+    segment_matches_width = (
+        shape.segment_register == _CS_SEGMENT_REGISTER_8616
+        and shape.second_segment_register == shape.segment_register
+    ) if word_form else shape.segment_register is None
+    if not segment_matches_width:
         return _evidence_8616(
             retain=True,
             proven_target=None,
@@ -719,23 +716,7 @@ def _proven_terminal_target_8616(
             ),
             decoded=decoded,
         )
-    if decoded.form in _WORD_JUMP_FORMS_8616:
-        if not _target_fetch_invariant_8616(head, linear_target):
-            return _evidence_8616(
-                retain=True,
-                proven_target=None,
-                failure=TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED,
-                block_addr=block_addr,
-                classified=True,
-                detail=(
-                    f"decoded target 0x{linear_target:x} is not invariant "
-                    f"across the fetch window of 0x{head:x}"
-                ),
-                decoded=decoded,
-            )
-        target = linear_target
-    else:
-        target = linear_target & 0xFFFFFFFF
+    target = linear_target
     return _evidence_8616(
         retain=True,
         proven_target=target,
@@ -745,3 +726,32 @@ def _proven_terminal_target_8616(
         detail="",
         decoded=decoded,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRelativeCallEvidence8616:
+    """Full CALL destination bound to exact bytes and native control expression."""
+
+    proven_target: int | None
+    failure: TerminalJumpRefusalReason8616 | None
+    stats: TerminalJumpEvidenceStats8616
+
+
+def native_relative_call_evidence_8616(
+    decoded: DecodedRelativeEdge,
+    next_expr: object | None,
+    tmp_exprs: Mapping[int, object],
+    type_environment: object | None,
+) -> NativeRelativeCallEvidence8616:
+    """Reuse the exact native relative composition proof without emitting a JMP.
+
+    The caller owns the Ijk_Call boundary and terminal byte extent. This
+    owner verifies the full control DAG against those bytes, including both
+    CS leaves, width, continuation, displacement and fetch-domain invariance.
+    """
+    if not decoded.is_call:
+        raise ValueError("native CALL proof requires a decoded relative CALL")
+    result = _proven_terminal_target_8616(
+        decoded, next_expr, tmp_exprs, type_environment, decoded.head,
+    )
+    return NativeRelativeCallEvidence8616(result.proven_target, result.failure, result.stats)

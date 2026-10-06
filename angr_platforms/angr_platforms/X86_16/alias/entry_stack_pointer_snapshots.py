@@ -12,9 +12,10 @@ inheriting coordinates they did not earn.
 
 Contract narrowing vs the shared owner: the shared ``value_offset`` accepts
 any ``size >= word`` temporary and ignores consumer decorations. For an
-entry-prefix proof, only word-exact (16-bit) producers whose recorded
-descriptor the consumer re-presents exactly earn a coordinate; a matching
-``source_tmp`` integer alone is insufficient. Coordinates are canonical byte
+entry-prefix proof, only word-exact (16-bit) producers earn a coordinate.
+Consumers must match the retained descriptor or the earned scalar TMP view
+of a recorded affine operation; a matching ``source_tmp`` integer alone is
+insufficient. Coordinates are canonical byte
 offsets modulo 2**16. BP starts unknown; SP starts at coordinate 0.
 
 Owns storage identity coordinates and their exact producing-value evidence.
@@ -26,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..ir.core import IRAddress, IRInstr, IRValue, MemSpace
+from ..ir.scalar_value_projection import ScalarProjectionKind8616, scalar_read_projection_8616
 from ..ir.vex_integer_displacement import (
     canonical_vex_integer_displacement_8616,
 )
@@ -63,6 +65,7 @@ def _undecorated_8616(value: IRValue) -> bool:
             value.version,
             value.call_output,
             value.memory_access_size,
+            value.active_unary,
         )
     )
 
@@ -86,6 +89,7 @@ def _bare_constant_8616(value: IRValue) -> bool:
         and value.call_output is None
         and value.source_tmp is None
         and value.memory_access_size is None
+        and value.active_unary is None
     )
 
 
@@ -106,6 +110,26 @@ class EntryProducerEvidence8616:
     op: str
     dst_size: int
     view: IRValue | None
+
+
+def _matches_producer_view_8616(value: IRValue, producer: EntryProducerEvidence8616) -> bool:
+    """Match a retained view or the scalar TMP projection of proven affine IR.
+
+    Captured operands no longer fold into a live register descriptor. Their
+    affine result is a scalar TMP whose display name carries no proof. The
+    recorded definition, word width, zero displacement and exact earned
+    operation establish this projection; pending computations never do.
+    """
+    if value == producer.view:
+        return True
+    if (value.space is not MemSpace.TMP or value.offset != 0
+            or producer.op not in _AFFINE_OPS or producer.view is None):
+        return False
+    projection = scalar_read_projection_8616(
+        read_expr=value.expr, read_bits=value.size * 8,
+        produced=(producer.op,), produced_bits=producer.dst_size * 8,
+    )
+    return projection is not None and projection.kind is ScalarProjectionKind8616.EARNED_REDECORATION
 
 
 @dataclass(slots=True)
@@ -158,8 +182,9 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
 
         A tmp-decorated read resolves only through recorded producer evidence:
         the producer must have earned a word coordinate, and the consumer must
-        re-present the producer's exact descriptor (space, name, offset, const,
-        size, expr, version). A decoration the producer did not earn — including
+        re-present the producer's descriptor or its exact scalar affine
+        projection (TMP, zero offset, word width, earned operation). Display
+        names are not scalar capture identity. A decoration not earned — including
         an unearned ``Iop_*`` label — is inconsistent evidence and refuses; a
         plain register-name fallback is never attempted.
         """
@@ -171,7 +196,7 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
                 producer is None
                 or producer.view is None
                 or producer.dst_size != _WORD_BYTES
-                or value != producer.view
+                or not _matches_producer_view_8616(value, producer)
             ):
                 return None
             coordinate = self.offsets.get(value.source_tmp)
@@ -314,6 +339,7 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
             and destination.version is None
             and destination.source_tmp is None
             and destination.memory_access_size is None
+            and destination.active_unary is None
         )
         if (
             instruction.op != "MOV"

@@ -11,15 +11,18 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING or __package__:
+    from .makefile_inventory import MakefileInventoryDiagKind, makefile_inventory_diagnostics
     from .makefile_inventory import makefile_variable_words as _makefile_variable_words
     from .pytest_source_index import load_pytest_source_index
 else:
+    from makefile_inventory import MakefileInventoryDiagKind, makefile_inventory_diagnostics
     from makefile_inventory import makefile_variable_words as _makefile_variable_words
     from pytest_source_index import load_pytest_source_index
 
@@ -1225,7 +1228,7 @@ _PROJECT_MAP_MARKERS = (
     "dosunit.py",
     "signature_catalog.py",
     "scripts/test_pipeline.py",
-    "fast tier is unit-focused only",
+    "binary-budgeted",
     "scripts/build_msc6_examples.py",
     "examples/msc6_constructs/",
     "reference/dosunit-execution-spec.md",
@@ -1242,7 +1245,7 @@ _PROJECT_MAP_MARKERS = (
     "Ownership-manifest tests are fast-only",
     "make quality-fast",
     "make test-pipeline-fast",
-    "must stay unit-focused",
+    "proof budgets stay unchanged",
     "make test-pipeline",
     "make test-pipeline-expanded",
     "libdosbox",
@@ -1325,14 +1328,19 @@ _MAKEFILE_FORBIDDEN_MARKERS = (
 )
 
 _PIPELINE_TIER_CONTRACT: dict[str, tuple[str, ...]] = {
-    "fast": ("binary-budgeted", "unit-focused"),
+    "fast": ("binary-budgeted", "unit-focused", "pytest-serial", "linux-process-controls"),
     "default": (
-        "binary-budgeted", "unit-focused", "binary-relational",
+        "binary-budgeted", "unit-focused", "pytest-serial", "linux-process-controls",
+        "makefile-gnu-oracle", "gp-word-native", "binary-relational",
         "ultra-quickc-fixtures", "msc6-tiny-full-pipeline",
     ),
     "expanded": (
         "binary-budgeted",
         "unit-focused",
+        "pytest-serial",
+        "linux-process-controls",
+        "makefile-gnu-oracle",
+        "gp-word-native",
         "binary-relational",
         "ultra-quickc-fixtures",
         "msc6-tiny-full-pipeline",
@@ -1342,6 +1350,107 @@ _PIPELINE_TIER_CONTRACT: dict[str, tuple[str, ...]] = {
 }
 
 _PROMOTED_TYPED_FILES = (
+    "inertia_decompiler/cli_rollback_snapshot_8616.py",
+    "inertia_decompiler/mz_static_intake.py",
+    "angr_platforms/angr_platforms/X86_16/frontend_local_call_evidence.py",
+    "angr_platforms/angr_platforms/X86_16/ir/real16_declared_interrupt8616.py",
+    "angr_platforms/angr_platforms/X86_16/ir/real16_path_memory8616.py",
+    "angr_platforms/angr_platforms/X86_16/ir/real16_initial_memory8616.py",
+    "angr_platforms/angr_platforms/X86_16/ir/real16_wide_multiply8616.py",
+    "angr_platforms/angr_platforms/X86_16/ir/scoped_control_obligations.py",
+    "angr_platforms/angr_platforms/X86_16/mz_static_boot.py",
+    'angr_platforms/angr_platforms/X86_16/alias/bp_preservation.py',
+    'angr_platforms/angr_platforms/X86_16/alias/saved_stack_store_window.py',
+    'angr_platforms/angr_platforms/X86_16/alias/stack_word_call_binding.py',
+    'angr_platforms/angr_platforms/X86_16/alias/stack_word_call_window.py',
+    'angr_platforms/angr_platforms/X86_16/borland_mangling.py',
+    'angr_platforms/angr_platforms/X86_16/callsite_pointer_values.py',
+    'angr_platforms/angr_platforms/X86_16/clinic_terminal_control.py',
+    'angr_platforms/angr_platforms/X86_16/control_coordinates.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_block_partition.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_boundary_transport.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_caller_entry_identity.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_cfg_direct_call.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_cfg_direct_jobs.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_cfg_direct_jump.py',
+    'angr_platforms/angr_platforms/X86_16/frontend_invocation_inventory.py',
+    'angr_platforms/angr_platforms/X86_16/ir/affine_indexed_address.py',
+    'angr_platforms/angr_platforms/X86_16/ir/affine_induction_role.py',
+    'angr_platforms/angr_platforms/X86_16/ir/condition_fingerprint_syntax.py',
+    'angr_platforms/angr_platforms/X86_16/ir/condition_relative_edge.py',
+    'angr_platforms/angr_platforms/X86_16/ir/condition_zero_input.py',
+    'angr_platforms/angr_platforms/X86_16/ir/direct_call_segment_context.py',
+    'angr_platforms/angr_platforms/X86_16/ir/direct_call_segment_entry.py',
+    'angr_platforms/angr_platforms/X86_16/ir/direct_call_segment_entry_binding.py',
+    'angr_platforms/angr_platforms/X86_16/ir/entry_domain_call_preservation.py',
+    'angr_platforms/angr_platforms/X86_16/ir/entry_jump_domain.py',
+    'angr_platforms/angr_platforms/X86_16/ir/frame_register_reaching_definition.py',
+    'angr_platforms/angr_platforms/X86_16/ir/indexed_induction_write_census.py',
+    'angr_platforms/angr_platforms/X86_16/ir/ir_boundary_cfg.py',
+    'angr_platforms/angr_platforms/X86_16/ir/logical_constant_word_receipt.py',
+    'angr_platforms/angr_platforms/X86_16/ir/memory_offset_word_value.py',
+    'angr_platforms/angr_platforms/X86_16/ir/no_effect_instructions.py',
+    'angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py',
+    'angr_platforms/angr_platforms/X86_16/ir/real16_edge_feasibility8616.py',
+    'angr_platforms/angr_platforms/X86_16/ir/scalar_instruction_effects.py',
+    'angr_platforms/angr_platforms/X86_16/ir/scoped_function_ir_view.py',
+    'angr_platforms/angr_platforms/X86_16/ir/segment_call_preservation.py',
+    'angr_platforms/angr_platforms/X86_16/ir/segment_effect_closure.py',
+    'angr_platforms/angr_platforms/X86_16/ir/vex_terminal_jump.py',
+    'angr_platforms/angr_platforms/X86_16/lifter_backend.py',
+    'angr_platforms/angr_platforms/X86_16/lifter_backend_selection.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/binary_callback_targets.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/binary_far_callback_targets.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_return_bridge_projection.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_target_bind_common.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_target_projection_integrity.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_target_raw_route.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_target_semantic_route.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_target_ssa_binder.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/call_target_ssa_contracts.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/far_callback_call_materialization.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/far_callback_call_shape.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/far_callback_call_value.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/far_return_boundary_carriers.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/gp_constant_restore.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/gp_word_assignment.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/gp_word_runtime.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/input_offset_value.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_discard.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/modular_argument_type_facts.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument_values.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_pointer_stack_input_segment.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_pointer_value_runtime.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_return_body_preflight.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_return_c_ast_congruence.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_return_entry_selector.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_return_expression.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_return_segment_use.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_return_selector.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/near_scaled_return_candidate.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/return_witness_source.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/storage_word_input_binding.py',
+    'angr_platforms/angr_platforms/X86_16/lowering/straight_line_placement.py',
+    'angr_platforms/angr_platforms/X86_16/mz_invocation_source.py',
+    'angr_platforms/angr_platforms/X86_16/mz_load_source.py',
+    'angr_platforms/angr_platforms/X86_16/relative_control_edge.py',
+    'angr_platforms/angr_platforms/X86_16/segment_call_preservation_stage.py',
+    'angr_platforms/angr_platforms/X86_16/semantics/bp_call_preservation.py',
+    'angr_platforms/angr_platforms/X86_16/semantics/call_target_evidence_8616.py',
+    'angr_platforms/angr_platforms/X86_16/semantics/direct_near_call_target_binding.py',
+    'angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py',
+    'angr_platforms/angr_platforms/X86_16/structuring/symbolic_ite.py',
+    'angr_platforms/angr_platforms/X86_16/validation_goto_target_identity.py',
+    'angr_platforms/angr_platforms/X86_16/widening/entry_word_transport.py',
+    'angr_platforms/angr_platforms/X86_16/widening/entry_word_transport_contracts.py',
+    'angr_platforms/angr_platforms/X86_16/widening/entry_word_transport_flow.py',
+    'angr_platforms/angr_platforms/X86_16/widening/entry_word_transport_snapshots.py',
+    'angr_platforms/angr_platforms/X86_16/widening/entry_word_transport_state.py',
+    'inertia_decompiler/binary_signature_metadata.py',
+    'inertia_decompiler/catalog_policy.py',
+    'inertia_decompiler/discovery_candidate_ranges.py',
+    'inertia_decompiler/external_unpacker_cache.py',
+    'inertia_decompiler/metadata_evidence.py',
     "angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_logical_input_contracts.py",
     "angr_platforms/angr_platforms/X86_16/alias/condition_register_definition.py",
     "angr_platforms/angr_platforms/X86_16/structuring/condition_register_expression.py",
@@ -1589,6 +1698,9 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/recovery_artifact_writer.py",
     "angr_platforms/angr_platforms/X86_16/corpus_recovery_artifact.py",
     "angr_platforms/angr_platforms/X86_16/confidence_and_assumptions.py",
+    "angr_platforms/angr_platforms/X86_16/confidence_evidence.py",
+    "angr_platforms/angr_platforms/X86_16/frontend_near_return_continuation.py",
+    "angr_platforms/angr_platforms/X86_16/ir/near_return_continuation_view.py",
     "angr_platforms/angr_platforms/X86_16/ir_recovery_summary.py",
     "angr_platforms/angr_platforms/X86_16/ir_readiness.py",
     "angr_platforms/angr_platforms/X86_16/ir_confidence_markers.py",
@@ -2430,6 +2542,11 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/lowering/far_return_pointer_use.py",
     "angr_platforms/angr_platforms/X86_16/lowering/far_return_pointer_use_contracts.py",
     "angr_platforms/angr_platforms/X86_16/lowering/far_return_expression_binding.py",
+    "inertia_decompiler/declared_call_transport.py",
+    "angr_platforms/angr_platforms/X86_16/declared_external_call_evidence.py",
+    "angr_platforms/angr_platforms/X86_16/frontend_repeated_store8616.py",
+    "angr_platforms/angr_platforms/X86_16/ir/real16_repeated_store8616.py",
+    "angr_platforms/angr_platforms/X86_16/semantics/call_projection_blocks.py",
 )
 
 _INERTIA_TYPED_PROMOTION_DEBT_FILES = ()
@@ -4682,7 +4799,7 @@ def _check_python_module_layer_headers(
         if "__pycache__" in path.parts:
             continue
         doc = ast.get_docstring(_parse_python(path)) or ""
-        if expected_layer not in doc:
+        if re.search(re.escape(expected_layer) + r"(?!\w)", doc) is None:
             violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
@@ -4741,13 +4858,13 @@ def _check_postprocess_stage_runs_pipeline_contract_gate(root: Path) -> tuple[Ar
             )
         )
 
-    gate = _find_function(tree, "_run_pipeline_contract_gate")
+    gate = _find_function(tree, "_run_pipeline_contract_gate_8616")
     if gate is None:
         violations.append(
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
                 "postprocess-stage-pipeline-contract-gate",
-                "postprocess stage must keep _run_pipeline_contract_gate before rewrite",
+                "postprocess stage must keep _run_pipeline_contract_gate_8616 before rewrite",
             )
         )
         return tuple(violations)
@@ -4761,7 +4878,7 @@ def _check_postprocess_stage_runs_pipeline_contract_gate(root: Path) -> tuple[Ar
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
                 "postprocess-stage-pipeline-contract-gate",
-                "_run_pipeline_contract_gate must call assert_pipeline_contracts_8616(codegen)",
+                "_run_pipeline_contract_gate_8616 must call assert_pipeline_contracts_8616(codegen)",
             )
         )
     return tuple(violations)
@@ -6888,14 +7005,22 @@ def _check_root_contract_layer_headers(repo_root: Path = REPO_ROOT) -> tuple[Arc
 
 
 def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[ArchitectureViolation, ...]:
+    """Validate proven repo-local QA inventories and their registered targets."""
     makefile_path = repo_root / "Makefile"
     makefile_text = _read_text_if_present(makefile_path)
     if makefile_text is None:
         return ()
     violations: list[ArchitectureViolation] = []
+    for diagnostic in makefile_inventory_diagnostics(makefile_text, base_dir=repo_root, include_root=repo_root):
+        if diagnostic.kind is not MakefileInventoryDiagKind.INCLUDE_SKIPPED_OPTIONAL:
+            violations.append(ArchitectureViolation(
+                _relative(makefile_path, repo_root),
+                "makefile-inventory-refused",
+                f"{diagnostic.kind.value} at {diagnostic.location}: {diagnostic.detail}",
+            ))
     violations.extend(_makefile_marker_violations_8616(makefile_path, makefile_text, repo_root))
-    typed_targets = frozenset(_makefile_variable_words(makefile_text, "QA_TYPED_FILES"))
-    ruff_targets = frozenset(_makefile_variable_words(makefile_text, "QA_RUFF_TARGETS"))
+    typed_targets = frozenset(_makefile_variable_words(makefile_text, "QA_TYPED_FILES", base_dir=repo_root, include_root=repo_root))
+    ruff_targets = frozenset(_makefile_variable_words(makefile_text, "QA_RUFF_TARGETS", base_dir=repo_root, include_root=repo_root))
     violations.extend(_makefile_promoted_file_violations_8616(makefile_path, typed_targets, ruff_targets, repo_root))
     violations.extend(_makefile_focused_target_violations_8616(makefile_path, makefile_text, repo_root))
     violations.extend(_makefile_qa_variable_violations_8616(makefile_path, makefile_text, repo_root))
@@ -6992,9 +7117,10 @@ def _makefile_focused_target_violations_8616(
             )
     pipeline_path = repo_root / "scripts" / "test_pipeline.py"
     if pipeline_path.exists():
-        makefile_pytest_targets = frozenset(_makefile_variable_words(makefile_text, "QA_PYTEST_TARGETS"))
+        makefile_pytest_targets = frozenset(_makefile_variable_words(makefile_text, "QA_PYTEST_TARGETS", base_dir=repo_root, include_root=repo_root))
+        skip_calls = _fast_pytest_skip_calls(repo_root)
         for target in _focused_pytest_literals(_parse_python(pipeline_path)):
-            if target not in makefile_pytest_targets:
+            if target not in makefile_pytest_targets and target.partition("::")[0] not in makefile_pytest_targets:
                 violations.append(
                     ArchitectureViolation(
                         _relative(makefile_path, repo_root),
@@ -7002,6 +7128,13 @@ def _makefile_focused_target_violations_8616(
                         f"fast pipeline pytest target {target!r} must also be included in QA_PYTEST_TARGETS",
                     )
                 )
+            node_exists, _skip_lines = _fast_pytest_target_contract(repo_root, target, skip_calls)
+            if not node_exists:
+                violations.append(ArchitectureViolation(
+                    _relative(makefile_path, repo_root),
+                    "makefile-missing-qa-node",
+                    f"fast pipeline node {target!r} does not exist",
+                ))
     return violations
 
 def _makefile_qa_variable_violations_8616(
@@ -7011,7 +7144,7 @@ def _makefile_qa_variable_violations_8616(
     violations: list[ArchitectureViolation] = []
     pytest_skip_calls = _fast_pytest_skip_calls(repo_root)
     for variable_name in ("QA_PYTEST_TARGETS", "QA_RUFF_TARGETS", "QA_TYPED_FILES"):
-        targets = _makefile_variable_words(makefile_text, variable_name)
+        targets = _makefile_variable_words(makefile_text, variable_name, base_dir=repo_root, include_root=repo_root)
         for target in _duplicate_items(targets):
             violations.append(
                 ArchitectureViolation(
@@ -10318,7 +10451,7 @@ def check_decompiler_architecture(
         _check_python_module_layer_headers(
             repo_root / "scripts",
             rule="script-module-layer-header",
-            expected_layer="Layer: Tooling/gates",
+            expected_layer="Layer: Tooling",
         )
     )
     violations.extend(_check_root_contract_docstrings(repo_root))

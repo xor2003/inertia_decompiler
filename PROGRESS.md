@@ -4,6 +4,705 @@
 
 # Progress
 
+## 2026-10-06 — Original comparator M0–M7 plan complete
+
+Final parent reconciliation accepted the real16 and PE32 comparator contracts;
+see reference/binary-behavior-equivalence-plan.md and the completion audit in
+.cache/comparator-implementation/comparator-profile-final-validation/.
+Final14-run measurement: exact cold/warm rows/contracts/dependencies,
+3046stable identities,55obligations per phase (3proved/2conditional/
+1counterexample/49unknown). Named phase profiles recorded without interruption;
+300.392s total child elapsed and439408KiB max child RSS, no controlled speedup claim.
+Cache-disabled and16dependency controls retained. Diagnostic-only redundant
+typing guard reviewed: scoped MyPy/Ruff clean,11tests and2parent controls pass.
+Measurement hash stays distinct from the later guard. Conditional/unknown
+results, native KVM skips and unsupported models remain explicit; this does
+not claim all binaries equivalent or unrelated decompiler/release gates green.
+Earlier entries below are historical status, not reopened task requirements.
+
+## 2026-10-06 — M7 public coherence and current corpus reviewed
+
+M7.1 accepted: corrected both flat32 drivers' help/report descriptions and
+MSC8 README. Parent AST review permits only module docstrings plus6descriptive
+string changes; no proof logic/numeric budget changed. Scoped lint and both
+actual CLI help commands exit0. Receipt: comparator-help-review-fix/PARENT_REVIEW.md.
+
+Current profiled-r2 corpus:14completed runs,16dependency controls passed,
+3044stable source identities. Parent verified exact cold/warm full rows,
+contracts and dependency bindings across7lanes/55obligations per phase:
+3proved/2conditional/1counterexample/49unknown. Sleep self's historical refusal
+detail shifts from unsupported boundary to budget exhaustion; verdict stays
+unknown and the difference is recorded. Total388.569s child elapsed,
+peak438868KiB child RSS; no speedup/regression claim. Receipt:
+comparator-final-corpus/PARENT_REVIEW.md. Rejected first run retained.
+
+M7 still open for the current cache-disabled leg and profiling interruption
+repair. Both Devin jobs are private; shared sources remain frozen. The active
+checklist now links the existing56-cell evidence map to avoid rediscovery.
+
+## 2026-10-06 — M5 comparator acceptance; M7 remains open
+
+Accepted M5 within its documented recursive-component, indirect-target and
+environment contracts. Conditional component premises remain visible and do
+not prove arbitrary-entry whole-binary equivalence. Parent verified all18
+attachment hashes and reviewed the current comparator checkpoint plus30
+passing public recursive/terminal controls. The latter retained identical
+semantic sources and exact node selection; a concurrent default pytest
+testpaths edit is explicitly qualified in its receipt. Acceptance:
+`.cache/comparator-implementation/m5-current-acceptance-attachment/ACCEPTANCE.md`.
+
+M7 refresh exposed a profiling failure in the warm real16-changed lane and
+source drift; that partial corpus run is rejected, not acceptance. Devin is
+diagnosing instrumentation. Parent rejected a help patch that incorrectly
+claimed every indirect call refuses; bounded complete targets are supported.
+Corrected the same stale README claim; driver help/report follow-up is staged
+separately. No proof semantics or budgets were relaxed. M7 still needs the
+reviewed public descriptions and final fixed-corpus/cache evidence.
+
+## 2026-10-06 — Comparator-only checkpoint passes
+
+Reviewed current comparator gate:1363admission +305shared contracts pass;
+dosunit/MSC8 final invocation228pass/5explicit KVM skips; BC5 standalone26pass.
+Initial combined-adapter command failed pytest same-basename collection;
+separate commands resolve invocation scope without source changes. All3198
+recorded source identities unchanged and parent-verified live. Receipt:
+.cache/comparator-implementation/comparator-current-gates/PARENT_REVIEW.md.
+Active plan reduced from9480to355lines before final command corrections;
+all eight milestone definitions retained exactly, full history archived in
+reference/binary-behavior-equivalence-history-20261006.md. Public bridge and
+fixed-corpus refresh run separately; no unrelated decompiler gates block them.
+
+## 2026-10-06 — User corrects scope back to Z3 comparators
+
+The user explicitly rejected treating unrelated decompiler gates as the goal.
+Stopped both active SetGear and InitBars Devin jobs (confirmed terminal exit1
+after parent SIGINT); private patches/evidence retained. Their native/generated-C
+failures are separate decompiler work, not comparator milestone blockers.
+Plan/checklist now distinguish comparator acceptance and affected shared-owner
+regressions from broad repository release checks. Next work is current real16/
+PE32 comparator tests, fixed-manifest proof/refusal/dependency/resource evidence,
+and only genuinely missing M5/M7 comparator obligations. No milestone declared
+complete and no historical failure relabeled green.
+
+## 2026-10-06 — Current refusal evidence and release-linter repair
+
+Four Devin slots allocated to private SetGear CS-declaration implementation,
+private InitBars proof-budget diagnosis, independent frozen accessor-corruption
+tests, and the minimal generation-atoms Vulture fix. Workers run scoped checks;
+parent reviews evidence and integration. Original InitBars node fails70.44s:
+first unproved call0x10566→0x11222, six budget refusals, ten pending jumps.
+SetGear15staged controls pass but public pending-artifact binding remains open.
+Release-linter read-only equivalent passes Ruff/MyPy/mypyc39/Basta/Lizard;
+Vulture finds the quoted-only DataclassInstance import. Snapshot4879paths
+unchanged during that run. Literal release gate and M5/M7 acceptance stay open.
+The minimal annotation correction is now accepted:8tests passed5.21s,
+scoped lint/MyPy clean, full Vulture exits0 in27.79s; live owner hash verified.
+Review:m7-generation-vulture-fix/PARENT_REVIEW.md.
+Receipts: m7-initbars-current-repair/, m7-release-linters-current/REPORT.md,
+m7-setgear-domain-refusal/PARENT_V4_INTERIM_REVIEW.md under
+.cache/comparator-implementation/.
+
+## 2026-10-06 — Native recheck completed; control projection sent back for proof validation
+
+KVM inherited-descriptor transport verified char10:232/API12 with the same
+read-only-host/repository-write/4GiB sandbox. Original serial native checks:
+InBoxLng passed validation plus compiled behavior; SetGear failed semantic
+validation (1passed/1failed44.83s). SetGear target-dispatch v2 is rejected:
+an independent probe shows placeholder RET closure claiming all6segment
+registers preserved without a declaration. Effect-authority correction
+remains private; original refusal retained. Earlier missing-device status
+is superseded. Receipt:m7-setgear-domain-refusal/PARENT_V2_REJECTION.md.
+
+Recursive raw-state retention and bounded consumer re-proof are now accepted:
+52tests passed56.74s, scoped checks clean,8final hashes verified. The initial
+49-test-green metadata-only projection was rejected; coherent false-target
+mutation now refuses. Destination coverage is re-proved, source authenticity
+still requires independent image binding, and joint results stay conditional.
+Receipt:m7-recursive-admission-fix/PARENT_FINAL_REVIEW.md. Current-source phase
+measurement accepted:28baseline/profile child runs complete,16dependency
+controls each, identical3043-path snapshots and detailed verdict parity.
+All four named phases observed;55obligations/phase remain3proved/2conditional/
+1counterexample/49unknown.288.216s baseline versus259.841s profiled is timing
+variance, not a speedup claim; peak404940/439040KiB. Named-owner scope only,
+disabled-cache leg not rerun. Receipt:m7-current-phase-run/PARENT_REVIEW.md.
+SetGear remains private; final broad gates remain owed.
+
+M5 requirement-to-evidence consolidation accepted as a record, not milestone
+closure (m5-current-acceptance-attachment/PARENT_REVIEW.md). Replaced an
+unverified historical84-test version claim with current50passes8.46s,
+JUnit/node IDs and6verified source/test hashes. Required checkpoint gates
+remain open; current named-phase measurement is accepted separately.
+
+Unicorn arena policy is integrated and parent-reviewed:64shared tests passed
+14.49s,7seeded replay nodes passed40.81s, scoped lint/types/enrollment clean,
+all10final hashes verified. Pressure tests support16MiB virtual-arena
+reservation with preserved16/32-bit observables; no
+end-to-end speedup or historical-crash claim. M5/M7 and full gates remain open.
+Receipts under `.cache/comparator-implementation/`: m7-small-timeout-recheck/native,
+m7-control-view-audit, m7-unicorn-memory-policy. Caps:4Devins/6test workers/2heavy jobs.
+
+## 2026-10-06 — Default gate sealed interrupted (exit130); four fixture repairs accepted
+
+One-shot default `test-pipeline` was parent-stopped at exit130 while already
+red: decompiler-contracts305pass, binary-budgeted3pass, unit-focused
+11270pass/26fail, serial/process/oracle/gp-word-native lanes green (gp-word
+ran on verified KVM at run time), binary-relational partial with live failures
+and2xdist worker crashes; ultra-quickc-fixtures and msc6-tiny-full-pipeline
+never executed, no summary.json produced. Live-enumerated source seal binds
+3195paths unchanged before/after the run, captured before the fixture edits.
+Receipt:m7-pipeline-current/REPORT.md + pipeline.log + source-delta.json.
+
+Dispositions since:10ASan tidshowrange nodes re-verified10pass6.80s with
+valid address space (m7-asan-recheck/pytest.log) — environment constraint, not
+a gate. Two Unicorn crash nodes serial2pass; historical crash cause
+unverified, bounded16MiB resource-policy experiment underway. Four reviewed
+fixture repairs integrated at exact staged hashes — lint0/156pass
+(m7-gate-fixture-repair/PARENT_INTEGRATION_REVIEW.md). Recursive fixture-only
+patch rejected for ownership; production repair+fixture-forwarding staged.
+13residual unit failures remain under triage (m7-gate-triage-next/REPORT.md);
+LoadProgram wrapper green does not prove callee loadprog green. Native
+recheck blocked: sandboxed Python cannot see /dev/kvm and a new with-kvm
+launch failed (.cache/devin-prompts/m7-small-timeout-kvm-launch-failed.log);
+the earlier gate KVM pass is historical evidence, native gate not waived.
+M5/M7 and final full gates open.
+
+## 2026-10-06 — Public checkpoint accepted; remaining gates delegated
+
+Public/schema/CLI refresh:253passed, all5helps exit0;3195live-enumerated
+source paths unchanged before/after and on parent review. Addition/removal
+detection now reaches the actual runner, with7private controls passing.
+Receipt:public-contract-refresh-20261006/PARENT_FINAL_REVIEW.md.
+
+Default pipeline now delegated with4test workers and verified KVM. Separate
+Devins stage invocation-source admission and phase-measurement work, one cheap
+test worker each. Shared sources remain frozen; at most4Devins/6aggregate
+test workers/2heavy tasks. No full pipeline or M5/M7 acceptance yet.
+
+Call0x123a6->0x1247b has the correct target and complete callee closure;
+selector_window_unproved is the actual missing binding evidence. Inventory
+refuses at0x1239e under its current boundary budget, leaving the global source
+uninstalled. The new probe nevertheless finds a scoped source; its visible
+boot-path events refuse declared_service_unproven and no caller premise closes.
+Preserve refusal and selector authority: the next task is bounded invocation
+admission, not target relaxation or repeated full collection. See sortd-call-target-mismatch/
+PARENT_CHECKPOINT.md.
+
+## 2026-10-06 — One-bit comparison effects integrated; native access restored
+
+Corpus follow-up:21/21attempts over7lanes complete,55obligations per mode.
+Cold/warm/disabled verdict, assumption, contract and dependency parity match
+everywhere; actual reuse/bypass checks and all source/input checks pass.
+Per mode:3proved/2conditional/1counterexample/49unknown. Child elapsed total
+516.52s; maximum child peak RSS404392KiB. Accepted for this snapshot only;
+phase profiling and final gates remain owed. Receipt:
+three-mode-parity/run-2026-10-06/PARENT_REVIEW.md.
+
+Original SWAPS remains1failed114.32s (caller SSA IR_BUILD_REFUSED). Current
+InitBars capture remains10selector/6call-budget refusals; no source repair
+from that diagnosis. Public contract refresh and a private exact target-binding
+diagnosis are next; no larger whole-closure retry authorized yet.
+
+Follow-up: the unchanged public LoadProgram COD regression passes1test36.72s
+(27.05s body); parent reviewed generated C, exact preserved call/output shape
+and8vector behavior oracle. Scoped one-shot Pyright now exits0/0errors.
+Final-source dependency controls pass16tests33.23s; original21attempt corpus
+and SWAPS run are in progress. Receipt:loadprogram-native-recheck/PARENT_REVIEW.md.
+
+Reviewed Devin's generic scalar-effect repair for CmpEQ1/CmpNE1, keeping
+destination/operand guards intact. Five new failures become green; final
+focused cohort153passed6.80s after the small Any-return typing cleanup.
+The broader292test owner cohort preceded that final typing change. Native
+root0x11728 now admits its pending transfer (ledger7/1/1/1/0); this is not
+whole SWAPS acceptance. Ruff/ratchet/MyPy clean. Pyright's zero-diagnostic
+watcher was terminated; one-shot batch receipt remains requested.
+
+KVM character10:232/API12 is accessible through the repository sandbox again.
+Source writing is frozen for the unchanged public LoadProgram native test and
+the original7lane/21attempt cold/warm/cache-disabled corpus with dependency
+controls. SWAPS follows when the native slot frees; at most2heavy tasks and
+6aggregate test workers. M5/M7 and final integrated gates remain open.
+Receipt:repne-scas-effects/PARENT_INTEGRATION_REVIEW.md under
+.cache/comparator-implementation/.
+
+## 2026-10-06 — Acceptance checkpoint: bounded repairs only
+
+Plan top status refreshed. Accepted bounded implementation repairs:
+corrected generation atoms (88 controls, 11.38s, parity 0 defects — no
+end-to-end speedup claim), SWAPS epoch-lifecycle fix (original SWAPS still
+refuses), KVM-marker classification (6 passed / 1 skipped on missing
+/dev/kvm; skip is not a pass, native evidence owed), architecture gate
+ARCH_EXIT=0 at scoped checkpoint (was 9 diagnostics; final integrated
+gates owed). Diagnostics only, no semantic repair claimed: SWAPS
+caller-0x108D0 capture (five selector-window IRRefusals; loader window
+alone is not proof). Original D4/experiment 5 keeps
+cold/warm/cache-disabled verdicts plus dependency parity — no narrowing.
+M0–M4/M6 accepted, M5/M7 open. Next: call-premise repair, native
+acceptance with accessible KVM, stable-source public/corpus parity and
+gates. Receipts:
+[generation-correction-integrate](.cache/comparator-implementation/generation-correction-integrate/PARENT_REVIEW.md),
+[swaps-epoch-integrate-reviewed](.cache/comparator-implementation/swaps-epoch-integrate-reviewed/PARENT_REVIEW.md),
+[loadprogram-kvm-mark](.cache/comparator-implementation/loadprogram-kvm-mark/PARENT_REVIEW.md),
+[swaps-ir-refusal-capture](.cache/comparator-implementation/swaps-ir-refusal-capture/PARENT_REVIEW.md),
+[m7-architecture-integrate-safe](.cache/comparator-implementation/m7-architecture-integrate-safe/PARENT_REVIEW.md),
+[acceptance-docs-review-finish parity](.cache/comparator-implementation/acceptance-docs-review-finish/PARENT_PARITY_REVIEW.md).
+
+## 2026-10-06 — Current acceptance status (supersedes adjacent wording)
+
+LoadProgram 20.30s/33.56s pair ran under internal `native_compare.py`
+(imports cache/generation/atom owners, overrides cache dir before
+`cli_core.main`): not public `decompile.py` timing/entrypoint acceptance;
+no optimization promoted, no speedup. Unchanged generated C passes GCC on
+all 8 error-code vectors via the correct five-word binary ABI; reviewed
+LoadProgramAbi helper + 18 controls integrated, both CLI regressions supply
+the declaration and require the consumed assumption, source text not
+repaired. Focused public run: 18 passed / 2 failed in 91.73 s, both
+unchanged 20s/10s timeouts (was 1 failed 64.51s); lint passes, helper
+passes direct MyPy (not enrolled in mypy-files). Public diagnosed CLI
+exit 3 with 3 s child stacks (typehoon, segment lowering, repeated
+atom/dataclass traversal, pointer-output publication), not exact shares.
+SWAPS 100s diagnostic: 225 installs inventory_refused 24.09s; 42
+imports/30 done, 2 context duplicates; 272 premise/260 None; snapshots omit
+mutable bytes/patches/registry/resolver — no cache/proof accepted.
+Delegated work streams in this snapshot: LoadProgram runtime, SWAPS
+authority lifecycle, InitBars remaining obligations, and this
+acceptance-docs review — each owns its checks; terminal status is not
+inferred from saved files. M0–M4/M6 accepted, M5/M7 open; earlier 305+1267
+predates integration. Evidence:
+`.cache/comparator-implementation/{perf-retained-native-review,loadprogram-acceptance-parent,swaps-request-counts}/`.
+
+## 2026-10-06 — Receipt publication repaired; bounded performance review
+
+Parent native pair now completes under the internal `native_compare.py`
+runner, not the public `decompile.py` entrypoint (wording corrected; see
+status above): production-source LoadProgram 20.30s/273248KiB, private
+dispatch 33.56s/273288KiB, both exit 0/validation=passed with declared-call
+assumption consumed and identical generated C. No native speedup
+demonstrated; optimization stays private. This supersedes the earlier
+timeout below for this invocation only, but source-shape/round-trip and
+final M5/M7 acceptance remain open. Audit Devin terminal 0 reviewed;
+measurement Devin stopped during setup terminal 143 and parent took over
+the existing runner. Evidence: perf-retained-native-review/ under
+`.cache/comparator-implementation/`. No active task remains from this pair.
+
+Function-summary publication now republishes authenticated consumed
+declarations after segment-state analysis. The actual stage-order
+regression and refusal controls pass in the 67-test cohort (21.07s); scoped
+lint/MyPy and startup architecture pass. Evidence:
+`.cache/comparator-implementation/receipt-stage-order/`. Fresh-cache
+LoadProgram still times out at unchanged 20s, wall 39.30s and 272144KiB
+RSS. M5/M7 remain open.
+
+Python fast-dispatch and pure-Python Cython experiments each improve
+isolated retained-IR traversal by approximately 40%, but neither has
+demonstrated native completion or an end-to-end gain. Both remain private.
+Two user-authorized Devin tasks have separate private ownership: one
+bounded native before/after measurement, one saved-evidence critical-path
+audit. (Superseded: both are terminal; delegated check ownership as of this
+snapshot is described in the status above.) No production changes or broad
+test reruns delegated. Read-only-host/repository-writable/4GiB sandbox
+reverified before launch.
+
+## 2026-10-05 — Live delay profiling and declaration parent integration
+
+Fresh SWAPS collector is terminal1:334.11s,317.17s body, still
+CALLER_SSA_UNAVAILABLE/IR_BUILD_REFUSED. Its15s external sample has299samples,
+10–12 nested IR imports,24.4% inclusive invocation inventory and14.4% source
+digest construction. Evidence and prioritized reuse experiments are in
+`reference/comparator-delay-audit.md`; no speedup or M5 acceptance claimed.
+
+Combined declaration overlay passes31reviewed consumer/transport controls.
+Parent added native apply/publication/revocation coverage and reproduced an
+AttributeError: the draft read nonexistent SegmentStateArtifact.function_addr.
+Private repair uses the authoritative input artifact's address and clears
+receipts after authority revocation. Combined32controls pass14.18s;14owned
+staged modules are Ruff-clean. Native LoadProgram20s acceptance remains a
+timeout; worker stacks identify recursive tail-generation atom construction.
+The declaration changes remain private, not production acceptance. Receipts:
+`.cache/comparator-implementation/m7-declaration-integration/`.
+
+Both Devin tasks are stopped (terminal143) after checkpoints: intake produced
+no patch; atom reuse produced a reviewed private proposal with synthetic gains
+but no native acceptance. Parent fixed its same-builder cyclic-mutation defect
+in a private copy (1000random graphs match); native20s still times out, so
+neither atom proposal is integrated. Sandbox rootRO/repoRW/4GiB reverified.
+No proof budgets increased. Updated optional cache contracts pass13tests23.02s.
+
+Final diagnostic OTel run is terminal4: actual semantic pointer-class mismatches
+at LoadProgram bp+0xa/+0xc plus missing/stale declared-call receipt. AST-root
+fingerprint spans total196.64ms/45calls, descriptor3.30ms/44calls in this diagnostic
+run; do not equate these with the previous aggregate fingerprint time or claim
+a speedup. Next work is the real declaration-consumption/provenance path, not
+the synthetic cycle optimization. M5/M7 and native acceptance remain open.
+
+## 2026-10-05 — Boolean ITE guard retained; pruning draft still under review
+
+Reviewed Devin's producer delta and integrated a narrower fallback preserving
+existing richer comparison recovery. Six new controls fail before the fix;
+final importer cohort60passed16.02s. Scoped lint, MyPy and startup architecture
+pass. Permanent controls reuse the enrolled result-width module. Receipt:
+`.cache/comparator-implementation/m7-invocation-edge-feasibility/parent-review/producer-integration.json`.
+Four independent soundness counterexamples keep the larger feasibility helper
+unintegrated; Devin71279 repairs its private copy. M5/M7 remain open.
+M7 performance audit found existing both-track measurements; final-source
+reconciliation and real16/shared dependency-control linkage remain, with exact
+next commands in `.cache/comparator-implementation/m7-performance-current-audit.md`.
+
+## 2026-10-05 — Full architecture gate and declaration-cache controls green
+
+Full architecture-check39470 passes after the11declaration/enrollment fixes.
+Architecture/Make regression14107 finishes419passed,1warning,236.28s.
+Independent unchanged parent declaration-memo controls now2passed23.80s
+against the revised staged intake; this closes those two reproduced failures,
+not retained-premise or original InitBars acceptance. Worker25919 remains live
+on its broader staged controls; retry-outcome44109 is separate and live.
+Receipts:`m7-callwalk-stage/parent-review/architecture-full-repaired.log`,
+`architecture-repair-tests.log`, and
+`m7-post-service-chain/parent-tests/declared-memo-repaired.log`.
+
+## 2026-10-05 — Full architecture gate exposes declaration/enrollment gaps
+
+Full architecture-check failed11findings: two ownership-header omissions,
+six missing promotion-registry entries and three unenrolled fast-pipeline
+tests. Corrected those explicit declarations without changing runtime logic;
+scoped lint passes. Full gate39470 and architecture/Make regression14107 are
+running; no green full-gate claim yet. Receipts:
+`m7-callwalk-stage/parent-review/architecture-{full,full-repaired,repair-tests}.log`.
+Caller-chain25919 reports fixture closure after threading declared services
+through both parent replay sites; this remains unaccepted staged evidence.
+
+## 2026-10-05 — Caller-chain worker redirected to reproduced admission failures
+
+Parent deliberately interrupted33505 (terminal130) to deliver the two
+reproduced declaration-cache failures before further draft expansion. Resumed
+the same blushing-roadrunner session as25919 with exact parent red controls,
+valid-declaration revocation requirements and unchanged stage-only ownership.
+Production is unaffected. Retry-outcome44109 remains live on its separate
+owner; no broad/native test repeated during this handoff.
+
+## 2026-10-05 — Traversal owner's MyPy gate cleaned without runtime change
+
+Removed34MyPy-confirmed unused redundant-cast suppressions and annotated the
+slot-helper local tuple in cli_c_ast_rewrites.py. Scoped lint and MyPy now
+pass. Independent compile comparison verifies all683runtime code objects
+identical to the saved pre-cleanup file. Pyright still has5diagnostics; a
+separate saved-source package reproduces exactly the same5,0added. No runtime
+or function acceptance claim; earlier native timeout remains authoritative.
+Receipt:`m7-callwalk-stage/parent-review/type-cleanup/`.
+
+## 2026-10-05 — Bounded retry-outcome correction delegated
+
+Devin44109 (`rainbow-parsnip`) owns a separate private stage for the recorded
+completed-validation-failure→retry-timeout masking defect. Exact current
+cli_decompilation baseline saved; typed outcome precedence and focused controls
+required, no native runs or production edits. Source/graph scout points to the
+two retry deadline returns and their callers; worker must reproduce actual
+masking before changing behavior. Caller-chain33505 continues separately;
+parent's declaration memo failures remain unresolved review requirements.
+
+## 2026-10-05 — Parent reproduces declaration-cache admission defect
+
+Two direct callable-seam controls fail43.76s against the scoped-source draft:
+after initial mint, malformed declared_boot or declared_services updates are
+ignored on the identical-local-evidence memo hit. Exact failures and overlay
+origins retained under m7-post-service-chain/parent-tests/; PARENT_REVIEW.md
+requires current declaration admission and retained authority revocation checks.
+This draft remains outside production. The initial collection error was a
+separate overlay layout issue, not a semantic test result.
+
+## 2026-10-05 — Post-walk worker profile retained
+
+Corrected-observer diagnostic90520 completed: actual CLI rc3 at44.711s,
+unchanged20s analysis budget, verified KVM API12, frozen sources.19actual
+worker samples span lifting/structuring/traversal; no single residual hotspot
+or end-to-end speedup is inferred. Receipt:`m7-setgear-walk-profile/REVIEW.md`.
+Parent caller-declaration revocation control is running against an isolated
+overlay after correcting its package-entry layout; original collection error
+is preserved. No scoped-source draft accepted yet.
+
+## 2026-10-05 — Reviewed walker integrated; SetGear still exceeds its limit
+
+Devin98197 finished0. Parent integrated the exact reviewed emitter after
+baseline hash verification, retaining per-field traversal and existing dynamic
+iterable ownership. Removed two newly unnecessary type-ignore comments;
+scoped lint passes, final MyPy35diagnostics exactly match saved baseline35.
+Production call-inventory/rollback cohort37passed18.88s. No proof budget changed.
+Original SetGear recheck57172 reached verified KVM API12 and failed at the
+unchanged30s subprocess bound:1failed47.50s pytest/52.49s outer. All3130source
+hashes unchanged,0missing. Earlier redirected launches never entered the test
+because KVM was not visible there; their logs are preserved separately.
+The optimization does not close SetGear or M7. Receipt:
+`m7-setgear-post-walk/receipt.json`; integration/checks under
+`m7-callwalk-stage/parent-review/`. InitBars worker33505 remains staged/live.
+
+## 2026-10-05 — Final walker review and native acceptance preparation
+
+Worker's revised owner exactly matches the parent fallback-owner repair;
+production still matches the saved dirty baseline. Final staged12controls pass
+29.07s. Saved benchmark samples are noisy: helper median1.001x baseline,
+full inventory observation0.871x, identical804calls/49names. Earlier worker
+0.651x/0.697x figures are separate observations, not the retained run's result.
+No end-to-end speedup accepted. Worker98197 remains live for final reporting.
+Prepared unchanged SetGear acceptance under m7-setgear-post-walk/ with expanded
+source hashing. Sandbox KVM character/API verification passes(API12); test
+execution awaits reviewed production integration. InitBars33505 stays separate.
+
+## 2026-10-05 — Durable traversal controls and worker review handoff
+
+Added alias-order, live shared-container mutation and container/node-cycle
+regressions to the already-enrolled test_cli_call_inventory.py. Scoped lint
+and the production baseline suite pass (durable-baseline.log). No walker
+optimization is integrated. Initial Devin8224 is terminal0; resumed the same
+rainbow-parsnip session as98197 for the parent repair, complete timing samples
+and full guard measurement. Worker has adopted the parent's fallback-owner
+repair in its isolated stage. InitBars worker33505 remains active separately.
+
+## 2026-10-05 — Parent removes duplicated exception boundary in stage
+
+Separate parent candidate replaces the traversal emitter's three new broad
+exception suppressions with the existing iterable boundary owner. Exact
+fallback-owner parity/inventory/live-mutation checks:11passed,1benchmark
+deselected,41.72s. Production and worker stage remain untouched; follow-up
+prompt contains the reviewed candidate and remaining measurement obligations.
+Receipt:`m7-callwalk-stage/parent-review/fallback-owner-parity.log`.
+
+## 2026-10-05 — Parent traversal parity passes; integration review remains
+
+Independent staged walker/inventory plus live-mutation controls:11passed,
+1benchmark deselected,38.81s. Worker reports helper-only timing improvement;
+parent has not accepted an end-to-end speedup. Review requires removal of new
+duplicated broad exception suppression and complete timing samples/full-guard
+accounting. Production stays unchanged. Exact evidence:
+`m7-callwalk-stage/parent-review/parity.log` and `REVIEW.md`.
+Post-service-chain worker remains active on missing declared-service transport
+through caller-proof construction; no InitBars acceptance yet.
+
+## 2026-10-05 — Scoped typing and traversal repair check
+
+Production MyPy passes for the four selected declared-interrupt/version owners
+through the promoted-file Make gate. Devin revised the staged traversal to
+preserve per-field expansion semantics; parent's unchanged live-container
+differential control now passes. Full worker parity/performance report and
+integration review remain pending; production traversal is unchanged.
+Evidence:`m7-declared-interrupt-stage/parent-tests/production-mypy.log`,
+`m7-callwalk-stage/parent-review/live-container-revised.log`.
+
+## 2026-10-05 — Exact caller-chain follow-up and traversal rejection
+
+Resumed Devin33505 (`blushing-roadrunner`) in isolated
+`m7-post-service-chain/` to advance the exact InitBars chain after the accepted
+interrupt boundary. Verified outer rootRO/repoRW/4GiB; no KVM needed for this
+static task. One60s real-image diagnostic maximum; production read-only.
+Parent differential traversal control fails against Devin8224's candidate:
+global container dedup loses a node appended during iterator consumption that
+the baseline visits via a later parent.1failed40.34s; candidate not integrated.
+Receipt:`m7-callwalk-stage/parent-review/REVIEW.md`. M5/M7 remain open.
+
+## 2026-10-05 — Integrated invocation regression evidence
+
+Parent production invocation-domain, boundary and pipeline cohort:133passed,
+1warning,70.06s. The real SORTD static diagnostic completed with production
+owners (no KVM) and the unchanged60s cap; its receipt is
+`m7-declared-interrupt-stage/parent-tests/native_declared_int21.json`.
+The explicit service API, conditional assumption, live-IVT revocation and
+unknown frame-load behavior are documented in real16-program-execution.md.
+These checks cover the first declared interrupt boundary, not the original
+InitBars chain. M5/M7 remain open; Devin8224 is still staging callwalk work.
+
+## 2026-10-05 — Declared-interrupt production integration checks
+
+Reviewed staged interrupt owners are now copied into production, with the
+shared DOS response encoding retained as one owner. Make, pipeline and test
+ownership enrollment include the new boundary/collision controls. Parent
+fixed the shared callable alias annotation; scoped lint-iteration passes.
+Initial production cohort:76passed/8failed; all eight failures are GNU Make
+temporary-file creation on the read-only default temporary path. The corrected
+run uses repository-local TMPDIR, preserving assertions:84passed,1warning,
+68.66s. Startup architecture checks pass. Evidence is retained in
+`m7-declared-interrupt-stage/parent-tests/production-*.log`.
+This integration does not establish InitBars closure or M5/M7 acceptance.
+Devin8224 remains live in the isolated callwalk optimization stage; no
+optimization patch has been accepted.
+
+## 2026-10-05 — Parent rejects observer-induced worker-route change
+
+Independent exact-guard control proves Devin's heartbeat changes Python thread
+count1→2 and fork eligibilityTrue→False. The observed daemon-thread route is
+therefore invalid evidence for ordinary SetGear execution. Corrected observer
+preserves1thread/True; parent49541 runs once with it at unchanged budgets.
+No production source changed. Earlier phase conclusions are superseded by
+`m7-setgear-phase-attribution/PARENT_REVIEW.md` and corrected-lane receipts.
+
+## 2026-10-05 — Actual SetGear execution phase identified
+
+Devin23675 terminal0; parent independently inspected observed process356.
+At15s it imports cli_core/work_items; at30s direct-decomp runs in a daemon
+thread with unreadable native frames. Diagnostic40.84s ends with the unchanged
+analysis timeout and stable sources. Parent corrected unsupported startup/cache
+and import-time claims; no hotspot or speedup inferred. Review:
+`m7-setgear-phase-attribution/PARENT_REVIEW.md`. Shared interrupt extraction57181
+continues in staging; no new production proof capability accepted.
+
+## 2026-10-05 — Interrupt repair parent controls pass; extraction pending
+
+Repair70787 finished; parent20fixture/corruption controls pass19.91s. Repaired
+source retained separately. Integration still awaits removal of the duplicated
+DOS response encoding and a frame-load control; same Devin resumes57181 in
+private staging. Separate Devin23675 investigates SetGear's missing diagnostic
+phase observations without production edits. Original M5/M7 remain open.
+
+## 2026-10-05 — SetGear remains a native timeout
+
+Verified KVM recheck22941:1failed53.40s pytest; all3127source hashes stable and
+five recorded cache misses. The original30s subprocess bound still expires.
+Single bounded diagnostic27476 yields no worker observations before its60s
+safety cap, so no performance diagnosis follows. Exact evidence:
+`m7-setgear-post-inventory/REVIEW.md`. Replay readback behavior is now documented
+in execution/program specs; source review and169+30passing controls stand.
+
+## 2026-10-05 — Replay public bridge refresh passed
+
+Parent60629:30passed,0failed/skipped,489.50s pytest/493.18s outer; all3127source
+hashes stable. Both concrete169-test and public30-test receipts now cover the
+reviewed replay-readback repair. Original SetGear node runs as22941 through
+verified KVM API12 after the earlier post-inventory environment limitation;
+no timeout/assertion change. Declared-interrupt repair70787 remains staged.
+
+## 2026-10-05 — Parent replay acceptance and interrupt draft rejection
+
+Reviewed worker74118 against its dirty baseline; all three replay consumers now
+refuse complete outcomes when final write bytes are unreadable. Parent11-module
+cohort169passed,0failed/skipped,96.46s; scoped lint passed and source hashes
+remained unchanged. Earlier enrollment164passed. Exact receipt:
+`replay-unreadable-write-review/PARENT_REVIEW.md`. No fabricated zero bytes or
+misaddressed readable pieces remain in this path. Original M5/M7 gates stay open.
+
+Devin12319's interrupt draft is rejected: parent four corruption controls show
+forged answers/preserved lanes are accepted under the same environment digest.
+Submitted draft and red evidence retained; resumed same session as70787 with
+staging-only ownership for canonical revalidation, live IVT and frame effects.
+No interrupt positive or InitBars closure is accepted from the rejected draft.
+
+## 2026-10-05 — Replay source-drift review
+
+Comparing the505-test snapshot to the earlier public checkpoint exposed one
+additional change: unreadable writes were substituted with zero bytes. This
+policy is rejected; worker74118 owns a bounded typed-refusal repair across
+function replay,boundary capture and program replay, plus focused controls.
+Dirty pre-run sources are saved in `replay-unreadable-write-review/before/`.
+No blanket rerun or changed proof budget is authorized. Earlier505test evidence
+remains recorded, not relabeled as final integrated acceptance.
+
+## 2026-10-05 — Current M5 native/control refresh passed
+
+Parent67251:505passed,0failures/skips,309.48s pytest/311.09s outer with2workers.
+All317stale index nodes and2new resolution controls are present in JUnit; complete
+terminal/service-census/IVT/environment modules add further controls. All3127
+source hashes stayed frozen. Stale evidence is refreshed; required project gates
+and M5/M7 acceptance remain open. Receipt: `m5-final-source-review/parent-refresh/`.
+Devin12319 stages the explicit conditional interrupt boundary, with no production
+changes or default DOS assumptions; its bounded native test phase is released.
+
+## 2026-10-05 — Exact boot boundary identified
+
+Independent native-byte decode confirms `mov ah,30h; int21h` at10f9a/10f9c.
+The caller-path census refuses this interrupt before ordinary near calls;
+its7/6fact ledger is not a count of calls. A scoped near-call index alone
+cannot discharge the service boundary. Draft stays unintegrated. Devin12558
+finishes its bounded report; read-only Devin80128 checks final M5 source/evidence
+bindings so only necessary acceptance checks are refreshed. M5/M7 remain open.
+
+## 2026-10-05 — Scoped invocation draft review
+
+Parent reproduced3request-revocation failures in the staged scoped-source API.
+An isolated receiver-identity guard passes12fixture/parent controls32.27s;
+production remains untouched. Stopped off-target Devin47276 (exit130), resumed
+the same session as12558 for the exact InitBars chain and bounded corrections.
+Early boot-call success is not the requested chain. M5/M7 remain open.
+Evidence: `.cache/comparator-implementation/m7-bounded-invocation-review/PARENT_REVIEW.md`.
+
+## 2026-10-05 — Local frame evidence reviewed and native boundary recovered
+
+Devin's budget-refused local near-CALL evidence is integrated. Parent found
+three stale/foreign-context failures, added project/architecture and loader
+identity revalidation with durable controls, then passed53focused tests43.23s.
+Startup architecture/context/enrollment and scoped lint pass. Scoped MyPy has
+exactly the same34diagnostics against saved pre-change sources, no new errors.
+Native SORTD10566→11222 now has an authenticated frame and complete42-block
+boundary; global invocation source stays absent. Original InitBars remains
+red10refusals: its first callee is now incomplete, rather than unresolved.
+
+Next exact surface has5selector-window markers plus1continuation marker.
+Neither may waive the other. Devin13672 owns a bounded combined-proof task;
+proof producers and an independent identical scope must exist before any
+conditional consumption. M5/M7 remain open. A current61.48s capped inventory
+profile still localizes recursive frontend callee construction; it is not a
+complete test or speedup result. Receipts: `m7-local-frame-review/`,
+`m7-indexed-budget-next-review/`, `m7-combined-control-review/` under
+`.cache/comparator-implementation/`.
+
+## 2026-10-05 — Local CALL-frame evidence repair started
+
+Authenticated bounded MZ intake discards local caller evidence on inventory
+budget exhaustion (59 closed +5 pending at64). Devin owns a separate typed
+local-frame authority; global invocation scope must remain refused and budgets
+unchanged. Exact dirty baseline and verified sandbox receipt precede launch.
+This removes no acceptance obligation: InitBars and M5/M7 remain open.
+CALL-coordinate test-only typing cleanup is integrated and independently green:
+19 tests,13.13s; scoped lint passes. Static KVM marker-policy controls:5 passed.
+Receipts: `.cache/comparator-implementation/m7-local-frame-review/` and
+`m7-relative-call-coordinate-review/parent-test-typing-final-{tests,lint}.log`.
+
+## 2026-10-05 — Checkpoint failures reduced and profiler reviewed
+
+Quality-dev ended with 11,025 passed, 8 failed, 27 skipped in its broad unit
+phase (642.45s); earlier 305 contract, 1,204 admission and 3 budgeted controls
+passed. Four stale contract assertions are repaired: scoped-view diagnostics,
+scoped-owner enrollment, split GP runtime lanes and shortened agent guidance.
+Their combined 212-test cohort and scoped lint pass. Four semantic/performance
+failures remain; no final gate or milestone acceptance follows.
+
+LoadProgram reproduces alone with pointer/value parameter validation mismatches
+before its timeout report; Devin is diagnosing that exact evidence. Parent's
+BC5 profiler calibration reached the real comparator, then independent controls
+found overlapping inclusive-time and cross-thread wall-total bugs. Corrected
+private staging passes 19 worker and 2 parent controls plus scoped lint. Phase
+coverage remains explicitly partial; no performance or corpus claim follows.
+Receipts: `m7-gate-contract-repairs/`, `m7-phase-accounting-parent/` under
+`.cache/comparator-implementation/`.
+
+## 2026-10-05 — Header invocation integration verification
+
+Reviewed header-only invocation intake is in production, retaining conditional
+scope and unresolved callee obligations. Parent corrected readonly boot-field
+protocols; MyPy and startup architecture checks pass. The four new production
+test modules pass 28 controls in 16.92s. Original SORTD remains refused, so this
+is integration evidence, not function acceptance. Required quality-dev runs with
+six test slots and one comparator admission worker; its outcome is pending.
+Receipts: `.cache/comparator-implementation/m7-header-invocation-parent/`.
+
+Devin's terminal-tail diagnosis is complete. Parent independently checked the
+binary's backward jump, indirect callbacks and RET bytes; neither a terminal
+exemption nor guessed runtime stack/data bounds is admitted. A separate Devin
+read-only review now identifies missing original M7 corpus/performance receipts.
+M5/M7 remain open. Static comparator validation requires no KVM.
+
+## 2026-10-04 — Guarded tests execute in explicit lanes
+
+Parent reviewed the worker's routing, receipt and Make changes and independently
+reproduced 89 focused passes. Actual nested-pytest and Linux process lanes each
+collect and pass two cases with no skips; elapsed 10.986s and 6.772s. Nineteen
+host-only functions remain in the focused pool. DOS GP-word execution is a
+separate default/expanded native obligation with visible unavailable results.
+The architecture contract requires the lanes and passes 32 controls after a
+recorded red positive case. Provider failures and empty inventories fail closed;
+targeted/profile commands preserve their selection. Full-suite light exclusivity
+now preserves marked/learned exclusive paths in standalone waves; parent passes
+34 partition/live controls. Sixty-six module ownership declarations preserve all
+executable ASTs and discharge their header findings. Broad gates, eleven native
+failures and M5/M7 remain open.
+Reviewed source edits are saved but uncommitted because this environment rejects
+Git index writes. Receipts: `m7-skip-lanes/`, `m7-final-architecture/`.
+
 ## 2026-10-04 — Reviewed fingerprint parser optimization
 
 One IR syntax owner now supplies both condition argument parsers, retaining
@@ -7662,3 +8361,549 @@ repository findings; the formatter is not listed. Full architecture cleanliness
 remains unresolved (315findings at its last run), so this is a scoped checkpoint.
 Physical renamer30synthetic tests pass, but its whole-repo scan reached60s and
 five dynamic-import refusals were independently retained; no apply accepted.
+
+F19 batch-2 real16 differential replay (2026-10): f19ru tools/dosunit16.py
+drove five new spec families against the EN originals — start_util 151,
+egame_math2 72, egame_3d 87, egame_clock 16, egame_scalelod 147
+self-harvested — all agree after fixes. Replay caught one literal-content
+bug byte-exact matching cannot see (formatMissionClock pushed ":" where
+the oracle pushes "") and forced a stale-candidate rebuild (process3dg
+draft vs MATCH). Identical div-by-zero int-0 exits now report
+AGREE-FAULT instead of INCOMPLETE. The F-19 native port gained the MSVC
+CRT LCG on both per-EXE state cells (START dseg:0x7a50, EGAME
+dseg:0x622c) with oracle goldens pinned into f19_behavior_tests;
+randMul/randomRange/srand semantics verified per-vector.
+
+m7-register-return-stage scope repair (2026-10-05): parent review rejected the
+staged near-return integration — a premise-derived unregistered artifact could
+publish PROVEN and complete universal coverage, laundering conditional
+near-call evidence. Repair kept the bounded slice (premise
+transport/consumption/publication): premise is now a source-bound typed
+record over the exact decoded callsite row/index; the raw conditional
+artifact keeps JMP + typed pending refusals so registry publication and
+universal coverage refuse through existing gates; a new staged scoped-view
+owner discharges RET only under a chain-bound invocation domain authenticating
+the identical row/index/artifact/boundary; callee routing splits
+universal-vs-scoped so pending bodies never enter universal coverage or
+closure pools. Staged suite 62 passed; before-variant 51p/9s/2f red where the
+baseline lacks premise transport; laundering probe reproduces the parent's
+proven/complete sequence on the pre-repair snapshot and shows
+unknown_refuse/incomplete on the repaired tree. Scoped lint-iteration clean.
+No production files touched; no SORTD fix or milestone acceptance claimed.
+
+2026-10-05 parent checkpoint: the scoped near-return repair is now integrated
+(the staging-only entry above is historical). Canonical82controls pass;
+independent logical-transfer typing review14controls pass30.00s. MyPy-dev and
+full architecture checks are green; exact delta and logs remain under
+`.cache/comparator-implementation/m7-logical-transfer-types/` and
+`m7-register-return-parent-review/`. Current comparator integration gate and
+bounded read-only Devin caller review are in progress. Native SetGear acceptance
+remains open; KVM API12 was verified inside its latest test process, superseding
+the earlier environment-limited skip only if that actual test passes. No original
+M5/M7 or final-gate acceptance is claimed.
+
+2026-10-05 follow-up: comparator gate terminal green305contracts+1204tests.
+Verified-KVM SetGear replay is a real unchanged30s subprocess timeout (1failed),
+not an environment skip. Parent then repaired Capstone detail-disabled near-call
+premise/freshness handling: saved baseline3red controls, final86focused passes;
+scoped lint/MyPy-dev/startup architecture green. The prior comparator gate
+predates this small boundary repair. Devin caller review finished unchanged
+5selector refusals; parent qualifies raw-byte caller counts and keeps the
+backward-tail and invocation-scope obligations separate. New bounded SetGear
+profile worker76588 is active, staging only. Original M5/M7 remain open.
+
+2026-10-05 parent review rejects both current proposals before integration:
+SetGear's event-only snapshot cache restores3calls where baseline restores4
+after an unreported insertion plus later call loss. Resume98388/rainbow-parsnip
+now implements exact state authentication; existing AST tokens also miss real
+type changes. Per-edge transport87863/tremendous-sunfish passes its old controls
+but parent2actual decoded wide-CALL/JMP controls expose coordinate-only premise
+borrowing. Correction prompt ready pending terminal worker state. All defects
+are staged-only; production is unchanged. Raw receipts/reviews remain under
+m7-snapshot-generation-parent/ and m7-per-edge-parent-review/.
+
+### 2026-10-05 — reviewed call-inventory observation integration
+
+Combined adjacent total/named call observations without caching across rewrites
+or rollback; parent restored the empty-obligation fast path. Durable controls
+cover one walk per observation, multiplicity/helper exclusion, unrestorable
+loss, restored-tree freshness and silent mutation.49staged/60production checks
+pass; scoped lint/types and enrollment checks pass (GNU Make tests require
+writable TMPDIR here). Native SetGear launch is environment-limited: /dev/kvm
+ENOENT before pytest. No end-to-end gain or M5/M7 acceptance claimed. Parent
+receipts: `.cache/comparator-implementation/m7-call-inventory-parent/REVIEW.md`.
+
+2026-10-05 — Scoped native import repair reviewed and integrated. Devin diagnosed
+an optional entry-jump application failure contaminating raw refusals; parent
+rejected consumer-side reason exemptions using a corruption control. Producer
+now retains raw refusals and separate application diagnostics. Durable regression
+red1/green43 (252.60s), including native mutation and boot-isolation controls.
+Scoped lint passes; two MyPy return-Any findings reproduce on saved baseline
+with identical configuration. No M5/M7 acceptance. Receipt:
+`.cache/comparator-implementation/m7-native-scoped-parent/`. Devin47012 separately
+reviews remaining profiling coverage under `m7-phase-coverage-review/`.
+
+2026-10-05 — Parent reviewed Devin47012 profiling hooks and integrated into
+private corpus harness:45tests+18subtests pass9.21s, scoped lint passes. Actual
+BC5 calibration retains refusal and source hashes;31.52s observed window has
+zero conservation residual (41.71s process elapsed). Partial attribution remains
+explicit. Frozen7lane/55obligation-per-phase uninstrumented run99184 started
+with dependency controls, serial processes and unchanged budgets. Profiled pass
+must follow on the same frozen source snapshot. Indexed-inventory follow-up
+still times out180s (1failed196.75s); no performance fix or M5/M7 acceptance.
+
+2026-10-05 — Frozen baseline99184 completed:14processes,7lanes,55rows per phase;
+3proved/2conditional/1counterexample/49unknown in each phase. Every lane matches
+cold/warm verdict/reason/assumption, dependency and contract evidence.2975source
+files unchanged; dependency controls6pass51.76s. Largest child peak399744KiB;
+process elapsed20.96–52.69s. Parent summary in
+m7-profiled-corpus/parent-uninstrumented-20261005/parent-summary.json.
+Profiled93620 starts serially on same frozen tree; no speedup or M5/M7 claim.
+
+2026-10-05 — Frozen baseline/profiled measurement pair completed28child runs.
+All55rows accounted per phase, identical proof-status counts and dependencies/
+contracts,2975sources unchanged. Fourteen closed profile windows conserve time.
+One unknown row changes refusal reason under instrumentation; do not claim full
+reason parity. Serial child totals487.84s baseline/618.91s profiled; median ratio
+1.273, peak399744/462616KiB. Diagnostic phase coverage remains named/partial,
+not a speedup or M5/M7 acceptance. Verified report: m7-phase-coverage-review/
+verified-summary.json. Devin20444 continues source-only staged discovery-cost
+review; no production optimization accepted.
+
+2026-10-05 — Discovery-cost review20444 terminal0; parent rejects combined
+baseline/VEX-cache draft for integration. Narrower staged repair28911 retains
+current image/loader reads and all publication rechecks, no VEX cache. Direct
+parent diagnostic98983 confirms29begin_lowering calls in one discovery
+(leaf15/region12/lowering2),5.488s of6.057s discovery, same3unknown verdicts.
+Early imports prevent end-to-end speed claims. Eight alternating hash-only
+controls reject sequential hashing (median0.489s vs current3thread0.411s,
+identical hashes). No production optimization accepted. Evidence under
+m7-discovery-cost-review/; original M5/M7 remain open.
+
+2026-10-05 — Original acceptance audit reconciled: current56-cell map is fully
+supported at its bounded evidence level, M5 native capability audit is already
+reconciled; no extra service/optimization prerequisite invented. Current M7
+checklist now links the frozen manifest,14named-phase measurements and baseline
+parity while retaining final public/dependency/source/gate obligations. InitBars
+focused16604 remains red40.54s with10selector-window refusals after the producer
+repair; exact test assertions retained. Typed-gate reviewer examines existing
+scope propagation vs universal expectation; Devin28911 continues staged-only
+identity reuse. No new production fix or M5/M7 acceptance claimed.
+
+2026-10-05 — Joint conditional obligations slice completed: new
+ir/scoped_control_obligations.py composes the source-bound continuation
+premise and the retained entry-jump selector proof over the same raw
+premise-derived surface; S1 derivation, per-consumption replay with
+surface re-audit, and joint obligation ledger count mirrored/orphan
+function-level markers exactly. Scoped seam in
+_scoped_callee_coverage_8616 routes mixed-marker surfaces through the
+composed view; continuation-only path preserved. Focused cohort + parent
+controls17passed44.17s; sibling scoped-IR regression74passed425.79s;
+lint-iteration clean over touched files. Native11222 remains
+CALLEE_INCOMPLETE universally and no scope was manufactured; InitBars
+validation not claimed. Report in
+m7-combined-control-review/REPORT.md.
+
+Parent review of that slice: 97 production regressions passed73.47s with
+unchanged source hashes. Parent fixed3new MyPy diagnostics; final17controls
+passed62.83s and ordinary-source MyPy matches the saved40diagnostics exactly.
+Scoped lint/startup/context/enrollment pass. Original InitBars remains red:
+10selector refusals, missing invocation scope; its captured inventory stopped
+at64boundaries with59closed callers and5pending targets. No full-function or
+M5/M7 acceptance. Devin47276 stages a bounded caller-authority follow-up;
+global budget refusal and all proof limits remain unchanged. Parent evidence:
+m7-combined-control-review/PARENT_REVIEW.md.
+
+Current public checkpoint: 180schema/accounting/seal/domain checks +30native
+recursive/terminal public bridges +17MSC8 +19BC5 adapter checks pass; all5CLI
+help commands exit0. No failures/skips or drift across3127snapshot paths.
+Public docs/schema/entrypoints match the prior28-file audit apart from3
+enrollment files. Receipt:m7-public-current-20261005/REPORT.md. This closes
+the current public refresh only; final integration/native/gate reconciliation
+and original M5/M7 remain open. Devin47276 still owns staging only.
+# 2026-10-05 — Retry-outcome integration and caller-chain parent review
+
+Current full quality-dev checkpoint (writable TMPDIR=.cache): linters-dev,
+typing, mypyc smoke, startup architecture,305contracts,1211comparator controls
+and3budgeted controls pass. Broad phase357failed/10839passed/27skipped in522.47s;
+later decomp-opt phase did not run. Failures are retained in
+`m7-control-refusal-review/failed-nodes.txt`. Many expose missed active-unary
+consumers; do not relabel them baseline debt or weaken source provenance.
+Staged repairs cover memory projections, input/return proofs and carry/borrow.
+Parent reconciled Make inventory literals and captured-guard assertions:
+154focused tests pass12.49s. Procfs disappearance race has deterministic
+red/green evidence; test helper catches only FileNotFoundError/ProcessLookupError,
+full module9passed6.08s. Production timeout policy unchanged.
+Devin InitBars diagnosis reviewed in `m7-initbars-target-review/PARENT_REVIEW.md`:
+real target-window refusal plus padding-entry/caller-registration obligations,
+not a false mismatch. No native acceptance or M5/M7 completion.
+
+Follow-up comparator admission: previous gate stopped at972passed/1failed
+(171.93s), with305precheck passes. The E8CBFF high-selector negative now
+asserts the producer's earlier native selector-window refusal and zero solver
+queries; independently evaluated retained SSA still reaches0x11000 atCS0x103,
+versus0x1000 atCS0/0x100. No production proof gate changed. Focused module
+8passed7.14s; scoped lint passes. Full comparator gate rerun pending in
+`m7-control-refusal-review/comparator-gate.log`. Sandboxed Devin is assigned
+only `m7-initbars-target-review/` to explain callsite0x10576 target_mismatch;
+the prior112s test and optional AH4A diagnostic are not being repeated.
+Original M5/M7 remain open.
+
+Comparator follow-up: companion public-boundary negative had the same stale
+refusal-stage expectation. Both controls now retain unknown/refuse, no admitted
+target, failed evidence accounting and independent concrete SSA counterexample.
+Family35passed21.53s; scoped lint passes. Final comparator-check-fast exits0:
+305precheck passes13.76s +1211admission passes183.59s. Receipt:
+`m7-control-refusal-review/comparator-gate-final.log`. No production proof code
+or budgets changed; this closes the comparator gate, not the broader plan.
+
+Integration checkpoint then exposed two MyPy errors before tests: optional
+instruction.addr at the declared interrupt boundary and a redundant cast in
+scoped-control dispatch. Added explicit missing-address refusal and removed
+the redundant cast. Scoped lint and full mypy-dev pass; affected service/joint
+control cohort34passed46.20s. quality-dev rerun is recorded separately in
+`m7-control-refusal-review/quality-dev-final.log`; no unexecuted later phase
+is claimed passing.
+
+2026-10-05 follow-up: unary contract integrated across eight owners/eight new
+test modules. Production new58pass; broader195pass/1incomplete-width-fixture
+corrected with importer/address39pass; native scopes10pass266.55s; enrollment
+166pass. Scoped lint/architecture/ownership/context pass; MyPy43saved-before/
+43current,0added. SORTD prefix now reaches INT21/AH4A at0x11011 (747classified,
+746materialized,1refusal). Resize bridge/environment declaration remains open.
+Typehoon candidate reviewed with Devin22994; parent corrected iterator loss,
+18private/185production controls pass, but unchanged KVM SetGear still times
+out30s. Optimization withdrawn to staging; previous native no-gain evidence
+also found, so do not repeat it. Receipts:m7-unary-integration/ and
+m7-typehoon-review/PARENT_REVIEW.md. M5/M7 and final acceptance remain open.
+
+Follow-up: reviewed caller-chain source/service propagation is now integrated.
+Parent198production controls pass101.17s; scoped lint/startup architecture pass.
+MyPy63diagnostics reproduce exactly under shadow-file dirty-baseline comparison
+(0added/removed), so no broad typing-green claim. Three old mocks now accept
+and verify declaration defaults; callback-identity regression is permanent.
+Expanded serial native-byte lane and ownership enrollment updated. Receipt:
+`m7-post-service-chain/parent-tests/integration-receipt.json`.
+
+The original SetGear phase diagnostic reveals an orphaned worker after its
+CLI parent is killed at30s. Imports16.9s/setup4.3s; worker then continued for
+63.06s, including43.86s rewrite and12.96s decompiler work. Returned ok is not
+acceptance. Existing complexity scaling makes requested20s internally40s;
+earlier reports of an effective20s analysis budget were imprecise. All3130
+source hashes remained stable. No budgets were changed. Devin35534 stages
+owner-death cleanup; Devin90380 stages typed exact census-failure sites for
+the unresolved InitBars path. Both scopes are private; M5/M7 remain open.
+
+Devin90380 is now terminal:6staged diagnostic controls pass. Exact early-leg
+failure site is function0x10f9a/block0x10fc3/instruction0x10fc5. Independent
+parent read of original MZ bytes e80c05 confirms the near-call target0x114d4.
+That callee's boundary/preservation proof is the next concrete obligation;
+no guessed additional DOS service is justified. Diagnostic patch remains
+staged for parent regression review. See `m7-invocation-refusal-site/`.
+
+Reviewed and integrated Devin's unstarted-isolated-retry correction. Permanent
+production tests reproduce3failures/2passes before the patch; focused
+CLI/regeneration/rollback/pipeline/enrollment cohort141passed38.91s afterward.
+An unstarted retry preserves completed evidence; an attempted timeout remains
+a timeout. Scoped lint and MyPy pass; one existing snapshot return required
+an object annotation and docstring, with no runtime behavior change.
+New controls are enrolled in the routine pipeline, Make and ownership map.
+
+Original SetGear remains a real30s subprocess timeout after this correction:
+KVM character10:232/API12 verified,3130source hashes unchanged,63.59s outer.
+No SetGear fix, performance gain or M5/M7 completion is claimed. Receipts:
+`.cache/comparator-implementation/m7-retry-outcome-stage/receipts/` and
+`m7-setgear-post-retry/`.
+
+Independent frozen caller-chain review: omitted declared_services forwarding
+in two parent replays reproduces a failed conditional-chain control11.38s;
+the two-line fix passes15.81s. A separate valid replacement callback retains
+the old memoized recompute authority: parent red5.15s, identity-check green4.00s.
+These changes remain staged pending full review and the actual InitBars chain.
+Devin25919 remains active; its bounded actual-SORTD diagnostic did not finish
+the requested chain. Static proof work requires no KVM.
+
+2026-10-05 — Parent refusal diagnostics acceptance:156production tests pass50.62s; lint/startup architecture pass; isolated shadow-file MyPy reproduces63existing diagnostics with0added. Receipt:m7-invocation-refusal-site/parent-review/integration-receipt.json. Independent first-callee review rejects inferred closure counts and identifies boot-bound ADD-SP/JAE feasibility before deeper indirect calls. Scope-bound edge proof is staged by Devin24377. Owner-death repair passes parent ordinary-subprocess control but still lacks safe supervision admission; Devin49092 handles explicit failure/readiness/identity/deadline controls. Neither draft integrated; M5/M7 remain open.
+
+2026-10-05 — Reviewed owner-death supervision integrated. Six production red controls; initial production180pass/1manifest failure corrected by counted Linux-only process enrollment. Final enrollment164pass10.14s and Linux lane8pass8.92s; scoped lint/MyPy/startup architecture pass. Parent repaired guardian-ready EOF/deadline bugs and test PID publication race. Receipt:m7-fork-owner-death/parent-review/integration-receipt.json. M5 attachment maps347/347indexed nodes to superseding passing JUnit/current test hashes, but required checkpoint gates remain open. Feasibility draft24377 stopped for duplicate Jcc semantics; corrected producer-based task7881 staged only. No SetGear or M5/M7 acceptance.
+
+2026-10-05 — M7 SetGear intra-rewrite-cost diagnostic (measurement only, no production edits): unchanged CLI argv under verified KVM(10:232/API12)+private cache keyspace(5 misses/0 hits); production 20s worker deadline killed worker pid453 mid-idx17(48 passes,round0) at+19.82s→CLI status=timeout. Measured: angr decompiler_run12.06s(61%), callsite pass2.36s, per-apply guard machinery≈37% of rewrite prefix; rehydrate/repair negligible. 49/49 control checks;3130 sources unchanged. Report:.cache/comparator-implementation/m7-rewrite-cost-current/REPORT.md. Proposal: accepted-inventory→before-inventory chaining (~1.5–2.5s); structural work-vs-budget gap remains open. No acceptance claim.
+
+2026-10-05 — M7 InitBars 0x10576 target_mismatch dissection (diagnostic only, no production edits): callee 0x11402 is IN-window and complete; the sole failed leg is the Semantics operand binding SELECTOR_WINDOW_UNPROVED — a genuine universal-selector counterexample (under cs=0x0058 the same E8 bytes wrap to flat 0x1402). The premise retry is empty because the only transporting edge (call 0x10554 @0x10042, landing on InitBars' verified 12-byte NOP sled) keys the index under 0x0554 while `for_target(0x10560)` queries 0x0560; census-built indexes carry no entry_identities. Second blocker: parent premise requires the caller head registered PROVEN — impossible in a single-function import session. Bounded first slice proposed: padded-window row join in `_caller_invocation_premise_8616`/`_registered_invocation_premise_8616` at the IR layer. Report: .cache/comparator-implementation/m7-initbars-target-review/REPORT.md. No acceptance claim.
+
+### Reviewed modular unary-use integration
+
+Integrated authenticated active-unary dependency traversal in the IR modular-use
+census, preserving signed-extension refusal and requiring exact producer evidence
+for captured one-bit values. Added 17 positive/corruption controls to the routine
+QA inventory. Parent baseline: 4 failed / 13 passed; final combined near-return and
+modular-use cohort: 102 passed in 23.02s. Scoped lint-iteration and MyPy passed.
+Evidence: `.cache/comparator-implementation/m7-unary-return-review/parent-*.log`.
+
+Devin carry proposal remains unintegrated: parent review reproduced a pinned-wrapper
+validation bypass and a lossy narrowing/widening chain receiving a PROVEN carry link.
+A bounded correction is being staged; passing original tests alone was insufficient.
+M5/M7 and the final broad gate remain open; no new corpus acceptance claimed.
+
+### Integrated copy and PUSH consumer repairs
+
+Parent integrated exact low-byte copy projection and eight routine corruption
+controls after reproducing two baseline failures; scoped lint/MyPy passed.
+Frozen saved-failure replay plus new controls:330passed/68failed in248.73s,
+versus357failures in the prior full run (different total selection). Remaining
+failures are saved verbatim in m7-control-refusal-review/remaining-failed-nodes.txt.
+
+Parent then reviewed/integrated physical PUSH capture identity repair with14
+controls:45passed14.00s. Differing capture versions require identical exact prior
+producer, width/projection checks and all other metadata; no generic unary
+identity substitution. Scoped lint/MyPy pass after explicit bool typing. Final
+63remaining-fast-failure +14control replay is running; five carry/SORTD/COD
+cases remain explicitly deferred to their owning followups, not accepted.
+Evidence under m7-indexed-copy-unary/ and m7-physical-push-review/.
+M5/M7 final gates and current performance reconciliation remain open.
+
+Physical-PUSH followup terminal:53passed/24failed25.16s (63previous failures plus14controls). With the five explicitly deferred cases,29previous failures remain outstanding; this is not a fresh full-suite count. Exact nodes/log: m7-physical-push-review/{remaining-failed-nodes.txt,parent-followup.log}. Final-source controls pass; no M5/M7 acceptance claim.
+
+### Stack-coordinate integration and remaining13cases
+
+Parent source trace showed SP writes consuming captured Sub16/Add16 results,
+while extent collection required a folded register descriptor. IR extent owner
+now records prior exact word captures in one pass, authenticates producer/read
+projection, and retains unwrapped literal arithmetic coordinates. Missing, duplicate,
+wrong-width/op/decoration, active-unary and wrap-sized producer controls refuse.
+Native extent tests now pass; no private-write permission is inferred by this owner.
+
+Reviewed/integrated worker entry-prefix snapshot repair: scalar TMP affine reads
+require earned recorded producer operation, exact width and zero displacement;
+16permanent corruption controls enrolled. Repaired incomplete scoped-resolution
+mock by supplying declared_services; no production fallback added. Final combined
+130tests pass9.68s, scoped lint/MyPy pass (test modules excluded by existing typing
+policy). Evidence: m7-stack-window-review/parent-{green,lint}.log and
+m7-stack-extent-review/.
+
+Saved failure set now has13outstanding cases:7address-escape/private-write,2carry,
+and4pipeline/SORTD cases. This is focused reconciliation, not a new full gate.
+Address-escape staging is delegated; Devin carry correction remains live58522
+(revalidated handle this turn), with original rejected proposal retained. Original
+M5/M7 and corpus/final release evidence remain open.
+
+### Carry/escape final consumer integration
+
+Parent reviewed and integrated address-escape dependency repair:34passed6.19s,
+scoped lint/MyPy pass. Capture identities now precede live-register fallback;
+widths and pending conversions remain authenticated, derived-address taint
+survives narrowing and outgoing/store controls.
+
+Devin carry correction terminal0 (session58522). Parent rejected residual
+missing-definition storage-width fallback with an executed red control, added
+explicit refusal, and integrated identity-only definition lookup plus explicit
+conversion consumption. Broader96test audit found3store-destination regressions
+(also reproduced in Devin's staged version). Parent repaired the Alias byte-lane
+consumer with exact16to8 traversal, preserved captured producer/read widths,
+operation/projection and register-version checks;9new refusal/positive controls.
+Final combined carry/ALU/destination/boundary cohort:110passed29.04s.
+Evidence: m7-carry-unary-review/parent-final/ and m7-carry-destination-review/.
+
+Reviewed/integrated retained decoded-boundary reuse at invocation lookup. It
+removes the concrete conflicting-census exception without weakening retention
+guards. Five boundary controls pass in final cohort; SWAPS still has honest
+IR_BUILD_REFUSED, not accepted. Scoped MyPy reports34identical saved-before
+diagnostics (0added/removed); no clean typing claim for that restricted import
+scope. Startup architecture passed.
+
+Remaining four previously recorded pipeline cases are still open:LoadProgram
+pointer publication (binary dereference facts exist but DS physical-source
+evidence missing),SWAPS caller IR refusal,InitBars caller-domain transport and
+SORTD inventory timeout. Current focused fixes are not final broad/M5/M7
+acceptance. No source or proof budget relaxed.
+
+### Encoded CALL destination integrated; resize bridge rejected for repair
+
+Parent integrated native CALL-byte binding and raw-entry prefix transport after
+checking all three production owners against saved baselines. Permanent MZ tests
+cross-check CX against Unicorn and reject a self-consistent forged callsite index.
+Mandatory Cython cohort:44passed218.80s; scoped lint, startup architecture and test
+ownership checks pass. Tests enrolled in the serial native lane. Final-source
+SWAPS/InitBars rerun remains2failed215.43s, so neither function is accepted.
+
+Resize worker17355 intentionally interrupted, terminal1, proposal retained.
+Independent native review reproduced two false-complete results: alternative
+branch writes merged chronologically, and stale-memory feasibility pruning a
+reachable code write. Bridge stays private; correction delegated to sandboxed
+Devin52137 with exact failing tests. Evidence under
+m7-encoded-entry-transport/ and m5-resize-bridge/parent-review/. M5/M7 remain open.
+
+### Missing native caller intake integrated
+
+SWAPS diagnosis reaches a missing registered parent before its conditional callee
+can receive an invocation scope. Parent reviewed and integrated bounded native
+caller intake, with early cycle guarding and refusal checks before registration;
+registration is raw identity only, followed by mandatory coverage/boot authority.
+Final-source18tests pass31.40s with Cython, lint/architecture/ownership pass,
+scoped MyPy59before/59after with0new/removed. Nine new controls enrolled in the
+serial native lane; legacy mock gains its required project field. Receipt:
+m7-swaps-next/parent-*.log. No SWAPS acceptance yet.
+
+Resize memory repair remains private in Devin52137. Parent matching-branch
+positives2passed9.94s against the rejected proposal, ready to verify useful
+behavior survives the two false-proof repairs. Independent Devin17860 stages
+the source-bound external-CALL segment declaration needed by LoadProgram;
+verified sandbox rootRO/repoRW/4GiB with KVM API12. Neither staged task is accepted.
+# 2026-10-05 resize bridge and request-wide premise budget
+
+Integrated reviewed AH4A declared-service response with path memory shared by
+census and feasibility; retained encoded-entry fixes. Permanent controls cover
+branch meets and cross-call stale-memory errors that falsely proved in the first
+proposal. Production96passed50.33s; final adapter52passed16.53s; lint,
+architecture and ownership pass. Scoped MyPy39before/39after, no new diagnostics.
+Collector-wide premise accounting stops sibling CALLs resetting64attempts;
+no verdict caching or proof-replay weakening. SWAPS baseline deliberately
+interrupted760.27s; rerun finishes334.73s but retains IR_BUILD_REFUSED. Final
+23guard/intake controls pass18.93s; full mypy-dev passes after a baseline-confirmed
+optional-boundary annotation fix. Actual native SORTD AH4A now binds the declared
+service but refuses its unproven BX input; other inputs and MCB overlay recorded
+in m5-resize-native/. Evidence:m5-resize-bridge/parent-review/ and
+m7-premise-budget/. Original M5/M7 and broad acceptance remain open.
+Comparator-check-fast after integration passes305prechecks16.47s and1211admission
+tests182.16s. Native BX trace locates missing authenticated LOAD evaluation at
+DS:2/3; a private shared readback repair is being staged. No loader bytes guessed.
+
+### Authenticated LOAD integration and remaining join defect
+
+Integrated shared declared-initialization readback and path-overlay LOADs in
+both census and feasibility. Native row identity binds before pruning; replay
+rebuilds the source-authenticated snapshot. Final production37controls pass
+44.76s, including same-address operand corruption. Lint, architecture, ownership
+and full mypy-dev pass. Narrow four-file MyPy reports context-dependent typing
+diagnostics; not reported clean. New controls enrolled in serial native IR lane.
+KVM API12 reverified; these static proofs do not require it.
+
+Native SORTD diagnostic now resolves the former LOAD but still loses SI at a
+join: the census retains a proven-impossible edge between live blocks. Explicit
+root-edge filtering is staging with a reproduced native diamond failure;
+callee scopes must retain independent/default edge sets. No expensive full
+pipeline retry until this prerequisite passes. Receipt:m5-path-load/.
+
+Stopped Devin17860 intentionally at54minutes (terminal1), preserving all draft
+files. It had not completed candidate tests. Devin38382 now owns only exact
+external-CALL binding repair and focused controls, using the existing harness.
+Original M5/M7 and final corpus/gate obligations remain open.
+
+Root-only feasible-edge filtering is integrated; nested scopes retain their
+default unfiltered register/memory meets. Native diamond baseline1failed1passed
+becomes green; final combined55tests pass23.24s, lint/full mypy-dev/architecture/
+ownership pass. Native SORTD now retains SI at the join and computes BX59926;
+the next loss is widening signed multiply Iop_MullS16 at0x210d before narrowing.
+That bounded operation is staging for both scalar consumers. Still no full
+native or M5/M7 acceptance. Evidence:m5-feasible-joins/.
+
+Shared widening arithmetic is integrated using the effect owner's admitted
+operation inventory, with strict operand/result widths and fully-known inputs.
+Verified original opcodeF7DB (NEG BX); exact native baseline fails and candidate
+passes with changed-operand revocation. Separate synthetic IMUL/Mul32 classifier
+gap is documented, not broadened. Final86tests pass30.58s; lint/full mypy-dev/
+architecture/ownership pass. Native SORTD now computesBX5610 and canonical AH4A
+returns carryFalse; next refusal CALL_BOUNDARY_UNPROVEN at0x212f. Whole-domain
+proof remains incomplete and publishes no consumption receipt. Comparator
+gate67949 running on frozen source; no M5/M7 acceptance. Receipt:m5-wide-multiply/.
+
+Comparator gate67949 completed terminal0 on final source:305prechecks16.65s
+and1211admission tests178.18s. No coverage loss in this gate; not a paired
+performance benchmark or whole-plan acceptance. Next native refusal0x212f is
+CALL CX after MOV CX,[0646]. Raw file bytes are zero, but exact current-memory
+and edge evidence must establish that the call is unreachable; read-only
+diagnosis remains in progress. Devin38382 exact CALL-binding repair remains live.
+
+### REP, edge refinement and declared-call parent review (2026-10-05)
+
+Integrated explicit synthetic-target binding (58production controls18.03s),
+whole bounded REP STOS transfer (46controls37.11s including native STOSW), and
+monotone known-bits edge refinement (47controls36.23s). Lint, full mypy-dev,
+ownership and relevant startup architecture checks pass. Comparator after REP
+passes305prechecks11.06s +1211tests204.16s; this predates the final refinement
+integration and is not reported as a fresh final release gate.
+
+Native SORTD now proves2127->212f dead. Its next direct-call refusal2131 was
+diagnosed as a manual-probe limit: both caller-supplied call-proof pools are
+empty. Do not infer a callee27aa defect from that harness. Actual SWAPS collector
+regression is running on integrated sources, without raising its budgets.
+
+Devin88383 stopped at15minute checkpoint, terminal1, with reviewed private
+near declaration-consumer repair. Parent native test exposed its unauthenticated
+far-operand shortcut; removal retains explicit far refusal and yields10green
+controls16.07s. Exact receipt/cache/report transport remains private under review.
+Original M5/M7 and final native/corpus/release acceptance remain open. Receipts:
+m5-rep-transfer/, m5-feasibility-refinement/, m5-next-direct-call/,
+m7-declared-target-binding/, m7-call-consumer-finish/, m7-call-transport/.
+
+### 2026-10-06 authenticated semantic declaration projection (private)
+
+Reproduced the raw-versus-enriched IR declaration refusal and repaired the
+private consumer through retained semantic projection authentication. Moved
+block-overlay verification to shared Semantics for both declaration consumption
+and the existing SSA CALL binder. Native/image/registry binding remains strict.
+Projection plus existing binder controls55passed53.26s; actual CALL-byte plus
+parent-reviewed Devin transport controls50passed25.52s; full-IR corruption
+controls18passed26.06s. These overlap. Actual LoadProgram summary construction,
+semantic publication and segment-state receipt application1passed15.84s/1.50s
+body. Ruff, type/doc/access ratchet and scoped four-owner MyPy pass.
+
+Devin99345 completed three real-import test files; parent reviewed and reran
+its32controls within the50-test cohort. Curated lane/ownership enrollment is
+still required, contrary to its automatic-discovery-only recommendation.
+The whole20s CLI still times out; one instrumented attempt authenticated the
+projection but refused later consumption. Next action is that exact artifact
+difference, not another blind full run. No production promotion, native-function
+acceptance, performance gain or M5/M7 closure claimed. Receipts:
+m7-declaration-integration/projection-*.log and m7-declaration-tests/.
+
+### 2026-10-06 native CALL replay integration
+
+Promoted the reviewed architectural flag-context replay prerequisite. Authentic
+raw CALL provenance survives optimized lifting; corrupted origin controls still
+refuse, with at most two native lifts and exact context restoration. Production
+red1failed/3passed; final CALL/segment cohort49passed9.08s and flag-context
+cohort21passed12.75s. Lint and startup architecture pass. Context/codec typing
+passes; explicit binder typing reports3Any-return diagnostics in unchanged code,
+not a clean owner check. Existing curated/Make/ownership enrollment verified.
+Logs:m7-declaration-integration/replay-*.log. Declaration overlay and full native
+acceptance remain unfinished; M5/M7 remain open. KVM API12/VM creation verified.
+
+### 2026-10-06 declaration transport production promotion
+
+Promoted16reviewed implementation files and enrolled three permanent consumer,
+transport and projection test modules plus exact native fixtures. Prior sources
+and hashes retained in m7-declaration-integration/promotion-baseline/. Source
+lint/startup architecture/ownership pass. Combined125passed/4failed24.17s:
+four ordinary-cache failures came from missing PYTHONHASHSEED=0; configured
+rerun7passed9.18s. Scoped package MyPy six existing diagnostics reproduced on
+saved before sources. Production LoadProgram remains timeout20s/exit3; no full
+native acceptance. Comparator gate63402 and private Devin admission audit34445
+are live at this checkpoint. M5/M7 and final corpus/performance gates stay open.
+
+Declaration integration gate63402 terminal0:305prechecks13.81s and1267admission
+tests233.31s on frozen sources. Follow-up real result-assembly test exposed4
+wrong failure replacements by the receipt gate. Success alone now requires
+receipt reauthentication; timeout/error/unknown/prior validation failure keeps
+its cause. Permanent transport controls enrolled. Direct-cache fixture now
+supplies the actual new CLI field; no production default/catch introduced.
+Final transport/direct-cache/serial-cache/function-summary cohort59passed31.77s;
+scoped lint passes. Broad gate predates this final CLI guard. Native LoadProgram
+still timed out20s before that diagnostic-only guard; no M5/M7 acceptance.
+Devin34445 remains live on private admission-boundary test audit; review pending.
+
+### 2026-10-06 admission audit closure and fingerprint profile
+
+Devin34445 terminal0. Parent reviewed its actual boundary tests, reproduced4
+bool/float schema admissions without xfail, fixed exact-int version checks at
+both document/receipt boundaries, split the test module and enrolled all three
+modules/shared fixture. Final139tests pass18.76s; lint/ownership/MyPy pass.
+No expected failures retained. Evidence:declaration-admission-parent/.
+
+Bounded production profiling verifies repeated segment-state fingerprint work:
+30roots6.78s inclusive; nested followup identifies source_artifact as dominant
+(4completed traversals2.74s). Whole-image hashing is below1ms. Raw events,
+stack samples and field summaries retained in m7-declaration-integration/.
+Instrumentation is not a paired benchmark. Native20s still times out; exact
+mutation/provenance-safe retained-IR reuse is the next performance question.
+All owned test/probe/Devin sessions in this checkpoint terminal; M5/M7 open.

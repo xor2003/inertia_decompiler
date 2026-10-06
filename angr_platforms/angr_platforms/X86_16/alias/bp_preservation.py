@@ -4,6 +4,9 @@ Layer: Alias.
 Responsibility: consume binary-owned IR coverage and exact saved-stack-byte
 lineage, then close BP effects over all supplied CFG paths. No compiler ABI,
 pointer representation, call target or rendered-code inference is performed.
+Owns storage identity.
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting
+work here.
 """
 
 from __future__ import annotations

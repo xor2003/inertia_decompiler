@@ -4,16 +4,21 @@ Responsibility: retain independent, freshly sealed full-state evidence while
 avoiding duplicate lowering of identical inputs within one comparison.
 """
 
+import argparse
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
-from test_real16_binary_compare import LEAF, _exe
+from test_real16_binary_compare import LEAF, LEAF_CHANGED, _exe
 
 from tools.dosunit import real16_binary_compare, ssa_provenance, straightline_ssa
-from tools.dosunit.real16_binary_compare import compare_binary16
+from tools.dosunit.real16_binary_compare import (
+    add_binary16_parser,
+    cmd_compare_binary16,
+    compare_binary16,
+)
 
 
 @pytest.mark.parametrize("same_path,same_catalog,expected_calls", [
@@ -154,3 +159,164 @@ def test_successful_backend_cannot_admit_mutated_evidence(
     assert report["status"] == "unknown", report
     assert report["proof"]["verdicts"][0]["detail"] == "stale_provenance"
     assert report["provenance"][side]["complete"] is False
+
+
+def _evidence_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Backend summary minus wall-clock solver timing (a measurement, not evidence)."""
+    return {
+        key: value for key, value in report["backend"]["summary"].items()
+        if key != "solver_time_ms"
+    }
+
+
+def _counted_lowering(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Count lower_straightline_ssa_document calls through the shared seam."""
+    original = straightline_ssa.lower_straightline_ssa_document
+    calls: list[Path] = []
+
+    def counted(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs["exe_path"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(straightline_ssa, "lower_straightline_ssa_document", counted)
+    return calls
+
+
+def test_default_reuse_lowers_identical_candidate_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eligible same-input case keeps the single lowering in default mode."""
+    oracle, catalog = _exe(tmp_path, "reuse", LEAF, 6)
+    calls = _counted_lowering(monkeypatch)
+    report = compare_binary16(oracle, oracle, catalog, catalog)
+    assert report["status"] == "proved", report
+    assert len(calls) == 1
+    assert report["lowering_reuse_mode"] == "enabled"
+    assert report["lowering_reuse"] == {"oracle": False, "candidate": True}
+
+
+def test_bypass_recomputes_identical_candidate_without_deepcopy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bypassed mode lowers the eligible candidate and never deepcopies."""
+    oracle, catalog = _exe(tmp_path, "bypass", LEAF, 6)
+    calls = _counted_lowering(monkeypatch)
+    monkeypatch.setattr(
+        real16_binary_compare, "deepcopy",
+        lambda *_a, **_k: pytest.fail("deepcopy reuse selected under bypass"),
+    )
+    report = compare_binary16(
+        oracle, oracle, catalog, catalog, reuse_identical_lowering=False,
+    )
+    assert report["status"] == "proved", report
+    assert calls == [oracle, oracle]
+    assert report["lowering_reuse_mode"] == "bypassed"
+    assert report["lowering_reuse"] == {"oracle": False, "candidate": False}
+    # Independent lowerings, not shared mutable state.
+    assert report["lowering"]["oracle"] == report["lowering"]["candidate"]
+
+
+@pytest.mark.parametrize("reuse_identical_lowering", [True, False])
+def test_changed_input_lowers_both_sides_in_every_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse_identical_lowering: bool,
+) -> None:
+    """Ineligible inputs always lower both sides; the flag changes nothing."""
+    oracle, oracle_catalog = _exe(tmp_path, "chg-o", LEAF, 6)
+    candidate, candidate_catalog = _exe(tmp_path, "chg-c", LEAF_CHANGED, 6)
+    calls = _counted_lowering(monkeypatch)
+    report = compare_binary16(
+        oracle, candidate, oracle_catalog, candidate_catalog,
+        reuse_identical_lowering=reuse_identical_lowering,
+    )
+    assert len(calls) == 2
+    assert report["lowering_reuse"] == {"oracle": False, "candidate": False}
+    assert report["lowering_reuse_mode"] == (
+        "enabled" if reuse_identical_lowering else "bypassed"
+    )
+
+
+def test_verdict_and_dependency_parity_positive_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identical binaries: enabled and bypassed runs emit equal proof evidence."""
+    oracle, catalog = _exe(tmp_path, "parity", LEAF, 6)
+    enabled = compare_binary16(oracle, oracle, catalog, catalog)
+    monkeypatch.setattr(
+        real16_binary_compare, "deepcopy",
+        lambda *_a, **_k: pytest.fail("deepcopy reuse selected under bypass"),
+    )
+    bypassed = compare_binary16(
+        oracle, oracle, catalog, catalog, reuse_identical_lowering=False,
+    )
+    assert enabled["status"] == bypassed["status"] == "proved"
+    assert enabled["proof"] == bypassed["proof"]
+    assert enabled["proof_domain"] == bypassed["proof_domain"]
+    assert enabled["input_domain"] == bypassed["input_domain"]
+    assert enabled["provenance"] == bypassed["provenance"]
+    assert _evidence_summary(enabled) == _evidence_summary(bypassed)
+    assert enabled["lowering"]["oracle"] == bypassed["lowering"]["candidate"]
+    assert enabled["lowering_reuse_mode"] != bypassed["lowering_reuse_mode"]
+
+
+def test_verdict_and_dependency_parity_corruption_case(tmp_path: Path) -> None:
+    """Changed leaf immediate: both modes report the same counterexample."""
+    oracle, oracle_catalog = _exe(tmp_path, "corr-o", LEAF, 6)
+    candidate, candidate_catalog = _exe(tmp_path, "corr-c", LEAF_CHANGED, 6)
+    enabled = compare_binary16(
+        oracle, candidate, oracle_catalog, candidate_catalog,
+    )
+    bypassed = compare_binary16(
+        oracle, candidate, oracle_catalog, candidate_catalog,
+        reuse_identical_lowering=False,
+    )
+    assert enabled["status"] == bypassed["status"] == "counterexample"
+    assert enabled["proof"] == bypassed["proof"]
+    assert enabled["proof_domain"] == bypassed["proof_domain"]
+    assert enabled["input_domain"] == bypassed["input_domain"]
+    assert enabled["provenance"] == bypassed["provenance"]
+    assert _evidence_summary(enabled) == _evidence_summary(bypassed)
+
+
+def _parse_and_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str],
+) -> dict[str, Any]:
+    """Route CLI args through the real parser into a stubbed owner call."""
+    captured: dict[str, Any] = {}
+
+    def fake_compare(*_a: Any, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "proved"}
+
+    monkeypatch.setattr(real16_binary_compare, "compare_binary16", fake_compare)
+    for name in ("oracle", "candidate"):
+        (tmp_path / f"{name}.exe").write_bytes(b"MZ" + b"\0" * 4)
+        (tmp_path / f"{name}.json").write_text("{}")
+    parser = argparse.ArgumentParser(prog="z3func")
+    add_binary16_parser(parser.add_subparsers())
+    args = parser.parse_args([
+        "compare-binary16",
+        "--oracle-exe", str(tmp_path / "oracle.exe"),
+        "--candidate-exe", str(tmp_path / "candidate.exe"),
+        "--oracle-functions", str(tmp_path / "oracle.json"),
+        "--candidate-functions", str(tmp_path / "candidate.json"),
+        "--out", str(tmp_path / "out.json"),
+        *extra,
+    ])
+    assert cmd_compare_binary16(args) == 0
+    return captured
+
+
+def test_cli_no_lowering_reuse_reaches_compare_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--no-lowering-reuse reaches compare_binary16 as reuse_identical_lowering."""
+    captured = _parse_and_run(monkeypatch, tmp_path, ["--no-lowering-reuse"])
+    assert captured["reuse_identical_lowering"] is False
+
+
+def test_cli_default_preserves_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the flag the API default of enabled reuse is forwarded."""
+    captured = _parse_and_run(monkeypatch, tmp_path, [])
+    assert captured["reuse_identical_lowering"] is True

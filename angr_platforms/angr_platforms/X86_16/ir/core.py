@@ -17,6 +17,7 @@ from .instruction_origin import IRInstructionOrigin8616
 __all__ = [
     "SEGMENTED_LOAD_ADDRESS_TAG_8616",
     "AddressStatus",
+    "IRActiveUnary8616",
     "IRAddress",
     "IRAtom",
     "IRBinaryValue",
@@ -90,6 +91,36 @@ class IRCallOutputProvenance8616:
 
 
 @dataclass(frozen=True, slots=True)
+class IRActiveUnary8616:
+    """One active unary computation that still produces this value.
+
+    ``op`` is the exact VEX operation name (``Iop_*``) and ``operand`` the
+    already-converted typed input value — nested operations therefore keep
+    their inner operation instead of collapsing into one provenance tag.
+    ``result_bits`` is the authoritative VEX result width in *bits* so a
+    one-bit result (``Iop_Not1``) is not widened to its byte storage.
+
+    This evidence lives only on the view that must still apply the
+    operation. A ``source_tmp``-pinned reference names the already
+    computed producer result, so captured views never carry it; the
+    producer instruction's operand retains the active computation.
+    ``IRValue.expr`` remains the compatibility/provenance projection.
+    """
+
+    op: str
+    operand: IRValue
+    result_bits: int
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize this active unary evidence for diagnostics."""
+        return {
+            "op": self.op,
+            "operand": self.operand.to_dict(),
+            "result_bits": self.result_bits,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class IRValue:
     """Typed scalar or storage value with optional exact access provenance."""
 
@@ -106,6 +137,7 @@ class IRValue:
     memory_access_insn: int | None = field(default=None, compare=False)
     source_tmp: int | None = field(default=None, compare=False)
     call_output: IRCallOutputProvenance8616 | None = None
+    active_unary: IRActiveUnary8616 | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this typed IR value for diagnostics and artifacts."""
@@ -124,6 +156,9 @@ class IRValue:
             "memory_access_insn": self.memory_access_insn,
             "source_tmp": self.source_tmp,
             "call_output": None if self.call_output is None else self.call_output.to_dict(),
+            "active_unary": (
+                None if self.active_unary is None else self.active_unary.to_dict()
+            ),
         }
 
 

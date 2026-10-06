@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "image_sha256": "2d42dc7884313e2be1b3309fe704012736260322ec083c321b83d6e89faf08a0",
+  "declarations": [
+    {
+      "caller_start": 4096,
+      "caller_end": 4157,
+      "caller_sha256": "6b1b2b40788e736d04981fc1e299fb2a6b016e21cc5d61a1cc7ca3865d3c7098",
+      "callsite_addr": 4118,
+      "target_addr": 4157,
+      "is_far": false,
+      "relations": [
+        "ds_preserved_on_return"
+      ]
+    }
+  ]
+}

@@ -191,6 +191,12 @@ Each named observation requires both physical addresses and a positive size
 inside the declared memory coverage. Names and sizes declare the correspondence between
 outputs; adding an observation cannot change guest execution.
 
+Final readback must contain observed bytes only. If a declared output or a
+recorded write cannot be read, the executor reports the missing range and
+backend cause and changes an otherwise complete outcome to `unsupported`.
+Readable write fragments keep their original physical addresses; missing bytes
+are never replaced with zeros. Comparing incomplete results remains incomplete.
+
 `environment.extra_memory` optionally supplies up to 32 disjoint conventional-RAM
 regions outside that allocation. Each entry names an exact segmented address
 and every initial byte; for example
@@ -303,6 +309,24 @@ instruction budget. It does not enable other DOS services or weaken allocation,
 fault, code-write or observation checks. The representative compiled startup
 probe now gets past the version query but still refuses on a write inside its
 declared whole-image code scope; this is not completed program acceptance.
+
+The invocation-domain census can also consume this explicitly declared service.
+Mint a `DeclaredInterruptService8616` with
+`tools.dosunit.real16_declared_invocation8616.declared_int21_version_service_8616`,
+binding the environment, caller and interrupt callsite. Pass the resulting
+relation through the proof API's `declared_services` tuple; its default is empty.
+The census must independently prove the AH/AL selector and revalidate the
+response, preserved registers, IVT slot and environment at consumption.
+Successful consumption records the `declared_interrupt_service` assumption;
+it is conditional on that environment, not proof of an arbitrary DOS handler.
+
+Prior writes overlapping the IVT slot revoke the relation. The six-byte INT
+frame enters the write ledger and must not overlap instruction bytes, including
+future fetches. Frame contents are not inferred: subsequent loads remain unknown.
+An absent declaration, altered response, foreign environment or unsupported
+selector remains a refusal. The shared response encoding lives in
+`angr_platforms.real16_version_response8616`; both execution and census derive
+their response words from that owner. This API adds no KVM dependency.
 
 ## Symbolic terminal comparison
 

@@ -20,6 +20,10 @@ from ..ir.logical_memory_contracts import (
     IRMemoryAccessKind8616,
     logical_memory_execution_address_matches_8616,
 )
+from ..ir.scalar_value_projection import (
+    ScalarProjection8616,
+    scalar_active_unary_projection_8616,
+)
 from .carry_borrow_contracts import (
     CarryBorrowConversion8616,
     CarryBorrowDefinitionSite8616,
@@ -62,8 +66,15 @@ def definition_for_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
 ) -> CarryBorrowDefinitionSite8616 | None:
-    """Resolve one exact temporary use without parsing its display name."""
-    if value.source_tmp is None:
+    """Resolve one exact temporary use to its identity definition.
+
+    Only a ``source_tmp``-pinned read carrying no pending ``active_unary``
+    computation names an already-produced temporary: the pin alone is the
+    definition key. A wrapper is a computation view of the operation still to
+    apply, not the temporary its operand names, and a pinned-plus-active view
+    is corrupt evidence, so both refuse rather than manufacture identity.
+    """
+    if value.active_unary is not None or value.source_tmp is None:
         return None
     return definitions.get(value.source_tmp)
 
@@ -76,15 +87,146 @@ def single_source_8616(site: CarryBorrowDefinitionSite8616) -> IRValue | None:
     return args[0]
 
 
+_PENDING_CONVERSION_DEPTH_8616 = 8
+
+
+def _conversion_projection_8616(
+    value: IRValue,
+    definitions: CarryBorrowDefinitions8616,
+    depth: int,
+) -> ScalarProjection8616 | None:
+    """Authenticate one pending unary view as an exact integer conversion.
+
+    A pending ``active_unary`` wrapper is a computation view, not a capture:
+    it must carry no ``source_tmp`` of its own, and the shared typed
+    projection must prove the operation is a supported conversion whose
+    declared source width equals the operand's proven produced width.
+    Non-conversion operations, pinned views, and unproven widths earn no
+    projection. ``depth`` bounds nested producer recursion.
+    """
+    unary = value.active_unary
+    if unary is None or value.source_tmp is not None:
+        return None
+    operand_bits = _produced_width_bits_8616(unary.operand, definitions, depth + 1)
+    if operand_bits is None:
+        return None
+    return scalar_active_unary_projection_8616(
+        value,
+        proven_operand_bits=operand_bits,
+    )
+
+
+def _site_produced_width_8616(
+    site: CarryBorrowDefinitionSite8616,
+    read: IRValue,
+    definitions: CarryBorrowDefinitions8616,
+    depth: int,
+) -> int | None:
+    """Return the proven result width in bits of one captured site.
+
+    Capture identity requires the site destination to own ``read.source_tmp``
+    at the read's storage width with the instruction width agreeing. Only an
+    admitted producing operation is a width authority: MOV forwards its single
+    source's proven width when that width fits the destination storage, LOAD
+    fills its destination bytes, and admitted binary operations produce their
+    destination width (shift counts are exempt from operand-width matching).
+    Anything else returns no proof rather than trusting declared metadata.
+    """
+    instruction = site.instruction
+    dst = instruction.dst
+    if (
+        dst is None
+        or dst.source_tmp != read.source_tmp
+        or dst.size != read.size
+        or dst.size <= 0
+        or instruction.size != dst.size
+    ):
+        return None
+    op = ir_op_8616(instruction)
+    if op is None:
+        return None
+    if op is CarryBorrowIROp8616.MOV:
+        args = site_value_args_8616(site)
+        if len(args) != 1 or args[0].size != dst.size:
+            return None
+        source_bits = _produced_width_bits_8616(args[0], definitions, depth + 1)
+        if source_bits is None or source_bits > dst.size * 8:
+            return None
+        return source_bits
+    if op is CarryBorrowIROp8616.LOAD:
+        arg = instruction.args[0] if len(instruction.args) == 1 else None
+        if not isinstance(arg, IRAddress) or arg.size != dst.size:
+            return None
+        return int(dst.size * 8)
+    args = site_value_args_8616(site)
+    width_checked = (
+        args[:1]
+        if op in (CarryBorrowIROp8616.SHL16, CarryBorrowIROp8616.SHR16)
+        else args
+    )
+    if len(args) != 2 or any(arg.size != dst.size for arg in width_checked):
+        return None
+    return int(dst.size * 8)
+
+
+def _produced_width_bits_8616(
+    value: IRValue,
+    definitions: CarryBorrowDefinitions8616,
+    depth: int = 0,
+) -> int | None:
+    """Return the reaching producer's proven result width in bits.
+
+    A pending conversion view proves only its authenticated target width; a
+    pinned read inherits the proven width of the site that captured its
+    temporary; a register or constant leaf proves only its own storage width.
+    Missing definitions, unpinned temporaries, and recursion deeper than the
+    bound return no proof — a declared ``result_bits`` alone never proves a
+    produced width.
+    """
+    if depth > _PENDING_CONVERSION_DEPTH_8616:
+        return None
+    if value.active_unary is not None:
+        projection = _conversion_projection_8616(value, definitions, depth)
+        return None if projection is None else projection.target_bits
+    if value.source_tmp is not None:
+        site = definitions.get(value.source_tmp)
+        if site is None:
+            return None
+        return _site_produced_width_8616(site, value, definitions, depth)
+    if value.space is MemSpace.TMP or value.size <= 0:
+        return None
+    return int(value.size * 8)
+
+
 def conversion_source_8616(
     site: CarryBorrowDefinitionSite8616,
     conversion: CarryBorrowConversion8616,
+    definitions: CarryBorrowDefinitions8616,
 ) -> IRValue | None:
-    """Return the source of one exact unary conversion projection."""
+    """Return the proven operand of the exact conversion one MOV applies.
+
+    The retained MOV must be that conversion's own projection: its source is
+    a pending unary with the requested opcode, the compatibility ``expr``
+    projection corroborates it, instruction/destination/source storage widths
+    agree, and the shared typed projection authenticates the unary's declared
+    widths against the operand's proven producer width. The returned operand
+    keeps its own identity — the conversion is consumed here at the caller's
+    explicit request, never erased into a fabricated temporary identity.
+    """
     source = single_source_8616(site)
-    if source is None or source.expr != (conversion.value,):
+    if (
+        source is None
+        or source.expr != (conversion.value,)
+        or source.active_unary is None
+        or source.active_unary.op != conversion.value
+    ):
         return None
-    return source
+    dst = site.instruction.dst
+    if dst is None or site.instruction.size != dst.size or source.size != dst.size:
+        return None
+    if _conversion_projection_8616(source, definitions, 0) is None:
+        return None
+    return source.active_unary.operand
 
 
 def is_constant_8616(value: IRValue, expected: int) -> bool:
@@ -140,6 +282,7 @@ def _load_byte_8616(
     source = conversion_source_8616(
         conversion,
         CarryBorrowConversion8616.WIDEN_BYTE_TO_WORD,
+        definitions,
     )
     load = None if source is None else definition_for_8616(source, definitions)
     address = _sized_load_address_8616(load, 1)
@@ -273,12 +416,23 @@ def dependency_arithmetic_sites_8616(
     definitions: CarryBorrowDefinitions8616,
     kind: CarryBorrowKind8616,
 ) -> tuple[CarryBorrowDefinitionSite8616, ...]:
-    """Collect exact matching arithmetic definitions in one SSA dependency DAG."""
+    """Collect exact matching arithmetic definitions in one SSA dependency DAG.
+
+    This is dependency traversal only: a pending ``active_unary`` conversion
+    preserves dependence on its operand without preserving value, so the walk
+    continues through the operand only after the shared typed projection
+    authenticates the conversion. An active-plus-pinned wrapper is corrupt and
+    is dropped before any capture lookup — missing proof is never identity.
+    """
     pending = [value]
     seen: set[int] = set()
     matches: list[CarryBorrowDefinitionSite8616] = []
     while pending:
         current = pending.pop()
+        if current.active_unary is not None:
+            if _conversion_projection_8616(current, definitions, 0) is not None:
+                pending.append(current.active_unary.operand)
+            continue
         if current.source_tmp is None or current.source_tmp in seen:
             continue
         seen.add(current.source_tmp)

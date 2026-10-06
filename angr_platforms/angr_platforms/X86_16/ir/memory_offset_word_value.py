@@ -5,6 +5,10 @@ Responsibility: bind one memory-use address to its SSA instruction, trace each
 word-sized base through the existing scalar owner, and retain their sum modulo
 65536. This is a numeric low-word projection, not full effective-address width,
 segment equality, pointer representation, object extent or Alias disjointness.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

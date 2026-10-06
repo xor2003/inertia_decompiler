@@ -1,0 +1,118 @@
+{
+ "schema": "relift-aggregate-1",
+ "writer_pid": 4,
+ "snapshot_seq": 3,
+ "monotonic": 381841.489433766,
+ "complete": true,
+ "counters": {
+  "calls_started": 2,
+  "calls_completed": 2,
+  "calls_failed": 0,
+  "calls_boundary_none": 0,
+  "calls_without_lookup": 0,
+  "lookups": 2,
+  "lookup_hits": 0,
+  "lookup_misses": 2,
+  "publishes": 2,
+  "direct_lifts_started": 2,
+  "direct_lifts_completed": 2,
+  "direct_lifts_failed": 0,
+  "detached_direct_lifts": 0,
+  "direct_lift_bytes": 10,
+  "direct_lift_wall_ns": 3000,
+  "direct_lift_max_ns": 1618,
+  "outer_wall_ns": 918847,
+  "outer_cpu_ns": 850339,
+  "outer_max_wall_ns": 541793,
+  "byte_groups": 1,
+  "byte_group_overflow": 0,
+  "full_groups": 2,
+  "full_group_overflow": 0,
+  "variant_overflow": 0,
+  "typed_failures_total": 0,
+  "artifacts_complete": 0,
+  "inflight_overflow": 0,
+  "group_snapshots": 3,
+  "writer_seq": 31
+ },
+ "byte_groups": [
+  {
+   "digest": "f71f9a46b7812a6be85459c9b8917f88",
+   "kind": "bytes",
+   "arch": "semantics:('x86_16', 16)",
+   "calls": 2,
+   "lookups": 2,
+   "hits": 0,
+   "misses": 2,
+   "publishes": 2,
+   "direct_lifts": 2,
+   "direct_bytes": 10,
+   "direct_ns": 3000,
+   "variants": {
+    "98a953f4774b7d0e85f3d97be84e2f83": {
+     "expected": [
+      2304
+     ],
+     "expected_truncated": false,
+     "calls": 1,
+     "lookups": 1,
+     "hits": 0,
+     "misses": 1,
+     "publishes": 1
+    },
+    "4236a687bf43a70788c10e2aa8f740ed": {
+     "expected": [
+      2304,
+      2305
+     ],
+     "expected_truncated": false,
+     "calls": 1,
+     "lookups": 1,
+     "hits": 0,
+     "misses": 1,
+     "publishes": 1
+    }
+   },
+   "variant_overflow": 0,
+   "failures": {},
+   "first_call": 1,
+   "last_call": 2
+  }
+ ],
+ "full_groups": [
+  {
+   "digest": "0a67207663d0f84c262d1796a182f7f8",
+   "byte_digest": "f71f9a46b7812a6be85459c9b8917f88",
+   "expected": [
+    2304
+   ],
+   "expected_truncated": false,
+   "calls": 0,
+   "lookups": 1,
+   "hits": 0,
+   "misses": 1,
+   "publishes": 1,
+   "direct_lifts": 1,
+   "direct_bytes": 5,
+   "direct_ns": 1618
+  },
+  {
+   "digest": "16228a8a9d165c4c4c4f5b8be93f7968",
+   "byte_digest": "f71f9a46b7812a6be85459c9b8917f88",
+   "expected": [
+    2304,
+    2305
+   ],
+   "expected_truncated": false,
+   "calls": 0,
+   "lookups": 1,
+   "hits": 0,
+   "misses": 1,
+   "publishes": 1,
+   "direct_lifts": 1,
+   "direct_bytes": 5,
+   "direct_ns": 1382
+  }
+ ],
+ "failure_reasons": {}
+}

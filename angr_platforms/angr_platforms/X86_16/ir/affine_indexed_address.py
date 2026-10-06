@@ -5,6 +5,10 @@ Responsibility: consume exact machine-access normalization and scalar affine
 provenance for every address component. No term is guessed to be a pointer or
 induction variable. This does not prove memory-load stability, ranges, Alias
 identity, physical disjointness, types, or binary coverage.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

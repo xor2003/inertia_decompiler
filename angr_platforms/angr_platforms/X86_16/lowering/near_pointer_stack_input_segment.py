@@ -5,6 +5,8 @@ Responsibility: join SSA-proven SS:BP address-of arguments with exact call and
 segment receipts. This establishes offset transport and selector equality only;
 it does not grant a native C-pointer representation, pointee type or publication.
 Consumes binary IR/SSA and typed call evidence, never source or rendered text.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

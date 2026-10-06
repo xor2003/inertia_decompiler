@@ -5,6 +5,10 @@ Responsibility: consume the existing constant-flow owner at the exact physical
 STORE sites, retaining enough source evidence to replay the value proof. This
 proves written values only, not aliases, later byte stability, or caller ABI.
 No source text, instruction spelling heuristics or generated C is consumed.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

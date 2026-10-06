@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import z3
@@ -12,7 +13,9 @@ from recursive_proof_fixtures.image_bound_inputs import Inputs, make_inputs
 from tools.dosunit import ssa_provenance
 from tools.dosunit.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.recursive_proofs import real16_address_model_closure as address_owner
+from tools.dosunit.recursive_proofs import real16_bound_operand_scope as bound_operand_owner
 from tools.dosunit.recursive_proofs import real16_image_bound_domain_consumer as owner
+from tools.dosunit.recursive_proofs import real16_normal_outcome_scope as outcome_owner
 from tools.dosunit.recursive_proofs import real16_operand_scope_proof as operand_owner
 from tools.dosunit.recursive_proofs import real16_physical_access_bounds as bounds_owner
 from tools.dosunit.recursive_proofs.native_model_hash_snapshot import (
@@ -179,7 +182,8 @@ def test_local_model_capture_does_not_bypass_source_receipt_failure(
     assert outcome.counters.failure_count > 0
 
 
-@pytest.mark.parametrize("seal", [bounds_owner.physical_access_model_hash, address_owner.address_model_model_hash])
+@pytest.mark.parametrize("seal", [bounds_owner.physical_access_model_hash, address_owner.address_model_model_hash,
+                                  bound_operand_owner.bound_operand_model_hash, outcome_owner.outcome_scope_model_hash])
 def test_bounds_model_seal_reads_semantic_sources_once_and_refreshes(
         monkeypatch: pytest.MonkeyPatch, seal: Callable[[], str]) -> None:
     """Each seal shares its native leaf but a later seal sees changed sources."""
@@ -201,7 +205,8 @@ def test_bounds_model_seal_reads_semantic_sources_once_and_refreshes(
     assert captured_native_model_hash() is None
 
 
-@pytest.mark.parametrize("seal", [bounds_owner.physical_access_model_hash, address_owner.address_model_model_hash])
+@pytest.mark.parametrize("seal", [bounds_owner.physical_access_model_hash, address_owner.address_model_model_hash,
+                                  bound_operand_owner.bound_operand_model_hash, outcome_owner.outcome_scope_model_hash])
 def test_bounds_model_seal_preserves_outer_digest_capture(
         monkeypatch: pytest.MonkeyPatch, seal: Callable[[], str]) -> None:
     """Nested digest construction must not rescan an already captured leaf."""
@@ -220,13 +225,19 @@ def test_bounds_model_seal_preserves_outer_digest_capture(
     assert captured_native_model_hash() is None
 
 
+@pytest.mark.parametrize("module,seal,dependency", [
+    (bounds_owner, bounds_owner.physical_access_model_hash, "code_prefix_model_hash"),
+    (bound_operand_owner, bound_operand_owner.bound_operand_model_hash, "code_prefix_model_hash"),
+    (outcome_owner, outcome_owner.outcome_scope_model_hash, "image_bound_domain_model_hash"),
+])
 def test_bounds_model_seal_exception_does_not_retain_capture(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch: pytest.MonkeyPatch, module: ModuleType,
+        seal: Callable[[], str], dependency: str) -> None:
     """A failed digest cannot leave stale source identity for the next proof."""
     def fail_digest() -> str:
         raise OSError("controlled unreadable model dependency")
 
-    monkeypatch.setattr(bounds_owner, "code_prefix_model_hash", fail_digest)
+    monkeypatch.setattr(module, dependency, fail_digest)
     with pytest.raises(OSError, match="controlled unreadable"):
-        bounds_owner.physical_access_model_hash()
+        seal()
     assert captured_native_model_hash() is None

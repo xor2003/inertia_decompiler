@@ -146,6 +146,7 @@ def test_sortd_sidecar_free_swapbars_recovers_binary_stack_arguments(tmp_path: P
     assert_swapbars_behavior(result.stdout, tmp_path)
 
 
+@pytest.mark.requires_kvm
 def test_sortd_sidecar_free_initbars_preserves_binary_stack_array(tmp_path: Path) -> None:
     sortd_exe = tmp_path / "SORTD.EXE"
     sortd_exe.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -250,6 +251,7 @@ def _run_decompile_file(
     )
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_sleep_anchor_eliminates_raw_flag_guard_and_keeps_validation_clean(tmp_path: Path) -> None:
     result = _run_decompile_addr(SORTDEMO_EXE, 0x10F38, analysis_timeout=30)
     scorecard = build_acceptance_scorecard(
@@ -293,6 +295,7 @@ def test_sortdemo_sleep_anchor_eliminates_raw_flag_guard_and_keeps_validation_cl
     assert "if (clock() <= goal)" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_sleep_proc_pipeline_declares_lowered_runtime_calls() -> None:
     result = _run_decompile_proc(
         SORTDEMO_EXE,
@@ -309,6 +312,7 @@ def test_sortdemo_sleep_proc_pipeline_declares_lowered_runtime_calls() -> None:
     assert "[tail-validation] whole-tail validation clean across 1 functions" in combined
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_reinitbars_preserves_clock_store_loop_and_validation_contract(tmp_path):
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -349,6 +353,7 @@ def test_sortdemo_reinitbars_preserves_clock_store_loop_and_validation_contract(
     assert scorecard.raw_ss_linear_count == 0
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_drawtime_materializes_clock_return_to_clfinish_once():
     result = _run_decompile_proc(
         SORTDEMO_EXE,
@@ -386,6 +391,7 @@ def test_sortdemo_drawtime_materializes_clock_return_to_clfinish_once():
     assert "[tail-validation] whole-tail validation clean" in combined
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_swapbars_materializes_arguments_without_dead_setup_artifacts():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -419,6 +425,7 @@ def test_sortdemo_swapbars_materializes_arguments_without_dead_setup_artifacts()
     assert not re.search(r"\bsub_[0-9a-fA-F]+\s*\(", swap_body)
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_swaps_preserves_binary_proven_global_increment_and_pointer_swap():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -457,6 +464,7 @@ def test_sortdemo_swaps_preserves_binary_proven_global_increment_and_pointer_swa
     assert scorecard.raw_ds_linear_count == 0
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_bubblesort_direct_path_validates_and_preserves_array_calls():
     result = _run_decompile_proc(
         SORTDEMO_EXE,
@@ -514,6 +522,7 @@ def test_sortdemo_bubblesort_direct_path_validates_and_preserves_array_calls():
     assert initial_limit < outer_loop < inner_loop < next_limit < outer_condition
 
 
+@pytest.mark.requires_kvm
 def test_sortd_bubblesort_sidecar_free_preserves_direct_ds_row_count(tmp_path: Path):
     isolated_binary = tmp_path / "SORTD.EXE"
     isolated_binary.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -549,6 +558,7 @@ def test_sortd_bubblesort_sidecar_free_preserves_direct_ds_row_count(tmp_path: P
     )
 
 
+@pytest.mark.requires_kvm
 def test_sortd_exchangesort_sidecar_free_folds_alias_proven_high_byte(tmp_path: Path):
     isolated_binary = tmp_path / "SORTD.EXE"
     isolated_binary.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -588,6 +598,7 @@ def test_sortd_exchangesort_sidecar_free_folds_alias_proven_high_byte(tmp_path: 
     assert "sub_10768(local_6, local_4);" in final_body
 
 
+@pytest.mark.requires_kvm
 def test_sortd_drawbar_sidecar_free_materializes_stack_buffer_and_conservative_return(
     tmp_path: Path,
 ) -> None:
@@ -633,6 +644,7 @@ def test_sortd_drawbar_sidecar_free_materializes_stack_buffer_and_conservative_r
     assert "inertia_ss] - 44" not in final_body
 
 
+@pytest.mark.requires_kvm
 def test_sortd_drawframe_sidecar_free_materializes_segmented_buffer_calls(
     tmp_path: Path,
 ) -> None:
@@ -681,6 +693,7 @@ def test_sortd_drawframe_sidecar_free_materializes_segmented_buffer_calls(
     assert not re.search(r"\breturn\s+[^;]+;", final_body)
 
 
+@pytest.mark.requires_kvm
 def test_sortd_reinitbars_sidecar_free_materializes_indexed_global_copy(
     tmp_path: Path,
 ) -> None:
@@ -783,6 +796,7 @@ def test_sortd_drawtime_sidecar_free_materializes_wide_delay_arguments(
     assert "vvar_" not in final_body
 
 
+@pytest.mark.requires_kvm
 def test_sortd_insertionsort_sidecar_free_splits_header_and_rebases_source(
     tmp_path: Path,
 ) -> None:
@@ -839,6 +853,7 @@ def test_sortd_insertionsort_sidecar_free_splits_header_and_rebases_source(
     assert "reg+" not in combined
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.xdist_group("sortd-initmenu")
 def test_sortd_initmenu_sidecar_free_preserves_calls_and_compiles(
     tmp_path: Path,
@@ -890,6 +905,7 @@ def test_sortd_initmenu_sidecar_free_preserves_calls_and_compiles(
     assert "return 0;" not in final_body
 
 
+@pytest.mark.requires_kvm
 def test_sortd_quicksort_sidecar_free_preserves_typed_control_flow_and_compiles(
     tmp_path: Path,
 ) -> None:
@@ -964,6 +980,7 @@ def test_sortd_quicksort_sidecar_free_preserves_typed_control_flow_and_compiles(
     assert do_body.index(f"local_2 = {high_arg};") < first_scan
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_exchangesort_preserves_inner_loop_setup_and_guarded_minimum_update():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1026,6 +1043,7 @@ def test_sortdemo_exchangesort_preserves_inner_loop_setup_and_guarded_minimum_up
     assert "\n    iRowMin = iRowCur;\n    iRowNext = iRowCur;\n    return" not in final_body
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_percolateup_materializes_parent_once_and_preserves_calls():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1082,6 +1100,7 @@ def test_sortdemo_percolateup_materializes_parent_once_and_preserves_calls():
     assert scorecard.validation_verdict == "stable"
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_main_uses_portable_flat_int_main_signature():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1116,6 +1135,7 @@ def test_sortdemo_main_uses_portable_flat_int_main_signature():
     assert scorecard.validation_verdict == "stable"
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_nfree_does_not_emit_undeclared_vvar_carrier():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1135,6 +1155,7 @@ def test_sortdemo_nfree_does_not_emit_undeclared_vvar_carrier():
     assert "vvar_" not in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_heapsort_materializes_call_arguments_without_stack_leaks():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1203,6 +1224,7 @@ def test_sortdemo_heapsort_materializes_call_arguments_without_stack_leaks():
     assert "stack[" not in final_body
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_file_summary_lines_are_stable_and_sorted():
     first = _run_decompile_file(SORTDEMO_EXE, max_functions=2)
     second = _run_decompile_file(SORTDEMO_EXE, max_functions=2)
@@ -1224,6 +1246,7 @@ def test_sortdemo_file_summary_lines_are_stable_and_sorted():
     assert any("shown=2 decompiled=2 asm_or_detail_fallback=0" in line for line in first_summary)
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_heapsort_anchor_no_longer_prunes_local_lane_after_repeated_empty_results():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1261,6 +1284,7 @@ def test_sortdemo_heapsort_anchor_no_longer_prunes_local_lane_after_repeated_emp
         assert "/* == asm fallback == */" in result.stdout
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_quicksort_preserves_pivot_swaps_and_recursive_calls(tmp_path):
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1336,6 +1360,7 @@ def test_sortdemo_quicksort_preserves_pivot_swaps_and_recursive_calls(tmp_path):
     assert scorecard.raw_flags_count == 0
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_runmenu_typed_switch_artifacts_are_safe_and_materialized():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1446,6 +1471,7 @@ def test_sortdemo_runmenu_typed_switch_artifacts_are_safe_and_materialized():
     assert "raw-ss-segmented-access" not in combined
 
 
+@pytest.mark.requires_kvm
 def test_sortdemo_runmenu_default_direct_path_validates_without_temp_carrier_fallback():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1486,6 +1512,7 @@ def test_sortdemo_runmenu_default_direct_path_validates_without_temp_carrier_fal
     assert scorecard.raw_ss_linear_count == 0
 
 
+@pytest.mark.requires_kvm
 def test_sortd_runmenu_sidecar_free_preserves_binary_escape_exit(tmp_path: Path) -> None:
     isolated_binary = tmp_path / "SORTD.EXE"
     isolated_binary.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
@@ -1522,6 +1549,7 @@ def test_sortd_runmenu_sidecar_free_preserves_binary_escape_exit(tmp_path: Path)
     assert_runmenu_oracle_rejects_corruption(result.stdout, tmp_path)
 
 
+@pytest.mark.requires_kvm
 def test_initbars_getvideoconfig_far_pointer_call_has_no_stack_setup_remnants():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1578,6 +1606,7 @@ def test_initbars_getvideoconfig_far_pointer_call_has_no_stack_setup_remnants():
     assert body.index(aggregate_copy) < body.index(aggregate_update)
 
 
+@pytest.mark.requires_kvm
 @pytest.mark.xdist_group("sortd-initmenu")
 def test_initmenu_pause_zero_guard_has_no_raw_flag_carrier(tmp_path):
     result = _run_decompile_addr(
@@ -1635,6 +1664,7 @@ def test_initmenu_pause_zero_guard_has_no_raw_flag_carrier(tmp_path):
     assert_initmenu_pause_guard_behavior(body, tmp_path)
 
 
+@pytest.mark.requires_kvm
 def test_drawframe_stack_array_and_memset_calls_survive_regeneration():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1671,6 +1701,7 @@ def test_drawframe_stack_array_and_memset_calls_survive_regeneration():
     assert "unsigned short achTmp;" not in body
 
 
+@pytest.mark.requires_kvm
 def test_beep_direct_path_validates_without_high_byte_contract_fallback():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1716,6 +1747,7 @@ def test_beep_direct_path_validates_without_high_byte_contract_fallback():
     assert scorecard.raw_ss_linear_count == 0
 
 
+@pytest.mark.requires_kvm
 def test_insertionsort_word_stores_materialized_without_raw_high_byte_memory():
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1762,6 +1794,7 @@ def test_insertionsort_word_stores_materialized_without_raw_high_byte_memory():
     assert "*(&" not in body
 
 
+@pytest.mark.requires_kvm
 def test_drawbar_word_stride_byte_fields_validate_without_indexed_mem_helper_syntax() -> None:
     result = _run_decompile_addr(
         SORTDEMO_EXE,
@@ -1809,6 +1842,7 @@ def test_drawbar_word_stride_byte_fields_validate_without_indexed_mem_helper_syn
     assert "SEG_PTR(ds" not in final_body
 
 
+@pytest.mark.requires_kvm
 def test_percolatedown_direct_global_increment_materialized():
     result = _run_decompile_addr(
         SORTDEMO_EXE,

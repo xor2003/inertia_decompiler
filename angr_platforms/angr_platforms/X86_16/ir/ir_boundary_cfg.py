@@ -9,6 +9,10 @@ A second explicit route covers conditionally transformed bodies: a retained
 authenticated consuming entry through ``complete_for`` while the raw
 artifact, the context-free ``complete`` verdict, and the universal registry
 contract stay unchanged.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
@@ -32,11 +36,38 @@ from .no_effect_instructions import (
 )
 
 if TYPE_CHECKING:
+    from .near_return_continuation_view import (
+        ScopedNearReturnContinuationView8616,
+    )
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import (
         ScopedFunctionCFGProjection8616,
         ScopedFunctionIRView8616,
     )
+
+
+def _typed_scoped_view_8616(
+    scoped_view: object,
+) -> ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None:
+    """Return the offered object when it is a typed owned scoped view.
+
+    The scoped coverage route is conditional-evidence only; two typed
+    view owners may carry it: the retained-application view and the
+    premise-derived near-return continuation view. Both expose
+    ``invocation_scope`` and ``cfg_projection_for`` with the same
+    scope-authenticated contract. Anything else is not evidence and the
+    caller refuses through its typed reason.
+    """
+    from .near_return_continuation_view import (
+        ScopedNearReturnContinuationView8616 as _NearView8616,
+    )
+    from .scoped_function_ir_view import ScopedFunctionIRView8616
+
+    if type(scoped_view) is ScopedFunctionIRView8616 or type(
+        scoped_view
+    ) is _NearView8616:
+        return scoped_view
+    return None
 
 
 def _closed_boundary_census_8616(
@@ -128,12 +159,15 @@ class IRBoundaryCoverageResult8616:
     ``scoped_view`` is the explicit conditional-evidence attachment: when it
     is ``None`` the result is universal evidence exactly as before, and
     ``complete_for`` ignores the offered entry. When it retains a typed
-    ``ScopedFunctionIRView8616``, ``artifact`` stays the identical *raw*
-    pending body — never a transformed or publishable artifact — and only
-    ``complete_for(scope)`` may authenticate the conditional surface;
-    ``complete`` delegates to ``complete_for(None)`` and therefore stays
-    permanently false for scoped evidence. The field is identity-bound
-    provenance, so it is excluded from equality and the repr.
+    scoped view — ``ScopedFunctionIRView8616`` for a retained
+    application, or ``ScopedNearReturnContinuationView8616`` for a
+    premise-derived near-return continuation — ``artifact`` stays the
+    identical *raw* pending body — never a transformed or publishable
+    artifact — and only ``complete_for(scope)`` may authenticate the
+    conditional surface; ``complete`` delegates to ``complete_for(None)``
+    and therefore stays permanently false for scoped evidence. The field
+    is identity-bound provenance, so it is excluded from equality and
+    the repr.
     """
 
     artifact: IRFunctionArtifact
@@ -144,9 +178,9 @@ class IRBoundaryCoverageResult8616:
     classified_fact_count: int
     materialized_count: int
     failure_count: int
-    scoped_view: ScopedFunctionIRView8616 | None = field(
-        default=None, compare=False, repr=False
-    )
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ) = field(default=None, compare=False, repr=False)
 
     @property
     def complete(self) -> bool:
@@ -333,7 +367,9 @@ def _scoped_evidence_failure_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
-    scoped_view: ScopedFunctionIRView8616 | None,
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ),
     consuming_scope: Real16InvocationDomain8616 | None,
 ) -> IRBoundaryCoverageFailure8616 | None:
     """Authenticate the full scoped evidence chain under one entry.
@@ -351,14 +387,12 @@ def _scoped_evidence_failure_8616(
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import (
         ScopedFunctionCFGProjection8616,
-        ScopedFunctionIRView8616,
     )
 
-    if (
-        type(scoped_view) is not ScopedFunctionIRView8616
-        or scoped_view.failure is not None
-    ):
+    view = _typed_scoped_view_8616(scoped_view)
+    if view is None or view.failure is not None:
         return IRBoundaryCoverageFailure8616.SCOPED_VIEW_REFUSED
+    scoped_view = view
     if (
         scoped_view.source_artifact is not artifact
         or scoped_view.boundary is not boundary
@@ -445,27 +479,26 @@ def prove_scoped_ir_boundary_coverage_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
-    scoped_view: ScopedFunctionIRView8616 | None,
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ),
 ) -> IRBoundaryCoverageResult8616:
     """Produce a scoped coverage proof bound to one consuming entry.
 
     The result retains the identical raw ``artifact`` — never a
     transformed body — the exact ``boundary``, and the typed
-    ``scoped_view`` as its only conditional evidence. Construction
+    ``scoped_view`` as its only conditional evidence. A retained
+    application view and a premise-derived near-return continuation view
+    are both accepted; any other object is not evidence. Construction
     evaluates the whole scoped surface once under the view's own retained
     entry so a stale or forged chain records a typed non-result instead
     of coverage a consumer could inherit. Nothing here registers,
     publishes, or converts the conditional body: ``complete`` remains
     context-free-false and only ``complete_for(scope)`` re-authenticates.
     """
-    # Deferred: binds the view owner lazily for the same package-load
-    # reason documented on ``_scoped_evidence_failure_8616``.
-    from .scoped_function_ir_view import ScopedFunctionIRView8616
-
+    typed_view = _typed_scoped_view_8616(scoped_view)
     consuming_scope = (
-        scoped_view.invocation_scope
-        if type(scoped_view) is ScopedFunctionIRView8616
-        else None
+        typed_view.invocation_scope if typed_view is not None else None
     )
     failure = (
         IRBoundaryCoverageFailure8616.PROJECT_MISMATCH

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 
 from ..ir.core import IRAddress, IRBinaryValue, IRInstr, IRValue, MemSpace
+from ..ir.scalar_value_projection import scalar_active_unary_projection_8616
 from ..ir.ssa import SSABlock
 from ..ir.ssa_function import SSAFunctionArtifact
 from ..ir.stack_extent_evidence import StackExtentEvidence8616
@@ -32,6 +33,14 @@ class StackAddressEscape8616(IntEnum):
     NO_DERIVED_ADDRESS_ESCAPE = 0
     DERIVED_ADDRESS_ESCAPE = 1
     UNKNOWN_REFUSE = 2
+
+
+@dataclass(frozen=True, slots=True)
+class _EscapeValueState8616:
+    """One exact destination's data dependence and produced storage width."""
+
+    escape: StackAddressEscape8616
+    size: int
 
 
 @dataclass(slots=True)
@@ -74,13 +83,38 @@ class _StackCells:
 
 def _key(value: IRValue) -> _ValueKey:
     """Use block-local VEX temporary identity or exact scalar SSA identity."""
-    if value.space is MemSpace.TMP and value.source_tmp is not None:
-        return value.space.value, value.source_tmp, None
+    if value.source_tmp is not None:
+        return MemSpace.TMP.value, value.source_tmp, None
     return value.space.value, value.name, value.version
 
 
+def _retained_escape_8616(
+    value: IRValue, states: dict[_ValueKey, _EscapeValueState8616],
+) -> StackAddressEscape8616:
+    """Read dependence only from an existing definition of matching width."""
+    retained = states.get(_key(value))
+    if retained is None or retained.size != value.size:
+        return StackAddressEscape8616.UNKNOWN_REFUSE
+    return retained.escape
+
+
+def _unary_escape_8616(
+    value: IRValue, states: dict[_ValueKey, _EscapeValueState8616],
+    frame_registers: frozenset[tuple[str, int]],
+) -> StackAddressEscape8616:
+    """Preserve dependence through authenticated conversions, never equality."""
+    unary = value.active_unary
+    assert unary is not None
+    if scalar_active_unary_projection_8616(value) is None:
+        return StackAddressEscape8616.UNKNOWN_REFUSE
+    state = _value_escape(unary.operand, states, frame_registers)
+    if value.index is not None:
+        state = max(state, _value_escape(value.index, states, frame_registers))
+    return state
+
+
 def _value_escape(
-    value: object, states: dict[_ValueKey, StackAddressEscape8616],
+    value: object, states: dict[_ValueKey, _EscapeValueState8616],
     frame_registers: frozenset[tuple[str, int]],
 ) -> StackAddressEscape8616:
     """Follow typed data operands; never interpret address operands as loads."""
@@ -88,15 +122,19 @@ def _value_escape(
         return max(_value_escape(value.lhs, states, frame_registers), _value_escape(value.rhs, states, frame_registers))
     if not isinstance(value, IRValue):
         return StackAddressEscape8616.UNKNOWN_REFUSE
+    if value.active_unary is not None:
+        return _unary_escape_8616(value, states, frame_registers)
     if value.index is not None:
-        base = states.get(_key(value), StackAddressEscape8616.UNKNOWN_REFUSE)
+        base = _retained_escape_8616(value, states)
         return max(base, _value_escape(value.index, states, frame_registers))
+    if value.source_tmp is not None:
+        return _retained_escape_8616(value, states)
     if value.space is MemSpace.CONST:
         return StackAddressEscape8616.NO_DERIVED_ADDRESS_ESCAPE
     if (value.name, value.version) in frame_registers and value.space is MemSpace.REG:
         return StackAddressEscape8616.DERIVED_ADDRESS_ESCAPE
     if _key(value) in states:
-        return states[_key(value)]
+        return _retained_escape_8616(value, states)
     # Incoming general registers predate this allocation. This does not prove
     # that memory reached through them is disjoint from the frame.
     if value.space is MemSpace.REG and value.version == 0:
@@ -105,7 +143,7 @@ def _value_escape(
 
 
 def _store_escape(
-    instruction: IRInstr, states: dict[_ValueKey, StackAddressEscape8616],
+    instruction: IRInstr, states: dict[_ValueKey, _EscapeValueState8616],
     frame_registers: frozenset[tuple[str, int]],
 ) -> StackAddressEscape8616:
     """Inspect stored data without treating the store address as escaping data."""
@@ -117,7 +155,7 @@ def _store_escape(
 
 
 def _definition_state(
-    instruction: IRInstr, states: dict[_ValueKey, StackAddressEscape8616],
+    instruction: IRInstr, states: dict[_ValueKey, _EscapeValueState8616],
     frame_registers: frozenset[tuple[str, int]],
     memory: _StackCells, index: int,
 ) -> StackAddressEscape8616:
@@ -153,7 +191,7 @@ def classify_stack_address_escape_8616(
     if not evidence.complete or evidence.block_addr != block.addr:
         return StackAddressEscape8616.UNKNOWN_REFUSE
     frame_registers = frozenset((item.name, item.version) for item in evidence.coordinates)
-    states: dict[_ValueKey, StackAddressEscape8616] = {}
+    states: dict[_ValueKey, _EscapeValueState8616] = {}
     outgoing: dict[str, StackAddressEscape8616] = {}
     outgoing_widths: dict[str, int] = {}
     excluded_outputs = {"sp", "ip", "flags", "d"}
@@ -173,7 +211,7 @@ def classify_stack_address_escape_8616(
         key = _key(destination)
         if key in states:
             return StackAddressEscape8616.UNKNOWN_REFUSE
-        states[key] = state
+        states[key] = _EscapeValueState8616(state, destination.size)
         if destination.space is MemSpace.REG and destination.name not in excluded_outputs:
             if destination.name is None or not _complete_output_write(destination, outgoing_widths):
                 return StackAddressEscape8616.UNKNOWN_REFUSE

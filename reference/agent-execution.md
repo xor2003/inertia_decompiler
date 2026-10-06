@@ -73,6 +73,18 @@ They do not relax its architecture or function-fix acceptance contract.
 - Avoid adding to files already over 350 lines where practical. Extract a focused
   owner when warranted, but do not turn a small fix into a size-only refactor.
 
+### KVM Test Requirements
+
+SSA/Z3 comparison, VEX lifting, static IR/Alias analysis, Unicorn replay and
+host GCC tests do not require KVM. Mark every test that executes a KVM-backed
+DOS runner with `@pytest.mark.requires_kvm`, including indirect compiler
+execution through decompiler CLI recompilation validation. Use function-level
+marks in mixed modules; mocked runners and missing-tool controls remain static.
+The collection hook probes KVM only for marked tests and records unavailable
+access as skipped evidence. A skip is not native acceptance. Run the static
+subset with `-m "not requires_kvm"` and native execution with `-m requires_kvm`;
+keep both in the applicable acceptance run.
+
 ### Linter Cadence
 
 Use explicit owned paths, not the entire shared dirty tree. A development
@@ -158,12 +170,31 @@ in logs; report scope, exit status, counts and actionable failures only.
   bounded in-process probe, use a temporary cache namespace/directory instead of
   deleting shared caches; confirm actual stage observations before interpreting
   an empty counter as absence of behavior.
+- Worker stdout/stderr may be captured and discarded on timeout. Write bounded
+  diagnostic events to a dedicated file and verify them there; missing console
+  hook messages do not establish that a stage was not executed.
 - Remove or consolidate tests only after proving duplication, supersession or
   obsolete requirements. Do not reduce coverage, suppress diagnostics, shorten
   timeouts indiscriminately, or hide failures to improve timings.
 
 ### Selective Delegation
 
+- Keep agents off the critical path once a reviewable patch and focused results
+  exist. Check long tasks at a 15–20 minute checkpoint; if only harness cleanup
+  or reporting remains, preserve the patch and take over that bounded work.
+  Verify process identity and terminal status when interrupting. A checkpoint
+  is not a timeout-based restart, and never waives review or required checks.
+- Give workers existing fixtures and one minimal reproducer. Prefer ordinary
+  pytest tests to a new standalone diagnostic framework; avoid spending a
+  handoff cycle refactoring temporary report scripts to satisfy production
+  lint rules. Production code and permanent tests retain their required gates.
+- Before changing a shared IR contract, identify its value, address and proof
+  consumers and coordinate their updates together; producer-only success is
+  not a complete implementation of that contract.
+- Integrate a coherent reviewed slice before starting another expansion of it.
+  Batch its final focused checks on stable sources. Keep repeated evidence
+  refreshes and full gates for changes that invalidate their inputs or for the
+  actual integration checkpoint; do not substitute more staging for delivery.
 - Agents may be started on demand, not automatically for every step. Prefer one
   bounded independent task initially; add workers only when expected wall-time
   savings justify their token and coordination cost. Do not delegate the next
@@ -171,7 +202,8 @@ in logs; report scope, exit status, counts and actionable failures only.
 - Use a lower-cost capable model for bounded test/tooling work and stronger
   reasoning for semantic ownership or difficult root causes when the delegation
   tool exposes model selection. Never claim model control that is unavailable.
-- Follow the graph/coverage handoff requirements in `AGENTS.md`. Supply exact
+- Follow the graph/coverage handoff requirements in `AGENTS.md` and
+  [reference/devin-handoff.md](devin-handoff.md). Supply exact
   ownership, current evidence, accepted/rejected experiments, deliverables,
   verification expectations and a stop condition; do not copy unnecessary history.
 - Avoid overlapping edits, duplicate investigation, repeated broad profiling and
@@ -202,3 +234,48 @@ in logs; report scope, exit status, counts and actionable failures only.
 - At a user-authorized commit/push checkpoint, include requested concurrent work,
   preserve other edits, exclude temporary artifacts, and verify push completion.
   A checkpoint is not whole-goal completion; record unresolved failures explicitly.
+
+### Context / Compaction Handoff
+
+For shorter displayed paths, use `scripts/compact_paths.py` on saved logs;
+`--legend` explains the aliases (see also Token-Efficient Command Output).
+Keep canonical paths in commands, source, raw logs and proof receipts. Do not
+rename modules just to shorten a report.
+
+Before compaction, create a minimal handoff for the next agent.
+
+Keep only:
+
+- current objective
+- non-obvious settled decisions/invariants
+- current state
+- next 3–6 actions
+- active blockers/risks
+- files needed for those actions
+
+Do not retain information that can be cheaply rediscovered from the repo.
+
+Delete:
+
+- investigation/history/rejected approaches
+- completed commands, logs, tool output
+- line numbers and Makefile locations
+- constructor/signature details unless currently blocking
+- completed test-case inventories
+- unrelated/future defects
+- duplicated information already in PLAN/PROGRESS
+- long path repetitions
+
+Use path aliases when useful.
+
+Completed work: one line per logical milestone.
+
+Relevant files: maximum 8 entries.
+
+Hard limit: 500 words. If the draft exceeds 500 words, rewrite it before compaction.
+
+For every retained fact ask:
+"Would the next agent likely make a wrong implementation decision without this?"
+If not, omit it.
+
+Do not preserve commands or exact locations solely to save the next agent a grep/search.

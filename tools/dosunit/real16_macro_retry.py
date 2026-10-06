@@ -16,8 +16,9 @@ Additive diagnostics: each deadline-gated
 macro admission decision is additionally recorded under
 ``backend["retry_budget"]["macro_steps"]`` as a typed ``RetryStageDecision``
 document — including the first shared-deadline early return that previously
-left no attempt evidence. Scheduling, gates, deadline arithmetic, timeout
-arguments and verdict rows are unchanged from production.
+left no attempt evidence. A required retry stopped by the shared deadline
+reports budget exhaustion while preserving earlier stage evidence. Scheduling,
+gates, deadline arithmetic and timeout arguments remain unchanged.
 """
 
 from __future__ import annotations
@@ -133,6 +134,10 @@ def retry_whole_function_with_macro(
     )
     if not macro_decision.attempted:
         record_stage_decision(retry.backend, "macro_steps", macro_decision)
+        if macro_decision.required and not macro_decision.budget_open:
+            return FunctionRetryEvidence(
+                replace(retry.evidence, reason="compose_budget_exceeded"), retry.backend,
+            )
         return retry
     function_id = str(oracle_entry.get("id") or obligation.id.key)
     remaining_ms = int((deadline - time.monotonic()) * 1000)

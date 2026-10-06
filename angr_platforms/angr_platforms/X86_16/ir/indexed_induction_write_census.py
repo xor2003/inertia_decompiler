@@ -5,6 +5,10 @@ Responsibility: refuse unaccounted induction mutations, including byte lanes
 and unclassified expressions, before a loop-range candidate materializes.
 Logical segment names alone do not prove physical disjointness. This owner
 does not infer aliases, invent call effects, or modify generated code.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

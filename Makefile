@@ -599,6 +599,7 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/ir/vex_terminal_jump.py \
 	angr_platforms/angr_platforms/X86_16/ir/entry_jump_domain.py \
 	angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_edge_feasibility8616.py \
 	angr_platforms/angr_platforms/X86_16/ir/vex_import.py \
 	angr_platforms/angr_platforms/X86_16/ir/vex_integer_displacement.py \
 	angr_platforms/angr_platforms/X86_16/ir/vex_bit_source.py \
@@ -684,6 +685,7 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/recovery_artifact_writer.py \
 	angr_platforms/angr_platforms/X86_16/corpus_recovery_artifact.py \
 	angr_platforms/angr_platforms/X86_16/confidence_and_assumptions.py \
+	angr_platforms/angr_platforms/X86_16/confidence_evidence.py \
 	angr_platforms/angr_platforms/X86_16/ir_recovery_summary.py \
 	angr_platforms/angr_platforms/X86_16/ir_readiness.py \
 	angr_platforms/angr_platforms/X86_16/ir_confidence_markers.py \
@@ -1381,6 +1383,7 @@ QA_TYPED_FILES := \
 	inertia_decompiler/cli_cod_globals.py \
 	inertia_decompiler/cli_dead_local_prune.py \
 	inertia_decompiler/cli_semantic_rollback.py \
+	inertia_decompiler/cli_rollback_snapshot_8616.py \
 	inertia_decompiler/cli_helper_modeling.py \
 	inertia_decompiler/cli_interrupt_modeling.py \
 	inertia_decompiler/cli_linear_aliases.py \
@@ -1744,6 +1747,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/ir/vex_terminal_jump.py \
 	angr_platforms/angr_platforms/X86_16/ir/entry_jump_domain.py \
 	angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_edge_feasibility8616.py \
 	angr_platforms/angr_platforms/X86_16/ir/vex_import.py \
 	angr_platforms/angr_platforms/X86_16/ir/vex_integer_displacement.py \
 	angr_platforms/angr_platforms/X86_16/ir/vex_bit_source.py \
@@ -1829,6 +1833,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/recovery_artifact_writer.py \
 	angr_platforms/angr_platforms/X86_16/corpus_recovery_artifact.py \
 	angr_platforms/angr_platforms/X86_16/confidence_and_assumptions.py \
+	angr_platforms/angr_platforms/X86_16/confidence_evidence.py \
 	angr_platforms/angr_platforms/X86_16/ir_recovery_summary.py \
 	angr_platforms/angr_platforms/X86_16/ir_readiness.py \
 	angr_platforms/angr_platforms/X86_16/ir_confidence_markers.py \
@@ -2523,6 +2528,7 @@ QA_RUFF_TARGETS := \
 	inertia_decompiler/cli_cod_globals.py \
 	inertia_decompiler/cli_dead_local_prune.py \
 	inertia_decompiler/cli_semantic_rollback.py \
+	inertia_decompiler/cli_rollback_snapshot_8616.py \
 	inertia_decompiler/cli_helper_modeling.py \
 	inertia_decompiler/cli_interrupt_modeling.py \
 	inertia_decompiler/cli_linear_aliases.py \
@@ -2662,6 +2668,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/tests/test_check_changed_non_test_types.py \
 	angr_platforms/tests/test_cli_core_clinic_policy.py \
 	angr_platforms/tests/test_fork_timeout.py \
+	angr_platforms/tests/test_fork_owner_death.py \
 	angr_platforms/tests/test_function_cache_context.py \
 	angr_platforms/tests/test_cli_batch_c_output.py \
 	angr_platforms/tests/test_x86_16_cli.py \
@@ -2756,7 +2763,16 @@ QA_RUFF_TARGETS := \
 	angr_platforms/tests/test_x86_16_vex_import.py \
 	angr_platforms/tests/test_x86_16_entry_jump_domain.py \
 	angr_platforms/tests/test_x86_16_invocation_domain.py \
+	angr_platforms/tests/test_x86_16_invocation_edge_feasibility.py \
+	angr_platforms/tests/test_x86_16_edge_known_bits_soundness.py \
+	angr_platforms/tests/test_x86_16_unary_value_contract.py \
+	angr_platforms/tests/test_x86_16_unary_fold_contract.py \
+	angr_platforms/tests/test_x86_16_unary_storage_guards.py \
+	angr_platforms/tests/test_x86_16_unary_call_binding.py \
+	angr_platforms/tests/test_x86_16_unary_address_capture.py \
+	angr_platforms/tests/test_x86_16_unary_constant_flow.py \
 	angr_platforms/tests/test_x86_16_invocation_domain_boundaries.py \
+	angr_platforms/tests/test_x86_16_invocation_refusal_site.py \
 	angr_platforms/tests/test_x86_16_invocation_partition_census.py \
 	angr_platforms/tests/test_x86_16_boot_call_prefix.py \
 	angr_platforms/tests/test_x86_16_invocation_unused_premise.py \
@@ -3464,7 +3480,16 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_vex_import.py \
 	angr_platforms/tests/test_x86_16_entry_jump_domain.py \
 	angr_platforms/tests/test_x86_16_invocation_domain.py \
+	angr_platforms/tests/test_x86_16_invocation_edge_feasibility.py \
+	angr_platforms/tests/test_x86_16_edge_known_bits_soundness.py \
+	angr_platforms/tests/test_x86_16_unary_value_contract.py \
+	angr_platforms/tests/test_x86_16_unary_fold_contract.py \
+	angr_platforms/tests/test_x86_16_unary_storage_guards.py \
+	angr_platforms/tests/test_x86_16_unary_call_binding.py \
+	angr_platforms/tests/test_x86_16_unary_address_capture.py \
+	angr_platforms/tests/test_x86_16_unary_constant_flow.py \
 	angr_platforms/tests/test_x86_16_invocation_domain_boundaries.py \
+	angr_platforms/tests/test_x86_16_invocation_refusal_site.py \
 	angr_platforms/tests/test_x86_16_invocation_partition_census.py \
 	angr_platforms/tests/test_x86_16_boot_call_prefix.py \
 	angr_platforms/tests/test_x86_16_invocation_unused_premise.py \
@@ -3681,6 +3706,9 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_dead_local_structured_reads.py \
 	angr_platforms/tests/test_x86_16_local_liveness.py \
 	angr_platforms/tests/test_cli_semantic_rollback.py \
+	angr_platforms/tests/test_cli_rollback_snapshot.py \
+	angr_platforms/tests/test_cli_call_inventory.py \
+	angr_platforms/tests/test_cli_retry_outcome.py \
 	angr_platforms/tests/test_x86_16_trivial_copy_optimization.py \
 	angr_platforms/tests/test_x86_16_widening_copyprop.py \
 	angr_platforms/tests/test_x86_16_widening_copyprop_width.py \
@@ -4151,6 +4179,20 @@ LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/stack_argument
 QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use.py angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use_contracts.py angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use_flow.py
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use.py angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use_contracts.py angr_platforms/angr_platforms/X86_16/ir/stack_argument_modular_use_flow.py angr_platforms/tests/test_x86_16_stack_argument_modular_use.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_stack_argument_modular_use.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_modular_unary_controls.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_modular_unary_controls.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_indexed_copy_projection_controls.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_indexed_copy_projection_controls.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_physical_push_controls.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_physical_push_controls.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_entry_affine_projection_controls.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_entry_affine_projection_controls.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_stack_escape_unary_controls.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_stack_escape_unary_controls.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_carry_unary_controls.py angr_platforms/tests/test_x86_16_carry_conversion_soundness.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_carry_unary_controls.py angr_platforms/tests/test_x86_16_carry_conversion_soundness.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_carry_destination_controls.py angr_platforms/tests/test_x86_16_retained_boundary_controls.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_carry_destination_controls.py angr_platforms/tests/test_x86_16_retained_boundary_controls.py
 LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/stack_argument_scaled_return.py
 QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/ir/stack_argument_scaled_return.py
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/ir/stack_argument_scaled_return.py angr_platforms/tests/test_x86_16_stack_argument_scaled_return.py
@@ -4211,8 +4253,8 @@ QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/storage_word_inp
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/storage_word_input_binding.py angr_platforms/tests/test_x86_16_storage_word_input_binding.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_storage_word_input_binding.py
 LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/lowering/near_pointer_value_runtime.py angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument_values.py
-QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/near_pointer_value_runtime.py angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument_values.py
-QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/near_pointer_value_runtime.py angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument_values.py angr_platforms/tests/test_near_pointer_argument_values.py
+QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/near_pointer_value_runtime.py
+QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/near_pointer_value_runtime.py
 
 LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/direct_call_segment_entry.py
 LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/ir_boundary_cfg.py
@@ -4228,11 +4270,20 @@ QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/ir/segment_effect_closure
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/ir/segment_effect_closure.py angr_platforms/tests/test_x86_16_segment_effect_closure.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_segment_effect_closure.py
 SCOPED_IR_OWNERS := \
+	angr_platforms/angr_platforms/X86_16/frontend_local_call_evidence.py \
+	angr_platforms/angr_platforms/X86_16/mz_static_boot.py \
+	inertia_decompiler/mz_static_intake.py \
+	angr_platforms/angr_platforms/X86_16/frontend_near_return_continuation.py \
+	angr_platforms/angr_platforms/X86_16/ir/near_return_continuation_view.py \
+	angr_platforms/angr_platforms/X86_16/ir/scoped_control_obligations.py \
 	tools/dosunit/real16_scoped_invocation.py \
 	angr_platforms/angr_platforms/X86_16/frontend_invocation_inventory.py \
 	angr_platforms/angr_platforms/X86_16/ir/entry_domain_call_preservation.py \
 	angr_platforms/angr_platforms/X86_16/ir/scoped_function_ir_view.py
 SCOPED_IR_CONTRACT_TESTS := \
+	angr_platforms/tests/test_x86_16_premise_collection_budget.py \
+	angr_platforms/tests/test_x86_16_invocation_pending_inventory.py \
+	angr_platforms/tests/test_x86_16_near_call_frame_width.py \
 	angr_platforms/tests/test_x86_16_invocation_inventory_budgets.py \
 	angr_platforms/tests/test_x86_16_scoped_ir_view.py \
 	angr_platforms/tests/test_x86_16_scoped_ir_view_counters.py \
@@ -4241,12 +4292,41 @@ SCOPED_IR_CONTRACT_TESTS := \
 	angr_platforms/tests/test_x86_16_scoped_segment_state.py \
 	angr_platforms/tests/test_x86_16_scoped_resolution_guard.py
 SCOPED_IR_NATIVE_TESTS := \
+	angr_platforms/tests/test_x86_16_invocation_edge_refinement.py \
+	angr_platforms/tests/test_x86_16_repeated_store_invocation.py \
+	angr_platforms/tests/test_x86_16_declared_call_target_binding.py \
+	angr_platforms/tests/test_x86_16_invocation_path_load.py \
+	angr_platforms/tests/test_x86_16_native_load_binding.py \
+	angr_platforms/tests/test_x86_16_invocation_feasible_joins.py \
+	angr_platforms/tests/test_x86_16_invocation_wide_multiply.py \
+	angr_platforms/tests/test_x86_16_invocation_internal_exit.py \
+	angr_platforms/tests/test_x86_16_declared_resize_boundary.py \
+	angr_platforms/tests/test_x86_16_resize_path_memory.py \
+	angr_platforms/tests/test_x86_16_caller_native_intake.py \
+	angr_platforms/tests/test_x86_16_encoded_entry_transport.py \
+	angr_platforms/tests/test_x86_16_local_call_evidence.py \
+	angr_platforms/tests/test_x86_16_local_evidence_epoch.py \
+	angr_platforms/tests/test_x86_16_scoped_invocation_source.py \
+	angr_platforms/tests/test_x86_16_declared_service_chain.py \
+	angr_platforms/tests/test_x86_16_mz_static_invocation.py \
+	angr_platforms/tests/test_x86_16_mz_static_intake_guards.py \
+	angr_platforms/tests/test_x86_16_mz_static_pending_callee.py \
+	angr_platforms/tests/test_x86_16_per_edge_frame_premise.py \
+	angr_platforms/tests/test_x86_16_near_return_continuation.py \
+	angr_platforms/tests/test_x86_16_scoped_control_obligations.py \
+	angr_platforms/tests/test_x86_16_scoped_control_refusal_ledger.py \
+	angr_platforms/tests/test_x86_16_near_return_scope_guards.py \
 	angr_platforms/tests/test_x86_16_scoped_invocation_adapter.py \
 	angr_platforms/tests/test_x86_16_scoped_ir_native_view.py \
 	angr_platforms/tests/test_x86_16_scoped_ir_native_import.py \
 	angr_platforms/tests/test_x86_16_scoped_ir_native_closure.py \
 	angr_platforms/tests/test_x86_16_scoped_ir_native_resolution.py
 LINTERS_DEV_MYPY_FILES += $(SCOPED_IR_OWNERS)
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/real16_invocation_domain.py
+# Follow-imports=skip needs the owned records visible for exact-type narrowing.
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/core.py angr_platforms/angr_platforms/X86_16/frontend_function_boundary.py
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/function_artifact.py angr_platforms/angr_platforms/X86_16/ir/segment_state_transfer.py angr_platforms/angr_platforms/X86_16/frontend_function_boundary_index.py
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/ir/vex_import.py
 # Keep the declared boot/image contracts visible under follow_imports=skip;
 # otherwise the adapter's runtime-authenticated ProgramBoot becomes Any.
 LINTERS_DEV_MYPY_FILES += tools/dosunit/real16_program_boot.py tools/dosunit/real16_replay_model.py
@@ -4302,6 +4382,7 @@ QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_frontend_block_partition.p
 QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_x86_16_calling_convention_compat.py \
 	angr_platforms/tests/test_fork_timeout.py \
+	angr_platforms/tests/test_fork_owner_death.py \
 	angr_platforms/tests/test_batch_decompile_procs_runtime.py \
 	angr_platforms/tests/test_x86_16_c_ast_utils.py \
 	angr_platforms/tests/test_cli_c_text_postprocess.py::test_known_helper_signature_text_preserves_recovered_signature \
@@ -4311,12 +4392,10 @@ QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_x86_16_bounded_linear_instruction_inventory.py::test_bounded_inventory_decodes_to_exact_region_end \
 	angr_platforms/tests/test_x86_16_function_pointer_argument_replay.py \
 	angr_platforms/tests/test_x86_16_stack_annotation_authority.py \
-	angr_platforms/tests/test_msc6_binary_recovery_policy.py \
 	angr_platforms/tests/test_x86_16_frontend_capstone_decode.py \
 	angr_platforms/tests/test_compiler_coverage_manifest.py \
 	angr_platforms/tests/test_compiler_coverage_csmith.py \
 	angr_platforms/tests/test_compiler_coverage_pointer_oracle.py \
-	angr_platforms/tests/test_msc6_memory_model.py \
 	angr_platforms/tests/test_compiler_coverage_result.py \
 	angr_platforms/tests/test_compiler_coverage_suite.py \
 	angr_platforms/tests/test_x86_16_nested_cdecl_arguments.py \
@@ -4324,12 +4403,8 @@ QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_msc6_original_evidence.py \
 	angr_platforms/tests/test_discovery_pre_entry_order.py \
 	angr_platforms/tests/test_signature_catalog_without_flair.py \
-	angr_platforms/tests/test_binary_signature_metadata.py \
 	angr_platforms/tests/test_signature_match_ambiguity.py \
 	angr_platforms/tests/test_ada_signature_integration.py \
-	angr_platforms/tests/test_default_signature_provenance.py \
-	angr_platforms/tests/test_metadata_evidence.py \
-	angr_platforms/tests/test_near_pointer_argument_values.py \
 	angr_platforms/tests/test_signature_region_bounds.py \
 	angr_platforms/tests/test_discovery_signature_isolation.py \
 	angr_platforms/tests/test_discovery_library_boundaries.py \
@@ -4434,6 +4509,32 @@ QA_PYTEST_TARGETS += angr_platforms/tests/test_workspace_sandbox.py
 
 
 # Declared DOS version-query effects and checked public receipts.
+REPEATED_STORE_FILES := angr_platforms/angr_platforms/X86_16/frontend_repeated_store8616.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_repeated_store8616.py
+QA_TYPED_FILES += $(REPEATED_STORE_FILES)
+LINTERS_DEV_MYPY_FILES += $(REPEATED_STORE_FILES)
+QA_RUFF_TARGETS += $(REPEATED_STORE_FILES)
+DECLARED_INTERRUPT_FILES := angr_platforms/angr_platforms/real16_version_response8616.py \
+	angr_platforms/angr_platforms/real16_resize_response8616.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_path_memory8616.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_initial_memory8616.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_wide_multiply8616.py \
+	angr_platforms/angr_platforms/X86_16/ir/real16_declared_interrupt8616.py \
+	tools/dosunit/real16_declared_invocation8616.py
+DECLARED_INTERRUPT_TESTS := angr_platforms/tests/test_x86_16_declared_interrupt_boundary.py \
+	angr_platforms/tests/test_x86_16_declared_interrupt_collision.py
+QA_TYPED_FILES += $(DECLARED_INTERRUPT_FILES)
+LINTERS_DEV_MYPY_FILES += $(DECLARED_INTERRUPT_FILES)
+QA_RUFF_TARGETS += $(DECLARED_INTERRUPT_FILES) $(DECLARED_INTERRUPT_TESTS)
+QA_PYTEST_TARGETS += $(DECLARED_INTERRUPT_TESTS)
+# Declared-call transport and projected-call block authentication owners.
+QA_TYPED_FILES += inertia_decompiler/declared_call_transport.py angr_platforms/angr_platforms/X86_16/declared_external_call_evidence.py angr_platforms/angr_platforms/X86_16/semantics/call_projection_blocks.py
+LINTERS_DEV_MYPY_FILES += inertia_decompiler/declared_call_transport.py angr_platforms/angr_platforms/X86_16/declared_external_call_evidence.py angr_platforms/angr_platforms/X86_16/semantics/call_projection_blocks.py
+QA_RUFF_TARGETS += inertia_decompiler/declared_call_transport.py angr_platforms/angr_platforms/X86_16/declared_external_call_evidence.py angr_platforms/angr_platforms/X86_16/semantics/call_projection_blocks.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_binary_callee_relative_call_coordinates.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_mapped_backward_boundary.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_local_call_evidence.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_local_evidence_epoch.py
 QA_TYPED_FILES += tools/dosunit/real16_program_version.py
 LINTERS_DEV_MYPY_FILES += tools/dosunit/real16_program_version.py
 QA_RUFF_TARGETS += tools/dosunit/real16_program_version.py angr_platforms/tests/test_real16_program_version.py
@@ -4680,7 +4781,8 @@ QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_real16_call_admission.py \
 	angr_platforms/tests/test_real16_public_calls.py \
 	angr_platforms/tests/test_real16_concrete_replay.py \
-	angr_platforms/tests/test_real16_replay_observations.py
+	angr_platforms/tests/test_real16_replay_observations.py \
+	angr_platforms/tests/test_real16_write_readback.py
 
 QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_real16_control_domain.py \
@@ -4736,7 +4838,8 @@ QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_real16_call_admission.py \
 	angr_platforms/tests/test_real16_public_calls.py \
 	angr_platforms/tests/test_real16_concrete_replay.py \
-	angr_platforms/tests/test_real16_replay_observations.py
+	angr_platforms/tests/test_real16_replay_observations.py \
+	angr_platforms/tests/test_real16_write_readback.py
 
 QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_real16_replay_cli.py \
@@ -4933,9 +5036,7 @@ QA_PYTEST_TARGETS += \
 # Optional signatures must not truncate independently closed binary callers;
 # unknown bodies and genuine neighboring library boundaries remain refused.
 LINTERS_DEV_MYPY_FILES += inertia_decompiler/discovery_candidate_ranges.py
-QA_TYPED_FILES += inertia_decompiler/discovery_candidate_ranges.py
 QA_RUFF_TARGETS += \
-	inertia_decompiler/discovery_candidate_ranges.py \
 	angr_platforms/tests/test_cli_caller_range_binary_bounds.py
 QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_cli_caller_range_binary_bounds.py
@@ -5321,6 +5422,7 @@ COMPARATOR_ADMISSION_TESTS := \
 	angr_platforms/tests/test_binary_callee_control_target.py \
 	angr_platforms/tests/test_real16_uncatalogued_calls.py::test_public_uncatalogued_direct_leaf \
 	angr_platforms/tests/test_dosunit_guarded_capture.py \
+	angr_platforms/tests/test_real16_write_readback.py \
 	angr_platforms/tests/test_real16_argument_controls.py \
 	angr_platforms/tests/test_real16_far_loop_controls.py \
 	angr_platforms/tests/test_dosunit_alarm_boundary.py \
@@ -5362,6 +5464,12 @@ COMPARATOR_ADMISSION_TESTS := \
 	angr_platforms/tests/test_segment_call_binding_regression.py \
 	angr_platforms/tests/test_native_relift_scope.py \
 	angr_platforms/tests/test_direct_near_call_target_binding.py \
+	angr_platforms/tests/test_x86_16_declared_call_consumption.py \
+	angr_platforms/tests/test_declared_call_transport.py \
+	angr_platforms/tests/test_projected_call_consumption.py \
+	angr_platforms/tests/test_declared_call_admission.py \
+	angr_platforms/tests/test_declared_call_schema.py \
+	angr_platforms/tests/test_declared_call_binding.py \
 	angr_platforms/tests/test_x86_16_native_helper_call_retention.py \
 	angr_platforms/tests/test_flat32_comparator_lane.py \
 	angr_platforms/tests/test_flat32_loop_controls.py \
@@ -5375,11 +5483,35 @@ comparator-check-fast: override PYTEST_WORKERS := $(COMPARATOR_PYTEST_WORKERS)
 comparator-check-fast: decompiler-contracts
 	$(Q)$(PYTHON) -m pytest -q $(PYTEST_ARGS) --maxfail=1 $(COMPARATOR_ADMISSION_TESTS)
 
+# Keep the complete QA inventory while deriving its host-only control selectors
+# from the pipeline owner. Guarded controls execute after the outer pytest pool.
+SPLIT_CONTROL_TEST_FILES := angr_platforms/tests/test_fork_owner_death.py angr_platforms/tests/test_pytest_live_failures.py angr_platforms/tests/test_compiler_coverage_runner.py angr_platforms/tests/test_x86_16_gp_word_runtime.py
+CONTROL_HOST_TARGETS_COMMAND ?= $(PYTHON) scripts/test_pipeline.py --print-host-controls
+define load_control_host_pytest_targets
+$(eval CONTROL_HOST_TARGETS_CACHE := $(shell $(CONTROL_HOST_TARGETS_COMMAND)))
+$(if $(filter 0,$(.SHELLSTATUS)),,$(error control-host-targets: provider command failed))
+$(if $(strip $(CONTROL_HOST_TARGETS_CACHE)),,$(error control-host-targets: provider returned an empty inventory))
+$(CONTROL_HOST_TARGETS_CACHE)
+endef
+CONTROL_HOST_PYTEST_TARGETS = $(if $(CONTROL_HOST_TARGETS_CACHE),$(CONTROL_HOST_TARGETS_CACHE),$(strip $(call load_control_host_pytest_targets)))
+GNU_MAKE_ORACLE_TEST_FILE := angr_platforms/tests/test_makefile_gnu_oracle.py
+GNU_MAKE_ORACLE_TARGET_PATTERN := $(GNU_MAKE_ORACLE_TEST_FILE)::%
+QA_HOST_PYTEST_TARGETS = $(filter-out $(SPLIT_CONTROL_TEST_FILES) $(GNU_MAKE_ORACLE_TEST_FILE),$(QA_PYTEST_TARGETS)) $(CONTROL_HOST_PYTEST_TARGETS)
+SERIAL_CONTROL_TARGET_PATTERN := angr_platforms/tests/test_pytest_live_failures.py::test_live_failures_preserve_reports_and_emit_before_session_end%
+LINUX_CONTROL_TARGET_PATTERN := angr_platforms/tests/test_fork_owner_death.py::% angr_platforms/tests/test_compiler_coverage_runner.py::test_real_timeout_stops_descendants_and_retains_both_output_streams%
+NATIVE_CONTROL_TARGET_PATTERN := angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_msc6_word_runtime_compiles_and_executes%
+PROFILE_GUARDED_TARGETS = $(filter $(SERIAL_CONTROL_TARGET_PATTERN) $(LINUX_CONTROL_TARGET_PATTERN) $(NATIVE_CONTROL_TARGET_PATTERN) $(GNU_MAKE_ORACLE_TARGET_PATTERN),$(PYTEST_PROFILE_TARGETS))
+PROFILE_EXPLICIT_GUARDED_TARGETS = $(foreach target,$(PROFILE_GUARDED_TARGETS),$(if $(filter $(firstword $(subst ::, ,$(target))),$(PYTEST_PROFILE_TARGETS)),,$(target)))
+PROFILE_HOST_PYTEST_TARGETS = $(filter-out $(SPLIT_CONTROL_TEST_FILES) $(GNU_MAKE_ORACLE_TEST_FILE) $(PROFILE_GUARDED_TARGETS),$(PYTEST_PROFILE_TARGETS)) $(foreach control_file,$(filter $(SPLIT_CONTROL_TEST_FILES),$(PYTEST_PROFILE_TARGETS)),$(filter $(control_file)::%,$(CONTROL_HOST_PYTEST_TARGETS)))
+PROFILE_CONTROL_LANES = $(if $(filter angr_platforms/tests/test_pytest_live_failures.py $(SERIAL_CONTROL_TARGET_PATTERN),$(PYTEST_PROFILE_TARGETS)),--lane pytest-serial) $(if $(filter angr_platforms/tests/test_compiler_coverage_runner.py angr_platforms/tests/test_fork_owner_death.py $(LINUX_CONTROL_TARGET_PATTERN),$(PYTEST_PROFILE_TARGETS)),--lane linux-process-controls) $(if $(filter angr_platforms/tests/test_x86_16_gp_word_runtime.py $(NATIVE_CONTROL_TARGET_PATTERN),$(PYTEST_PROFILE_TARGETS)),--lane gp-word-native) $(if $(filter $(GNU_MAKE_ORACLE_TEST_FILE) $(GNU_MAKE_ORACLE_TARGET_PATTERN),$(PYTEST_PROFILE_TARGETS)),--lane makefile-gnu-oracle)
+
 pytest:
-	$(Q)INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE=$${INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE:-$(FOCUSED_TEST_DECOMPILE_TIMEOUT_SCALE)} $(PYTHON) -m pytest -q $(PYTEST_ARGS) -m "$(PYTEST_FOCUSED_MARKER_EXPR)" $(QA_PYTEST_TARGETS)
+	$(Q)INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE=$${INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE:-$(FOCUSED_TEST_DECOMPILE_TIMEOUT_SCALE)} $(PYTHON) -m pytest -q $(PYTEST_ARGS) -m "$(PYTEST_FOCUSED_MARKER_EXPR)" $(QA_HOST_PYTEST_TARGETS)
+	$(Q)$(PYTHON) scripts/test_pipeline.py --lane pytest-serial --lane linux-process-controls --lane gp-word-native --lane makefile-gnu-oracle --out .cache/pytest/guarded-controls.json
 
 pytest-profile:
-	$(Q)INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE=$${INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE:-$(FULL_TEST_DECOMPILE_TIMEOUT_SCALE)} $(PYTHON) scripts/pytest_profile.py $(PYTEST_PROFILE_ARGS) -m "$(PYTEST_FOCUSED_MARKER_EXPR)" --profile-json $(PYTEST_PROFILE_JSON) $(PYTEST_PROFILE_TARGETS)
+	$(if $(strip $(PROFILE_HOST_PYTEST_TARGETS)),$(Q)INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE=$${INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE:-$(FULL_TEST_DECOMPILE_TIMEOUT_SCALE)} $(PYTHON) scripts/pytest_profile.py $(PYTEST_PROFILE_ARGS) -m "$(PYTEST_FOCUSED_MARKER_EXPR)" --profile-json $(PYTEST_PROFILE_JSON) $(PROFILE_HOST_PYTEST_TARGETS))
+	$(if $(strip $(PROFILE_CONTROL_LANES)),$(Q)$(PYTHON) scripts/test_pipeline.py $(PROFILE_CONTROL_LANES) $(foreach target,$(PROFILE_EXPLICIT_GUARDED_TARGETS),--control-target '$(target)') --out .cache/pytest/profile-guarded-controls.json)
 
 pytest-inventory:
 	$(PYTHON) scripts/pytest_profile.py --profile-json $(PYTEST_INVENTORY_JSON) --collect-only -q >/dev/null
@@ -5396,10 +5528,40 @@ pytest-files:
 			printf '%s\n' "$$test_target"; \
 		done | sort -u | tr '\n' ' ' \
 	)"; \
-	if [ -n "$$(echo "$$selected_tests" | tr -d '[:space:]')" ]; then \
-		INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE=$${INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE:-$(FOCUSED_TEST_DECOMPILE_TIMEOUT_SCALE)} $(PYTHON) -m pytest -q $(PYTEST_ARGS) -m "$(PYTEST_FOCUSED_MARKER_EXPR)" $$selected_tests; \
+	host_tests=""; control_lanes=""; guarded_targets=""; \
+	for test_target in $$selected_tests; do \
+		case "$$test_target" in \
+			angr_platforms/tests/test_pytest_live_failures.py) \
+				host_tests="$$host_tests $(filter angr_platforms/tests/test_pytest_live_failures.py::%,$(CONTROL_HOST_PYTEST_TARGETS))"; control_lanes="$$control_lanes pytest-serial" ;; \
+			angr_platforms/tests/test_pytest_live_failures.py::test_live_failures_preserve_reports_and_emit_before_session_end*) control_lanes="$$control_lanes pytest-serial"; guarded_targets="$$guarded_targets $$test_target" ;; \
+			angr_platforms/tests/test_fork_owner_death.py) control_lanes="$$control_lanes linux-process-controls" ;; \
+			angr_platforms/tests/test_fork_owner_death.py::*) control_lanes="$$control_lanes linux-process-controls"; guarded_targets="$$guarded_targets $$test_target" ;; \
+			angr_platforms/tests/test_compiler_coverage_runner.py) \
+				host_tests="$$host_tests $(filter angr_platforms/tests/test_compiler_coverage_runner.py::%,$(CONTROL_HOST_PYTEST_TARGETS))"; control_lanes="$$control_lanes linux-process-controls" ;; \
+			angr_platforms/tests/test_compiler_coverage_runner.py::test_real_timeout_stops_descendants_and_retains_both_output_streams*) control_lanes="$$control_lanes linux-process-controls"; guarded_targets="$$guarded_targets $$test_target" ;; \
+			angr_platforms/tests/test_x86_16_gp_word_runtime.py) \
+				host_tests="$$host_tests $(filter angr_platforms/tests/test_x86_16_gp_word_runtime.py::%,$(CONTROL_HOST_PYTEST_TARGETS))"; control_lanes="$$control_lanes gp-word-native" ;; \
+			angr_platforms/tests/test_x86_16_gp_word_runtime.py::test_msc6_word_runtime_compiles_and_executes*) control_lanes="$$control_lanes gp-word-native"; guarded_targets="$$guarded_targets $$test_target" ;; \
+			$(GNU_MAKE_ORACLE_TEST_FILE)) control_lanes="$$control_lanes makefile-gnu-oracle" ;; \
+			$(GNU_MAKE_ORACLE_TEST_FILE)::*) control_lanes="$$control_lanes makefile-gnu-oracle"; guarded_targets="$$guarded_targets $$test_target" ;; \
+			*) host_tests="$$host_tests $$test_target" ;; \
+		esac; \
+	done; \
+	host_tests="$$(for test_target in $$host_tests; do printf '%s\n' "$$test_target"; done | sort -u | tr '\n' ' ')"; \
+	if [ -n "$$(echo "$$host_tests" | tr -d '[:space:]')" ]; then \
+		INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE=$${INERTIA_TEST_DECOMPILE_TIMEOUT_SCALE:-$(FOCUSED_TEST_DECOMPILE_TIMEOUT_SCALE)} $(PYTHON) -m pytest -q $(PYTEST_ARGS) -m "$(PYTEST_FOCUSED_MARKER_EXPR)" $$host_tests || exit $$?; \
 	else \
-		echo "pytest-files: no test files selected"; \
+		echo "pytest-files: no host test files selected"; \
+	fi; \
+	if [ -n "$$control_lanes" ]; then \
+		control_target_args=""; \
+		for test_target in $$guarded_targets; do \
+			guarded_file="$${test_target%%::*}"; \
+			case " $$selected_tests " in *" $$guarded_file "*) ;; *) control_target_args="$$control_target_args --control-target $$test_target" ;; esac; \
+		done; \
+		lane_args=""; \
+		for lane in $$(for lane in $$control_lanes; do printf '%s\n' "$$lane"; done | sort -u); do lane_args="$$lane_args --lane $$lane"; done; \
+		$(PYTHON) scripts/test_pipeline.py $$lane_args $$control_target_args --out .cache/pytest/selected-guarded-controls.json; \
 	fi
 
 pytest-all: pytest-inventory
@@ -5657,3 +5819,22 @@ QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/clinic_terminal_control.p
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/clinic_terminal_control.py angr_platforms/tests/test_x86_16_clinic_terminal_control.py
 QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_clinic_binary_terminal_control.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_clinic_terminal_control.py
+
+# Complete focused-test admission; duplicate detection remains enforced.
+QA_PYTEST_TARGETS += angr_platforms/tests/test_flat32_indirect_callbacks.py angr_platforms/tests/test_flat32_indirect_callback_effects.py angr_platforms/tests/test_dosunit_kvikdos_strict.py angr_platforms/tests/test_x86_16_aam_fault.py angr_platforms/tests/test_native_effect_environment_guards.py angr_platforms/tests/test_dosunit_io_read_state.py angr_platforms/tests/test_x86_16_import_identity.py angr_platforms/tests/test_acceptance_reporting.py angr_platforms/tests/test_cli_shared_future_collection.py angr_platforms/tests/test_cli_ranked_task_queue.py angr_platforms/tests/test_x86_16_vex_binop_result_width.py angr_platforms/tests/test_x86_16_vex_wrtmp_result_width.py angr_platforms/tests/test_inertia_telemetry.py angr_platforms/tests/test_makefile_variable_expansion.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_makefile_variable_expansion.py
+
+# External GNU parity controls retain explicit unavailable-tool accounting.
+QA_PYTEST_TARGETS += angr_platforms/tests/test_makefile_gnu_oracle.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_makefile_gnu_oracle.py
+
+QA_PYTEST_TARGETS += angr_platforms/tests/test_kvm_marker_policy.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_kvm_marker_policy.py
+
+# Promote reviewed compiler-evidence owners into the existing quality gates.
+QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/borland_mangling.py angr_platforms/angr_platforms/X86_16/lowering/call_return_bridge_projection.py angr_platforms/angr_platforms/X86_16/lowering/call_target_bind_common.py angr_platforms/angr_platforms/X86_16/lowering/call_target_projection_integrity.py angr_platforms/angr_platforms/X86_16/lowering/call_target_raw_route.py angr_platforms/angr_platforms/X86_16/lowering/call_target_semantic_route.py angr_platforms/angr_platforms/X86_16/lowering/call_target_ssa_binder.py angr_platforms/angr_platforms/X86_16/lowering/call_target_ssa_contracts.py angr_platforms/angr_platforms/X86_16/lowering/gp_constant_restore.py angr_platforms/angr_platforms/X86_16/lowering/gp_word_assignment.py angr_platforms/angr_platforms/X86_16/lowering/gp_word_runtime.py angr_platforms/angr_platforms/X86_16/semantics/call_target_evidence_8616.py angr_platforms/angr_platforms/X86_16/semantics/direct_near_call_target_binding.py
+QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/borland_mangling.py angr_platforms/angr_platforms/X86_16/lowering/call_return_bridge_projection.py angr_platforms/angr_platforms/X86_16/lowering/call_target_bind_common.py angr_platforms/angr_platforms/X86_16/lowering/call_target_projection_integrity.py angr_platforms/angr_platforms/X86_16/lowering/call_target_raw_route.py angr_platforms/angr_platforms/X86_16/lowering/call_target_semantic_route.py angr_platforms/angr_platforms/X86_16/lowering/call_target_ssa_binder.py angr_platforms/angr_platforms/X86_16/lowering/call_target_ssa_contracts.py angr_platforms/angr_platforms/X86_16/lowering/gp_constant_restore.py angr_platforms/angr_platforms/X86_16/lowering/gp_word_assignment.py angr_platforms/angr_platforms/X86_16/lowering/gp_word_runtime.py angr_platforms/angr_platforms/X86_16/semantics/call_target_evidence_8616.py angr_platforms/angr_platforms/X86_16/semantics/direct_near_call_target_binding.py
+
+# Typed confidence metadata reporting: static producer/refusal controls.
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_confidence_and_assumptions.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_confidence_and_assumptions.py

@@ -53,7 +53,11 @@ from ..ir.real16_invocation_domain import (
     Real16CallInvocation8616,
     Real16InvocationDomain8616,
 )
-from .direct_ret_call_effect import direct_near_call_target_is_bound_8616
+from ..synthetic_call_stub_evidence import is_synthetic_call_stub_8616
+from .direct_ret_call_effect import (
+    direct_near_call_encoding_is_bound_8616,
+    direct_near_call_target_is_bound_8616,
+)
 
 __all__ = [
     "DirectNearCallCoordinates8616",
@@ -62,6 +66,7 @@ __all__ = [
     "DirectNearCallTargetBindingStats8616",
     "DirectNearCallTargetBindingVerdict8616",
     "DirectNearCallTargetShape8616",
+    "prove_declared_direct_near_call_target_binding_at_coordinates_8616",
     "prove_direct_near_call_target_binding_8616",
     "prove_direct_near_call_target_binding_at_coordinates_8616",
     "prove_direct_near_call_target_binding_from_decoded_8616",
@@ -69,6 +74,13 @@ __all__ = [
 
 _MAX_ALIAS_DEPTH_8616 = 16
 _CS_SEGMENT_REGISTER_8616 = "cs"
+
+
+class _TargetBindingKind8616(StrEnum):
+    """Separate native target identity from synthetic behavior authority."""
+
+    REAL_BODY = "real_body"
+    DECLARED_STUB = "declared_stub"
 
 
 class DirectNearCallTargetBindingVerdict8616(StrEnum):
@@ -346,7 +358,14 @@ def _native_terminal_failure_8616(
     project: object, block: IRBlock, origin: IRInstructionOrigin8616, callsite: int,
     next_addr: int,
 ) -> DirectNearCallTargetBindingFailure8616 | None:
-    """Re-lift the bounded native block to check domain and terminal identity."""
+    """Check native terminal identity in the active or architectural flag view.
+
+    A raw caller can have been imported before function-CFG flag omission was
+    enabled. That omission changes VEX statement/temporary numbers, not CALL
+    identity. Retry at most once in the architectural view if an active context
+    exists; both attempts retain exact origin coordinates and next-temporary
+    checks. Never accept merely because the instruction addresses match.
+    """
     if not isinstance(project, angr.Project) or not isinstance(project.arch, Arch86_16):
         return DirectNearCallTargetBindingFailure8616.CONTROL_DOMAIN_UNPROVED
     if project.arch.control_address_domain is not ControlAddressDomain.LOADER_LINEAR:
@@ -355,6 +374,22 @@ def _native_terminal_failure_8616(
     if not 0 < size <= 4096:
         return DirectNearCallTargetBindingFailure8616.TERMINAL_POSITION_MISMATCH
     native = project.factory.block(block.addr, size=size, opt_level=0, collect_data_refs=True).vex
+    failure = _native_terminal_identity_failure_8616(native, origin)
+    if failure is None:
+        return None
+    from ..ir.status_flag_lift_context import architectural_status_flag_replay_8616
+
+    with architectural_status_flag_replay_8616() as suspended:
+        if not suspended:
+            return failure
+        native = project.factory.block(block.addr, size=size, opt_level=0, collect_data_refs=True).vex
+    return _native_terminal_identity_failure_8616(native, origin)
+
+
+def _native_terminal_identity_failure_8616(
+    native: object, origin: IRInstructionOrigin8616,
+) -> DirectNearCallTargetBindingFailure8616 | None:
+    """Require the exact native terminal position and temporary in one view."""
     if not isinstance(native, pyvex.IRSB) or native.jumpkind != "Ijk_Call":
         return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
     if type(origin.statement_index) is not int or origin.statement_index != len(native.statements):
@@ -392,7 +427,7 @@ def _tmp_producer_8616(
     value: IRValue,
 ) -> IRInstr | None:
     """Resolve one temporary-typed value to its unique producer instruction."""
-    if value.source_tmp is None:
+    if value.source_tmp is None or value.active_unary is not None:
         return None
     return producers.get(value.source_tmp)
 
@@ -402,6 +437,8 @@ def _operand_8616(
     value: IRValue,
 ) -> IRInstr | IRValue | None:
     """Resolve one operand position to a producer instruction or a leaf value."""
+    if value.active_unary is not None:
+        return None
     if value.source_tmp is not None:
         return producers.get(value.source_tmp)
     if value.space in {MemSpace.REG, MemSpace.CONST}:
@@ -417,6 +454,11 @@ def _const_int_8616(value: IRValue, size: int) -> int | None:
         or value.size != size
     ):
         return None
+    if (value.active_unary is not None or value.source_tmp is not None
+            or value.expr or value.call_output is not None):
+        return None
+    if value.offset or value.index is not None or value.index_shift:
+        return None
     return value.const
 
 
@@ -425,21 +467,40 @@ def _conversion_operand_8616(
     value: IRValue,
     conversion: str,
 ) -> IRInstr | IRValue | None:
-    """Return the operand of one recorded VEX conversion expression.
-
-    Conversion temporaries import as MOV instructions whose argument retains
-    the exact unary operator tag and the operand's source temporary. Any other
-    producer shape is not this conversion.
-    """
-    if value.expr != (conversion,):
+    """Resolve a captured conversion result through its exact active computation."""
+    widths = {"Iop_16Uto32": (2, 4), "Iop_32to16": (4, 2)}.get(conversion)
+    if widths is None or value.expr != (conversion,) or value.active_unary is not None:
         return None
     producer = _tmp_producer_8616(producers, value)
     if producer is None or producer.op != "MOV" or len(producer.args) != 1:
         return None
-    source = producer.args[0]
-    if not isinstance(source, IRValue) or source.expr != (conversion,):
+    if value.size != widths[1] or producer.size != widths[1]:
         return None
-    return _operand_8616(producers, source)
+    if (producer.dst is None or producer.dst.size != widths[1]
+            or producer.dst.active_unary is not None):
+        return None
+    source = producer.args[0]
+    if not isinstance(source, IRValue):
+        return None
+    inner = _active_conversion_source_8616(source, conversion)
+    return None if inner is None else _operand_8616(producers, inner)
+
+
+def _active_conversion_source_8616(value: IRValue, conversion: str) -> IRValue | None:
+    """Validate one supported active conversion, including both exact widths."""
+    widths = {"Iop_16Uto32": (2, 4), "Iop_32to16": (4, 2)}.get(conversion)
+    active = value.active_unary
+    if widths is None or active is None or value.source_tmp is not None:
+        return None
+    if (not _plain_register_coordinates_8616(value)
+            or value.expr != (conversion,) or active.op != conversion):
+        return None
+    if (value.size != widths[1] or type(active.result_bits) is not int
+            or active.result_bits != widths[1] * 8):
+        return None
+    if active.operand.size != widths[0] or active.operand.active_unary is not None:
+        return None
+    return active.operand
 
 
 def _reg_leaf_name_8616(
@@ -480,15 +541,13 @@ def _reg_leaf_value_name_8616(
             or not _plain_register_coordinates_8616(operand)
             or operand.expr not in (None, ("Iop_16Uto32",))):
         return None
-    if operand.expr is None and operand.size == 2:
-        return operand.name
-    # A widened conversion value still names its 16-bit source register.
-    if operand.source_tmp is None:
-        return operand.name if operand.expr == ("Iop_16Uto32",) and operand.size == 4 else None
-    producer = _tmp_producer_8616(producers, operand)
-    if producer is None:
-        return None
-    return _reg_leaf_name_8616(producers, producer, depth=depth + 1)
+    if operand.active_unary is not None:
+        inner = _active_conversion_source_8616(operand, "Iop_16Uto32")
+        return None if inner is None else _reg_leaf_name_8616(producers, inner, depth=depth + 1)
+    if operand.source_tmp is not None:
+        producer = _tmp_producer_8616(producers, operand)
+        return None if producer is None else _reg_leaf_name_8616(producers, producer, depth=depth + 1)
+    return operand.name if operand.expr is None and operand.size == 2 else None
 
 
 def _reg_leaf_instr_name_8616(
@@ -506,6 +565,9 @@ def _reg_leaf_instr_name_8616(
     if (not _plain_register_coordinates_8616(arg)
             or arg.expr not in (None, ("Iop_16Uto32",))):
         return None
+    if arg.active_unary is not None:
+        inner = _active_conversion_source_8616(arg, "Iop_16Uto32")
+        return None if inner is None else _reg_leaf_name_8616(producers, inner, depth=depth + 1)
     if arg.source_tmp is not None:
         node = producers.get(arg.source_tmp)
         if node is None:
@@ -928,6 +990,25 @@ def _bound_selector_invocation_8616(
     return None
 
 
+def _target_bytes_bound_8616(
+    project: object,
+    coordinates: DirectNearCallCoordinates8616,
+    kind: _TargetBindingKind8616,
+) -> bool:
+    """Apply the explicit target policy before shared current-byte binding."""
+    if kind is _TargetBindingKind8616.DECLARED_STUB:
+        return is_synthetic_call_stub_8616(project, coordinates.target_addr) and (
+            direct_near_call_encoding_is_bound_8616(
+                project, coordinates.callsite_addr, coordinates.next_addr,
+                coordinates.target_addr, CallsiteMachineFrameKind8616.NEAR,
+            )
+        )
+    return direct_near_call_target_is_bound_8616(
+        project, coordinates.callsite_addr, coordinates.next_addr,
+        coordinates.target_addr, CallsiteMachineFrameKind8616.NEAR,
+    )
+
+
 def _prove_binding_core_8616(
     project: object,
     block: IRBlock,
@@ -935,6 +1016,7 @@ def _prove_binding_core_8616(
     coordinates: DirectNearCallCoordinates8616,
     *,
     invocation: Real16InvocationDomain8616 | None = None,
+    target_kind: _TargetBindingKind8616 = _TargetBindingKind8616.REAL_BODY,
 ) -> DirectNearCallTargetBinding8616:
     """Bind the symbolic CALL operand to the proven coordinate triple.
 
@@ -982,13 +1064,7 @@ def _prove_binding_core_8616(
             DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED,
             normalized=True, classified=True, shape=shape,
         )
-    if not direct_near_call_target_is_bound_8616(
-        project,
-        callsite_addr,
-        coordinates.next_addr,
-        target_addr,
-        CallsiteMachineFrameKind8616.NEAR,
-    ):
+    if not _target_bytes_bound_8616(project, coordinates, target_kind):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.TARGET_BYTES_MISMATCH,
@@ -1028,6 +1104,38 @@ def prove_direct_near_call_target_binding_at_coordinates_8616(
         return identity
     return _prove_binding_core_8616(
         project, block, instruction, coordinates, invocation=invocation
+    )
+
+
+def prove_declared_direct_near_call_target_binding_at_coordinates_8616(
+    project: object,
+    *,
+    block: IRBlock,
+    instruction: IRInstr,
+    coordinates: DirectNearCallCoordinates8616,
+    invocation: Real16InvocationDomain8616 | None = None,
+) -> DirectNearCallTargetBinding8616:
+    """Bind a native near CALL to a registered synthetic target only.
+
+    Reuses every operand, provenance, native re-lift and selector gate.
+    Closed frontend stub membership is required in addition to current E8
+    bytes. This proves control identity, never callee behavior or segment
+    preservation. Consumers must rerun this function on every use: the
+    result complete property is not a mutable-source authentication cache.
+    """
+    if not any(item is instruction for item in block.instrs):
+        return _refuse_8616(
+            coordinates.callsite_addr, coordinates.target_addr,
+            DirectNearCallTargetBindingFailure8616.INSTRUCTION_NOT_IN_BLOCK,
+        )
+    identity = _call_identity_8616(
+        instruction, coordinates.callsite_addr, coordinates.target_addr, block,
+    )
+    if isinstance(identity, DirectNearCallTargetBinding8616):
+        return identity
+    return _prove_binding_core_8616(
+        project, block, instruction, coordinates, invocation=invocation,
+        target_kind=_TargetBindingKind8616.DECLARED_STUB,
     )
 
 

@@ -39,6 +39,18 @@ from tools.dosunit.terminal_fault import FaultGate, _guard_divisor
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("flat32", [False, True], ids=["mz16", "pe32"])
+def test_x87_self_comparison_refuses_unmodeled_state(flat32: bool) -> None:
+    """FLD1 before a declared exit cannot prove equality in the integer model."""
+    code = exit_code(prefix=bytes.fromhex("d9e8")) if flat32 else bytes.fromhex("d9e8b8004ccd21")
+    result = (compare_pe if flat32 else compare_mz)(code, code)
+    assert result.status is ST.TerminalComparisonStatus.REFUSED
+    for lane in (result.oracle, result.candidate):
+        assert lane.trace is None
+        assert lane.refusal is not None
+        assert lane.refusal.kind is ST.TerminalRefusalKind.INSTRUCTION_SCOPE
+
+
 def test_mz_div_zero_fault_is_typed_outcome_not_exit() -> None:
     """``xor cx,cx; div cl`` stops on #DE — a CPU fault, never DOS exit."""
     trace = ST.trace_real16_terminal(mz(bytes.fromhex("31c9f6f1")), dos_environment())

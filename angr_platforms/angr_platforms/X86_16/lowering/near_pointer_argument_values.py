@@ -5,6 +5,8 @@ Responsibility: project a proven near-pointer value into C without confusing
 the DOS C null representation with an address in the live data segment.
 The caller owns pointer classification and source-value provenance. This module
 must not infer pointer classes from scalar values, names, source text, or output.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

@@ -5,6 +5,8 @@ Responsibility: encode the existing target-specific native-near or guest-view
 pointer representation, preserving word narrowing and null for runtime offsets.
 The caller still owns pointer classification, source provenance and segment
 binding. Rendering this helper grants none of those semantic proofs.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

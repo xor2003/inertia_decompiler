@@ -357,7 +357,12 @@ class ResolvedMemoryOperand:
         return space, explicit_segment, stable, base, size, seg_origin
 
     def _raw_offset_and_tmp_defs(self) -> tuple[object, dict[int, object] | None]:
-        """Unwrap the VexValue offset and resolve RdTmp chains through the IRSB."""
+        """Unwrap the VexValue offset and resolve RdTmp chains through the IRSB.
+
+        Dynamic boundary: third-party pyvex values may expose rdt and irsb_c;
+        plain expressions need neither. Missing customizer state leaves the
+        expression unresolved rather than fabricating temporary definitions.
+        """
         offset_raw = self.offset
         tmp_defs = None
         # Dynamic boundary: offset may be a third-party pyvex VexValue wrapper.
@@ -782,7 +787,12 @@ def _bp_add_sub_fallback_8616(
 
 
 def _leaf_add_sub_terms(expr: object) -> tuple[list[object], int]:
-    """Classify a leaf expression as a term or a folded constant."""
+    """Classify a leaf expression as a term or a folded constant.
+
+    Dynamic boundary: third-party VEX expression variants expose tag/con/value
+    on different surfaces. Fold only an observed integer constant; preserve
+    opaque or incomplete expressions as terms instead of guessing a value.
+    """
     # Leaf expression: VEX Get, RdTmp, Const, or int literal.
     # These are atomic terms — return them as a single-term list.
     # Handle VEX Const objects (tag=Iex_Const, .con.value)

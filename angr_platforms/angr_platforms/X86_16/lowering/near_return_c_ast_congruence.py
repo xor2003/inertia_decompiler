@@ -12,6 +12,7 @@ congruence only: no pointer representation, segment binding, pointer
 arithmetic, prototype, or publication claim. It never mutates the C AST,
 codegen, candidate, or project.
 Consumes retained IR proof fields and typed codegen projections only.
+Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 

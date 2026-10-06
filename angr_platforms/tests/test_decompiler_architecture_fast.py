@@ -67,6 +67,79 @@ def test_full_guard_still_rejects_external_compiler_in_fast_lane() -> None:
     assert any("'fast'" in detail for detail in _lane_contract_errors(lanes))
 
 
+@pytest.mark.parametrize("tier", ["fast", "default", "expanded"])
+@pytest.mark.parametrize("required", ["pytest-serial", "linux-process-controls"])
+def test_full_guard_requires_sequenced_process_controls(tier: str, required: str) -> None:
+    """Moving guarded tests out of the worker pool must retain their execution."""
+    lanes = _actual_pipeline_lanes()
+    assert required in lanes[tier]
+    lanes[tier] = tuple(lane for lane in lanes[tier] if lane != required)
+    assert any(repr(tier) in detail for detail in _lane_contract_errors(lanes))
+
+
+@pytest.mark.parametrize("tier", ["default", "expanded"])
+def test_full_guard_requires_external_gp_runtime_control(tier: str) -> None:
+    """Host-only selectors cannot replace the original DOS execution coverage."""
+    lanes = _actual_pipeline_lanes()
+    assert "gp-word-native" in lanes[tier]
+    lanes[tier] = tuple(lane for lane in lanes[tier] if lane != "gp-word-native")
+    assert any(repr(tier) in detail for detail in _lane_contract_errors(lanes))
+
+
+def _contract_gate_fixture(root: Path, name: str, body: str) -> None:
+    """Write a minimal stage containing an explicit pipeline-contract owner."""
+    (root / "decompiler_postprocess_stage.py").write_text(
+        "from .pipeline.contracts import assert_pipeline_contracts_8616\n"
+        f"def {name}(codegen, function):\n    {body}\n",
+    )
+
+
+def test_contract_guard_accepts_current_owned_gate_name(tmp_path: Path) -> None:
+    """The guard follows the real 8616 owner rather than its retired spelling."""
+    _contract_gate_fixture(tmp_path, "_run_pipeline_contract_gate_8616", "assert_pipeline_contracts_8616(codegen)")
+    assert not architecture_check._check_postprocess_stage_runs_pipeline_contract_gate(tmp_path)
+
+
+def test_contract_guard_rejects_retired_gate_name(tmp_path: Path) -> None:
+    """An unrelated legacy helper cannot stand in for the current gate owner."""
+    _contract_gate_fixture(tmp_path, "_run_pipeline_contract_gate", "assert_pipeline_contracts_8616(codegen)")
+    violations = architecture_check._check_postprocess_stage_runs_pipeline_contract_gate(tmp_path)
+    assert any("_run_pipeline_contract_gate_8616" in item.detail for item in violations)
+
+
+def test_contract_guard_rejects_empty_current_gate(tmp_path: Path) -> None:
+    """A present helper must still consume the actual pipeline assertions."""
+    _contract_gate_fixture(tmp_path, "_run_pipeline_contract_gate_8616", "return None")
+    violations = architecture_check._check_postprocess_stage_runs_pipeline_contract_gate(tmp_path)
+    assert any("must call assert_pipeline_contracts_8616" in item.detail for item in violations)
+
+
+def test_project_map_matches_current_binary_admission_contract() -> None:
+    """Navigation must describe the budgeted lane now required by every tier."""
+    root = Path(__file__).resolve().parents[2]
+    path = root / "reference/project-map.md"
+    assert not architecture_check._project_map_doc_violations_8616(path, path.read_text(), root)
+
+
+@pytest.mark.parametrize("layer", ["build", "reporting", "pytest adapter", "sandbox"])
+def test_script_tooling_subdomains_are_owned(tmp_path: Path, layer: str) -> None:
+    """Tooling subclasses retain their accurate responsibility declarations."""
+    path = tmp_path / "tool.py"
+    path.write_text(f'"""Layer: Tooling/{layer}.\nResponsibility: own this tool boundary.\n"""\n')
+    assert not architecture_check._check_python_module_layer_headers(
+        tmp_path, rule="script-module-layer-header", expected_layer="Layer: Tooling",
+    )
+
+
+@pytest.mark.parametrize("layer", ["Alias", "ToolingFake", "Tooling_wrong"])
+def test_script_header_cannot_claim_foreign_namespace(tmp_path: Path, layer: str) -> None:
+    """Prefix similarity cannot make a foreign layer belong to Tooling."""
+    (tmp_path / "tool.py").write_text(f'"""Layer: {layer}.\nResponsibility: own this boundary.\n"""\n')
+    assert architecture_check._check_python_module_layer_headers(
+        tmp_path, rule="script-module-layer-header", expected_layer="Layer: Tooling",
+    )
+
+
 def test_startup_checker_consumes_prechecked_import_violations(
     monkeypatch,
     tmp_path: Path,

@@ -2,9 +2,32 @@
 
 from types import SimpleNamespace
 
+import pytest
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 
 from inertia_decompiler import discovery_evidence_project as isolation
+
+
+@pytest.mark.parametrize("with_metadata,with_setting", [(False, False), (False, True), (True, False)])
+def test_isolation_preserves_independently_missing_policy(monkeypatch, with_metadata, with_setting):
+    source = SimpleNamespace(
+        entry=0x1200, loader=SimpleNamespace(main_object=SimpleNamespace(binary="APP.EXE", linked_base=0x1000)),
+    )
+    if with_metadata:
+        source._inertia_lst_metadata = LSTMetadata(
+            data_labels={}, code_labels={0x1000: "runtime"},
+            signature_code_addrs=frozenset({0x1000}),
+        )
+    if with_setting:
+        source._inertia_include_library_functions = True
+    target = SimpleNamespace()
+    monkeypatch.setattr(isolation, "_build_project_cached", lambda *args, **kwargs: target)
+    assert isolation.isolated_discovery_evidence_project_8616(source) is target
+    assert target._inertia_include_library_functions is with_setting
+    if with_metadata:
+        assert target._inertia_lst_metadata.code_labels == {0x1000: "runtime"}
+    else:
+        assert target._inertia_lst_metadata is None
 
 
 def test_isolation_retains_only_detached_signature_evidence(monkeypatch):

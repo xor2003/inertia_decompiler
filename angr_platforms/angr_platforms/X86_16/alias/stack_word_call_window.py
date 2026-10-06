@@ -6,6 +6,9 @@ frame-coordinate and scalar-effect owners. This theorem is conditional on the
 supplied IR coverage; it does not prove binary completeness, caller/callee ABI,
 callee-load stability, or selector equality across functions. Coordinates are
 relative to arbitrary block incoming SP, not function-entry SP.
+Owns storage identity.
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting
+work here.
 """
 
 from __future__ import annotations

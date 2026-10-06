@@ -377,6 +377,7 @@ def _rewrite_flag_bit_value_expr_8616(
     changed = False
 
     def transform(expr: object) -> object | None:
+        """Replace a masked flag-bit read with its assigned predicate, when safe."""
         nonlocal changed
         info = _extract_flag_bit_value_info_8616(expr)
         if info is None:
@@ -432,6 +433,7 @@ class _FlagBitValueWalk8616:
         return rewritten
 
     def visit_stmt(self, stmt: object, assignments: Assignments8616) -> None:
+        """Rewrite flag-bit reads in one statement against the seen assignments."""
         if isinstance(stmt, CStatements):
             self.visit_block(stmt, assignments)
             return
@@ -464,6 +466,7 @@ class _FlagBitValueWalk8616:
             self.visit_block(else_node, list(assignments))
 
     def visit_block(self, node: object, incoming_assignments: Assignments8616) -> None:
+        """Walk a block's statements, threading the flag-assignment history forward."""
         local_assignments = list(incoming_assignments)
         for stmt in _unwrap_statements_8616(node):
             self.visit_stmt(stmt, local_assignments)
@@ -910,6 +913,7 @@ def _rewrite_flag_condition_expr_8616(
     changed = False
 
     def transform(expr: object) -> object:
+        """Rewrite a flag-mask test to a recovered ordering condition, when safe."""
         nonlocal changed
         combined = _recover_combined_signed_flag_condition_8616(expr, flag_var, flag_expr, codegen)
         if combined is not None:
@@ -1073,6 +1077,7 @@ class _FlagConditionWalk8616:
     def transform(
         self, node: object, prior_assignments: list[tuple[CAssignment, CStatements | None]] | None = None
     ) -> object:
+        """Rewrite flag-test conditions across one statement block; return the block."""
         if not isinstance(node, CStatements):
             return node
 
@@ -1250,6 +1255,7 @@ def _fix_interval_guard_conditions_8616(codegen: object) -> bool:
     changed = False
 
     def transform(node: object) -> object:
+        """Repair one node's split-ordering chain or impossible interval guard."""
         nonlocal changed
         if isinstance(node, CIfElse) and _simplify_split_ordering_if_chain_8616(node, codegen):
             changed = True

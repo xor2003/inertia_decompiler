@@ -3,6 +3,10 @@
 Responsibility: preserve opaque AIL conditional-value identity at the symbolic
 conversion boundary. Equal renderings do not prove equal effectful values.
 Never recover calls, arguments or conditions from text.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence.
+Do not perform alias-state ownership, widening, type/materialization recovery,
+rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

@@ -56,6 +56,14 @@ class _StatementBlockLike8616(Protocol):
     statements: list[object]
 
 
+class _DeadSetupCounters8616(Protocol):
+    """Owned integer counters established before the production sweep."""
+
+    dead_setup_candidates: int
+    dead_setup_refused: int
+    dead_setup_pruned: int
+
+
 def _is_statement_block_like_8616(node: object) -> TypeGuard[_StatementBlockLike8616]:
     """Return whether a dynamic angr/codegen boundary node has mutable statements."""
     return isinstance(getattr(node, "statements", None), list)
@@ -194,12 +202,12 @@ def _is_candidate_lhs(lhs: object) -> TypeGuard[CVariable]:
 
 def _is_address_of_op_8616(node: object) -> bool:
     """Return whether a dynamic angr/codegen node takes an address."""
-    return isinstance(node, CUnaryOp) and getattr(node, "op", None) in {"Reference", "AddressOf"}
+    return isinstance(node, CUnaryOp) and node.op in {"Reference", "AddressOf"}
 
 
 def _binop_has_const_operand_8616(node: CBinaryOp) -> bool:
     """Return whether an Add/Sub node has a constant operand."""
-    if getattr(node, "op", None) not in {"Add", "Sub"}:
+    if node.op not in {"Add", "Sub"}:
         return False
     return isinstance(node.lhs, CConstant) or isinstance(node.rhs, CConstant)
 
@@ -484,7 +492,7 @@ def _prune_block_candidates_8616(
     return len(candidates), refused, 0, False
 
 
-def _production_sweep_8616(codegen: object, statements: object) -> bool:
+def _production_sweep_8616(codegen: _DeadSetupCounters8616, statements: object) -> bool:
     """Run production prune passes until a fixpoint across dynamic angr/codegen blocks."""
     changed = False
     while True:
@@ -507,11 +515,11 @@ def _production_sweep_8616(codegen: object, statements: object) -> bool:
             pass_changed = pass_changed or block_changed
 
         if total_candidates:
-            typing.cast(typing.Any, codegen).dead_setup_candidates = int(getattr(codegen, "dead_setup_candidates", 0)) + total_candidates
+            codegen.dead_setup_candidates += total_candidates
         if total_refused:
-            typing.cast(typing.Any, codegen).dead_setup_refused = int(getattr(codegen, "dead_setup_refused", 0)) + total_refused
+            codegen.dead_setup_refused += total_refused
         if total_pruned:
-            typing.cast(typing.Any, codegen).dead_setup_pruned = int(getattr(codegen, "dead_setup_pruned", 0)) + total_pruned
+            codegen.dead_setup_pruned += total_pruned
             changed = True
         if not pass_changed:
             break
@@ -552,7 +560,7 @@ def _prune_dead_setup_carriers_8616(codegen: object) -> bool:
     ):
         return True
 
-    return _production_sweep_8616(codegen, statements)
+    return _production_sweep_8616(typing.cast(_DeadSetupCounters8616, codegen), statements)
 
 
 def _block_escaped_names_8616(
@@ -560,7 +568,12 @@ def _block_escaped_names_8616(
     reads: dict[tuple[str, int | str], int],
     escaped: set[str],
 ) -> None:
-    """Record names of still-present proven-dead candidates in one block."""
+    """Record names of still-present proven-dead candidates in one block.
+
+    Dynamic boundary: third-party angr containers may lack a statements
+    sequence. Absence contributes no diagnostic candidates; present statements
+    still require the existing DEFINITELY_DEAD evidence before being counted.
+    """
     stmts = list(getattr(block, "statements", ()) or ())
     if not stmts:
         return

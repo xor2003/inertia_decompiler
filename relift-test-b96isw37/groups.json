@@ -1,0 +1,72 @@
+{
+ "schema": "relift-aggregate-1",
+ "writer_pid": 4,
+ "snapshot_seq": 1,
+ "monotonic": 381841.479366989,
+ "complete": false,
+ "counters": {
+  "calls_started": 1,
+  "calls_completed": 0,
+  "calls_failed": 1,
+  "calls_boundary_none": 0,
+  "calls_without_lookup": 1,
+  "lookups": 0,
+  "lookup_hits": 0,
+  "lookup_misses": 0,
+  "publishes": 0,
+  "direct_lifts_started": 1,
+  "direct_lifts_completed": 0,
+  "direct_lifts_failed": 1,
+  "detached_direct_lifts": 0,
+  "direct_lift_bytes": 4,
+  "direct_lift_wall_ns": 374829,
+  "direct_lift_max_ns": 0,
+  "outer_wall_ns": 605836,
+  "outer_cpu_ns": 606036,
+  "outer_max_wall_ns": 605836,
+  "byte_groups": 1,
+  "byte_group_overflow": 0,
+  "full_groups": 0,
+  "full_group_overflow": 0,
+  "variant_overflow": 0,
+  "typed_failures_total": 0,
+  "artifacts_complete": 0,
+  "inflight_overflow": 0,
+  "group_snapshots": 1,
+  "writer_seq": 13
+ },
+ "byte_groups": [
+  {
+   "digest": "95592d85e3d4d52301392dbbc32a42d9",
+   "kind": "bytes",
+   "arch": "semantics:('x86_16', 16)",
+   "calls": 1,
+   "lookups": 0,
+   "hits": 0,
+   "misses": 0,
+   "publishes": 0,
+   "direct_lifts": 1,
+   "direct_bytes": 4,
+   "direct_ns": 374829,
+   "variants": {
+    "cb203d77595e9031f245905f4ec747c2": {
+     "expected": [
+      1792
+     ],
+     "expected_truncated": false,
+     "calls": 1,
+     "lookups": 0,
+     "hits": 0,
+     "misses": 0,
+     "publishes": 0
+    }
+   },
+   "variant_overflow": 0,
+   "failures": {},
+   "first_call": 1,
+   "last_call": 1
+  }
+ ],
+ "full_groups": [],
+ "failure_reasons": {}
+}

@@ -285,7 +285,12 @@ class _TrivialCopyWalk8616:
         next_stmt: object,
         lhs_key: TrivialCopyKey8616,
     ) -> None:
-        """Emit the detailed copy-candidate debug record."""
+        """Emit the detailed copy-candidate debug record.
+
+        Dynamic angr AST boundary: the next statement need not be an assignment,
+        and expression variants need not expose value or variable fields. Missing
+        fields stay None in this diagnostic; they supply no liveness evidence.
+        """
         lhs = stmt.lhs
         rhs = stmt.rhs
         next_lhs = getattr(next_stmt, "lhs", None)
@@ -364,8 +369,8 @@ class _TrivialCopyWalk8616:
         if consumer_idx is None or consumer_idx >= len(statements):
             return None
         next_stmt = statements[consumer_idx]
-        next_lhs = getattr(next_stmt, "lhs", None) if isinstance(next_stmt, CAssignment) else None
-        next_rhs = getattr(next_stmt, "rhs", None) if isinstance(next_stmt, CAssignment) else None
+        next_lhs = next_stmt.lhs if isinstance(next_stmt, CAssignment) else None
+        next_rhs = next_stmt.rhs if isinstance(next_stmt, CAssignment) else None
         if not (
             isinstance(next_stmt, CAssignment)
             and not _is_temporary_name_8616(self._variable_name(next_lhs))

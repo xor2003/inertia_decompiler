@@ -7470,6 +7470,7 @@ class _CallsiteStackArgsMaterializer8616:
         self.codegen = codegen
 
     def run(self) -> bool:
+        """Drive callsite stack-argument materialization; return whether the body changed."""
         self.cfunc = getattr(self.codegen, "cfunc", None)
         if self.cfunc is None:
             _set_callsite_materialization_decision_8616(
@@ -20678,6 +20679,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def make_assignment(self, offset: int, symbol: StructuredAstValue) -> StructuredAstValue:
+        """Build a stack-slot assignment storing ``symbol`` at ``offset``; None without a cvar."""
         lhs = self._stack_cvar_for_offset(offset, allow_best_match=False)
         if lhs is None:
             lhs = self._stack_cvar_for_offset(offset, allow_best_match=True)
@@ -21134,6 +21136,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def materialize_assignment(self, stmt: StructuredAstValue, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None) -> bool:
+        """Rewrite evidence-proven immediate stores in ``stmt`` to their symbols."""
         local_changed = False
         for offset in tuple(evidence):
             assignment, rhs = self._assignment_to_stack_offset_8616(stmt, offset)
@@ -21232,6 +21235,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def resolve_stack_offset(self, expr: StructuredAstValue) -> int | None:
+        """Resolve an lvalue expression to its BP-relative stack offset, or None."""
         while isinstance(expr, CTypeCast):
             expr = expr.expr
         if isinstance(expr, structured_c.CVariable):
@@ -21556,6 +21560,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def final_standalone_call_ref(self, stmt: StructuredAstValue) -> StructuredAstValue:
+        """Return ``(call, container, index)`` for the statement's last standalone call."""
         call = self.standalone_call_from_statement(stmt)
         if call is not None:
             return call, None, None
@@ -21978,6 +21983,7 @@ class _CallsiteStackArgsMaterializer8616:
     def symbol_for_immediate(self,
         offset: int, imm: int | None, *, exclude_names: set[str] | None = None, evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None
     ) -> StructuredAstValue:
+        """Return a cloned evidence symbol for ``offset`` matching ``imm``, or None."""
         symbols = evidence.get(offset)
         if not symbols:
             return None
@@ -22174,6 +22180,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def flatten(self, term: StructuredAstValue, sign: int = 1) -> StructuredAstValue:
+        """Flatten an Add/Sub expression tree into ``(term, sign)`` leaf pairs."""
         while isinstance(term, CTypeCast):
             term = term.expr
         if isinstance(term, CBinaryOp) and term.op == "Add":
@@ -22289,6 +22296,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def standalone_call_from_statement(self, stmt: StructuredAstValue) -> StructuredAstValue:
+        """Unwrap a statement to its standalone CFunctionCall node, or None."""
         if isinstance(stmt, CFunctionCall):
             return stmt
         expr = getattr(stmt, "expr", None)
@@ -22717,6 +22725,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def single_nested_statement(self, stmt: StructuredAstValue) -> StructuredAstValue:
+        """Return the lone nested statement when present, else the statement itself."""
         nested = getattr(stmt, "statements", None)
         if isinstance(nested, (list, tuple)) and len(nested) == 1:
             return nested[0]

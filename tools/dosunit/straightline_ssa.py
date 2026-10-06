@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     import angr
     import capstone
+    import pyvex
 
     from tools.dosunit.real16_control_boundary import BoundaryProof, ControlProofLedger
     from tools.dosunit.ssa_output_lemmas import ScalarPreprocessing
@@ -15920,6 +15921,55 @@ def _instruction_text(insn: Any, *, function_base: int) -> dict[str, Any]:  # no
     }
 
 
+def _native_call_transfer_target(
+    irsb: pyvex.IRSB, instructions: list[dict[str, Any]], info: dict[str, Any],
+) -> int | None:
+    """Serialize source-bound native CALL evidence; text is display data only."""
+    from tools.dosunit.binary_callee_control_target import (
+        RelativeCallTargetFailure,
+        far_call_target,
+        native_constant_control,
+        relative_call_target,
+    )
+    from tools.dosunit.real16_call_contracts import Real16CallRefusal
+    from tools.dosunit.real16_call_frames import decoded_call_frame
+
+    # Both real16 and flat32 expose 32-bit VEX control; use the arch identity.
+    if irsb.arch.name != "86_16":
+        return native_constant_control(irsb)
+    last = instructions[-1] if instructions else {}
+    address = last.get("address")
+    head = _optional_int(address.get("linear")) if isinstance(address, dict) else None
+    raw = last.get("bytes")
+    size = _optional_int(last.get("size"))
+    encoding = b""
+    if isinstance(raw, str):
+        try:
+            encoding = bytes.fromhex(raw)
+        except ValueError:
+            encoding = b""
+    if head is None or size != len(encoding) or not encoding:
+        info["target_refusal"] = RelativeCallTargetFailure.SOURCE_INCOMPLETE.value
+        return None
+    try:
+        frame = decoded_call_frame({"source": {"instructions": instructions}})
+    except Real16CallRefusal:
+        info["target_refusal"] = RelativeCallTargetFailure.FORM_UNSUPPORTED.value
+        return None
+    if frame.has_saved_cs:
+        # Far control already carries its own selector in native IR. It does
+        # not use a CS-relative displacement or the near-selector theorem.
+        result = far_call_target(irsb, encoding=encoding, offset_bytes=frame.offset_bytes)
+    else:
+        result = relative_call_target(irsb, head=head, encoding=encoding)
+    if result.stats is not None:
+        info["target_evidence"] = result.stats.to_dict()
+    if result.failure is not None:
+        info["target_refusal"] = result.failure.value
+        info["native_target_refusal"] = None if result.native_failure is None else result.native_failure.value
+    return result.target
+
+
 def _transfer_info(irsb: Any, instructions: list[dict[str, Any]]) -> dict[str, Any] | None:  # noqa: ANN401
     """Serialize binary IR control, retaining unresolved indirect successors."""
     nonreturning = _nonreturning_interrupt_transfer(instructions)
@@ -15928,9 +15978,7 @@ def _transfer_info(irsb: Any, instructions: list[dict[str, Any]]) -> dict[str, A
     jumpkind = str(getattr(irsb, "jumpkind", ""))
     if jumpkind == "Ijk_Call":
         info: dict[str, Any] = {"kind": "direct_call", "jumpkind": jumpkind}
-        target = _const_expr_value(getattr(irsb, "next", None))
-        if target is None:
-            target = _direct_call_target_from_instructions({"instructions": instructions})
+        target = _native_call_transfer_target(irsb, instructions, info)
         if target is not None:
             info["target"] = {
                 "raw": normalize_hex(target),

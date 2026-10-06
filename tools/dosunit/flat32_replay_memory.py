@@ -31,6 +31,7 @@ from tools.dosunit.flat32_replay_model import (
     ReplayImage,
     ReplayVector,
 )
+from tools.dosunit.unicorn_engine import make_guest
 
 if TYPE_CHECKING:
     import angr
@@ -227,7 +228,7 @@ def _initialize_guest(
     stack = values["esp"]
     grants = plan_page_grants(_declared_regions(image, vector, stack))
     _require_mapped_patches(vector, grants)
-    guest = Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_32)
+    guest = make_guest(unicorn.UC_ARCH_X86, unicorn.UC_MODE_32)
     _bind_guest_pages(guest, grants, image, vector, stack)
     for name, identity in REGISTER_IDS.items():
         guest.reg_write(identity, values.get(name, 2 if name == "eflags" else 0))

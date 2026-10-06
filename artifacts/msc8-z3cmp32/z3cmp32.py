@@ -2,8 +2,22 @@
 """Layer: validation CLI.
 
 Responsibility: compare PE32/ELF32 functions through dosunit SSA/Z3.
-The opt-in PE32 region mode composes complete acyclic call-free CFGs;
-unproved calls, loops and partial regions remain explicit refusals.
+`leaf` admits complete single-block near returns; `matched-cfg` runs closed
+bijective CFG induction; the opt-in PE32 `region`/`auto` modes compose
+complete bounded acyclic regions. Unproved results in the non-leaf modes
+retry through checked lanes: call composition over declared callee ranges,
+which inlines every direct call and every indirect call whose composed
+target selector finitely enumerates only declared entries, with a Z3-proved
+return target at each call site; bounded matched/reblocked CFG induction;
+and closed call-loop or macro-step induction, so callers whose loops
+contain admitted direct calls can prove. Recursive or undeclared call
+targets, indirect selectors with unconstrained or over-budget leaves,
+partial scans and exhausted budgets refuse; `--recursive` is a separate
+opt-in image-bound PE32 component proof over a caller-declared access
+domain, never member discharge. Conditional premise options
+(`--normalize-globals`, `--entry-esp-range`, `--ordered-io-environment`)
+publish serialized assumptions. No refusal or conditional result is counted
+as an unconditional proof.
 """
 
 from __future__ import annotations
@@ -268,7 +282,9 @@ def compare_region_mode(
             ),
             "calls": "bounded complete nonrecursive VEX composition with checked return targets",
             "loops": (
-                "matched CFG fallback: eight blocks and 250 ms per block; unsupported loops refuse"
+                "matched CFG fallback: eight blocks and 250 ms per block, then closed "
+                "reblocked-CFG, call-loop and macro-step induction retries; "
+                "still-unproved loops refuse"
                 if loop_context is not None else "refused; matched-cfg induction remains available"
             ),
             "outputs": return_outputs,
@@ -386,7 +402,12 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
                 "control_flow": "closed bijective CFG induction over full internal state",
                 "outputs": output_regs,
                 "memory": "entire byte array",
-                "calls": "refused",
+                "calls": (
+                    "call boundaries refuse the CFG compare, then retry through checked "
+                    "bounded composition over declared ranges: direct targets and finite "
+                    "selector-enumerated indirect targets, each with a proved return; "
+                    "undeclared, unconstrained, recursive or over-budget targets refuse"
+                ),
                 "global_normalization": None,
             },
         }

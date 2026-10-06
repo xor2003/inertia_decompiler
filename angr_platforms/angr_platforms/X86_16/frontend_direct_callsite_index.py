@@ -17,6 +17,7 @@ from .frontend_caller_entry_identity import CallerEntryIdentity8616, caller_targ
 from .frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 __all__ = [
+    "DecodedCallerCensus8616",
     "DecodedDirectCallsite8616",
     "DecodedDirectCallsiteIndex8616",
     "DecodedDirectCallsiteIndexStats8616",
@@ -37,6 +38,14 @@ class _BoundaryInstruction8616(Protocol):
     """Third-party Capstone instruction identity retained by a boundary."""
 
     address: object
+
+
+class _NativeCallsiteInstruction8616(Protocol):
+    """Exact encoding exposed by a third-party decoded instruction."""
+
+    address: object
+    size: object
+    bytes: bytes
 
 
 class _BoundaryDisassembly8616(Protocol):
@@ -86,7 +95,7 @@ def build_boundary_direct_callsite_index_8616(
             or frozenset(addresses) != boundary.reachable_instruction_addrs):
         raise ValueError("decoded boundary instruction census does not match")
     index = build_decoded_direct_callsite_index_8616(
-        {(boundary.addr, boundary.addr + boundary.size): instructions},
+        (DecodedCallerCensus8616(boundary.addr, boundary.decode_start, boundary.decode_end, instructions),),
         direct_target_resolver=direct_target_resolver,
         instruction_address_resolver=_boundary_instruction_address_8616,
     )
@@ -107,6 +116,25 @@ class DecodedFarCallTarget8616:
 
 
 @dataclass(frozen=True, slots=True)
+class DecodedCallerCensus8616:
+    """Retain decoding bounds independently of a callable entry identity.
+
+    This contract does not assert entry equivalence or a NOP prefix. Multiple
+    entries may own overlapping decoding bounds without collapsing their rows.
+    """
+
+    entry_addr: int
+    decode_start: int
+    decode_end: int
+    instructions: tuple[object, ...]
+
+    def __post_init__(self) -> None:
+        """Reject an entry outside its declared decoding interval."""
+        if not 0 <= self.decode_start <= self.entry_addr < self.decode_end:
+            raise ValueError("caller census entry lies outside decoding bounds")
+
+
+@dataclass(frozen=True, slots=True)
 class DecodedDirectCallsite8616:
     """Retain one exact direct call coordinate in a decoded caller range."""
 
@@ -117,6 +145,68 @@ class DecodedDirectCallsite8616:
     target_addr: int
     entry_identity: CallerEntryIdentity8616 | None = None
     is_far: bool = False
+
+    def encoded_near_coordinates(self) -> tuple[int, int] | None:
+        """Decode continuation and raw E8 target independently of lookup aliases.
+
+        These are candidate linear coordinates, not proof of a selector
+        domain. Only an exact unprefixed word CALL binds this contract;
+        downstream invocation proofs still authenticate loaded bytes and CS.
+        ``target_addr`` may carry a normalized lookup identity and must not
+        replace the encoded destination when selecting a census surface.
+        """
+        if (self.is_far or type(self.instruction_index) is not int
+                or not 0 <= self.instruction_index < len(self.instructions)):
+            return None
+        instruction = cast(_NativeCallsiteInstruction8616,
+                           self.instructions[self.instruction_index])
+        try:
+            address = instruction.address
+            size = instruction.size
+            encoding = bytes(instruction.bytes)
+        except (AttributeError, TypeError):
+            return None
+        if (type(address) is not int or address != self.callsite_addr
+                or type(size) is not int or size != 3):
+            return None
+        if len(encoding) != 3 or encoding[0] != 0xE8:
+            return None
+        next_addr = address + size
+        displacement = int.from_bytes(encoding[1:3], "little", signed=True)
+        return next_addr, next_addr + displacement
+
+
+    def bound_near_coordinates(
+        self, boundary: ExactFunctionRangeBoundary8616,
+    ) -> tuple[int, int] | None:
+        """Bind retained CALL bytes to the caller's exact decoded census.
+
+        Index membership is only lookup evidence: a self-consistent forged
+        index must not replace the native instruction the parent proof ran.
+        Parent-domain replay separately authenticates this census to source.
+        """
+        coordinates = self.encoded_near_coordinates()
+        if (coordinates is None or self.caller_start != boundary.addr
+                or self.callsite_addr not in boundary.reachable_instruction_addrs):
+            return None
+        try:
+            matches = tuple(
+                instruction
+                for block in boundary.blocks
+                for instruction in cast(_BoundaryBlock8616, block).capstone.insns
+                if _boundary_instruction_address_8616(instruction) == self.callsite_addr
+            )
+            if len(matches) != 1:
+                return None
+            actual = cast(_NativeCallsiteInstruction8616, matches[0])
+            retained = cast(_NativeCallsiteInstruction8616,
+                            self.instructions[self.instruction_index])
+            if (type(actual.size) is not int or actual.size != 3
+                    or bytes(actual.bytes) != bytes(retained.bytes)):
+                return None
+        except (AttributeError, TypeError):
+            return None
+        return coordinates
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +248,7 @@ class DecodedDirectCallsiteIndex8616:
     _entries_by_exact_far_target: dict[int, tuple[DecodedDirectCallsite8616, ...]] = field(
         default_factory=dict
     )
+    caller_censuses: tuple[DecodedCallerCensus8616, ...] = ()
 
     def target_identity(self, target_addr: int) -> int:
         """Use the same proven identity for lookup and recursive-cycle checks."""
@@ -193,7 +284,7 @@ def _exact_far_target_identity_8616(
 
 
 def build_decoded_direct_callsite_index_8616(
-    decoded_ranges: Mapping[tuple[int, int], tuple[object, ...]],
+    decoded_ranges: Mapping[tuple[int, int], tuple[object, ...]] | tuple[DecodedCallerCensus8616, ...],
     *,
     direct_target_resolver: DirectCallTargetResolver8616,
     instruction_address_resolver: InstructionAddressResolver8616,
@@ -205,12 +296,21 @@ def build_decoded_direct_callsite_index_8616(
     raw_fact_count = 0
     failure_count = 0
     identities = {} if entry_identities is None else entry_identities
+    explicit_censuses = decoded_ranges if isinstance(decoded_ranges, tuple) else ()
+    if explicit_censuses and entry_identities is not None:
+        raise ValueError("explicit caller censuses cannot assert NOP entry identities")
     if entry_identities is not None and set(identities) != set(decoded_ranges):
         raise ValueError("caller entry identities do not cover the decoded ranges")
     ordered_identities = tuple(identities[key] for key in sorted(identities))
-    for caller_range, instructions in sorted(decoded_ranges.items()):
+    rows = (
+        tuple(((census.decode_start, census.decode_end), census.instructions, census.entry_addr)
+              for census in explicit_censuses)
+        if isinstance(decoded_ranges, tuple)
+        else tuple((bounds, instructions, bounds[0]) for bounds, instructions in sorted(decoded_ranges.items()))
+    )
+    for caller_range, instructions, entry_addr in rows:
         identity = identities.get(caller_range)
-        caller_start = caller_range[0] if identity is None else identity.entry_addr
+        caller_start = entry_addr if identity is None else identity.entry_addr
         if identity is not None and (identity.decode_start, identity.decode_end) != caller_range:
             raise ValueError(f"caller entry identity disagrees with decode range {caller_range!r}")
         for instruction_index, instruction in enumerate(instructions):
@@ -263,7 +363,7 @@ def build_decoded_direct_callsite_index_8616(
     )
     if not stats.closed:
         raise ValueError("decoded direct-call index accounting did not close")
-    return DecodedDirectCallsiteIndex8616(entries, stats, ordered_identities, far_entries)
+    return DecodedDirectCallsiteIndex8616(entries, stats, ordered_identities, far_entries, explicit_censuses)
 
 
 @dataclass(frozen=True, slots=True)

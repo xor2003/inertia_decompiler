@@ -674,6 +674,7 @@ def _simplify_boolean_cites_8616(codegen: object) -> bool:
     changed = False
 
     def transform(node: object) -> object:
+        """Collapse a constant-armed CITE to its condition or its negation."""
         if not isinstance(node, CITE):
             return node
         values = _bool_cite_values_8616(node)
@@ -735,6 +736,7 @@ class _SimplifyExpressionRun8616:
     codegen: object
 
     def run(self) -> bool:
+        """Run expression simplification over the cfunc roots; return changed."""
         if getattr(self.codegen, "cfunc", None) is None:
             return False
         roots = self._collect_cfunc_roots_8616()
@@ -1361,6 +1363,7 @@ class _SimplifyExpressionRun8616:
         return None
 
     def transform(self, node: object) -> object:
+        """Apply the simplification arms to one node; identity when nothing folds."""
         counted = self._fold_stat_counted_8616(node)
         if counted is not None:
             return counted

@@ -6,6 +6,8 @@ the existing modular-input owner to obtain its callee-bound proven word address.
 The envelope is a query only: no piece gains segment proof or pointer authority.
 This receipt does not authorize widening, native pointer representation or C
 publication. Missing or conflicting evidence retains an explicit refusal.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

@@ -7,6 +7,10 @@ nested-call proofs are revalidated under one shared bounded traversal, so a
 direct ``complete`` call cannot fan out into repeated dependency-graph walks.
 This does not prove callee effects, infer segment equality, or authorize C
 changes.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .real16_invocation_domain import Real16InvocationDomain8616
 
-from .core import IRFunctionArtifact, SegmentOrigin
+from .core import IRBlock, IRFunctionArtifact, SegmentOrigin
 from .ir_boundary_cfg import IRBoundaryCoverageResult8616
 from .segment_state import SegmentStateArtifact
 from .segment_state_transfer import SEGMENT_REGISTERS
@@ -93,17 +97,17 @@ def _closure_evidence_8616(
         return SegmentEffectClosureFailure8616.CALL_EVIDENCE_STALE, (), ()
     if not _state_census_complete_8616(artifact, state):
         return SegmentEffectClosureFailure8616.STATE_CENSUS_INCOMPLETE, (), ()
-    exit_addrs = _return_candidates_8616(coverage, state)
-    if exit_addrs is None:
+    candidates = _return_candidates_8616(coverage, state)
+    if candidates is None:
         return SegmentEffectClosureFailure8616.RETURN_EXIT_UNPROVEN, (), ()
-    exits = tuple(block for block in artifact.blocks if block.addr in exit_addrs)
+    exit_addrs, exits = candidates
     if not exits or any(not block.instrs or block.instrs[-1].op != "RET" for block in exits):
         return SegmentEffectClosureFailure8616.RETURN_EXIT_UNPROVEN, (), ()
     calls = tuple(sorted({
         instruction.addr for block in artifact.blocks for instruction in block.instrs
         if instruction.op == "CALL" and type(instruction.addr) is int
     }))
-    return None, calls, tuple(sorted(block.addr for block in exits))
+    return None, calls, tuple(sorted(exit_addrs))
 
 
 def _state_census_complete_8616(
@@ -127,24 +131,36 @@ def _state_census_complete_8616(
 def _return_candidates_8616(
     coverage: IRBoundaryCoverageResult8616,
     state: SegmentStateArtifact,
-) -> frozenset[int] | None:
+) -> tuple[frozenset[int], tuple[IRBlock, ...]] | None:
     """Select closed CFG exits, preserving raw instruction identities.
 
     A scoped pending edge has no successor claim: it must not become a
     return by confusing a missing map entry with an empty successor tuple.
     Only this operation's freshly authenticated projection is consumed.
+    The returned blocks are the surface a returning-exit check may read:
+    raw blocks on the universal route, effective projection blocks on
+    the scoped route, so a conditionally discharged terminal is read
+    from the authenticated surface — never from the retained raw JMP.
     """
     artifact = coverage.artifact
     view = state.scoped_view
     if view is None:
-        return frozenset(block.addr for block in artifact.blocks if not block.successor_addrs)
+        exits = tuple(
+            block for block in artifact.blocks if not block.successor_addrs
+        )
+        return frozenset(block.addr for block in exits), exits
     projection = view.cfg_projection_for(state.invocation_scope)
     if projection is None or projection.source_artifact is not artifact:
         return None
     block_addrs = {block.addr for block in artifact.blocks}
     if set(projection.successors) != block_addrs or any(projection.pending.values()):
         return None
-    return frozenset(addr for addr, successors in projection.successors.items() if not successors)
+    exits = tuple(
+        block
+        for block in projection.blocks
+        if not projection.successors[block.addr]
+    )
+    return frozenset(block.addr for block in exits), exits
 
 
 def _bounded_closure_evidence_8616(

@@ -539,7 +539,7 @@ def test_scoped_route_rejects_wrong_source(world: SimpleNamespace) -> None:
 
 def test_scoped_route_rejects_wrong_view(world: SimpleNamespace) -> None:
     """A non-view object and a refused view are both caller errors."""
-    with pytest.raises(TypeError, match="ScopedFunctionIRView8616"):
+    with pytest.raises(TypeError, match="typed scoped view owner"):
         state_mod.build_x86_16_segment_state_artifact(
             world.source,
             invocation_scope=world.scope,

@@ -12,6 +12,8 @@ Selector safety is owned by ``near_return_selector`` and replayed before use.
 This detached AST grants no pointer, segment or native-representation authority
 and mutates no body or prototype. Every refusal keeps classified and materialized
 counts zero; retained congruence, operand identity and mutable nodes are replayed.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

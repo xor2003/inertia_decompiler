@@ -10,6 +10,7 @@ agrees the register carries the proven word; any missing or poisoned
 predecessor exit poisons the entry. Unreachable targets and cycles produce
 typed refusal kinds, never guessed closure. Off-cone exits are retained
 diagnostics, never reentry impossibility.
+Consumes alias-proven storage identity.
 Do not join values from rendered text, cosmetic shape, postprocess, or CLI/reporting evidence.
 """
 

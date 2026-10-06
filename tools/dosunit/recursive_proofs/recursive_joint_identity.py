@@ -7,6 +7,7 @@ Callers must admit and bound terms before serialization; a digest grants no proo
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 from tools.dosunit.model import canonical_json_bytes
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
@@ -43,7 +44,25 @@ def joint_proposal_hash(system: JointSystem, bootstrap: tuple[MachineState, Mach
                    "original": step.original, "candidate": step.candidate,
                    "successors": [node.key() for node in step.successors],
                    "callee": step.callee.key() if step.callee is not None else None,
-                   "continuation": step.continuation.key() if step.continuation is not None else None}
+                   "continuation": step.continuation.key() if step.continuation is not None else None,
+                   "original_control": (step.original_control.to_document()
+                                        if step.original_control is not None else None),
+                   "candidate_control": (step.candidate_control.to_document()
+                                         if step.candidate_control is not None else None)}
                   for step in system.steps],
     }
     return hashlib.sha256(canonical_json_bytes(document)).hexdigest()
+
+
+def control_view_model_hash() -> str:
+    """Seal the real16 control-boundary, declared-target and resolver owners.
+
+    A proved control view produced under one revision of the proof or
+    resolver owners must not be consumed after those owners change; binding
+    the owner sources keeps stale projections a typed refusal.
+    """
+    parent = Path(__file__).resolve().parent.parent
+    paths = (parent / "real16_control_boundary.py", parent / "real16_control_targets.py",
+             parent / "straightline_ssa.py", Path(__file__).with_name("recursive_static_control.py"))
+    values = [hashlib.sha256(path.read_bytes()).hexdigest() for path in paths]
+    return hashlib.sha256(canonical_json_bytes(values)).hexdigest()

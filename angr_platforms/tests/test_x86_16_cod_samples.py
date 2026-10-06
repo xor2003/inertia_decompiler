@@ -1070,6 +1070,7 @@ def test_byteops_cod_main_refuses_unresolved_generic_stack_base():
     assert error.value.details["failure_count"] == len(entries) - 5
 
 
+@pytest.mark.requires_kvm
 def test_strlen_cod_sample_resolves_direct_stack_loads_to_annotated_slots():
     result = subprocess.run(
         [
@@ -1116,6 +1117,7 @@ def test_strlen_cod_sample_resolves_direct_stack_loads_to_annotated_slots():
     assert "&s_0 - 2" not in text
 
 
+@pytest.mark.requires_kvm
 def test_overlay_cod_sample_wrapper_returns_overlay_segment():
     result = subprocess.run(
         [
@@ -1183,6 +1185,7 @@ def test_overlay_cod_sample_wrapper_returns_overlay_segment():
     )
 
 
+@pytest.mark.requires_kvm
 def test_dosfunc_cod_sample_deduplicates_stack_local_names(tmp_path):
     result = subprocess.run(
         [

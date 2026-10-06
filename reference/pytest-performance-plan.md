@@ -1811,3 +1811,81 @@ zero tool errors. None was marked safe for automatic removal; matching
 coverage does not establish equal assertions. These millisecond-scale tests
 cannot explain the heavy lane's runtime. Keep their semantic contracts and
 prioritize the repeated decompilation work after the environment is stable.
+
+## 2026-10-05 completion-latency audit
+
+The saved `m7-control-refusal-review/quality-dev-tmpdir.log` records the broad
+test phase at 522.47 seconds (357 failed, 10,839 passed, 27 skipped), preceded
+by 9.43-second contracts, 111.26-second comparator tests and an 18.05-second
+transitive-call lane. These are historical failing-run measurements, not a
+fresh green gate or total command wall time. The day-long implementation delay
+cannot be attributed to this one test phase: repeated diagnosis, integration,
+and verification cycles are a separate cost.
+
+Current priorities, without increasing proof budgets:
+
+1. Resolve the four recorded remaining cases before another broad gate. Keep
+   focused reruns in one interpreter; avoid rerunning unchanged green cohorts.
+2. Measure SWAPS callee-resolution work before adding caching. Complete closures
+   already have request-local reuse; distinguish aggregate-resolution exhaustion
+   from depth exhaustion and identify repeated identical evidence surfaces.
+3. Stop attempting unary repairs for LoadProgram. The COD fixture supplies a
+   synthetic callee without DS-preservation evidence. It needs real callee
+   evidence or a justified typed contract; extra CPU cannot discharge that gap.
+4. Profile the 180-second SORTD inventory timeout after its shared caller-proof
+   blockers are resolved. Keep its full inventory assertions and current cap.
+5. Freeze semantic sources for final verification. Use two workers for budgeted
+   proofs and up to six for ordinary tests; run global gates at integration,
+   rather than between each local repair. Source changes invalidate proof caches.
+
+The existing gate log also records InitBars at 91.90 seconds and LoadProgram at
+45.66 seconds. Later diagnostic timings use different instrumentation and cannot
+establish a speedup. M5/M7 remain open; four focused outstanding cases are not a
+fresh full-suite failure count. Receipts are under
+`.cache/comparator-implementation/m7-{sortd,loadprogram}-final-review/`.
+
+One bounded SWAPS diagnostic subsequently recorded 166 callee-resolution
+attempts over 35 targets, 84 complete-closure cache hits, and nine aggregate
+64-resolution-limit refusals. Maximum call depth was eight and import depth
+two: this run exhausted the aggregate budget, not the depth limit. The
+unresolved target `0x136da` alone consumed 18 resolution units over 20 attempts
+at two callsites. Complete-proof reuse is already effective; repeated failed
+resolution is the next measured optimization candidate. A safe experiment must
+key reuse to unchanged source, scope, callsite and dependency state, allow retry
+when evidence changes, and never retain transient cycle/budget failures as
+permanent conclusions. Address-only negative caching is not justified.
+
+The probe failed in 28.33 seconds with the same top-level IR refusal. The prior
+minimally instrumented diagnostic took 70.75 seconds; these are not controlled
+before/after measurements. Nested inclusive timings overlap and must not be
+summed. Production-owner SHA256 matches its saved baseline. No runtime patch,
+measured speedup, or new proof acceptance is claimed by this audit.
+
+### Live follow-up: execution versus delivery latency
+
+The October 5 follow-up successfully opened `/dev/kvm` and read API version 12.
+KVM is available for native acceptance in this parent environment; the historical
+missing-device result above is not the current blocker. Static SSA/Z3 comparison
+does not need it. CPU pressure was about 5% over 60 seconds and memory pressure
+was zero at the observation, so there is no current evidence for memory pressure
+as the primary delay. This snapshot does not characterize earlier runs.
+
+The resize-bridge Devin job had spent about 26 minutes elapsed, with about
+98 seconds of CPU across its two live CLI processes. Completed child work is
+not included in that CPU count. Its saved staged suite took 26.41 seconds for
+65 tests; the worker log shows substantial staging, fixture repair and lint/type
+iteration. These tests used an interpreted lifter overlay and still require
+parent verification with the mandatory compiled lifter. Separately, the parent's
+two permanent encoded-entry controls completed in 8.21 seconds. Neither result
+is full-plan acceptance or an end-to-end speedup measurement.
+
+The immediate completion path is therefore integration, not more parallel broad
+testing: review the existing staged deltas, reproduce with the required backend,
+then run the four recorded outstanding cases in a focused batch. Keep optional
+performance experiments outside that critical path. In particular, do not add
+negative caching until source/scope/dependency invalidation and transient budget
+refusals have explicit controls. Reuse the existing timing logs; run a new broad
+gate only after this coherent source set is stable. Keep the 15–20 minute worker
+checkpoint in the execution rules: a reviewable patch must not wait indefinitely
+for temporary harness cleanup. Do not interpret elapsed worker time as solver CPU
+time or count staged passes as integrated completion.

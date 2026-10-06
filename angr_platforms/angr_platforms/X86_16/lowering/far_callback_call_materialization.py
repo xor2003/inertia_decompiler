@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: consume exact IR Value, callee ABI, target-code, and typed CFG
 proofs before changing a C call's argument or prototype. Separate BP word
 stores are never claimed to be one four-byte Alias object or deleted here.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

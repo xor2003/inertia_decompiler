@@ -46,8 +46,10 @@ def test_rewrite_call_loss_snapshot_requires_calls_or_named_guard(
     state = SimpleNamespace(
         current_func_addr=0x10000, function=SimpleNamespace(addr=0x10000, name="probe"),
         pass_name="test", call_loss_guard_active=True, expected_call_guard_active=named_guard,
-        _codegen_call_expr_count=lambda: len(calls),
-        _missing_expected_call_names_from_codegen_counts=lambda: [] if "needed" in calls else ["needed"],
+        _codegen_call_inventory_8616=lambda with_names: cli_decompilation.CliCallInventory8616(
+            len(calls), {name: calls.count(name) for name in set(calls)} if with_names else {}
+        ),
+        _missing_expected_call_names_8616=lambda counts: [] if counts.get("needed") else ["needed"],
         _snapshot_codegen_cfunc=snapshot, _restore_codegen_cfunc=restore,
         _run_stack_lowering_pass=object(), _stack_lowering_already_attempted=False,
         iter_changed=False, dec=SimpleNamespace(codegen=None),

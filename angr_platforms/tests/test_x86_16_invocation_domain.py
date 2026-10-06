@@ -267,6 +267,7 @@ def _assert_native_refusal_closed(premise: Real16InvocationDomain8616) -> None:
     # nothing, so every classified row accounts for exactly one failure.
     assert premise.materialized_count == 0
     assert premise.failure_count == premise.classified_fact_count
+    assert premise.refusal_site is not None
 
 
 def test_opaque_destination_effects_refuse() -> None:

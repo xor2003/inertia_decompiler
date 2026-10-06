@@ -24,7 +24,7 @@ def _process_is_running(pid: int) -> bool:
     if stat_path.exists():
         try:
             fields = stat_path.read_text(encoding="utf-8").split()
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return False
         return len(fields) < 3 or fields[2] not in {"X", "Z"}
     try:
@@ -32,6 +32,20 @@ def _process_is_running(pid: int) -> bool:
     except ProcessLookupError:
         return False
     return True
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, ProcessLookupError])
+def test_process_disappearing_during_stat_read_is_stopped(
+    monkeypatch: pytest.MonkeyPatch, error: type[OSError],
+) -> None:
+    """A process disappearing after stat lookup is no longer running."""
+    def vanished_stat(_path: Path, *, encoding: str) -> str:
+        raise error("process disappeared during procfs read")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "exists", lambda _path: True)
+        patch.setattr(Path, "read_text", vanished_stat)
+        assert not _process_is_running(123)
 
 
 def test_fork_timeout_reaps_descendants_left_by_nested_timeout(tmp_path: Path) -> None:

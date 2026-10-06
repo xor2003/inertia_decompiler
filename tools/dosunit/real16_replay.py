@@ -26,6 +26,7 @@ from tools.dosunit.real16_guest import (
 from tools.dosunit.real16_replay_compare import compare_executions as compare_executions
 from tools.dosunit.real16_replay_compare import compare_replays as compare_replays
 from tools.dosunit.real16_replay_model import (
+    COMPLETE_OUTCOMES,
     ONE_MIB,
     A20Policy,
     Real16CaptureObservation,
@@ -145,9 +146,112 @@ def _classified(guest: Uc, decoder: capstone.Cs, address: int, size: int) -> tup
     return True, "", raw, decoded.id
 
 
-def _coalesced_writes(guest: Uc, addresses: set[int]) -> tuple[tuple[int, bytes], ...]:
-    """Coalesce final written bytes in deterministic physical-address order."""
+@dataclass(frozen=True, slots=True)
+class _ReadbackGap:
+    """One recorded physical span whose final guest readback refused.
+
+    ``cause`` names the backend error (the symbolic ``UC_ERR_*`` name when
+    the backend exposes it); ``address``/``size`` bound the exact span that
+    produced no bytes. A gap is evidence of lost observation and is never
+    substituted with fabricated data.
+    """
+
+    address: int
+    size: int
+    cause: str
+
+
+@dataclass(frozen=True, slots=True)
+class _WriteSnapshot:
+    """Coalesced real write bytes plus every span the readback refused.
+
+    ``writes`` contains only bytes genuinely read from the guest; ``gaps``
+    covers recorded addresses that produced no bytes, so consumers can
+    refuse a complete outcome rather than publish partial evidence.
+    """
+
+    writes: tuple[tuple[int, bytes], ...]
+    gaps: tuple[_ReadbackGap, ...]
+
+
+def _readback_cause(error: UcError) -> str:
+    """Name the backend cause of one refused readback symbolically."""
+    errno = int(error.errno)
+    names: dict[int, str] = (
+        {value: name for name, value in vars(unicorn).items()
+         if name.startswith("UC_ERR_") and isinstance(value, int)}
+        if unicorn is not None else {}
+    )
+    return names.get(errno, f"uc_error:{errno}")
+
+
+def _try_read_span(guest: Uc, address: int, size: int) -> bytes | _ReadbackGap:
+    """Read one declared span; a named backend error returns a typed gap."""
+    try:
+        return bytes(guest.mem_read(address, size))
+    except UcError as error:
+        return _ReadbackGap(address, size, _readback_cause(error))
+
+
+def _read_span(
+    guest: Uc, start: int, size: int,
+    pieces: list[tuple[int, bytes]], gaps: list[_ReadbackGap],
+) -> None:
+    """Read a recorded write span into accurately labeled pieces and gaps.
+
+    A recorded write may straddle a mapped/unmapped boundary (the hook sees
+    every touched address, including the half that faulted). Named backend
+    errors bisect the span until the exact unreadable addresses are typed;
+    each emitted piece covers only bytes genuinely read at its address,
+    never substitutes. Any error that is not a named backend readback
+    failure propagates.
+    """
+    try:
+        data = bytes(guest.mem_read(start, size))
+    except UcError as error:
+        if size <= 1:
+            gaps.append(_ReadbackGap(start, 1, _readback_cause(error)))
+            return
+        half = size // 2
+        _read_span(guest, start, half, pieces, gaps)
+        _read_span(guest, start + half, size - half, pieces, gaps)
+        return
+    if data:
+        pieces.append((start, data))
+
+
+def _merged_gaps(gaps: list[_ReadbackGap]) -> tuple[_ReadbackGap, ...]:
+    """Merge adjacent equal-cause byte gaps into spans, preserving order."""
+    merged: list[_ReadbackGap] = []
+    for gap in gaps:
+        last = merged[-1] if merged else None
+        if last is not None and last.cause == gap.cause and last.address + last.size == gap.address:
+            merged[-1] = _ReadbackGap(last.address, last.size + gap.size, last.cause)
+        else:
+            merged.append(gap)
+    return tuple(merged)
+
+
+def _merged_pieces(pieces: list[tuple[int, bytes]]) -> tuple[tuple[int, bytes], ...]:
+    """Merge physically adjacent read pieces into coalesced groups."""
     groups: list[tuple[int, bytes]] = []
+    for start, data in pieces:
+        if groups and groups[-1][0] + len(groups[-1][1]) == start:
+            groups[-1] = (groups[-1][0], groups[-1][1] + data)
+        else:
+            groups.append((start, data))
+    return tuple(groups)
+
+
+def _coalesced_writes(guest: Uc, addresses: set[int]) -> _WriteSnapshot:
+    """Coalesce final written bytes in deterministic physical-address order.
+
+    Spans the guest refuses to read back come back as typed gaps with cause
+    and range; emitted groups cover only genuinely read bytes at their
+    labeled address, so nothing is substituted or mislabeled.
+    """
+    pieces: list[tuple[int, bytes]] = []
+    raw_gaps: list[_ReadbackGap] = []
     ordered = sorted(addresses)
     index = 0
     while index < len(ordered):
@@ -155,9 +259,36 @@ def _coalesced_writes(guest: Uc, addresses: set[int]) -> tuple[tuple[int, bytes]
         end = index + 1
         while end < len(ordered) and ordered[end] == ordered[end - 1] + 1:
             end += 1
-        groups.append((start, bytes(guest.mem_read(start, end - index))))
+        _read_span(guest, start, end - index, pieces, raw_gaps)
         index = end
-    return tuple(groups)
+    return _WriteSnapshot(_merged_pieces(pieces), _merged_gaps(raw_gaps))
+
+
+def _snapshot_gap_detail(gaps: tuple[_ReadbackGap, ...]) -> str:
+    """Detail fragment naming the first refused snapshot span and its cause."""
+    first = gaps[0]
+    return f"snapshot_unreadable:{first.cause}:{first.address:#x}+{first.size:#x}"
+
+
+def _apply_snapshot_gaps(state: _RunState, gaps: tuple[_ReadbackGap, ...]) -> str | None:
+    """Disclose a partial final snapshot on the run state; return its detail.
+
+    ``RETURNED``/``FAULTED`` publish complete declared state, so a partial
+    readback downgrades them to ``UNSUPPORTED``; truncated or already
+    refused outcomes keep their typing. Either way the first refused span
+    is retained as a typed event and surfaced on ``detail`` when no earlier
+    refusal claimed it.
+    """
+    if not gaps:
+        return None
+    detail = _snapshot_gap_detail(gaps)
+    state.events.append(ReplayEvent(ReplayEventKind.UNMAPPED_ACCESS, detail, gaps[0].address))
+    if state.status in COMPLETE_OUTCOMES:
+        state.status = Real16ReplayStatus.UNSUPPORTED
+        state.detail = detail
+    else:
+        state.detail = state.detail or detail
+    return detail
 
 
 def _result_registers(guest: Uc) -> tuple[tuple[str, int], ...]:
@@ -318,13 +449,20 @@ def replay(
     ctx = _HookCtx(image, policy, decoder, vector.frame.target.linear(), state)
     _install_hooks(guest, ctx)
     _run_guest(guest, ctx, entry, instruction_limit)
-    observed = tuple(
-        (obs.segment * 16 + obs.offset, _seg_read(guest, obs, size))
-        for obs, size in vector.observations
-    )
+    observed: list[tuple[int, bytes]] = []
+    gaps: list[_ReadbackGap] = []
+    for obs, size in vector.observations:
+        linear = obs.segment * 16 + obs.offset
+        read = _try_read_span(guest, linear, size)
+        if isinstance(read, _ReadbackGap):
+            gaps.append(read)
+        else:
+            observed.append((linear, read))
+    snapshot = _coalesced_writes(guest, state.writes)
+    _apply_snapshot_gaps(state, (*gaps, *snapshot.gaps))
     result = Real16ReplayResult(
-        state.status, _result_registers(guest), observed,
-        _coalesced_writes(guest, state.writes), tuple(state.events),
+        state.status, _result_registers(guest), tuple(observed),
+        snapshot.writes, tuple(state.events),
         state.instructions, state.detail, mask,
     )
     # Hook trampolines reference the guest; without a collection cycle each
@@ -378,16 +516,25 @@ def capture(
     ctx = _HookCtx(image, policy, decoder, trap, state, capture_state)
     _install_hooks(guest, ctx)
     _run_guest(guest, ctx, entry, instruction_limit)
+    snapshot = _coalesced_writes(guest, state.writes)
+    detail = _apply_snapshot_gaps(state, snapshot.gaps)
     status = resolve_capture_status(
         capture_state, state.status,
         returned=Real16ReplayStatus.RETURNED, budget=Real16ReplayStatus.BUDGET_EXHAUSTED,
     )
+    if detail is not None and status is CaptureStatus.CAPTURED:
+        # Boundary resolution lets ``reached`` outrank the run state, so a
+        # refused final snapshot must explicitly demote the capture-local
+        # stop instead of publishing CAPTURED on partial evidence.
+        status = CaptureStatus.EXECUTION_REFUSED
+        state.status = Real16ReplayStatus.UNSUPPORTED
+        state.detail = detail
     result = Real16CaptureResult(
         status, entry, boundary,
         state.status if status not in {CaptureStatus.CAPTURED, CaptureStatus.TRACE_OVERFLOW} else None,
         _result_registers(guest),
         tuple(_capture_observation(guest, obs, size) for obs, size in vector.observations),
-        _coalesced_writes(guest, state.writes), tuple(state.events),
+        snapshot.writes, tuple(state.events),
         state.instructions, tuple(capture_state.trace), trap, state.detail, mask,
     )
     # Same guest-lifetime rule as replay: release the translator reservation.

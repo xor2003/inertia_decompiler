@@ -228,6 +228,7 @@ def test_signed_global_declaration_refuses_non_high_word_evidence(offset: int) -
     assert stats.materialized_count == 0
 
 
+@pytest.mark.requires_kvm
 def test_sortd_runmenu_signed_wide_global_is_sidecar_free_and_validated(tmp_path: Path) -> None:
     sortd_exe = tmp_path / "SORTD.EXE"
     sortd_exe.write_bytes(mz_executable_image((REPO_ROOT / "SORTDEMO.EXE").read_bytes()))

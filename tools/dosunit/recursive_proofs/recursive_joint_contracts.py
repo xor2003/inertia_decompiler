@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from tools.dosunit.proof_contracts import ContractIdentity, ObligationReport, ProofStatus
 from tools.dosunit.recursive_proofs.recursive_call_components import FunctionId
@@ -111,6 +112,45 @@ class JointNodeId:
 
 
 @dataclass(frozen=True, slots=True)
+class JointProvedControl:
+    """Fetch-domain-proved control view bound to one raw composed effect.
+
+    Joint construction produces this only when the real16 control-boundary
+    proof normalized the block's actual composed ``control_ip`` term under
+    the producer's recorded ``control_domain`` fact. It is evidence to
+    re-verify, never trusted successor metadata: ``block`` retains the exact
+    proving part record so a consumer re-runs the same bounded boundary
+    proof and must confirm ``normalized`` still equals its fresh product —
+    a forged term, domain or covered code identity can never authorize a
+    destination. ``domain`` keeps the recorded fetch-window fact as a
+    visible unclosed assumption, and any stale or tampered binding must
+    refuse instead of normalizing.
+    """
+
+    node: JointNodeId
+    address: int
+    raw: dict[str, Any]
+    normalized: dict[str, Any]
+    domain: dict[str, Any]
+    block: dict[str, Any]
+    code_sha256: str
+    model_hash: str
+
+    def to_document(self) -> dict[str, Any]:
+        """Serialize every bound field for proposal-identity hashing."""
+        return {
+            "node": self.node.key(),
+            "address": self.address,
+            "raw": self.raw,
+            "normalized": self.normalized,
+            "domain": self.domain,
+            "block": self.block,
+            "code_sha256": self.code_sha256,
+            "model_hash": self.model_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class JointStepPair:
     """Two binary-derived effects with explicit complete static dispatch."""
 
@@ -125,6 +165,8 @@ class JointStepPair:
     successors: tuple[JointNodeId, ...]
     callee: JointNodeId | None = None
     continuation: JointNodeId | None = None
+    original_control: JointProvedControl | None = None
+    candidate_control: JointProvedControl | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -96,7 +96,12 @@ def _node_condition_key_8616(node: object) -> tuple[int, int] | None:
 def _condition_rows_for_node_8616(
     node: object,
 ) -> list[tuple[tuple[int, int], object, str]]:
-    """Return the tagged condition rows contributed by one C-AST node."""
+    """Return the tagged condition rows contributed by one C-AST node.
+
+    Dynamic boundary: third-party angr C-AST variants carry either condition
+    pairs or an optional condition field. Only conditions with observed source
+    tags contribute rows; absent fields produce no condition evidence.
+    """
     rows: list[tuple[tuple[int, int], object, str]] = []
     if isinstance(node, CIfElse):
         condition_pairs = cast(

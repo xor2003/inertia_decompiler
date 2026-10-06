@@ -5483,6 +5483,7 @@ class _TailValidationNodeRun8616:
             self._record_assignment_location(node, location)
 
     def run(self) -> None:
+        """Record this node's validation-visible call, write, return, and flow effects."""
         node = self.node
         if isinstance(node, CFunctionCall):
             for call_node in _iter_observable_call_nodes_for_validation_8616(node):

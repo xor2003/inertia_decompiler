@@ -46,8 +46,9 @@ def _binop(op: str, *args):
     return SimpleNamespace(tag="Iex_Binop", op=op, args=args)
 
 
-def _unop(op: str, arg):
-    return SimpleNamespace(tag="Iex_Unop", op=op, args=(arg,))
+def _unop(op: str, arg, *, size: int = 2):
+    """Provide the byte-valued result width of this synthetic VEX boundary."""
+    return SimpleNamespace(tag="Iex_Unop", op=op, args=(arg,), result_size=size)
 
 
 def _wrtmp(tmp: int, data):
@@ -283,9 +284,9 @@ def test_vex_import_recovers_explicit_ss_linearized_bp_offset_as_segmented_frame
                 _wrtmp(0, _get_register("bp")),
                 _wrtmp(1, _binop("Iop_Add16", _rdtmp(0), _const(0xFFFE))),
                 _wrtmp(2, _get_register("ss")),
-                _wrtmp(3, _unop("Iop_16Uto32", _rdtmp(2))),
+                _wrtmp(3, _unop("Iop_16Uto32", _rdtmp(2), size=4)),
                 _wrtmp(4, _binop("Iop_Shl32", _rdtmp(3), _const(4))),
-                _wrtmp(5, _unop("Iop_16Uto32", _rdtmp(1))),
+                _wrtmp(5, _unop("Iop_16Uto32", _rdtmp(1), size=4)),
                 _wrtmp(6, _binop("Iop_Add32", _rdtmp(4), _rdtmp(5))),
                 _store(_rdtmp(6), _const(1)),
             )

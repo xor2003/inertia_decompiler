@@ -8,7 +8,7 @@ Dynamic attribute access is limited to the third-party angr/codegen boundary.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence, Set
+from collections.abc import Callable, Mapping, Sequence, Set
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, cast
@@ -53,9 +53,11 @@ _THIRD_PARTY_SEMANTIC_FIELDS_8616 = (
 )
 
 
-def _qualified_type_name_8616(value: object) -> str:
-    """Return a stable qualified type label for one generation atom."""
-    value_type = type(value)
+_SCALAR_LEAF_TYPES_8616 = (bool, int, str)
+
+
+def _qualified_type_name_8616(value_type: type[object]) -> str:
+    """Return a stable qualified type label for one exact type."""
     return f"{value_type.__module__}.{value_type.__qualname__}"
 
 
@@ -75,7 +77,13 @@ def _ordered_item_atoms_8616(
 
 @dataclass(slots=True)
 class ValidationGenerationAtomBuilder8616:
-    """Build exact atoms while reusing only proven cycle-free subgraphs."""
+    """Build exact atoms while reusing only proven cycle-free subgraphs.
+
+    Exact builtin containers dispatch by identity so arbitrary metaclass
+    ``__hash__``/``__eq__`` is never invoked, and bound-method locals only
+    cut attribute lookups: no state is retained across generation requests,
+    so mutations between builds are still observed exactly as before.
+    """
 
     _active: set[int] = field(default_factory=set, init=False)
     _memo: dict[int, tuple[object, ValidationGenerationAtom8616]] = field(
@@ -114,13 +122,20 @@ class ValidationGenerationAtomBuilder8616:
         value: object,
     ) -> tuple[ValidationGenerationAtom8616, bool]:
         """Return an atom plus proof that no ancestor cycle shaped it."""
-        if value is None or isinstance(value, bool | int | str):
+        if value is None:
+            return value, True
+        value_type = type(value)
+        # Exact scalar types first; the isinstance fallback keeps subclass
+        # leaves (including IntEnum) on the identical leaf branch as before.
+        if value_type is bool or value_type is int or value_type is str:
+            return cast("ValidationGenerationAtom8616", value), True
+        if isinstance(value, _SCALAR_LEAF_TYPES_8616):
             return value, True
         if isinstance(value, Enum):
             enum_value, cacheable = self._atom_with_cacheability(value.value)
             return (
                 "enum",
-                _qualified_type_name_8616(value),
+                _qualified_type_name_8616(value_type),
                 enum_value,
             ), cacheable
 
@@ -129,7 +144,7 @@ class ValidationGenerationAtomBuilder8616:
         if cached is not None and cached[0] is value:
             return cached[1], True
         if identity in self._active:
-            return ("cycle", _qualified_type_name_8616(value), identity), False
+            return ("cycle", _qualified_type_name_8616(value_type), identity), False
 
         self._active.add(identity)
         try:
@@ -147,19 +162,21 @@ class ValidationGenerationAtomBuilder8616:
         """Normalize one dataclass instance field-by-field."""
         field_atoms: list[ValidationGenerationAtom8616] = []
         cacheable = True
+        atom_with_cacheability = self._atom_with_cacheability
         dataclass_value: DataclassInstance = cast("DataclassInstance", value)
         for dataclass_field in fields(dataclass_value):
-            field_atom, field_cacheable = (
-                self._dynamic_field_atom_with_cacheability(
-                    value,
-                    dataclass_field.name,
-                )
-            )
-            field_atoms.append((dataclass_field.name, field_atom))
+            field_name = dataclass_field.name
+            try:
+                field_value = getattr(value, field_name)
+            except AttributeError:
+                field_atoms.append((field_name, ("missing", field_name)))
+                continue
+            field_atom, field_cacheable = atom_with_cacheability(field_value)
+            field_atoms.append((field_name, field_atom))
             cacheable = cacheable and field_cacheable
         return (
             "dataclass",
-            _qualified_type_name_8616(value),
+            _qualified_type_name_8616(type(value)),
             tuple(field_atoms),
         ), cacheable
 
@@ -170,14 +187,15 @@ class ValidationGenerationAtomBuilder8616:
         """Normalize one mapping with order-independent item atoms."""
         mapping_items: list[ValidationGenerationAtom8616] = []
         cacheable = True
+        atom_with_cacheability = self._atom_with_cacheability
         for key, item in value.items():
-            key_atom, key_cacheable = self._atom_with_cacheability(key)
-            item_atom, item_cacheable = self._atom_with_cacheability(item)
+            key_atom, key_cacheable = atom_with_cacheability(key)
+            item_atom, item_cacheable = atom_with_cacheability(item)
             mapping_items.append((key_atom, item_atom))
             cacheable = cacheable and key_cacheable and item_cacheable
         return (
             "mapping",
-            _qualified_type_name_8616(value),
+            _qualified_type_name_8616(type(value)),
             _ordered_item_atoms_8616(mapping_items),
         ), cacheable
 
@@ -188,13 +206,14 @@ class ValidationGenerationAtomBuilder8616:
         """Normalize one set with order-independent item atoms."""
         set_items: list[ValidationGenerationAtom8616] = []
         cacheable = True
+        atom_with_cacheability = self._atom_with_cacheability
         for item in value:
-            item_atom, item_cacheable = self._atom_with_cacheability(item)
+            item_atom, item_cacheable = atom_with_cacheability(item)
             set_items.append(item_atom)
             cacheable = cacheable and item_cacheable
         return (
             "set",
-            _qualified_type_name_8616(value),
+            _qualified_type_name_8616(type(value)),
             _ordered_item_atoms_8616(set_items),
         ), cacheable
 
@@ -205,13 +224,14 @@ class ValidationGenerationAtomBuilder8616:
         """Normalize one ordered sequence item-by-item."""
         sequence_items: list[ValidationGenerationAtom8616] = []
         cacheable = True
+        atom_with_cacheability = self._atom_with_cacheability
         for item in value:
-            item_atom, item_cacheable = self._atom_with_cacheability(item)
+            item_atom, item_cacheable = atom_with_cacheability(item)
             sequence_items.append(item_atom)
             cacheable = cacheable and item_cacheable
         return (
             "sequence",
-            _qualified_type_name_8616(value),
+            _qualified_type_name_8616(type(value)),
             tuple(sequence_items),
         ), cacheable
 
@@ -220,6 +240,14 @@ class ValidationGenerationAtomBuilder8616:
         value: object,
     ) -> tuple[ValidationGenerationAtom8616, bool]:
         """Normalize one non-active, non-memoized compound value."""
+        value_type = type(value)
+        # Exact builtin containers are never dataclass instances, so identity
+        # dispatch reproduces the general branch order below without adding
+        # a frame per nesting level and without invoking arbitrary metaclass
+        # __hash__/__eq__ on the value's class.
+        container_atom = _EXACT_CONTAINER_ATOMS_8616.get(id(value_type))
+        if container_atom is not None:
+            return container_atom(self, value)
         if is_dataclass(value) and not isinstance(value, type):
             return self._dataclass_atom(value)
         if isinstance(value, Mapping):
@@ -231,21 +259,52 @@ class ValidationGenerationAtomBuilder8616:
 
         semantic_fields: list[ValidationGenerationAtom8616] = []
         cacheable = True
+        atom_with_cacheability = self._atom_with_cacheability
         for field_name in _THIRD_PARTY_SEMANTIC_FIELDS_8616:
             try:
                 field_value = getattr(value, field_name)
             except (AttributeError, TypeError, ValueError):
                 continue
-            field_atom, field_cacheable = self._atom_with_cacheability(field_value)
+            field_atom, field_cacheable = atom_with_cacheability(field_value)
             semantic_fields.append((field_name, field_atom))
             cacheable = cacheable and field_cacheable
         if semantic_fields:
             return (
                 "surface",
-                _qualified_type_name_8616(value),
+                _qualified_type_name_8616(value_type),
                 tuple(semantic_fields),
             ), cacheable
-        return ("opaque", _qualified_type_name_8616(value), id(value)), True
+        return ("opaque", _qualified_type_name_8616(value_type), id(value)), True
+
+
+_ContainerAtomMethod8616 = Callable[
+    [ValidationGenerationAtomBuilder8616, object],
+    tuple[ValidationGenerationAtom8616, bool],
+]
+
+
+# Strongly retain the builtin container types so their ids are stable and
+# can never be reused by another class for the table's whole lifetime.
+_EXACT_CONTAINER_TYPES_8616 = (dict, list, tuple, set, frozenset)
+
+# Exact builtin containers are never dataclass instances, so they reach the
+# same branch as the general isinstance order inside ``_uncached_atom``.
+# The table is keyed by ``id`` of the strongly retained builtin types, so
+# lookup hashes an int and never invokes arbitrary metaclass
+# ``__hash__``/``__eq__`` on the value's class; an unhashable or
+# equality-poisoned class misses the table and falls through to the same
+# isinstance order as before. The single cast records that the table only
+# ever pairs a builtin with its matching container handler.
+_EXACT_CONTAINER_ATOMS_8616 = cast(
+    "dict[int, _ContainerAtomMethod8616]",
+    {
+        id(dict): ValidationGenerationAtomBuilder8616._mapping_atom,
+        id(list): ValidationGenerationAtomBuilder8616._sequence_atom,
+        id(tuple): ValidationGenerationAtomBuilder8616._sequence_atom,
+        id(set): ValidationGenerationAtomBuilder8616._set_atom,
+        id(frozenset): ValidationGenerationAtomBuilder8616._set_atom,
+    },
+)
 
 
 def build_validation_generation_atom_8616(

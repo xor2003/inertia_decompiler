@@ -10,6 +10,7 @@ Every entry-reachable predecessor must agree; unseeded, clobbered, divergent,
 cyclic, or malformed evidence refuses closed. Off-target exits are retained but
 never treated as closure. The fact is conditional on remaining inside the
 supplied acyclic cone; unknown exits are not proved unable to reenter.
+Consumes alias-proven storage identity.
 Do not join values from rendered text, cosmetic shape, postprocess, or CLI/reporting evidence.
 """
 

@@ -2096,10 +2096,13 @@ def _direct_call_insn_from_block(project: object, block_addr: int) -> object | N
 
 
 def _resolve_direct_call_target_from_insn(project: object, insn: object) -> int | None:
+    """Resolve direct CALL forms after rejecting unrelated instruction kinds."""
+    mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
+    if mnemonic not in {"call", "lcall"}:
+        return None
     operands: tuple[Any, ...] = tuple(
         _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(insn, "insn", None), "operands", ()) or ()
     )
-    mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
 
     if (
         mnemonic == "lcall"
@@ -2683,6 +2686,7 @@ class _SeedCounts8616:
     terminal_register_return_failures: int = 0
 
     def begin(self) -> None:
+        """Start the elapsed-time baseline when seed-metric tracking is enabled."""
         if self.track:
             self.start = time.perf_counter()
 

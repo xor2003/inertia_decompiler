@@ -5,6 +5,8 @@ Responsibility: join binary indirect-call parameter facts, caller push sources,
 and a decoded near-code target before publishing a function-pointer value.
 Only exact 16-bit same-code-segment targets are accepted; unknown evidence
 remains a refusal, never a symbol guessed from numeric proximity.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

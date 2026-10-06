@@ -5,6 +5,8 @@ Responsibility: validate a caller-proven segment:offset Value against one exact
 DOS MZ image entry, closed decoded control flow, and a callee-owned far-pointer
 parameter fact. This does not prove the caller's Value or four-byte Alias object.
 Unknown, open, or near-return bodies remain typed refusals.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

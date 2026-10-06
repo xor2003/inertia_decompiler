@@ -19,6 +19,7 @@ import itertools
 import sys
 import types
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,16 @@ class _FarTarget:
     def __init__(self, target_addr: int) -> None:
         """Retain the exact far target coordinate."""
         self.target_addr = target_addr
+
+
+@dataclass(frozen=True)
+class _Census:
+    """Typed caller census at the stubbed index boundary."""
+
+    entry_addr: int
+    decode_start: int
+    decode_end: int
+    instructions: tuple[object, ...]
 
 
 class _Index:
@@ -104,6 +115,8 @@ class _Boundary:
         self.project = project
         self.addr = addr
         self.size = (max(covered) - addr + 1) if covered else 0
+        self.decode_start = addr
+        self.decode_end = addr + self.size
         self.blocks = blocks
         self.reachable_instruction_addrs = frozenset(covered)
 
@@ -177,6 +190,7 @@ def _load_inventory() -> types.ModuleType:
     pkg.__path__ = []
     sys.modules[package] = pkg
     index_module = types.ModuleType(f"{package}.frontend_direct_callsite_index")
+    index_module.DecodedCallerCensus8616 = _Census
     index_module.DecodedDirectCallsiteIndex8616 = _Index
     index_module.DecodedFarCallTarget8616 = _FarTarget
     index_module.DirectCallTargetResolver8616 = Callable

@@ -14,7 +14,11 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ..declared_external_call_evidence import DeclaredCallAdmission8616
     from .direct_call_segment_context import SegmentEntryContext8616
+    from .near_return_continuation_view import (
+        ScopedNearReturnContinuationView8616,
+    )
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import (
         ScopedFunctionCFGProjection8616,
@@ -105,7 +109,9 @@ def _contextual_live_in_8616(
 
 def _scoped_predecessor_map_8616(
     artifact: IRFunctionArtifact,
-    scoped_view: ScopedFunctionIRView8616,
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616
+    ),
     invocation_scope: Real16InvocationDomain8616 | None,
 ) -> tuple[dict[int, tuple[int, ...]], ScopedFunctionCFGProjection8616]:
     """Authenticate the scoped view once and return its effective CFG.
@@ -220,6 +226,7 @@ def _solve_once(
     call_preservations: tuple[SegmentCallPreservationResult8616, ...],
     entry_context: SegmentEntryContext8616 | None,
     invocation_scope: Real16InvocationDomain8616 | None,
+    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
 ) -> SegmentStateSolution8616:
     """Solve one CFG fixed point using the prior restore-source state surface."""
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
@@ -243,6 +250,7 @@ def _solve_once(
                 saved_instruction_entries,
                 call_preservations=call_preservations,
                 source_artifact=artifact, invocation_scope=invocation_scope,
+                declared_call_effects=declared_call_effects,
             )[0]
             if new_entry != entry_states[block_addr]:
                 entry_states[block_addr] = new_entry
@@ -261,6 +269,7 @@ def _solve_once(
             saved_instruction_entries,
             call_preservations=call_preservations,
             source_artifact=artifact, invocation_scope=invocation_scope,
+            declared_call_effects=declared_call_effects,
         )
         instruction_entries.update(block_entries)
         instruction_exits.update(block_exits)
@@ -280,7 +289,10 @@ def solve_segment_state_8616(
     *,
     entry_context: SegmentEntryContext8616 | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
-    scoped_view: ScopedFunctionIRView8616 | None = None,
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ) = None,
+    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
 ) -> SegmentStateSolution8616:
     """Solve local restore chains with an optional exact-callsite entry relation.
 
@@ -323,12 +335,16 @@ def solve_segment_state_8616(
             else build_x86_16_ir_predecessor_map(artifact)
         )
     else:
+        from .near_return_continuation_view import (
+            ScopedNearReturnContinuationView8616,
+        )
         from .scoped_function_ir_view import ScopedFunctionIRView8616
 
-        if type(scoped_view) is not ScopedFunctionIRView8616:
+        if type(scoped_view) is not ScopedFunctionIRView8616 and type(
+            scoped_view
+        ) is not ScopedNearReturnContinuationView8616:
             raise TypeError(
-                "scoped segment state requires a typed "
-                "ScopedFunctionIRView8616"
+                "scoped segment state requires a typed scoped view owner"
             )
         predecessor_map, scoped_projection = _scoped_predecessor_map_8616(
             artifact, scoped_view, invocation_scope
@@ -338,12 +354,12 @@ def solve_segment_state_8616(
                 function_ssa, set(predecessor_map), predecessor_map
             )
     saved_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
-    solution = _solve_once(artifact, predecessor_map, restore_sources, saved_entries, call_preservations, entry_context, invocation_scope)
+    solution = _solve_once(artifact, predecessor_map, restore_sources, saved_entries, call_preservations, entry_context, invocation_scope, declared_call_effects)
     for _ in range(len(restore_sources) + 2):
         if solution.instruction_entry_states == saved_entries:
             break
         saved_entries = solution.instruction_entry_states
-        solution = _solve_once(artifact, predecessor_map, restore_sources, saved_entries, call_preservations, entry_context, invocation_scope)
+        solution = _solve_once(artifact, predecessor_map, restore_sources, saved_entries, call_preservations, entry_context, invocation_scope, declared_call_effects)
     if scoped_projection is not None:
         solution = replace(solution, scoped_projection=scoped_projection)
     return solution

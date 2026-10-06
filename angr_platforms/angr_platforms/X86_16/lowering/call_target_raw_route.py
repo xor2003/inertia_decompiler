@@ -7,6 +7,8 @@ Responsibility: bind a raw-stage SSA CALL — no Semantics enrichment — to
 the project-registered raw ``IRFunctionArtifact`` producer by shared
 position, retained origin, and operand projection, then close the owned
 producer-integrity closure against that raw block.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

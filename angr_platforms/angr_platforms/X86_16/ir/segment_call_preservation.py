@@ -17,6 +17,10 @@ exactly one bound, still-complete proof, inside explicit traversal budgets.
 This never proves whole-function equivalence, stack balance, or termination;
 it only projects segment identities observed at the callee's admitted RET
 exits. Never infer GP preservation, calling conventions, or pointer types.
+Owns typed Value, Address, Condition, instruction facts, and lossless
+normalization.
+Do not perform alias-state ownership, widening, lowering/materialization,
+structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

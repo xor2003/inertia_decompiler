@@ -8,6 +8,8 @@ SSA CALL candidate at a callsite, unique typed blocks, the
 registry-published raw artifact, and the producer-integrity closure that
 binds an ``SSABlock`` to the owned ``build_x86_16_block_local_ssa``
 projection of whichever source block the route selected.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

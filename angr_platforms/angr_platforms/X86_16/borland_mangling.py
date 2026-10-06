@@ -136,8 +136,10 @@ class BorlandSignature:
     parse_error: str = ""
 
 
-def _render_type(type_node: BorlandType) -> str:
-    """Render a decoded type as C-flavoured text (optional evidence)."""
+def _render_type(type_node: BorlandType | None) -> str:
+    """Render optional decoded type evidence, retaining missing children as unknown."""
+    if type_node is None:
+        return "?"
     if type_node.kind is BorlandTypeKind.BUILTIN:
         quals = " ".join(sorted(type_node.quals))
         return f"{quals} {type_node.builtin}".strip() or type_node.builtin

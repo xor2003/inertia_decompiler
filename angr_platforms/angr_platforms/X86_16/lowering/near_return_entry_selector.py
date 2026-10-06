@@ -9,6 +9,7 @@ Nonpublishing: it mutates no body, prototype, callsite or registry and grants
 no native-pointer representation. Detached construction consumes a codegen
 node identifier; completeness replay is observational and allocates nothing. A later
 near-return publication stage consumes the retained replayable binding.
+Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 

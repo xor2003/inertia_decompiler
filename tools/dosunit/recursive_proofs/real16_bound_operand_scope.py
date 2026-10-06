@@ -19,6 +19,10 @@ from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationRefusal,
 )
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import LoadedRelationProof
+from tools.dosunit.recursive_proofs.native_model_hash_snapshot import (
+    native_model_hash_snapshot,
+    native_model_hash_snapshot_active,
+)
 from tools.dosunit.recursive_proofs.real16_code_prefix_proof import (
     Real16CodePrefixProof,
     _entry,
@@ -89,6 +93,14 @@ class BoundReal16OperandScope:
 
 def bound_operand_model_hash() -> str:
     """Seal both authoritative producers and this connecting theorem."""
+    if native_model_hash_snapshot_active():
+        return _bound_operand_model_hash()
+    with native_model_hash_snapshot():
+        return _bound_operand_model_hash()
+
+
+def _bound_operand_model_hash() -> str:
+    """Read both producer digests within one digest-local native capture."""
     from pathlib import Path
 
     digest = hashlib.sha256(code_prefix_model_hash().encode("ascii"))

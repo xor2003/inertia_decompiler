@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -355,13 +355,13 @@ def place_direct_stack_move_pretest_initializer_assignment_8616(
 class _PretestInitOutcome8616(Enum):
     """Disposition of one fact's pretest-initializer materialization attempt."""
 
-    REFUSED_BRANCH_OWNER = auto()
-    REFUSED_NO_EVIDENCE = auto()
-    FAILED_EVIDENCE = auto()
-    REFUSED_NO_SITE = auto()
-    REFUSED_ASSIGNMENT = auto()
-    NOT_PLACED = auto()
-    MATERIALIZED = auto()
+    REFUSED_BRANCH_OWNER = "refused_branch_owner"
+    REFUSED_NO_EVIDENCE = "refused_no_evidence"
+    FAILED_EVIDENCE = "failed_evidence"
+    REFUSED_NO_SITE = "refused_no_site"
+    REFUSED_ASSIGNMENT = "refused_assignment"
+    NOT_PLACED = "not_placed"
+    MATERIALIZED = "materialized"
 
 
 @dataclass(frozen=True, slots=True)

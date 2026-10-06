@@ -654,3 +654,68 @@ def test_partitioned_controller_runs_short_lived_heavy_waves_exactly_once(
     assert len(summary["observed_worker_resource_lower_bounds"]) == 3
     assert all(fact["elapsed_seconds"] >= 0 for fact in summary["wave_resource_facts"])
     assert summary["succeeded"] is record_outcomes
+
+
+@pytest.mark.parametrize("exclusive_input", [("light-exclusive.py",), ("light-z.py", "light-a.py")])
+def test_light_exclusive_paths_run_alone_without_losing_regular_coverage(exclusive_input):
+    """Marked or learned exclusive light files cannot share a worker wave."""
+    from collections import Counter
+
+    from scripts.pytest_resource_history import WorkerResourceHistory
+
+    args = runner._parse_args([
+        "--inventory-json", "inventory.json", "--summary-json", "summary.json",
+        "--workers", "6", "--heavy-workers", "2", "--max-rss-mib", "2048",
+    ])
+    light = ("light-normal-b.py", *exclusive_input, "light-normal-a.py")
+    heavy = WorkerSpec("heavy-0", ("heavy-normal.py",))
+    heavy_exclusive = WorkerSpec("heavy-exclusive-0", ("heavy-exclusive.py",))
+    exclusive_paths = frozenset((*exclusive_input, "heavy-exclusive.py"))
+    schedules = runner._build_schedules(
+        args, {"light": light, "heavy": (*heavy.paths, *heavy_exclusive.paths)},
+        dict.fromkeys((*light, *heavy.paths, *heavy_exclusive.paths), 1.0), 2,
+        [(heavy,), (heavy_exclusive,)], WorkerResourceHistory(), exclusive_paths,
+    )
+    scheduled_paths = [path for specs, _limit in schedules for scheduled in specs for path in scheduled.spec.paths]
+    assert Counter(scheduled_paths) == Counter((*light, *heavy.paths, *heavy_exclusive.paths))
+    assert schedules[0][1] == 6
+    assert schedules[1][1] == 2
+    assert schedules[1][0][0].spec == heavy
+    assert schedules[2][0][0].spec == heavy_exclusive
+    light_exclusive_order = []
+    for specs, limit in schedules:
+        paths = [path for scheduled in specs for path in scheduled.spec.paths]
+        if set(paths) & exclusive_paths:
+            assert limit == 1
+            assert len(specs) == 1
+            assert len(paths) == 1
+        if set(paths) & set(exclusive_input):
+            light_exclusive_order.extend(paths)
+    assert light_exclusive_order == sorted(exclusive_input)
+    assert args.max_rss_mib == 2048
+
+
+def test_nested_pytest_only_integration_function_requests_exclusive_resources():
+    """Keep the lightweight observer tests independent of nested worker controls."""
+    import ast
+
+    path = Path(__file__).with_name("test_pytest_live_failures.py")
+    marked = [
+        node.name for node in ast.parse(path.read_text()).body
+        if isinstance(node, ast.FunctionDef)
+        and any(isinstance(marker, ast.Attribute) and marker.attr == "resource_serial" for marker in node.decorator_list)
+    ]
+    assert marked == ["test_live_failures_preserve_reports_and_emit_before_session_end"]
+
+
+def test_all_light_exclusive_inventory_creates_no_empty_concurrent_wave():
+    """An all-exclusive light inventory still executes each path exactly once."""
+    from scripts.pytest_resource_history import WorkerResourceHistory
+
+    args = runner._parse_args(["--inventory-json", "inventory.json", "--summary-json", "summary.json"])
+    schedules = runner._build_schedules(
+        args, {"light": ("b.py", "a.py"), "heavy": ()}, {"a.py": 1.0, "b.py": 1.0},
+        2, [], WorkerResourceHistory(), frozenset({"a.py", "b.py"}),
+    )
+    assert [(specs[0].spec.paths, limit) for specs, limit in schedules] == [(("a.py",), 1), (("b.py",), 1)]
+    assert all(len(specs) == 1 for specs, _limit in schedules)
