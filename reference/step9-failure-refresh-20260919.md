@@ -275,7 +275,7 @@ passes all three stages, with `PYTHON_JIT=1 PYTHONHASHSEED=0`:
 - No failed, skipped, or timed-out pipeline stages.
 
 Log: `/tmp/step9-current-test-pipeline.log`. Structured stage report:
-`angr_platforms/.cache/test_pipeline/summary.json` (overwritten by later runs).
+`.cache/frontend/test_pipeline/summary.json` (overwritten by later runs).
 Slowest routine tests: InitBars 107.89s, InitMenu 98.66s, RunMenu 75.19s,
 InsertionSort 67.77s. The routine stage remains above its 30s advisory budget.
 
@@ -701,7 +701,7 @@ This does not establish that contention is the timeout's sole cause or close the
 full-suite gate. Evidence: `/tmp/step9-initbars-cfg.log`,
 `/tmp/step9-graph-final-focused.log` (exposes the stale edge),
 `/tmp/step9-graph-final-focused2.log`, `/tmp/step9-topology-ruff.log` (clean),
-and `angr_platforms/.cache/test_pipeline/summary.json` (failed broad run).
+and `.cache/frontend/test_pipeline/summary.json` (failed broad run).
 
 ## Shared-Epilogue Register Value Proof
 

@@ -328,8 +328,8 @@ removing avoidable dynamic attribute access.
 Definition of done:
 
 - `make mypy-all PYTHON=./.venv/bin/python` reports zero errors for all non-test
-  decompiler code under `angr_platforms/angr_platforms/X86_16/` and
-  `inertia_decompiler/`, plus their owned entrypoints
+  decompiler code under `inertia/frontend/x86_16/` and
+  `inertia/cli/`, plus their owned entrypoints
 - strict mode remains enabled; no blanket `ignore_errors`, broad `Any`, or
   unchecked owned boundary is added to obtain a green result
 - every touched non-test module retains `Layer:` and `Responsibility:` and all
@@ -347,7 +347,7 @@ remain explicit and compiled.
 Definition of done:
 
 - the mypyc target builds every non-test module in the decompiler core and CLI,
-  not only `inertia_decompiler.decompile_file_summary`
+  not only `inertia.cli.decompile_file_summary`
 - clean pure-Python and compiled-mode import smoke tests pass without stale
   local extension artifacts influencing the result
 - the complete pytest suite and default/expanded pipelines pass in both

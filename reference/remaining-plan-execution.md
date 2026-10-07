@@ -452,7 +452,7 @@ Final accepted source evidence:
   harness positive/corruption controls: 48 passes. Scoped MyPy, touched type/doc,
   architecture and ownership checks pass. New kernel Ruff checks pass. Existing
   global lint debt remains visible, including two pre-existing complex-condition
-  warnings in `scripts/generated_c_contracts.py`; global quality is not green.
+  warnings in `tools/compiler_toolchain/generated_c_contracts.py`; global quality is not green.
 
 Observed activation/verification window: September 20, 01:37:44 to 02:20:24
 +02:00, 42m40s wall time including edits and waits. Boundaries are the first

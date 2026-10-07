@@ -39,7 +39,7 @@ This is the curated gate, not the full repository test suite.
 
 The subsequent default pipeline exits 2. Its unit lane passes 3,050 tests in
 112.67s and QuickC passes; MSC6 tiny fails two of seven constructs. The saved
-structured summary is `angr_platforms/.cache/test_pipeline/summary.json`;
+structured summary is `.cache/frontend/test_pipeline/summary.json`;
 per-construct diagnostics are in `examples/build_msc6_tiny/*/report.json`.
 Compiler diagnostics are in `decompile_compile_stdout` and linker diagnostics
 in `decompile_link_stdout`, not stderr. Do not dump the large nested profiles
@@ -62,7 +62,7 @@ when only these fields are needed.
   function correct.
 
 Declaration-loss path confirmed by source inspection:
-`scripts/build_msc6_examples.py::_build_from_function_decompiles` calls
+`tools/compiler_toolchain/build_msc6_examples.py::_build_from_function_decompiles` calls
 `_extract_decompiled_function_definition`, which returns only the matched
 signature/body and discards top-level externs. `_build_fallback_source` joins
 those bodies and `_prepare_decompiled_source_for_c89` invokes synthetic-global

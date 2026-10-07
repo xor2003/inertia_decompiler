@@ -1,0 +1,2482 @@
+{
+  "schema": "coverage-matrix-1",
+  "status": "frozen_plan_all_unverified",
+  "generated": "2026-10-06",
+  "authority": "reference/compiler-coverage-plan.md",
+  "purpose": "Finite 32-64 source coverage pilot for 16-bit real-mode DOS C round trips. Planning data only: no cell, source, profile or phase in this file is evidence of a passing round trip, an emitted binary mechanism or a verified compiler configuration.",
+  "vocabulary": {
+    "scope_status": {
+      "reuse": "scripts/compiler_coverage_manifest.py ScopeStatus",
+      "admitted": "required obligation bound to exactly one cell with a selected witness",
+      "later": "inventory retained from pilot.json/large.json; no cell selected it in this frozen pilot",
+      "excluded": "explicitly out of scope for this plan; reason recorded",
+      "undecided": "target-defined or extension behavior pending a compiler probe; never silently admitted"
+    },
+    "source_state": {
+      "existing": "source file exists in the repository and was read for this mapping",
+      "planned_not_implemented": "witness proposal only; the path does not exist and must not be treated as available",
+      "generated_retained": "generator-produced artifact retained by pinned hash, replayable through scripts/compiler_coverage_csmith.py"
+    },
+    "source_kind": {
+      "runtime_case": "linked-EXE round-trip case with an exit-code oracle",
+      "compile_probe": "compile-time target-defined behavior probe; not a runtime round trip",
+      "generated_case": "Csmith-generated runtime case; runtime helper boundary documented"
+    },
+    "oracle": {
+      "exit_code_255": "existing convention: 255 = pass, 1..N identifies the failing check",
+      "exit_code_0": "Csmith convention: 0 = pass",
+      "compile_time_assert": "probe records target-defined facts at compile time; failure is loud"
+    },
+    "emitted_evidence": {
+      "unverified": "no compatible receipt proves the compiler emits the desired mechanism",
+      "verified": "COD/IR/EXE inspection under the exact selected compiler/model proves emission"
+    },
+    "config_evidence": {
+      "unverified": "compiler identity, flags, model and link line not yet confirmed by a probe receipt",
+      "verified": "compiler probe receipt under this exact profile"
+    },
+    "roundtrip_status": {
+      "reuse": "scripts/compiler_coverage_result.py CoverageOutcome",
+      "note": "per-source and per-cell values aggregate the selected profiles; all selected cases are currently not_attempted",
+      "values": [
+        "passed",
+        "harness_failed",
+        "build_failed",
+        "original_run_failed",
+        "not_attempted",
+        "decompile_failed",
+        "validation_failed",
+        "recompile_failed",
+        "behavior_failed",
+        "timed_out"
+      ]
+    },
+    "phase_status": {
+      "planning": "matrix frozen; execution not started",
+      "not_started": "required phase represented explicitly so it cannot be accidentally excluded"
+    },
+    "cell_axis": {
+      "source_feature": "C construct present and exercised in the witness source",
+      "emitted_pattern": "specific binary mechanism the compiler must emit; never inferred from source text",
+      "configuration": "compiler/model/optimization configuration evidence",
+      "boundary": "compiler-generated helper or matched library call boundary"
+    },
+    "compile_run_evidence": "optional per-source receipt of original-compiler compile/link/run and corruption-control outcomes; never decompiler roundtrip evidence"
+  },
+  "compilers": {
+    "msc51": {
+      "identity": "Microsoft C 5.1",
+      "directory": "/home/xor/inertia_player/dos_compilers/Microsoft C v5.1",
+      "lane": "primary",
+      "probe_status": "probed",
+      "note": "CL 5.10 + LINK 3.65 verified compile/link/run under kvikdos; both models pass width asserts. Receipts in toolchain-probes-20261006.",
+      "measured": {
+        "compiler": "CL.EXE 5.10",
+        "linker": "LINK.EXE 3.65",
+        "compile_runner": "kvikdos",
+        "run_runner": "kvikdos",
+        "models_verified": [
+          "small",
+          "large"
+        ],
+        "receipt": "examples/compiler_coverage/toolchains.json"
+      }
+    },
+    "wtc11": {
+      "identity": "Watcom C/C++ 11.0b, 16-bit",
+      "directory": "/home/xor/inertia_player/dos_compilers/Watcom C++ v11b",
+      "lane": "final_same_corpus",
+      "probe_status": "not_probed",
+      "phase_status": "not_started",
+      "note": "Runs after MS/Borland acceptance on the same admitted corpus; presence here is required so the phase cannot be silently dropped."
+    },
+    "msc6": {
+      "identity": "Microsoft C v6ax",
+      "directory": "/home/xor/inertia_player/dos_compilers/Microsoft C v6ax",
+      "lane": "historical_baseline",
+      "probe_status": "historical_only",
+      "note": "Existing runner and pilot.json/large.json evidence. Historical tiny/small-model results are regression evidence only; they never count as MS C 5.1 or Borland 3.1 acceptance."
+    },
+    "bc31": {
+      "identity": "Borland C++ 3.1 (BCC.EXE/TLINK.EXE), C mode",
+      "directory": "/home/xor/inertia_player/dos_compilers/Borland C++ v3.1",
+      "lane": "primary",
+      "probe_status": "probed",
+      "note": "BCC/TLINK are DPMI-hosted: compile/link under DOSBox 0.74-3, produced real-mode MZ runs under kvikdos. Two-runner lane required.",
+      "measured": {
+        "compiler": "BCC.EXE 3.1 (C mode via .c extension)",
+        "linker": "TLINK.EXE 5.1",
+        "compile_runner": "dosbox",
+        "run_runner": "kvikdos",
+        "models_verified": [
+          "small",
+          "large"
+        ],
+        "receipt": "examples/compiler_coverage/toolchains.json"
+      }
+    }
+  },
+  "profiles": [
+    {
+      "id": "msc51-small",
+      "compiler": "msc51",
+      "memory_model": "small",
+      "flags": [
+        "/AS",
+        "/Od",
+        "/W3",
+        "/c"
+      ],
+      "flags_status": "verified_by_probe",
+      "config_evidence": "verified",
+      "receipt": "examples/compiler_coverage/toolchains.json"
+    },
+    {
+      "id": "msc51-large",
+      "compiler": "msc51",
+      "memory_model": "large",
+      "flags": [
+        "/AL",
+        "/Od",
+        "/W3",
+        "/c"
+      ],
+      "flags_status": "verified_by_probe",
+      "config_evidence": "verified",
+      "receipt": "examples/compiler_coverage/toolchains.json"
+    },
+    {
+      "id": "msc51-small-opt",
+      "compiler": "msc51",
+      "memory_model": "small",
+      "flags": [
+        "/Ox"
+      ],
+      "flags_status": "proposed_pending_probe",
+      "config_evidence": "unverified",
+      "note": "Selected optimization witness only; not a new source axis."
+    },
+    {
+      "id": "bc31-small",
+      "compiler": "bc31",
+      "memory_model": "small",
+      "flags": [
+        "-Od",
+        "-ms"
+      ],
+      "flags_status": "verified_by_probe",
+      "config_evidence": "verified",
+      "receipt": "examples/compiler_coverage/toolchains.json"
+    },
+    {
+      "id": "bc31-large",
+      "compiler": "bc31",
+      "memory_model": "large",
+      "flags": [
+        "-Od",
+        "-ml"
+      ],
+      "flags_status": "verified_by_probe",
+      "config_evidence": "verified",
+      "receipt": "examples/compiler_coverage/toolchains.json"
+    },
+    {
+      "id": "bc31-small-opt",
+      "compiler": "bc31",
+      "memory_model": "small",
+      "flags": [
+        "-ms",
+        "-O2"
+      ],
+      "flags_status": "proposed_pending_probe",
+      "config_evidence": "unverified",
+      "note": "Selected optimization witness only; not a new source axis."
+    },
+    {
+      "id": "msc51-probe",
+      "compiler": "msc51",
+      "memory_model": null,
+      "flags": [],
+      "flags_status": "probe_per_model",
+      "config_evidence": "unverified",
+      "note": "Compile-time probes run under each relevant model. Width/model facts already verified by toolchain-probes-20261006 probe.c; this profile still needs the probe sources compiled."
+    },
+    {
+      "id": "bc31-probe",
+      "compiler": "bc31",
+      "memory_model": null,
+      "flags": [],
+      "flags_status": "probe_per_model",
+      "config_evidence": "unverified",
+      "note": "Compile-time probes run under each relevant model. Width/model facts already verified by toolchain-probes-20261006 probe.c; this profile still needs the probe sources compiled."
+    },
+    {
+      "id": "wtc11-small",
+      "compiler": "wtc11",
+      "memory_model": "small",
+      "flags": [],
+      "flags_status": "phase_not_started",
+      "config_evidence": "unverified"
+    },
+    {
+      "id": "wtc11-large",
+      "compiler": "wtc11",
+      "memory_model": "large",
+      "flags": [],
+      "flags_status": "phase_not_started",
+      "config_evidence": "unverified"
+    },
+    {
+      "id": "wtc11-probe",
+      "compiler": "wtc11",
+      "memory_model": null,
+      "flags": [],
+      "flags_status": "phase_not_started",
+      "config_evidence": "unverified"
+    }
+  ],
+  "phases": [
+    {
+      "id": "ms_borland_corpus",
+      "status": "planning",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-large",
+        "bc31-large",
+        "msc51-small-opt",
+        "bc31-small-opt"
+      ],
+      "acceptance": "Every admitted cell has an accepted emitted witness under its selected MS C 5.1 and Borland 3.1 profiles; all admitted cases and negative controls pass; missing cells published."
+    },
+    {
+      "id": "watcom_11b_same_corpus",
+      "status": "not_started",
+      "profiles": [
+        "wtc11-small",
+        "wtc11-large",
+        "wtc11-probe"
+      ],
+      "applies_to": "same admitted corpus: every runtime_case/generated_case source under wtc11-small, the large subset under wtc11-large, and every compile_probe under wtc11-probe",
+      "note": "Required final phase; must not be read as excluded."
+    }
+  ],
+  "first_batch": {
+    "denominator": 16,
+    "sources": [
+      "word_comparisons",
+      "array_pointer_writes",
+      "branches_loops",
+      "call_composition",
+      "struct_value_abi",
+      "bitfield_neighbors",
+      "multidim_alias",
+      "csmith_seed2"
+    ],
+    "profiles": [
+      "msc51-small",
+      "bc31-small"
+    ],
+    "subtotals": {
+      "baseline_existing": 8,
+      "directed_additions": 6,
+      "csmith": 2
+    },
+    "note": "Starter batch, not the completion boundary. Directed probes are implemented under examples/compiler_coverage/ with compile/run + control receipts; all sixteen round trips remain not_attempted.",
+    "baseline_sources": [
+      "word_comparisons",
+      "array_pointer_writes",
+      "branches_loops",
+      "call_composition"
+    ],
+    "directed_sources": [
+      "struct_value_abi",
+      "bitfield_neighbors",
+      "multidim_alias"
+    ],
+    "csmith_sources": [
+      "csmith_seed2"
+    ]
+  },
+  "sources": [
+    {
+      "id": "word_comparisons",
+      "path": "examples/msc6_constructs/compare16.c",
+      "state": "existing",
+      "sha256": "d2295f9cc9660b5040f0fccad0184dd079af2cdd626a09dc70fb8e5940cacc25",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.signed_int",
+        "types.unsigned_int",
+        "operations.comparison",
+        "operations.arithmetic_boundaries",
+        "flow.if_else",
+        "flow.early_return",
+        "calls.direct"
+      ],
+      "actual_mechanisms": "six relational operators on signed and unsigned int via branch masks (rel_i16/rel_u16), clamp/window selection, unsigned wrap add_wrap_u16(65535,1)=0, signed extremes -32768/32767, unsigned 32768/65535 edges; exit codes 1-16 identify each failed check",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-small-opt",
+        "bc31-small-opt",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "array_pointer_writes",
+      "path": "examples/msc6_constructs/pointer_memory.c",
+      "state": "existing",
+      "sha256": "570526e250e12a4a2bf17d81b7f720ac108813e92ec17864e419a7df6434f68e",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "storage.array",
+        "storage.pointer_write",
+        "storage.overlapping_aliases",
+        "pointer.same_object_alias",
+        "pointer.local_address_argument",
+        "pointer.array_decay",
+        "pointer.disjoint_objects",
+        "array.byte_elements",
+        "array.word_elements",
+        "array.variable_index",
+        "array.parameter_decay",
+        "array.multi_element",
+        "array.local",
+        "array.same_buffer_read_write",
+        "array.disjoint_buffers",
+        "calls.direct",
+        "calls.pointer_return",
+        "flow.for"
+      ],
+      "actual_mechanisms": "indexed byte/word writes and sums, swap_ptrs(&a,&a) same-object alias, offset_copy overlap in both directions over disjoint and overlapping ranges, zero-count loops, select_word returns pointer into caller array; checks 1-11",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-large",
+        "bc31-large",
+        "wtc11-small",
+        "wtc11-large"
+      ],
+      "roundtrip": "not_attempted",
+      "large_rationale": "far data pointer transport across calls"
+    },
+    {
+      "id": "branches_loops",
+      "path": "examples/msc6_constructs/simple_control.c",
+      "state": "existing",
+      "sha256": "a4b750495423e8afa62f1da1f9b9f934e3d4d527b7bcc2d0fea04a211efc8ec1",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "flow.if_else",
+        "flow.for",
+        "flow.switch",
+        "calls.direct"
+      ],
+      "actual_mechanisms": "if/else chains in classify, for loop with parity-split accumulator in sum_to, switch with grouped cases 1/2 plus default in switch_fold; emitted switch mechanism (compare chain vs table) is unverified and must not be assumed a jump table; checks 1-5",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-small-opt",
+        "bc31-small-opt",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "call_composition",
+      "path": "examples/msc6_constructs/function_pointers.c",
+      "state": "existing",
+      "sha256": "014890b4c780bb6856816112656c126a9b558f06fa21cc98e35c6bb8d7d25194",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "calls.direct",
+        "calls.indirect",
+        "calls.composition",
+        "calls.pending_arguments_across_call",
+        "flow.if_else"
+      ],
+      "actual_mechanisms": "indirect calls through function-pointer parameter (apply_twice), conditional function-pointer selection, three-argument nested call with one argument itself a call result (nested_arguments); checks 1-5",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-large",
+        "bc31-large",
+        "wtc11-small",
+        "wtc11-large"
+      ],
+      "roundtrip": "not_attempted",
+      "large_rationale": "far function pointer transport and far indirect calls"
+    },
+    {
+      "id": "struct_value_abi",
+      "path": "examples/compiler_coverage/struct_value_abi.c",
+      "state": "existing",
+      "sha256": "7a5bc44c66caa73452ff2620ff134de73ce44722d83c2034ce3a02a4dd1979e9",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.struct",
+        "struct.mixed_field_widths",
+        "struct.mixed_signedness",
+        "struct.pass_by_value",
+        "struct.return_by_value",
+        "struct.assignment_copy",
+        "calls.aggregate_abi",
+        "calls.direct"
+      ],
+      "proposal": "Small mixed-width struct passed and returned by value, assigned to another object; check named fields and unchanged caller input; do not prescribe a hidden return-pointer convention",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted",
+      "compile_run_evidence": {
+        "scope": "original_compiler_source_contract_only_not_roundtrip",
+        "host": "host originals verified: exit 255 pass, controls exit 1/3/3 detected",
+        "msc51_small": "SVA_ORIG exit 255 pass; SVA_BAD bad_return exit 1 detected",
+        "receipt": ".cache/compiler-coverage/starter-msc51-20261006/REPORT.md"
+      }
+    },
+    {
+      "id": "bitfield_neighbors",
+      "path": "examples/compiler_coverage/bitfield_neighbors.c",
+      "state": "existing",
+      "sha256": "543103d76f9cb5d4aea23ddb2cf0986a0cca06cd5728ff40dbe3b38663157c88",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.bitfield",
+        "bitfield.unsigned_int",
+        "bitfield.adjacent_fields",
+        "bitfield.write_preserves_neighbors",
+        "bitfield.ordinary_field_neighbors",
+        "bitfield.compound_update"
+      ],
+      "proposal": "Adjacent unsigned int bitfields: assign/update one field while preserving neighbors and an ordinary member; explicit unsigned int and in-range values only; per-compiler layout probe is a prerequisite (probes/bitfield_layout.c)",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted",
+      "compile_run_evidence": {
+        "scope": "original_compiler_source_contract_only_not_roundtrip",
+        "host": "host originals verified: exit 255 pass, controls exit 1/3/3 detected",
+        "msc51_small": "BFN_ORIG exit 255 pass; BFN_BAD erased_neighbor exit 3 detected",
+        "receipt": ".cache/compiler-coverage/starter-msc51-20261006/REPORT.md"
+      }
+    },
+    {
+      "id": "multidim_alias",
+      "path": "examples/compiler_coverage/multidim_alias.c",
+      "state": "existing",
+      "sha256": "37da5410747b5aba7bcd2fbe3b6d661c2c5815b568bb8cc81d0cd66ff492939d",
+      "kind": "runtime_case",
+      "batch": "first",
+      "oracle": "exit_code_255",
+      "source_features": [
+        "array.multidimensional",
+        "pointer.pointer_to_array",
+        "storage.overlapping_aliases",
+        "array.variable_index"
+      ],
+      "proposal": "Small two-dimensional array passed as pointer-to-row; variable row/column indexing; same-array alias store/readback and disjoint case; in-bounds only with correct pointer-to-array types",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted",
+      "compile_run_evidence": {
+        "scope": "original_compiler_source_contract_only_not_roundtrip",
+        "host": "host originals verified: exit 255 pass, controls exit 1/3/3 detected",
+        "msc51_small": "MDA_ORIG exit 255 pass; MDA_BAD bad_store exit 3 detected",
+        "receipt": ".cache/compiler-coverage/starter-msc51-20261006/REPORT.md"
+      }
+    },
+    {
+      "id": "csmith_seed2",
+      "path": null,
+      "state": "generated_retained",
+      "kind": "generated_case",
+      "batch": "first",
+      "oracle": "exit_code_0",
+      "generated": {
+        "seed": 2,
+        "generator_revision": "35e702de01e158bc948a2024d0e187c1803d1ebb",
+        "generator_branch": "ms-c-dos (user fork)",
+        "generator_sha256": "f75bbeaacab98f1048340db1462700d035dd1f7c03e3470e6beb010b1f0511eb",
+        "source_sha256": "353845463705795ea0822c0ecaf5f956828405507d956d661e2fa124a4d66939",
+        "options": [
+          "--max-funcs",
+          "1",
+          "--max-block-depth",
+          "2",
+          "--max-block-size",
+          "2",
+          "--max-expr-complexity",
+          "3",
+          "--max-array-dim",
+          "1",
+          "--max-array-len-per-dim",
+          "4"
+        ],
+        "retained_copy": ".cache/compiler-coverage/csmith-pinned-replay-001/csmith.c"
+      },
+      "source_features": [
+        "workload.csmith_seed2"
+      ],
+      "actual_mechanisms": "pinned generated interactions with checksum oracle; historical build linked two application functions plus 67 runtime helpers, so the runtime boundary (verified binary-signature matching) is a documented dependency, not waived",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted",
+      "dependency": "runtime signature catalog for the linked Csmith helpers; historical msc6 replays timed out and prove nothing for these lanes",
+      "compile_run_evidence": {
+        "scope": "original_compiler_source_contract_only_not_roundtrip",
+        "msc51_small": "original run exit 0, checksum 637A4628",
+        "note": "runtime helper signatures still unresolved",
+        "bc31_small": "original run exit 0, checksum 637A4628, identical source sha256"
+      }
+    },
+    {
+      "id": "word32_comparisons",
+      "path": "examples/msc6_constructs/compare32.c",
+      "state": "existing",
+      "sha256": "54a28bc9db3106c964a3c447bb5d199b66d39b2d484c5817c3cd1edad8d2923b",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.signed_long",
+        "types.unsigned_long",
+        "operations.comparison",
+        "flow.if_else",
+        "calls.direct"
+      ],
+      "actual_mechanisms": "six relational operators on signed and unsigned long via masks, select_max, clamp_window; desired emitted mechanism is multiword compare (high-then-low word) not a single compare; values 100000L/-2000L/300000UL exceed 16-bit range; checks 1-14",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "mixed_width_compare",
+      "path": "examples/msc6_constructs/mixwidth.c",
+      "state": "existing",
+      "sha256": "668da3342c630cac0bbd50b31f02c8a95b3bba23da0cf18f9d4a03a2bc9d2a20",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "operations.conversion",
+        "types.signed_long",
+        "operations.comparison"
+      ],
+      "actual_mechanisms": "long vs int comparisons force implicit int->long sign extension before compare; boundary inputs -32768/-32769/32768/2147483647/-2147483648 keep the extension observable; checks 1-8",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "enum_union_overlay",
+      "path": "examples/msc6_constructs/enum_union.c",
+      "state": "existing",
+      "sha256": "a2efb71696e2c8a04bddbe8519dafc54eb8122553f18a35465897971a51b014b",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.enum",
+        "enum.implicit_values",
+        "enum.switch",
+        "enum.parameter_return",
+        "types.union",
+        "union.same_member_store_load",
+        "union.character_representation_access"
+      ],
+      "actual_mechanisms": "enum parameter dispatched through switch with default; union IntBytes written via bytes[] then read as word (0x1234 check) -- target-defined inactive-member overlay, verified per compiler, not assumed portable",
+      "target_defined": "union inactive-member read is implementation-defined; admitted because both target compilers share the little-endian overlay, verified empirically at baseline",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "nested_loop_goto",
+      "path": "examples/msc6_constructs/loops_jumps.c",
+      "state": "existing",
+      "sha256": "283b0e3c06b7c64dfb2527f8d65bc89523ee8a65679de16d8143be0cc4f18e67",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "flow.while",
+        "flow.do_while",
+        "flow.break",
+        "flow.continue",
+        "flow.goto",
+        "flow.early_return",
+        "array.nested_loops",
+        "flow.loop_carried_state"
+      ],
+      "actual_mechanisms": "while loop containing do-while with continue and break on carried total, early return inside loop nest, two backward gotos forming a manual loop in goto_accumulate; checks 1-2",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "struct_array_fields",
+      "path": "examples/msc6_constructs/medium_structs.c",
+      "state": "existing",
+      "sha256": "edc64e9e7ce936d1563e015b509daaabe2db83ba125e65f92f7330859ba14754",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.struct",
+        "struct.single_field",
+        "struct.pass_by_pointer",
+        "struct.array_element",
+        "struct.local",
+        "struct.field_address",
+        "array.struct_elements",
+        "flow.while",
+        "flow.early_return",
+        "calls.direct"
+      ],
+      "actual_mechanisms": "struct Pair array accessed through pointer with field offsets, int array rotated through pointer indexing, early-return linear search; checks 1-3",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "scalar_widths",
+      "path": "examples/msc6_constructs/scalar_types_io.c",
+      "state": "existing",
+      "sha256": "fd40b1f06b9343778adc134140e798d4d0417dae5957a744a140035efb7af663",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.signed_char",
+        "types.unsigned_char",
+        "types.signed_short",
+        "types.unsigned_short",
+        "types.signed_int",
+        "types.unsigned_int",
+        "types.signed_long",
+        "types.unsigned_long",
+        "operations.conversion",
+        "operations.shift",
+        "calls.pointer_return",
+        "calls.direct"
+      ],
+      "actual_mechanisms": "signed/unsigned char arithmetic and shifts, short/ushort/int arithmetic, uint rotate via (a<<1)|(a>>15) exercising bit-15 boundary, long add and ulong sub as multiword ops, pointer-return selection over char arrays; float/double remain commented out (FPU excluded); checks 1-13",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-small-opt",
+        "bc31-small-opt",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "globals_statics",
+      "path": "examples/msc6_constructs/storage_classes.c",
+      "state": "existing",
+      "sha256": "a16a4192dae4407276e64b65bc8020c2b940c05d32219f984ef911d187e53d49",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "storage.global",
+        "storage.static_local",
+        "array.global",
+        "array.string_initializer",
+        "array.partial_initializer",
+        "calls.direct"
+      ],
+      "actual_mechanisms": "static globals and initializer arrays, function-local static persisting across calls (bump_static), global counter mutation observed across calls including byte-carry boundaries 242->252 and 246->256; checks 1-5",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-large",
+        "bc31-large",
+        "wtc11-small",
+        "wtc11-large"
+      ],
+      "roundtrip": "not_attempted",
+      "large_rationale": "far data access to globals/statics"
+    },
+    {
+      "id": "sortdemo_interactions",
+      "path": "examples/msc6_constructs/sortdemo_patterns.c",
+      "state": "existing",
+      "sha256": "3f465839a4695908ea891a66f118cfdc7c78def801828b6cebc8efd1f831fb65",
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "storage.global",
+        "flow.for",
+        "flow.while",
+        "flow.do_while",
+        "flow.short_circuit",
+        "flow.break",
+        "calls.direct",
+        "calls.pending_arguments_across_call",
+        "array.global",
+        "array.variable_index",
+        "array.nested_loops",
+        "flow.loop_carried_state"
+      ],
+      "actual_mechanisms": "SORTDEMO-derived patterns: global word arrays, nested selection-sort loops, swap through pointer pairs, pivot scan with && short-circuit and &&-guarded inner whiles, DrawTime callback state observed through globals across the sort; checks 1-17",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "abi_model_probe",
+      "path": "examples/compiler_coverage/probes/model.c",
+      "state": "existing",
+      "sha256": "76799d9215484e7fe1718a4a79dcf43c69d5aafe48e6efc788f10aea0042d18e",
+      "kind": "compile_probe",
+      "batch": null,
+      "oracle": "compile_time_assert",
+      "source_features": [
+        "model.small",
+        "model.large",
+        "abi.near",
+        "abi.far",
+        "compiler.msc5"
+      ],
+      "actual_mechanisms": "compile-time asserts: int=2, long=4, data and function pointer width match M_I86SM/M_I86LM model macro, char far* =4; runs under each model to record actual defaults",
+      "profiles": [
+        "msc51-probe",
+        "bc31-probe",
+        "wtc11-probe"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "char_boundaries",
+      "path": "examples/msc6_constructs/char_boundaries.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.signed_char",
+        "types.unsigned_char",
+        "operations.arithmetic_boundaries",
+        "operations.conversion"
+      ],
+      "proposal": "Signed/unsigned char at 127/128/255 boundaries, explicit truncation casts, promotion into int comparisons; scalar_widths already covers generic byte ops, this adds only the boundary inputs",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "ulong_carry",
+      "path": "examples/msc6_constructs/ulong_carry.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.unsigned_long",
+        "operations.long_carry",
+        "operations.arithmetic_boundaries"
+      ],
+      "proposal": "Unsigned long add/sub carry across the 65535 low-word boundary (e.g. 0x0000FFFF+1, 0x00010000-1, borrows); in-range signed long only, no signed overflow; desired emitted mechanism is adc/sbb carry propagation",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "long_arith",
+      "path": "examples/msc6_constructs/long_arith.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.signed_long",
+        "types.unsigned_long",
+        "operations.long_arith",
+        "calls.compiler_helpers"
+      ],
+      "proposal": "Long/unsigned long multiply, divide and modulo on in-range values; emitted mechanism (helper call vs inline multiword sequence) is unverified and must be observed per compiler; helper calls count toward calls.compiler_helpers",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "long_shift",
+      "path": "examples/msc6_constructs/long_shift.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "operations.shift",
+        "operations.long_shift",
+        "types.unsigned_long",
+        "calls.compiler_helpers"
+      ],
+      "proposal": "Unsigned long left/right shifts with counts below width including the 15/16/17 boundary; signed long shifts avoided where implementation-defined; multiword shift emission recorded per compiler",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "dense_switch",
+      "path": "examples/msc6_constructs/dense_switch.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "flow.switch",
+        "emitted.switch_jump_table"
+      ],
+      "proposal": "Dense consecutive case range (e.g. 0..11) sized to plausibly elicit an indirect jump table per compiler; the cell is only an emitted witness if binary/IR inspection under the exact profile shows table dispatch -- a compare-chain emission still covers flow.switch but leaves emitted.switch_jump_table unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "cond_side_effects",
+      "path": "examples/msc6_constructs/cond_side_effects.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "flow.short_circuit",
+        "calls.composition",
+        "flow.if_else"
+      ],
+      "proposal": "&& and || chains where later operands are calls with observable global side effects, proving evaluation order and short-circuit suppression; existing sources only have pure-load conditions",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "variadic_args",
+      "path": "examples/msc6_constructs/variadic_args.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "calls.variadic",
+        "calls.direct"
+      ],
+      "proposal": "Bounded variadic callee using stdarg.h with sentinel-terminated scalar arguments of mixed width; checks caller cleanup and argument transport, not a printf port",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "bounded_recursion",
+      "path": "examples/msc6_constructs/bounded_recursion.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "calls.recursion",
+        "flow.if_else"
+      ],
+      "proposal": "Depth-bounded recursion (e.g. recursive gcd or depth-limited sum) with a base case observed through globals; frame depth kept small and deterministic",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "explicit_far_abi",
+      "path": "examples/msc6_constructs/explicit_far_abi.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "abi.far",
+        "calls.far",
+        "pointer.far_data",
+        "pointer.far_function",
+        "pointer.near_far_conversion"
+      ],
+      "proposal": "Explicit far/near qualified pointers and functions under the small model: far data read/write through a far pointer, far call and far function pointer transport, segment preservation; run under small and also the large subset to contrast defaults",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-large",
+        "bc31-large",
+        "wtc11-small",
+        "wtc11-large"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "nested_struct",
+      "path": "examples/msc6_constructs/nested_struct.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.struct",
+        "struct.nested",
+        "struct.array_member",
+        "struct.pointer_member",
+        "struct.field_address"
+      ],
+      "proposal": "Struct containing a nested struct, an array member and a pointer member; field addressing through both object and pointer; layout probe evidence recorded separately, padding not an oracle",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "union_widths",
+      "path": "examples/msc6_constructs/union_widths.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "types.union",
+        "union.byte_word_long_members",
+        "union.nested_in_struct",
+        "union.array_member",
+        "union.same_member_store_load"
+      ],
+      "proposal": "Union with byte/word/long members and a union nested in a struct; same-member store/load plus the per-compiler overlay pattern already used by enum_union_overlay; extends coverage beyond the 2-byte case",
+      "target_defined": "member overlay reads verified per compiler at baseline",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "bitfield_signed",
+      "path": "examples/msc6_constructs/bitfield_signed.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "bitfield.signed_int",
+        "bitfield.width_one",
+        "bitfield.intermediate_width",
+        "bitfield.read_sign_extension",
+        "bitfield.increment_decrement"
+      ],
+      "proposal": "Explicit signed int bitfields including width-1 and intermediate widths; read sign extension observed; allocation-boundary packing recorded by the layout probe rather than assumed",
+      "target_defined": "signed bitfield extension and packing are target-defined; requires probes/bitfield_layout.c first",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "enum_variants",
+      "path": "examples/msc6_constructs/enum_variants.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "enum.explicit_values",
+        "enum.mixed_explicit_implicit",
+        "enum.negative",
+        "enum.sparse",
+        "enum.typedef",
+        "enum.struct_member",
+        "enum.integer_conversion"
+      ],
+      "proposal": "Explicit, mixed, negative and sparse enum values used as parameters, returns, struct members and switch selectors; sizeof(enum) recorded by probes/aggregate_layout.c",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "pointer_ops",
+      "path": "examples/msc6_constructs/pointer_ops.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "pointer.increment_decrement",
+        "pointer.scaled_arithmetic",
+        "pointer.same_array_difference",
+        "pointer.pointer_to_pointer",
+        "pointer.null_comparison",
+        "array.pointer_iteration",
+        "pointer.void_conversion"
+      ],
+      "proposal": "Pointer ++/-- and scaled arithmetic within one array, same-array pointer difference, pointer-to-pointer indirection, null comparison without dereference, void* round trip of object pointers only",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "array_init",
+      "path": "examples/msc6_constructs/array_init.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "array.byte_elements",
+        "array.word_elements",
+        "array.long_elements",
+        "array.partial_initializer",
+        "array.zero_initializer",
+        "array.string_initializer",
+        "array.local",
+        "array.global",
+        "array.static_local",
+        "array.single_element"
+      ],
+      "proposal": "Initializers for byte/word/long element arrays, partial and zero initializers, string initializer, across local/global/static storage; verifies stored initializer bytes, not codegen guesses",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "library_call_boundary",
+      "path": "examples/msc6_constructs/library_call_boundary.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "runtime_case",
+      "batch": null,
+      "oracle": "exit_code_255",
+      "source_features": [
+        "calls.library_boundary"
+      ],
+      "proposal": "One or two common runtime calls whose bodies are signature-matched and excluded, checking preserved call arguments/results/effects only",
+      "dependency": "verified binary-signature matching for the linked runtime helpers; blocked until that boundary exists -- admitted obligation, blocked witness",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "wtc11-small"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "probe_char_signedness",
+      "path": "examples/compiler_coverage/probes/char_signedness.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "compile_probe",
+      "batch": null,
+      "oracle": "compile_time_assert",
+      "source_features": [
+        "abi.default_plain_char_signedness",
+        "types.plain_char"
+      ],
+      "proposal": "Compile-time record of plain char signedness per compiler (CHAR_MIN sign or equivalent compile-time encoding); decides types.plain_char admission without guessing",
+      "profiles": [
+        "msc51-probe",
+        "bc31-probe",
+        "wtc11-probe"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "probe_bitfield_layout",
+      "path": "examples/compiler_coverage/probes/bitfield_layout.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "compile_probe",
+      "batch": null,
+      "oracle": "compile_time_assert",
+      "source_features": [
+        "bitfield.target_layout",
+        "bitfield.allocation_unit_boundary",
+        "bitfield.plain_int_signedness"
+      ],
+      "proposal": "Per-compiler bitfield layout evidence: allocation unit, ordering, plain-int signedness; prerequisite for bitfield_neighbors/bitfield_signed expectations; never assume matching packing across compilers",
+      "profiles": [
+        "msc51-probe",
+        "bc31-probe",
+        "wtc11-probe"
+      ],
+      "roundtrip": "not_attempted"
+    },
+    {
+      "id": "probe_aggregate_layout",
+      "path": "examples/compiler_coverage/probes/aggregate_layout.c",
+      "state": "planned_not_implemented",
+      "sha256": null,
+      "kind": "compile_probe",
+      "batch": null,
+      "oracle": "compile_time_assert",
+      "source_features": [
+        "struct.field_alignment_padding",
+        "struct.target_packing",
+        "union.alignment_size",
+        "enum.target_representation"
+      ],
+      "proposal": "Compile-time record of struct member offsets/padding for the mixed-width fixture shapes, union alignment/size, and sizeof(enum); complements model.c pointer-width probe",
+      "profiles": [
+        "msc51-probe",
+        "bc31-probe",
+        "wtc11-probe"
+      ],
+      "roundtrip": "not_attempted"
+    }
+  ],
+  "cells": [
+    {
+      "id": "values.word_compare",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "types.signed_int",
+        "types.unsigned_int",
+        "operations.comparison"
+      ],
+      "required_input": "signed and unsigned int pairs at -32768/-2/0/5/7/32767 and 32768/65535; unsigned wrap add 65535+1",
+      "required_observation": "per-check exit codes distinguish each relational outcome; wrap result 0 observed; 255 pass",
+      "witness": "word_comparisons",
+      "desired_emitted": "signed jl/jge-family vs unsigned jb/jae-family branches selecting per operator; mask materialization kept; no helper",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "invert one comparison polarity or signedness; harness must detect deviation from the declared oracle (exit 255 pass; deliberate corrupt variants exit 1..N)"
+    },
+    {
+      "id": "values.byte_ops",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "types.signed_char",
+        "types.unsigned_char"
+      ],
+      "required_input": "signed/unsigned char pairs at -128/127/128/255 including shift/xor masks and promotion into int",
+      "required_observation": "exit codes; byte results observable at 128 and 255; truncation casts kept observable",
+      "witness": "char_boundaries",
+      "secondary_witnesses": [
+        "scalar_widths"
+      ],
+      "desired_emitted": "sign vs zero extension on widen (cbw/movsx-class), byte-register ops, explicit truncation",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "drop a truncation or use the wrong extension direction; boundary inputs must expose it"
+    },
+    {
+      "id": "values.plain_char_probe",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "undecided",
+      "covers": [
+        "types.plain_char",
+        "abi.default_plain_char_signedness"
+      ],
+      "required_input": "plain char used only where signedness cannot change the result",
+      "required_observation": "probe records each compiler's default signedness",
+      "witness": "probe_char_signedness",
+      "desired_emitted": "none; compile-time fact only",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-probe",
+        "bc31-probe"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "n/a compile probe",
+      "note": "undecided in pilot.json; fixtures avoid depending on plain-char signedness until the probe resolves it"
+    },
+    {
+      "id": "values.short_ops",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "types.signed_short",
+        "types.unsigned_short"
+      ],
+      "required_input": "short/unsigned short subtraction and multiply; rotate inputs including bit 15",
+      "required_observation": "exit codes; rotate of 0x8000 must yield 1",
+      "witness": "scalar_widths",
+      "secondary_witnesses": [
+        "array_pointer_writes"
+      ],
+      "desired_emitted": "word arithmetic (16-bit short equals int width on this target), shl/shr pair forming the rotate",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "drop the >>15 term or widen/narrow one operation; results must differ"
+    },
+    {
+      "id": "values.long_compare",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "types.signed_long",
+        "types.unsigned_long"
+      ],
+      "required_input": "long and unsigned long pairs beyond 16-bit range: 100000/-2000, 300000/300001, extremes",
+      "required_observation": "exit codes per compare; signed and unsigned outcomes differ on the same bit patterns",
+      "witness": "word32_comparisons",
+      "secondary_witnesses": [
+        "mixed_width_compare",
+        "scalar_widths"
+      ],
+      "desired_emitted": "multiword compare: high-word compare then low-word tie-break, or a documented helper",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "compare low word only; 100000 vs -2000 must expose it"
+    },
+    {
+      "id": "values.boundaries",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "operations.arithmetic_boundaries"
+      ],
+      "required_input": "byte 127/128/255, word 32767/32768/65535, unsigned long carry across 65535",
+      "required_observation": "each boundary value flows through the operation and is checked, not folded away unobserved",
+      "witness": "word_comparisons",
+      "secondary_witnesses": [
+        "char_boundaries",
+        "ulong_carry",
+        "scalar_widths"
+      ],
+      "desired_emitted": "runtime arithmetic or provably-equal folding only with emitted evidence; constants not silently erased",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "replace one boundary constant; oracle must detect"
+    },
+    {
+      "id": "values.conversions",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "operations.conversion"
+      ],
+      "required_input": "explicit narrowing casts to char/short and implicit int->long promotion at -32768/-32769/2147483647",
+      "required_observation": "exit codes; sign-extension direction observable",
+      "witness": "mixed_width_compare",
+      "secondary_witnesses": [
+        "scalar_widths"
+      ],
+      "desired_emitted": "sign extension for signed widen, zero extension for unsigned, truncation on narrow",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "wrong extension direction; negative inputs must expose it"
+    },
+    {
+      "id": "values.shifts",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "operations.shift",
+        "operations.long_shift"
+      ],
+      "required_input": "word shifts including variable counts and shift by 15; long shifts by counts 1..31 crossing the word boundary",
+      "required_observation": "exit codes; bits crossing the word boundary observed",
+      "witness": "scalar_widths",
+      "secondary_witnesses": [
+        "long_shift"
+      ],
+      "desired_emitted": "shl/shr/sar or multiword shift sequence/helper; count handling recorded",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "use signed shift where unsigned required, or wrong count; boundary inputs expose it"
+    },
+    {
+      "id": "values.long_arith",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "operations.long_arith",
+        "operations.long_carry"
+      ],
+      "required_input": "in-range long/ulong multiply/divide/modulo; 0x0000FFFF+1 and 0x00010000-1 carry/borrow edges",
+      "required_observation": "exit codes per operation; carry into/out of high word observable",
+      "witness": "long_arith",
+      "secondary_witnesses": [
+        "ulong_carry",
+        "long_shift",
+        "scalar_widths"
+      ],
+      "desired_emitted": "adc/sbb carry chains plus helper call or inline multiword sequence for mul/div, recorded per compiler -- not assumed",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "drop carry/borrow propagation or corrupt a remainder; boundary inputs must expose it"
+    },
+    {
+      "id": "values.enums",
+      "axis": "source_feature",
+      "family": "values",
+      "scope": "admitted",
+      "covers": [
+        "types.enum",
+        "enum.implicit_values",
+        "enum.explicit_values",
+        "enum.mixed_explicit_implicit",
+        "enum.negative",
+        "enum.sparse",
+        "enum.typedef",
+        "enum.parameter_return",
+        "enum.integer_conversion",
+        "enum.struct_member",
+        "enum.switch"
+      ],
+      "required_input": "implicit, explicit, negative and sparse enum values through parameters, returns, struct members and switch selectors",
+      "required_observation": "exit codes; enum-as-int-width transport observable; sizeof(enum) recorded by probe",
+      "witness": "enum_union_overlay",
+      "secondary_witnesses": [
+        "enum_variants",
+        "probe_aggregate_layout"
+      ],
+      "desired_emitted": "enum carried as int-width value; switch dispatch compare chain or table, unverified",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "remap one enumerator value; checks must fail",
+      "target_defined": "sizeof(enum) representation recorded per compiler by probe_aggregate_layout"
+    },
+    {
+      "id": "storage.arrays",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "storage.array",
+        "array.single_element",
+        "array.multi_element",
+        "array.byte_elements",
+        "array.word_elements",
+        "array.long_elements",
+        "array.variable_index",
+        "array.local",
+        "array.global",
+        "array.parameter_decay"
+      ],
+      "required_input": "byte/word/long element arrays, variable indices, zero-count loops, local and global storage, decay to pointer parameter",
+      "required_observation": "array contents observed through exit checks",
+      "witness": "array_pointer_writes",
+      "secondary_witnesses": [
+        "struct_array_fields",
+        "array_init",
+        "globals_statics"
+      ],
+      "desired_emitted": "scaled indexed addressing per element width; DS-relative globals vs BP-relative locals",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "shift one index or stride; must be detected"
+    },
+    {
+      "id": "storage.initializers",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "array.partial_initializer",
+        "array.zero_initializer",
+        "array.string_initializer",
+        "array.static_local",
+        "struct.initializer"
+      ],
+      "required_input": "partial/zero/string initializers across local, global and static storage",
+      "required_observation": "stored initializer bytes checked, including implicit zero fill",
+      "witness": "array_init",
+      "secondary_witnesses": [
+        "globals_statics"
+      ],
+      "desired_emitted": "initialized data emitted to the data segment or startup stores, per compiler",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "corrupt one initializer byte or zero-fill bound; must be detected"
+    },
+    {
+      "id": "storage.pointer_alias",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "storage.pointer_write",
+        "storage.overlapping_aliases",
+        "pointer.same_object_alias",
+        "pointer.disjoint_objects",
+        "pointer.local_address_argument",
+        "array.same_buffer_read_write",
+        "array.disjoint_buffers"
+      ],
+      "required_input": "same-object alias swap_ptrs(&a,&a), overlapping copies both directions, disjoint buffer writes, local addresses passed as arguments",
+      "required_observation": "post-copy contents checked elementwise; readback after aliased store observed",
+      "witness": "array_pointer_writes",
+      "secondary_witnesses": [
+        "multidim_alias"
+      ],
+      "desired_emitted": "stores/loads through pointer operands not reordered across aliases; overlap loop order preserved",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "reverse copy order or cache across the alias; overlapping cases must expose it"
+    },
+    {
+      "id": "storage.pointer_ops",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "pointer.increment_decrement",
+        "pointer.scaled_arithmetic",
+        "pointer.same_array_difference",
+        "pointer.pointer_to_pointer",
+        "pointer.null_comparison",
+        "pointer.array_decay",
+        "array.pointer_iteration",
+        "pointer.void_conversion",
+        "operations.pointer_arithmetic"
+      ],
+      "required_input": "++/-- and scaled arithmetic within one array, same-array difference, pointer-to-pointer, null comparison, void* round trip of object pointers",
+      "required_observation": "element selection and difference results checked",
+      "witness": "pointer_ops",
+      "secondary_witnesses": [
+        "array_pointer_writes",
+        "scalar_widths"
+      ],
+      "desired_emitted": "stride-scaled pointer arithmetic; no out-of-object dereference",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "wrong element scale or off-by-one on ++; must be detected"
+    },
+    {
+      "id": "storage.multidim",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "array.multidimensional",
+        "pointer.pointer_to_array",
+        "array.first_last_valid_index"
+      ],
+      "required_input": "2-D array, pointer-to-row parameter, variable row/column indices, first/last valid elements",
+      "required_observation": "element readback including same-array alias store; in-bounds only",
+      "witness": "multidim_alias",
+      "desired_emitted": "row-stride multiply plus column index addressing",
+      "emitted_evidence": "unverified",
+      "emitted_note": "msc51-small COD corroboration only: row stride 8 emitted as shl bx,3, column shl ax,1 (starter-msc51-20261006); bc31 lane unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "change row stride or store destination; must be detected"
+    },
+    {
+      "id": "storage.struct_access",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "types.struct",
+        "struct.single_field",
+        "struct.mixed_field_widths",
+        "struct.mixed_signedness",
+        "struct.pass_by_pointer",
+        "struct.array_element",
+        "struct.local",
+        "struct.field_address",
+        "struct.nested",
+        "struct.array_member",
+        "struct.pointer_member",
+        "array.struct_elements"
+      ],
+      "required_input": "struct objects via pointer, array element, nested member, array member and pointer member",
+      "required_observation": "named-field checks; padding never an oracle",
+      "witness": "struct_array_fields",
+      "secondary_witnesses": [
+        "nested_struct",
+        "struct_value_abi"
+      ],
+      "desired_emitted": "field offsets/strides consistent with the recorded layout probe",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "swap two field offsets; must be detected"
+    },
+    {
+      "id": "storage.struct_value",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "struct.pass_by_value",
+        "struct.return_by_value",
+        "struct.assignment_copy"
+      ],
+      "required_input": "mixed-width struct passed by value, returned by value, assigned to another object",
+      "required_observation": "named fields of the destination checked; caller input object unchanged",
+      "witness": "struct_value_abi",
+      "desired_emitted": "stack copy or hidden result storage as emitted; convention established by the binary, not prescribed",
+      "emitted_evidence": "unverified",
+      "emitted_note": "msc51-small COD corroboration only: 8-byte MixRec returned via movsw x4 into static $T20001 with ax=OFFSET (starter-msc51-20261006); bc31 lane unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "corrupt a returned field in flight or skip the copy; must be detected"
+    },
+    {
+      "id": "storage.bitfields",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "types.bitfield",
+        "bitfield.unsigned_int",
+        "bitfield.signed_int",
+        "bitfield.width_one",
+        "bitfield.intermediate_width",
+        "bitfield.adjacent_fields",
+        "bitfield.write_preserves_neighbors",
+        "bitfield.ordinary_field_neighbors",
+        "bitfield.compound_update",
+        "bitfield.increment_decrement",
+        "bitfield.read_sign_extension"
+      ],
+      "required_input": "adjacent unsigned int bitfields, explicit signed int width-1 and intermediate widths, in-range values only",
+      "required_observation": "one-field updates leave neighbors and the ordinary member unchanged; signed reads observe extension",
+      "witness": "bitfield_neighbors",
+      "secondary_witnesses": [
+        "bitfield_signed"
+      ],
+      "desired_emitted": "mask+shift read-modify-write preserving neighbors",
+      "emitted_evidence": "unverified",
+      "emitted_note": "msc51-small COD corroboration only: single 16-bit storage word, and/or RMW masks preserve neighbors (starter-msc51-20261006); bc31 lane unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "clear a neighbor bitfield or ordinary member; must be detected",
+      "target_defined": "layout recorded by probe_bitfield_layout per compiler before expectations are frozen"
+    },
+    {
+      "id": "storage.unions",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "types.union",
+        "union.same_member_store_load",
+        "union.character_representation_access",
+        "union.byte_word_long_members",
+        "union.nested_in_struct",
+        "union.array_member"
+      ],
+      "required_input": "byte/word/long member writes then reads through the same and overlay members; union nested in struct",
+      "required_observation": "overlay result (0x1234-style) and same-member round trips observed",
+      "witness": "enum_union_overlay",
+      "secondary_witnesses": [
+        "union_widths"
+      ],
+      "desired_emitted": "same-address accesses at differing widths",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "swap byte order of the overlay; must be detected",
+      "target_defined": "overlay reads are implementation-defined; verified per compiler at baseline, not assumed portable"
+    },
+    {
+      "id": "storage.globals",
+      "axis": "source_feature",
+      "family": "storage",
+      "scope": "admitted",
+      "covers": [
+        "storage.global",
+        "storage.static_local"
+      ],
+      "required_input": "globals and initialized arrays read/written across calls; function-local static across two calls",
+      "required_observation": "bump_static returns 12 then 14; global mutations observed by later checks",
+      "witness": "globals_statics",
+      "secondary_witnesses": [
+        "sortdemo_interactions"
+      ],
+      "desired_emitted": "DS-relative global addressing; static local in data storage not stack",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "allocate the static on stack or drop a store; downstream checks must fail"
+    },
+    {
+      "id": "flow.if_else",
+      "axis": "source_feature",
+      "family": "flow",
+      "scope": "admitted",
+      "covers": [
+        "flow.if_else",
+        "flow.early_return"
+      ],
+      "required_input": "if/else chains with early returns inside loops and multiple return points",
+      "required_observation": "branch-taken outcomes checked per path; found-index and fallthrough results",
+      "witness": "branches_loops",
+      "secondary_witnesses": [
+        "word_comparisons",
+        "struct_array_fields"
+      ],
+      "desired_emitted": "branch chain preserving test order and polarity; multiple exits",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "invert one branch polarity or drop the early exit; must be detected"
+    },
+    {
+      "id": "flow.loops",
+      "axis": "source_feature",
+      "family": "flow",
+      "scope": "admitted",
+      "covers": [
+        "flow.for",
+        "flow.while",
+        "flow.do_while",
+        "flow.break",
+        "flow.continue",
+        "flow.loop_carried_state",
+        "array.nested_loops"
+      ],
+      "required_input": "for/while/do-while, nested loops, break/continue, loop-carried accumulators",
+      "required_observation": "accumulator results prove iteration counts and carried state",
+      "witness": "nested_loop_goto",
+      "secondary_witnesses": [
+        "branches_loops",
+        "sortdemo_interactions",
+        "array_pointer_writes"
+      ],
+      "desired_emitted": "backedges and joins preserved; loop-carried values live",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "off-by-one a bound or drop a continue; totals must differ"
+    },
+    {
+      "id": "flow.goto",
+      "axis": "source_feature",
+      "family": "flow",
+      "scope": "admitted",
+      "covers": [
+        "flow.goto"
+      ],
+      "required_input": "backward gotos forming a manual loop",
+      "required_observation": "accumulated total proves goto path taken",
+      "witness": "nested_loop_goto",
+      "desired_emitted": "unconditional jumps to existing blocks; no fabricated structure needed for the oracle",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "retarget one goto; total must differ"
+    },
+    {
+      "id": "flow.switch",
+      "axis": "source_feature",
+      "family": "flow",
+      "scope": "admitted",
+      "covers": [
+        "flow.switch"
+      ],
+      "required_input": "grouped cases 1/2 plus default (existing); dense consecutive cases (planned); enum-typed selector",
+      "required_observation": "each case arm and default observed",
+      "witness": "branches_loops",
+      "secondary_witnesses": [
+        "dense_switch",
+        "enum_union_overlay"
+      ],
+      "desired_emitted": "compare chain OR table dispatch; recorded, not assumed",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "swap two case targets; must be detected"
+    },
+    {
+      "id": "emitted.jump_table",
+      "axis": "emitted_pattern",
+      "family": "flow",
+      "scope": "admitted",
+      "covers": [
+        "emitted.switch_jump_table"
+      ],
+      "required_input": "dense consecutive case range sized to plausibly elicit a table",
+      "required_observation": "all case arms correct AND the table mechanism confirmed in the emitted binary",
+      "witness": "dense_switch",
+      "desired_emitted": "indexed indirect jump through a case table",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "corrupt one table entry; must be detected",
+      "note": "never inferred from the presence of a switch; if both compilers emit compare chains this cell is recorded as not-emitted, not covered"
+    },
+    {
+      "id": "flow.short_circuit",
+      "axis": "source_feature",
+      "family": "flow",
+      "scope": "admitted",
+      "covers": [
+        "flow.short_circuit"
+      ],
+      "required_input": "&& / || chains, pure loads (existing) and side-effecting calls (planned)",
+      "required_observation": "short-circuit suppression observable through call side effects",
+      "witness": "cond_side_effects",
+      "secondary_witnesses": [
+        "sortdemo_interactions",
+        "array_pointer_writes"
+      ],
+      "desired_emitted": "sequential branches skipping later operands",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "evaluate a suppressed operand; side-effect counter must expose it"
+    },
+    {
+      "id": "calls.direct",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.direct"
+      ],
+      "required_input": "direct calls with 0-3 scalar arguments",
+      "required_observation": "results checked per call",
+      "witness": "call_composition",
+      "secondary_witnesses": [
+        "word_comparisons",
+        "array_pointer_writes",
+        "branches_loops"
+      ],
+      "desired_emitted": "near call/ret, argument stack transport",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "drop or reorder one argument; must be detected"
+    },
+    {
+      "id": "calls.indirect",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.indirect"
+      ],
+      "required_input": "function-pointer parameter called twice; conditional target selection",
+      "required_observation": "apply_twice results prove both indirect calls ran",
+      "witness": "call_composition",
+      "desired_emitted": "indirect call through the pointer operand; call-live state preserved",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "retarget one indirect call; results must differ"
+    },
+    {
+      "id": "calls.composition",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.composition",
+        "calls.pending_arguments_across_call"
+      ],
+      "required_input": "argument expression containing a call; pending arguments live across it; callback state across the sort",
+      "required_observation": "nested_arguments and DrawTime results prove argument evaluation and call-live state",
+      "witness": "call_composition",
+      "secondary_witnesses": [
+        "sortdemo_interactions"
+      ],
+      "desired_emitted": "argument evaluation order/pending transport preserved (whichever order the ABI fixes)",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "clobber a pending argument across the inner call; must be detected"
+    },
+    {
+      "id": "calls.pointer_return",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.pointer_return"
+      ],
+      "required_input": "functions returning pointers into caller-owned arrays",
+      "required_observation": "read and write through the returned pointer observed",
+      "witness": "array_pointer_writes",
+      "secondary_witnesses": [
+        "scalar_widths"
+      ],
+      "desired_emitted": "pointer result in the ABI return register(s) for the model",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "return base instead of offset; checks must fail"
+    },
+    {
+      "id": "calls.aggregate",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.aggregate_abi"
+      ],
+      "required_input": "struct argument and return value crossing the call boundary",
+      "required_observation": "field-level checks both directions; caller input unchanged",
+      "witness": "struct_value_abi",
+      "desired_emitted": "whatever hidden-result/copy convention the binary uses; recorded per compiler",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "skip the copy or corrupt the hidden result slot; must be detected"
+    },
+    {
+      "id": "calls.recursion",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.recursion"
+      ],
+      "required_input": "depth-bounded self-calls with base case",
+      "required_observation": "recursive result and observed call depth",
+      "witness": "bounded_recursion",
+      "desired_emitted": "self call building frames; termination checked",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "remove the base case or an argument; must be detected"
+    },
+    {
+      "id": "calls.variadic",
+      "axis": "source_feature",
+      "family": "calls",
+      "scope": "admitted",
+      "covers": [
+        "calls.variadic"
+      ],
+      "required_input": "varying argument counts with sentinel termination and mixed widths",
+      "required_observation": "per-call totals prove correct argument walks",
+      "witness": "variadic_args",
+      "desired_emitted": "caller cleanup after variable pushes; callee walks the pushed range",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "wrong arg count or width walk; totals must differ"
+    },
+    {
+      "id": "calls.compiler_helpers",
+      "axis": "boundary",
+      "family": "boundaries",
+      "scope": "admitted",
+      "covers": [
+        "calls.compiler_helpers"
+      ],
+      "required_input": "long arithmetic/shift/struct-copy operations that plausibly emit helper calls",
+      "required_observation": "helper calls preserved with arguments/results/effects; not deleted as noise",
+      "witness": "long_arith",
+      "secondary_witnesses": [
+        "ulong_carry",
+        "long_shift",
+        "struct_value_abi",
+        "csmith_seed2"
+      ],
+      "desired_emitted": "compiler runtime helper calls as emitted (per compiler)",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "delete or retarget a helper call; results must differ",
+      "note": "only helpers actually used by these cases are in scope; not a universal runtime-library project"
+    },
+    {
+      "id": "calls.library_boundary",
+      "axis": "boundary",
+      "family": "boundaries",
+      "scope": "admitted",
+      "covers": [
+        "calls.library_boundary"
+      ],
+      "required_input": "one or two common runtime calls (e.g. memory/string helpers)",
+      "required_observation": "call arguments, results and visible effects preserved; matched bodies excluded",
+      "witness": "library_call_boundary",
+      "desired_emitted": "library call preserved with correct argument transport",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "drop a call argument or swap callee; must be detected",
+      "dependency": "verified binary-signature matching; admitted obligation with a currently blocked witness"
+    },
+    {
+      "id": "workload.csmith",
+      "axis": "boundary",
+      "family": "boundaries",
+      "scope": "admitted",
+      "covers": [
+        "workload.csmith_seed2"
+      ],
+      "required_input": "pinned seed-2 source (sha256 3538...) plus its five runtime headers",
+      "required_observation": "exit-0 checksum oracle; runtime helpers bounded by verified signatures",
+      "witness": "csmith_seed2",
+      "desired_emitted": "whatever the pinned source emits; runtime boundary handled by signature matching, not name-only exclusion",
+      "emitted_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "corrupt the checksum accumulation; must be detected",
+      "dependency": "runtime signature catalog; --max-funcs 1 does not bound linked runtime size (67 helpers observed)"
+    },
+    {
+      "id": "model.small",
+      "axis": "configuration",
+      "family": "dos_model_abi",
+      "scope": "admitted",
+      "covers": [
+        "model.small",
+        "abi.near",
+        "pointer.near_data",
+        "pointer.near_function",
+        "compiler.msc5"
+      ],
+      "required_input": "whole runtime corpus compiled small model; probe asserts the model macro",
+      "required_observation": "M_I86SM-style probe asserts; all runtime round trips under this profile",
+      "witness": "abi_model_probe",
+      "secondary_witnesses": [
+        "word_comparisons",
+        "array_pointer_writes",
+        "branches_loops",
+        "call_composition"
+      ],
+      "desired_emitted": "near code/data defaults: near call/ret, 16-bit DS-relative data pointers",
+      "emitted_evidence": "unverified",
+      "config_evidence": "unverified",
+      "profiles": [
+        "msc51-small",
+        "bc31-small",
+        "msc51-probe",
+        "bc31-probe"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "compile under the wrong model; probe asserts must fail loudly"
+    },
+    {
+      "id": "model.large",
+      "axis": "configuration",
+      "family": "dos_model_abi",
+      "scope": "admitted",
+      "covers": [
+        "model.large",
+        "abi.far",
+        "calls.far",
+        "pointer.far_data",
+        "pointer.far_function",
+        "pointer.near_far_conversion"
+      ],
+      "required_input": "targeted subset only: globals_statics, call_composition, array_pointer_writes, explicit_far_abi",
+      "required_observation": "far call/return and far data transport observed end to end; segment preservation",
+      "witness": "explicit_far_abi",
+      "secondary_witnesses": [
+        "globals_statics",
+        "call_composition",
+        "array_pointer_writes"
+      ],
+      "desired_emitted": "far call/retf, seg:off pointer transport, far loads/stores",
+      "emitted_evidence": "unverified",
+      "config_evidence": "unverified",
+      "profiles": [
+        "msc51-large",
+        "bc31-large",
+        "msc51-small",
+        "bc31-small"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "truncate a far pointer to near or drop the segment half; far-data checks must fail",
+      "note": "targeted subset within budget, not a duplicate of every small-model case; tiny/medium/compact/huge remain deferred"
+    },
+    {
+      "id": "config.target_layout",
+      "axis": "configuration",
+      "family": "dos_model_abi",
+      "scope": "admitted",
+      "covers": [
+        "struct.field_alignment_padding",
+        "struct.target_packing",
+        "union.alignment_size",
+        "enum.target_representation",
+        "bitfield.target_layout",
+        "bitfield.allocation_unit_boundary"
+      ],
+      "required_input": "compile-time probes: model/widths (existing), aggregate/enum layout and bitfield layout (planned)",
+      "required_observation": "per-compiler recorded facts; probe failure is loud, not silently admitted",
+      "witness": "abi_model_probe",
+      "secondary_witnesses": [
+        "probe_aggregate_layout",
+        "probe_bitfield_layout",
+        "probe_char_signedness"
+      ],
+      "desired_emitted": "none (compile-time)",
+      "emitted_evidence": "unverified",
+      "config_evidence": "unverified",
+      "profiles": [
+        "msc51-probe",
+        "bc31-probe",
+        "wtc11-probe"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "assert a wrong layout fact; probe must fail compilation"
+    },
+    {
+      "id": "config.optimization",
+      "axis": "configuration",
+      "family": "optimization",
+      "scope": "admitted",
+      "covers": [
+        "compiler.optimization_variants"
+      ],
+      "required_input": "selected witnesses only: word_comparisons, branches_loops, scalar_widths",
+      "required_observation": "same round-trip oracle under the optimization-on profile; emitted differences (folding, strength reduction, register/spill) recorded, not assumed",
+      "witness": "word_comparisons",
+      "secondary_witnesses": [
+        "branches_loops",
+        "scalar_widths"
+      ],
+      "desired_emitted": "representative optimized codegen; if a construct is optimized away it is not an emitted witness",
+      "emitted_evidence": "unverified",
+      "config_evidence": "unverified",
+      "profiles": [
+        "msc51-small-opt",
+        "bc31-small-opt"
+      ],
+      "roundtrip": "not_attempted",
+      "corruption_control": "same negative controls as the baseline profile; optimization never waives the oracle",
+      "note": "representative verified configurations on selected witnesses; not a compiler-exhaustive optimization matrix"
+    }
+  ],
+  "large_model_subset": [
+    "globals_statics",
+    "call_composition",
+    "array_pointer_writes",
+    "explicit_far_abi"
+  ],
+  "optimization_subset": [
+    "word_comparisons",
+    "branches_loops",
+    "scalar_widths"
+  ],
+  "negative_controls": [
+    {
+      "id": "oracle_convention",
+      "applies_to": "all runtime cases",
+      "requirement": "acceptance is deviation-free match to the declared oracle: handwritten cases exit 255 on pass and 1..N on deliberate failure, csmith exits 0; a bare nonzero-vs-zero split is not the criterion",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    },
+    {
+      "id": "corrupt_return_value",
+      "applies_to": "every runtime case",
+      "requirement": "change a returned value; comparator must detect",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    },
+    {
+      "id": "corrupt_memory_write",
+      "applies_to": "every runtime case with observable stores",
+      "requirement": "drop or corrupt a store; comparator must detect",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    },
+    {
+      "id": "corrupt_branch_polarity",
+      "applies_to": "every runtime case with branches",
+      "requirement": "invert a branch; comparator must detect",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    },
+    {
+      "id": "corrupt_struct_field",
+      "applies_to": [
+        "struct_value_abi"
+      ],
+      "requirement": "corrupt a returned struct field; must be detected",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    },
+    {
+      "id": "corrupt_bitfield_neighbor",
+      "applies_to": [
+        "bitfield_neighbors",
+        "bitfield_signed"
+      ],
+      "requirement": "clear a neighbor bitfield or ordinary member; must be detected",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    },
+    {
+      "id": "corrupt_row_stride",
+      "applies_to": [
+        "multidim_alias"
+      ],
+      "requirement": "change a row stride or store destination; must be detected",
+      "lanes": [
+        "msc51",
+        "bc31"
+      ]
+    }
+  ],
+  "deferred": {
+    "note": "Inventory retained from examples/compiler_coverage/pilot.json and large.json. later = no selected witness in this frozen pilot; excluded = out of scope for this plan; undecided = target-defined pending probe. None of these may silently re-enter as covered.",
+    "later": [
+      "enum.zero",
+      "enum.duplicate_values",
+      "enum.array_element",
+      "pointer.huge_data",
+      "pointer.object_const",
+      "pointer.const_pointer",
+      "pointer.volatile_object",
+      "pointer.one_past_no_dereference",
+      "pointer.global_address_return",
+      "pointer.static_address_return",
+      "pointer.partial_overlap_bytes",
+      "pointer.array_of_pointers",
+      "pointer.struct_member",
+      "pointer.segment_boundary",
+      "pointer.huge_normalization",
+      "pointer.function_table_dispatch",
+      "array.pointer_elements",
+      "array.constant_index",
+      "array.far_storage",
+      "array.huge_storage",
+      "struct.global",
+      "struct.static_local",
+      "struct.self_referential_pointer",
+      "struct.bitfield_member",
+      "struct.union_member",
+      "struct.near_far_pointer_member",
+      "struct.copy_with_padding_ignored",
+      "union.change_member_then_read_new_member",
+      "union.struct_member",
+      "union.pointer_member",
+      "union.first_member_initializer",
+      "union.assignment_copy",
+      "union.pass_by_value",
+      "union.return_by_value",
+      "bitfield.full_storage_width",
+      "bitfield.mixed_signedness",
+      "bitfield.unnamed_padding",
+      "bitfield.unnamed_zero_width",
+      "bitfield.nested_struct",
+      "bitfield.comparison_promotion",
+      "bitfield.struct_copy",
+      "storage.const",
+      "storage.volatile",
+      "model.tiny",
+      "model.compact",
+      "model.medium",
+      "model.huge",
+      "abi.calling_convention_variants"
+    ],
+    "excluded": [
+      {
+        "id": "workload.unpacking",
+        "reason": "active plan: unpacking outside scope"
+      },
+      {
+        "id": "workload.matched_library_bodies",
+        "reason": "library bodies excluded; call ABI/arguments/results/effects remain required via calls.library_boundary and calls.compiler_helpers"
+      },
+      {
+        "id": "cpu.fpu387",
+        "reason": "active plan: FPU outside scope; scalar_widths keeps its float/double sections commented out"
+      },
+      {
+        "id": "workload.protected_mode",
+        "reason": "active plan: 16-bit real mode only"
+      },
+      {
+        "id": "workload.windows",
+        "reason": "original inventory exclusion retained; DOS real mode only"
+      },
+      {
+        "id": "workload.handwritten_assembly",
+        "reason": "active plan: deferred workloads excluded for this corpus"
+      },
+      {
+        "id": "workload.mixed_32bit_real_mode",
+        "reason": "active plan: 16-bit real mode only"
+      },
+      {
+        "id": "workload.ghidra_reko_parity",
+        "reason": "active plan: decompiler parity outside this corpus"
+      }
+    ],
+    "undecided": [
+      {
+        "id": "types.software_float",
+        "probe": null,
+        "note": "FPU-adjacent; needs a scope decision, not assumed in or out"
+      },
+      {
+        "id": "compiler.default_memory_model",
+        "probe": "abi_model_probe",
+        "note": "probe records the actual default per compiler; profiles are always explicit"
+      },
+      {
+        "id": "enum.values_outside_int_range_extension",
+        "probe": null,
+        "note": "extension; no witness proposed"
+      },
+      {
+        "id": "union.inactive_member_read_extension",
+        "probe": "probe_aggregate_layout",
+        "note": "the byte/word overlay pattern is admitted as target-defined (verified per compiler); broader inactive-member reads stay undecided"
+      },
+      {
+        "id": "bitfield.plain_int_signedness",
+        "probe": "probe_bitfield_layout",
+        "note": "fixtures use explicit unsigned/signed int; plain-int bitfields avoided until probed"
+      },
+      {
+        "id": "bitfield.non_int_base_extension",
+        "probe": null,
+        "note": "extension; no witness proposed"
+      },
+      {
+        "id": "bitfield.signed_out_of_range_assignment",
+        "probe": null,
+        "note": "implementation-defined; avoided in fixtures"
+      },
+      {
+        "id": "pointer.integer_roundtrip_target_rules",
+        "probe": null,
+        "note": "target-defined; pointer_ops keeps object pointers only"
+      }
+    ]
+  },
+  "summary": {
+    "note": "Planning counts; recomputed by the private check script. Nothing here is a pass count.",
+    "sources_total": 36,
+    "sources_existing": 16,
+    "sources_planned_not_implemented": 19,
+    "sources_generated_retained": 1,
+    "runtime_sources": 32,
+    "compile_probes": 4,
+    "first_batch_cases": 16,
+    "ms_borland_case_pairs": 78,
+    "watcom_case_pairs_not_started": 40,
+    "cells": 40,
+    "admitted_cells": 39,
+    "undecided_cells": 1
+  }
+}

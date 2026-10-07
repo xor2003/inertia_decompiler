@@ -49,11 +49,11 @@ They do not relax its architecture or function-fix acceptance contract.
   requested); six concurrent copies reproduced deadline refusals. Keep these
   controls out of the broad unit inventory, without raising proof timeouts.
   The unit and relational lanes print failed node IDs, phases and existing
-  tracebacks immediately through `scripts.pytest_live_failures`; final pytest
+  tracebacks immediately through `tools.dev.pytest_live_failures`; final pytest
   summaries and exit codes remain authoritative. Its subprocess integration
   checks run serially to avoid nesting an xdist pool inside the six-worker pool.
   Use `make ... PYTEST_WORKERS=6` to select six workers in both Make's focused
-  tests and the curated pipeline, or pass `scripts/test_pipeline.py
+  tests and the curated pipeline, or pass `tools/dev/test_pipeline.py
   --pytest-workers 6` directly. The pipeline accepts 1-6 and defaults to three;
   `--msc6-workers` controls external compiler constructs, not pytest workers.
 - Pass the selected project interpreter to Pyright, for example
@@ -104,7 +104,7 @@ iteration is a coherent edit plus its focused regression, not each keystroke.
 Example (Python processes inherit nice 10 and the configured JIT setting):
 
 ```sh
-rtk proxy nice -n 10 make lint-iteration PYTHON=./.venv/bin/python FILES="tools/dosunit/owner.py angr_platforms/tests/test_owner.py"
+rtk proxy nice -n 10 make lint-iteration PYTHON=./.venv/bin/python FILES="tools/dosunit/owner.py tools/dosunit/tests/test_owner.py"
 ```
 
 Do not run broad MyPy, Pyright, mypyc, Vulture, Basta, or Lizard after every
@@ -212,7 +212,7 @@ in logs; report scope, exit status, counts and actionable failures only.
 
 ### Token-Efficient Command Output
 
-- View saved logs with `rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python scripts/compact_paths.py --legend < run.log`. One pass abbreviates all supported paths: `X16/`, `TEST/`, `DU/`, `REF/`, `SCRIPTS/`, and repository-root `./`. These are display aliases, not filesystem paths. Keep full raw logs and use canonical paths in commands, links and proof receipts; never feed compact output into machine validation.
+- View saved logs with `rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python tools/dev/compact_paths.py --legend < run.log`. One pass abbreviates all supported paths: `X16/`, `TEST/`, `DU/`, `REF/`, `SCRIPTS/`, and repository-root `./`. These are display aliases, not filesystem paths. Keep full raw logs and use canonical paths in commands, links and proof receipts; never feed compact output into machine validation.
 
 - Keep Make's quiet recipe mode enabled; use `make Q=` only when the expanded command itself is needed for diagnosis.
 - Keep `RUFF_OUTPUT_FLAGS`, `MYPY_OUTPUT_FLAGS`, `PYRIGHT_OUTPUT_FLAGS`, `PYTEST_OUTPUT_FLAGS`, and `LIZARD_OUTPUT_FLAGS` compact by default; override one explicitly only when deeper diagnostics are needed.
@@ -237,7 +237,7 @@ in logs; report scope, exit status, counts and actionable failures only.
 
 ### Context / Compaction Handoff
 
-For shorter displayed paths, use `scripts/compact_paths.py` on saved logs;
+For shorter displayed paths, use `tools/dev/compact_paths.py` on saved logs;
 `--legend` explains the aliases (see also Token-Efficient Command Output).
 Keep canonical paths in commands, source, raw logs and proof receipts. Do not
 rename modules just to shorten a report.

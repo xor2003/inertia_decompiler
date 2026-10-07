@@ -9,7 +9,7 @@ survive. Routine pytest is now green: 3,898 passed in 206.58s. All seven MS C
 round trips pass, with no failed or timed-out pipeline lanes. Global Ruff and
 full-suite acceptance remain open.
 
-The subsequent [full audit](p0-full-suite-post-bios-20260911.md) confirms this
+The subsequent full audit (historical checkpoint) confirms this
 BIOS test passes: 11,750 passed, 21 failed elsewhere, 170 skipped. Source was
 stable and all 11,941 tests were accounted for. The historical checkpoints
 below that say the full suite was not refreshed describe their earlier state.

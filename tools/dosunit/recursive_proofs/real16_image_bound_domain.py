@@ -12,9 +12,10 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import Architecture, FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import initial_state
+from tools.dosunit.compare.real16_call_contracts import initial_state
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import Architecture, FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load
 from tools.dosunit.recursive_proofs.loaded_byte_native_transition import (
     _check_states,
@@ -44,7 +45,6 @@ from tools.dosunit.recursive_proofs.real16_native_effect_binding import (
 from tools.dosunit.recursive_proofs.recursive_joint_admission import JointRefusal, derive_joint_frame_layout
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason, JointStepKind, JointSystem
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
-from tools.dosunit.register_state_relations import MachineState
 
 
 class BoundDomainReason(StrEnum):

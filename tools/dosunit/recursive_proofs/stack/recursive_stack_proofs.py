@@ -14,9 +14,10 @@ from typing import cast
 
 import z3
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import materialize_function
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.stack.recursive_stack_address_comparisons import (
     AddressComparisonEvidence,
     AddressComparisonResult,
@@ -51,7 +52,6 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_store_coordinates impo
     StoreCoordinateResult,
     normalize_push_coordinates,
 )
-from tools.dosunit.register_state_relations import MachineState
 
 
 class StackProofReason(StrEnum):

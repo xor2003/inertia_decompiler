@@ -12,12 +12,12 @@ from typing import Any, cast
 
 import z3
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.real16_call_contracts import initial_state, materialize_function
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import initial_state, materialize_function
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_relation import LoadedRelationLimits
-from tools.dosunit.register_state_relations import MachineState
-from tools.dosunit.ssa_output_lemmas import OutputEqualityResult, prove_output_equalities
+from tools.dosunit.ssa.ssa_output_lemmas import OutputEqualityResult, prove_output_equalities
 
 MAX_PROPOSAL_BYTES: int = 1048576
 MAX_PROPOSAL_NODES: int = 262144

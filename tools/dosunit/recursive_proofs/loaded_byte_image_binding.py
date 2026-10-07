@@ -16,12 +16,12 @@ from pathlib import Path
 
 import angr
 
-from tools.dosunit.flat32_pe_loader import InclusivePE
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import Architecture
-from tools.dosunit.real16_mz_load import image_from_mz_bytes, parse_mz
-from tools.dosunit.real16_replay_model import Real16Image
+from tools.dosunit.architectures.flat32_pe_loader import InclusivePE
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import Architecture
 from tools.dosunit.recursive_proofs.loaded_byte_relation import LoadedBytes, LoadedRelationLimits, snapshot_loaded_bytes
+from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes, parse_mz
+from tools.dosunit.runtime.real16_replay_model import Real16Image
 
 MAX_FILE_BYTES: int = 4 * 1024 * 1024
 MAX_MAPPING_RECORDS: int = 65536
@@ -120,7 +120,8 @@ def _intake(data: bytes, limits: LoadedRelationLimits) -> None:
 
 def _model_hash(architecture: Architecture) -> str:
     """Bind this factory, the authoritative MZ loader and installed CLE model."""
-    from tools.dosunit import flat32_pe_loader, real16_mz_load
+    from tools.dosunit.architectures import flat32_pe_loader
+    from tools.dosunit.runtime import real16_mz_load
 
     paths = (Path(__file__), Path(real16_mz_load.__file__), Path(flat32_pe_loader.__file__))
     document = {"version": "loaded-executable-binding-v1", "architecture": architecture.value,

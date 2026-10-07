@@ -26,7 +26,7 @@ original EXE + function catalog
 
 ## Implementation Steps
 
-1. Add `tools/dosunit/ir_edges.py`
+1. Add `tools/dosunit/architectures/ir_edges.py`
    - Discover original-side `BranchTarget` records through
      `project.factory.block(...).vex` and the x86-16 lifter-backed block
      decode.
@@ -44,7 +44,7 @@ original EXE + function catalog
    - Emit typed refusals for unsupported memory predicates, indirect jumps, and
      missing concrete function entries.
 
-2. Add `tools/dosunit/solver_slice.py`
+2. Add `tools/dosunit/catalog/solver_slice.py`
    - Solve only the selected branch predicate.
    - Materialize only the condition needed by the edge:
      - equality

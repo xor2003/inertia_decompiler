@@ -63,7 +63,7 @@ a separate active gate, so these results are scoped acceptance only.
 
 ## PE32 boot delivery: parent review (2026-09-30)
 
-Devin delivered only `tools/dosunit/pe32_program_boot.py` and its boot test
+Devin delivered only `tools/dosunit/runtime/pe32_program_boot.py` and its boot test
 owner: 43 worker controls. Exact worker-final copies are retained under
 `.cache/comparator-implementation/pe32-program-start/worker-final/`.
 Parent rechecked the complete worker-to-current delta: the boot test owner is
@@ -450,7 +450,7 @@ M6 scope. Sleep session88821 remains live with static-only ownership.
 
 Devin session22939 exited0; parent verified all8baseline source hashes unchanged
 and independently reproduced20staged controls in1.17s. Promoted to
-angr_platforms/tests/test_real16_program_file_copy.py, removing staged sys.path
+tools/dosunit/tests/test_real16_program_file_copy.py, removing staged sys.path
 hacks/E402 exemptions. Added a parent control for independent input/output byte
 budgets in one execution. Final cohort104passed/2.18s,3workers:21combined controls,
 existing input/output integration and pipeline inventory. Actual MZ/Unicorn
@@ -1012,7 +1012,7 @@ Parent independently reviewed complete wrapper/tests and corrected zero-budget
 entry: emit explicit UNKNOWN/compose_budget_exceeded evidence without invoking
 prior or macro engines. Strict public control monkeypatches both engines to fail
 if called and passes. Existing production call/region retry owner remains
-byte-identical; separate tools/dosunit/real16_macro_retry.py wraps it, and public
+byte-identical; separate tools/dosunit/compare/real16_macro_retry.py wraps it, and public
 consumer changes only its retry import. One shared remaining-time budget,
 existing attempts preserved, scoped SAT never COUNTEREXAMPLE, all modeled state
 retained. No additional binary lifting or environment bypass.

@@ -169,7 +169,7 @@ The proof cache is not a trusted input by default. It is built during the curren
 
 ### 1. Semantic Proof Cache
 
-Add `SemanticEqualityCache` in `tools/dosunit/straightline_ssa.py` or a small adjacent module if it grows.
+Add `SemanticEqualityCache` in `tools/dosunit/compare/straightline_ssa.py` or a small adjacent module if it grows.
 
 Responsibilities:
 

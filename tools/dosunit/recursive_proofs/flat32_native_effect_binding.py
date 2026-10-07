@@ -22,30 +22,26 @@ import capstone
 import pyvex
 import z3
 
-from tools.dosunit import (
-    binary_environment,
-    flat32_call_contracts,
-    flat32_call_lowering,
-    flat32_pe_loader,
-    flat32_replay,
-    ssa_provenance,
+from tools.dosunit.architectures import flat32_pe_loader
+from tools.dosunit.architectures.flat32 import flat32_register_architecture
+from tools.dosunit.compare import flat32_call_contracts, flat32_call_lowering
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.flat32_call_contracts import (
+    CallCompositionRefusal,
+    _initial_state,
+    _register_widths,
 )
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.binary_environment import (
+from tools.dosunit.compare.flat32_call_lowering import _accepted_jumpkind, _check_exits, _static_next
+from tools.dosunit.contracts import binary_environment
+from tools.dosunit.contracts.binary_environment import (
     external_effects,
     instruction_port_effect,
     instruction_requires_machine_state,
     requires_environment_contract,
 )
-from tools.dosunit.flat32_call_contracts import (
-    CallCompositionRefusal,
-    _initial_state,
-    _register_widths,
-)
-from tools.dosunit.flat32_call_lowering import _accepted_jumpkind, _check_exits, _static_next
-from tools.dosunit.flat32_replay import _instruction_scope
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs import (
     loaded_byte_image_binding,
     loaded_byte_native_transition,
@@ -72,8 +68,10 @@ from tools.dosunit.recursive_proofs.native_model_hash_snapshot import (
 )
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import NativeBlockKind
 from tools.dosunit.recursive_proofs.recursive_joint_proof import strict_state_document
-from tools.dosunit.register_state_relations import MachineState
-from tools.dosunit.ssa_output_lemmas import OutputEqualityResult, prove_output_equalities
+from tools.dosunit.reporting import ssa_provenance
+from tools.dosunit.runtime import flat32_replay
+from tools.dosunit.runtime.flat32_replay import _instruction_scope
+from tools.dosunit.ssa.ssa_output_lemmas import OutputEqualityResult, prove_output_equalities
 
 MAX_NATIVE_REQUESTS: int = 4096
 MAX_NATIVE_BLOCK_BYTES: int = 4096
@@ -204,7 +202,7 @@ def flat32_native_binding_model_hash() -> str:
                                for module in owners if module.__file__ is not None],
                    "snapshot_owner": native_model_snapshot_owner_hash(),
                    "semantic": ssa_provenance._semantic_hash(),
-                   "registers": S._ssa_register_widths(),
+                   "registers": _register_widths(),
                    "packages": {name: version(name) for name in
                                 ("angr", "archinfo", "capstone", "cle", "pyvex", "z3-solver")}}
     return hashlib.sha256(canonical_json_bytes(description)).hexdigest()
@@ -318,7 +316,8 @@ def _effect(run: _Flat32BindingRun, row: Flat32NativeBlockRequest,
             raise _Flat32Refusal(Flat32BindingReason.DECODE, "flat32 arch lacks an instruction-pointer offset")
         kind = _check_lifted_control(irsb, int(ip_offset))
         lowered = S._lower_irsb(irsb, output_regs=(*reg_widths, "ip"),
-                                max_assignments_per_function=MAX_NATIVE_ASSIGNMENTS)
+                                max_assignments_per_function=MAX_NATIVE_ASSIGNMENTS,
+                                architecture=flat32_register_architecture())
         if isinstance(lowered, S.LowerFailure):
             raise _Flat32Refusal(Flat32BindingReason.DECODE, f"{lowered.reason}: {lowered.message}")
         if lowered.get("trap_exits") or external_effects(lowered):

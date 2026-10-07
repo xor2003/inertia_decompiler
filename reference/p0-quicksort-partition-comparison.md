@@ -36,7 +36,7 @@ repeated afterward.
 ### Root Cause Repaired; Quality Debt Remains
 
 The first corrupting consumer is
-`inertia_decompiler/cli_c_ast_rewrites.py::_simplify_structured_c_expressions`.
+`inertia.cli.cli_c_ast_rewrites::_simplify_structured_c_expressions`.
 Structural snapshots on one codegen instance show correct partition operands
 on entry and an array-address replacement on exit. This is not a JCC recovery
 failure. The legacy simplifier memoized widening analyses using bare node IDs,

@@ -16,7 +16,8 @@ from typing import cast
 
 import z3
 
-from tools.dosunit.proof_contracts import Architecture, FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_contracts import Architecture, FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs import loaded_byte_relation_proof as seed_owner
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load, ImageBindingRefusal
 from tools.dosunit.recursive_proofs.loaded_byte_native_transition import (
@@ -49,7 +50,6 @@ from tools.dosunit.recursive_proofs.real16_native_effect_binding import (
 )
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
-from tools.dosunit.register_state_relations import MachineState
 
 
 class FetchedCodeReason(StrEnum):

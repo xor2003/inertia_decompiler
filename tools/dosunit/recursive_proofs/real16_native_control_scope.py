@@ -17,26 +17,26 @@ from typing import NoReturn, cast
 import capstone
 import pyvex
 import z3
-from angr_platforms.X86_16.arch_86_16 import Arch86_16
-from angr_platforms.X86_16.control_coordinates import (
+
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.control_coordinates import (
     ControlAddressDomain,
     ControlWidth,
     architectural_offset,
     linear_continuation,
 )
-from angr_platforms.X86_16.relative_control_edge import DecodedRelativeEdge, decode_relative_edge
-
-from tools.dosunit import ssa_constant_terms
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import initial_state, materialize_function
+from inertia.frontend.x86_16.relative_control_edge import DecodedRelativeEdge, decode_relative_edge
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import initial_state, materialize_function
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs import recursive_static_control
 from tools.dosunit.recursive_proofs.real16_entry_domain import Real16ScalarDomain, entry_domain_model_hash
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import native_binding_model_hash
 from tools.dosunit.recursive_proofs.recursive_static_control import resolve_static_control
 from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import _state_exprs
-from tools.dosunit.register_state_relations import MachineState
+from tools.dosunit.ssa import ssa_constant_terms
 
 
 class ControlScopeObligation(StrEnum):
@@ -126,7 +126,7 @@ class _Refusal(Exception):
 
 def native_control_model_hash() -> str:
     """Seal this owner and all consumed native/domain/projection owners."""
-    import angr_platforms.X86_16.control_coordinates as coordinates
+    import inertia.frontend.x86_16.control_coordinates as coordinates
 
     digest = hashlib.sha256(Path(__file__).read_bytes())
     digest.update(native_binding_model_hash().encode("ascii"))

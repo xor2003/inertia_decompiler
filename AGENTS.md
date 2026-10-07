@@ -25,19 +25,21 @@ Core model: all reasoning on `Value` (data), `Address` (memory segment+offset),
 
 ## Layer ownership
 
-- `frontend`: `angr_platforms/angr_platforms/X86_16/` (arch, loader, lift, SimOS, sidecar)
-- `IR`: `X86_16/ir/`
-- `semantics`: `X86_16/semantics/`
-- `alias`: `X86_16/alias/`
-- `widening`: `X86_16/widening/`
-- `traits/summaries/confidence`: `X86_16/*.py`
-- `types/lowering/object recovery`: `X86_16/lowering/` + `type_*.py`
-- `structuring`: `X86_16/structuring/` + `decompiler_structuring_stage.py`
-- `rewrite/cleanup`: `X86_16/postprocess/` + `decompiler_postprocess_stage.py`
-- `tail validation`: `X86_16/tail_validation*.py`, `validation_*.py`
-- `CLI/fallback/reporting`: `inertia_decompiler/`
+- `frontend`: architecture, control coordinates, MZ/NE loaders, interrupt contracts,
+  DOS SimOS, VEX lifter, sidecars, adapters and native-backend verification in
+  `inertia/frontend/x86_16/`
+- `IR`: `inertia/ir/`
+- `semantics`: `inertia/semantics/`
+- `alias`: `inertia/alias/`
+- `widening`: `inertia/widening/`
+- `traits/summaries/confidence`: their owning `inertia/` layer (see `reference/project-map.md`)
+- `types/lowering/object recovery`: `inertia/lowering/`
+- `structuring`: `inertia/structuring/`
+- `rewrite/cleanup`: `inertia/postprocess/`
+- `tail validation`: `inertia/validation/`
+- `CLI/fallback/reporting`: `inertia/cli/`
 
-Semantic recovery → `X86_16/`. Cleanup-only → `postprocess/`. Do not add to root compatibility files (`alias_model.py`, `alias_domains.py`, etc.).
+Semantic recovery → the owning `inertia/` layer. Cleanup-only → `inertia/postprocess/`. Import canonical owners directly; do not recreate historical forwarding files.
 
 ## Hard rules
 
@@ -115,26 +117,24 @@ Every semantic improvement needs closed evidence loop: `raw_fact_count`, `normal
 - Fast iteration per coherent Python edit on explicit owned paths:
   `rtk proxy nice -n 10 make lint-iteration PYTHON=./.venv/bin/python FILES="owned.py test_owned.py"`
   (Ruff + type/doc/access ratchet), then the focused regression. Scoped
-  MyPy/Pyright/Basta/Vulture/Lizard, Cython builds, broad scans and repeat-check
-  policy: [Linter cadence](reference/agent-execution.md#linter-cadence).
-  Documentation-only edits need no Python lint.
-- Run Python/pytest at nice 10 with `PYTHON_JIT=1`; share at most six test
-  workers; retain full logs and report scope, exit status, counts and
-  actionable failures.
+  MyPy/Pyright/Basta/Vulture/Lizard, Cython builds, broad scans and repeat-check policy:
+  [Linter cadence](reference/agent-execution.md#linter-cadence). Documentation-only edits need no Python lint.
+- Run Python/pytest at nice 10 with `PYTHON_JIT=1`; share at most six test workers; retain
+  full logs and report scope, exit status, counts and actionable failures.
 - Mandatory guidance: read and follow
-  [reference/agent-execution.md](reference/agent-execution.md) at startup and
-  after compaction (regression, performance, delegation, token-output, progress,
-  compaction-handoff rules). This file remains the canonical architecture and
-  acceptance contract; `CLAUDE.md` supplements and never overrides either file.
+  [reference/agent-execution.md](reference/agent-execution.md) at startup and after compaction
+  (regression, performance, delegation, token-output, progress, compaction-handoff rules). This file
+  remains the canonical architecture and acceptance contract; `CLAUDE.md` supplements and never overrides either file.
 - Regular local gate: `make quality-fast PYTHON=./.venv/bin/python`.
   `make test-pipeline PYTHON=./.venv/bin/python` before claiming semantic decompiler improvements.
   `make test-pipeline-expanded PYTHON=./.venv/bin/python` for broad slow audits.
   Hard gate before PR/incremental work: `make quality-hard PYTHON=./.venv/bin/python`; linters-only: `make linters-hard PYTHON=./.venv/bin/python`.
   Changed surface: `make quality-dev PYTHON=./.venv/bin/python`; typing debt: `make linters PYTHON=./.venv/bin/python`.
-- Also read `reference/project-map.md`, `reference/decompiler-map.md`,
-  `reference/agent-rules.md`, `reference/real-mode-edge-policy.md`,
-  `reference/frontend-backend-migration-policy.md` (Supplemental glossary and
-  long-running-agent guidance).
-- Devin delegation (user-authorized only): baseline, sandbox boundary, launch,
-  prompt template and parent review: [reference/devin-handoff.md](reference/devin-handoff.md).
-- Compaction handoff spec: [agent-execution.md](reference/agent-execution.md#context--compaction-handoff).
+- Read `reference/project-map.md`, then the task's component README. Use
+  `tools/dev/agent_test_focus.py --files <paths> --context --json --json-only`
+  to locate owners, interfaces and focused tests. For decompiler, lifter or proof changes also read
+  `reference/decompiler-map.md`, `reference/agent-rules.md`, `reference/real-mode-edge-policy.md` and
+  `reference/frontend-backend-migration-policy.md`. `reference/agent-rules.md` provides supplemental
+  glossary and long-running-agent guidance. Independent tools need their domain guides when crossing those boundaries; root invariants always apply.
+- Devin delegation (user-authorized only): baseline, sandbox boundary, launch, prompt template and
+  parent review: [reference/devin-handoff.md](reference/devin-handoff.md). Compaction handoff spec: [agent-execution.md](reference/agent-execution.md#context--compaction-handoff).

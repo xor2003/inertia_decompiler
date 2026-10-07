@@ -68,8 +68,8 @@ separate commands resolve invocation scope without source changes. All3198
 recorded source identities unchanged and parent-verified live. Receipt:
 .cache/comparator-implementation/comparator-current-gates/PARENT_REVIEW.md.
 Active plan reduced from9480to355lines before final command corrections;
-all eight milestone definitions retained exactly, full history archived in
-reference/binary-behavior-equivalence-history-20261006.md. Public bridge and
+all eight milestone definitions retained exactly. Superseded history was
+removed during reference cleanup. Public bridge and
 fixed-corpus refresh run separately; no unrelated decompiler gates block them.
 
 ## 2026-10-06 — User corrects scope back to Z3 comparators
@@ -3692,20 +3692,20 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 11 signature/sidecar tests pass, def-integrity
   vs HEAD clean (missing names are hoisted nested defs), zero architecture
   violations against the file.
-- `angr_platforms/angr_platforms/X86_16/annotations.py`: Ruff complexity
+- `inertia/lowering/annotations.py`: Ruff complexity
   debt cleared to zero (6 findings). Extracted identity/prototype/CC
   assignment, declaration parsing, arg/stack/global annotation lanes, LST
   and synthetic-global label application, and arg-name tokenization.
 - Verified: ruff 0, mypy 0, 10 annotation tests pass, def-integrity vs HEAD
   clean, zero architecture violations against the file.
-- `angr_platforms/angr_platforms/X86_16/callsite_stack_metadata.py`: Ruff
+- `inertia/postprocess/callsite_stack_metadata.py`: Ruff
   complexity debt cleared to zero (6 findings). Extracted env/codegen prune
   modes, prune gating, child-block recursion, per-candidate dead-carrier
   classification, probe-seen tracking, metadata-ID normalization, recorded
   store pruning, and nested-block recursion.
 - Verified: ruff 0, mypy 0, 90 callsite/stack-probe tests pass,
   def-integrity vs HEAD clean, zero architecture violations against the file.
-- `angr_platforms/angr_platforms/X86_16/cod_extract.py`: Ruff complexity
+- `inertia/frontend/x86_16/cod_extract.py`: Ruff complexity
   debt cleared to zero (6 findings). Hoisted COD marker/source/asm metadata
   helpers to module level, extracted the proc-body collection lane,
   synthetic-global symbol ordering/addressing/patching lanes, and the tiny
@@ -3714,13 +3714,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   failures reproduce identically on bare HEAD — pre-existing),
   def-integrity vs HEAD clean (missing names are hoisted nested defs),
   zero architecture violations against the file.
-- `angr_platforms/angr_platforms/X86_16/parse.py`: Ruff complexity debt
+- `inertia/frontend/x86_16/parse.py`: Ruff complexity debt
   cleared to zero (6 findings). Converted prefix/control-flow dispatch to
   lookup tables and extracted the immediate-decode lane.
 - Verified: ruff 0, 32 decode/lifting tests pass, def-integrity vs HEAD
   clean, zero architecture violations against the file. One mypy error
   (`X86Instruction` typed Any in pyvex) is identical on bare HEAD.
-- `angr_platforms/angr_platforms/X86_16/validation_calls.py`: Ruff complexity
+- `inertia/validation/validation_calls.py`: Ruff complexity
   debt cleared to zero (6 findings). Extracted arg-list normalization,
   parameter BP-offset/entry-refusal helpers, required-call match resolution
   lanes, callee/helper-width/prototype fallbacks, classified and
@@ -3728,7 +3728,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   count mismatch lane.
 - Verified: ruff 0, mypy 0, 74 validation-call tests pass, def-integrity vs
   HEAD clean, zero architecture violations against the file.
-- `angr_platforms/angr_platforms/X86_16/verification_80286.py`: Ruff
+- `inertia/frontend/x86_16/verification_80286.py`: Ruff
   complexity debt cleared to zero (6 findings). Split the manual
   control-flow simulator into a per-opcode dispatch table with typed
   handlers (prefix scan, HLT, loop family, jumps, near/far calls,
@@ -3755,7 +3755,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   condition-slice grouping/object-fact materialization lanes.
 - Verified: ruff 0, mypy 0, 54 call-output/wide-condition tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
-- `tools/dosunit/failure_report.py`: Ruff debt cleared to zero (9
+- `tools/dosunit/reporting/failure_report.py`: Ruff debt cleared to zero (9
   findings) and mypy debt reduced 23 -> 0 vs HEAD. Extracted the
   region-mismatch instruction lane, complexity per-function/refusal
   lanes, SSA-compare section appenders (result rows, region equality,
@@ -3796,7 +3796,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, module imports clean, def-integrity vs HEAD
   clean, zero architecture violations (no dedicated debugger_gdb test
   file exists; TUI step-over tests pass on the sibling gdb_tui file).
-- `scripts/decompile_cod_dir.py`: Ruff debt cleared to zero (5
+- `tools/dev/decompile_cod_dir.py`: Ruff debt cleared to zero (5
   findings). Split the 35-complexity `main` into a typed
   `_RunAccumulator` state (result/failure/scheduler-timeout handlers)
   plus `_build_arg_parser`, `_collect_work_items`,
@@ -3806,14 +3806,14 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   tail and the COD selector-match lane.
 - Verified: ruff 0, mypy 0, `--help` smoke clean, def-integrity vs HEAD
   clean, zero architecture violations.
-- `angr_platforms/angr_platforms/X86_16/jcc_condition.py`: Ruff debt
+- `inertia/frontend/x86_16/jcc_condition.py`: Ruff debt
   cleared to zero (5 findings). Split the IR-value conversion into
   per-space register/temp lanes, hoisted the masked-zero and binary
   compare result builders to module level with a typed ordered
   compare-dispatch table, and extracted the unary zero/nonzero lane.
 - Verified: ruff 0, mypy 0, 100 postprocess-jcc tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
-- `angr_platforms/angr_platforms/X86_16/addressing_helpers.py`: Ruff
+- `inertia/frontend/x86_16/addressing_helpers.py`: Ruff
   debt cleared to zero (5 findings). Extracted `typed_address` segment
   field and raw-offset lanes into private methods, merged the identical
   SS/DS int-offset returns, extracted the BP two-arg fallback, and
@@ -3822,7 +3822,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   def-integrity vs HEAD clean. The 4 promoted-typed-file dynamic-attr
   findings are unchanged from HEAD (inherited debt on moved getattr
   lines, not new).
-- `angr_platforms/angr_platforms/X86_16/validation/canonicalize.py`:
+- `inertia/validation/canonicalize.py`:
   Ruff debt cleared to zero (5 findings). Extracted the binary
   canonicalization arm, replaced the seven repeated optional-attr
   comparisons with an ordered accessor table, extracted binary/unary
@@ -3844,7 +3844,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   resolver, the function IRSB gather, and the per-IRSB frame-delta scan.
 - Verified: ruff 0, mypy 0, 3 stack-frame-recovery tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
-- `angr_platforms/angr_platforms/X86_16/recovery_confidence.py`:
+- `inertia/validation/recovery_confidence.py`:
   Ruff debt cleared to zero (3 findings). Split the evidence appender
   into output-stage/summary groups, the assumptions appender into
   helper/failure/summary groups, and the two summary OR-chains into
@@ -3923,7 +3923,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   print lanes, and PAT wildcard operand lanes.
 - Verified: ruff 0, mypy 0, 4 msc6-compat tests pass, `--help` parses on both
   CLIs, def-integrity vs HEAD clean.
-- `tools/dosunit/complexity.py`: Ruff debt cleared to zero (3 findings).
+- `tools/dosunit/catalog/complexity.py`: Ruff debt cleared to zero (3 findings).
   Extracted scan-window resolution, lifter block lift, per-block
   instruction scan, branch/opcode/effect metric lanes, and control/data
   risk-kind lanes. Also fixed pre-existing mypy debt in the module
@@ -3956,7 +3956,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - NON-WIP complex-structure debt: 0. Remaining 31 findings are all in
   user-WIP files (omf_pat.py, build_msc6_examples.py, signature_catalog.py,
   straightline_ssa.py).
-- `tools/dosunit/straightline_ssa.py` + `scripts/build_msc6_examples.py`
+- `tools/dosunit/compare/straightline_ssa.py` + `scripts/build_msc6_examples.py`
   (+ omf_pat.py, signature_catalog.py): remaining complex-structure debt
   cleared to zero repo-wide. straightline_ssa splits: pair-boundary
   detail, unproven-call-target mismatch, normalized z3-solve tail,
@@ -4010,7 +4010,7 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `ip`), `_can_add_dynamic_successor_range=declared_bounds_only` (strict
   `.lst` extents — out-of-extent successors refuse instead of scanning
   into neighbours).
-- Engine fixes in `tools/dosunit/straightline_ssa.py`:
+- Engine fixes in `tools/dosunit/compare/straightline_ssa.py`:
   - `_lower_binop`: Iop_DivMod{U,S}64to32 lowered as
     concat(trunc(rem,32), trunc(quot,32)) (x86 DIV/IDIV packing, verified
     on concrete z3 values); Iop_NwHLtoMw concat family lowered.
@@ -6373,7 +6373,7 @@ real16-file-input/. Original M0-M7/release acceptance remains open.
 
 The serial cold/warm runner is terminal: five command pairs executed, but its
 MSC8 changed warm phase failed to seal evidence. The traceback identifies a
-live-worktree tools/dosunit/flat32_proof_report.py import from a frozen driver.
+live-worktree tools/dosunit/reporting/flat32_proof_report.py import from a frozen driver.
 Both flat32 adapters inserted a hardcoded /home/xor/vextest at sys.path[0],
 overriding the snapshot PYTHONPATH. Consequently all flat32 phases from this
 checkpoint lack established source isolation; their apparent verdicts and
@@ -6844,7 +6844,7 @@ remaining original M4-M7 exits, with final project gates once KVM is available.
 
 Devin session22939 exited0; parent verified all8baseline source hashes unchanged
 and independently reproduced20staged controls in1.17s. Promoted to
-angr_platforms/tests/test_real16_program_file_copy.py, removing staged sys.path
+tools/dosunit/tests/test_real16_program_file_copy.py, removing staged sys.path
 hacks/E402 exemptions. Added a parent control for independent input/output byte
 budgets in one execution. Final cohort104passed/2.18s,3workers:21combined controls,
 existing input/output integration and pipeline inventory. Actual MZ/Unicorn
@@ -7215,7 +7215,7 @@ Devin loop revision finished and remains staged. Parent reproduces opaque TMP DI
 ## 2026-10-02 — Riptide v8 corpus compare; dosunit region-proof recovery
 
 Comparator work on the region-composition path
-(tools/dosunit/straightline_ssa.py plus new dosunit proof/control modules):
+(tools/dosunit/compare/straightline_ssa.py plus new dosunit proof/control modules):
 pooled evidence-backed layout_normalization pairs across per-part results
 (`_region_adopted_layout_pairs` feeding `_region_step_quick` and the
 transition-system compare as `global_map`), added the `cutpoint_state`
@@ -8347,7 +8347,7 @@ review; neither their unit tests nor this checkpoint constitutes M5/M7 acceptanc
 
 Path-display decision and fixture repair (2026-10-04): physical43-module
 shortening would affect112tracked files and invalidate proof receipts, so the
-immediate token-saving change is display-only scripts/compact_paths.py. The
+immediate token-saving change is display-only tools/dev/compact_paths.py. The
 single streaming pass preserves raw logs and all diagnostic text except known
 path prefixes; canonical commands/source/receipts stay unchanged. AGENTS and
 execution guidance document aliases. Physical renamer remains staged/unapplied.
@@ -8907,3 +8907,251 @@ stack samples and field summaries retained in m7-declaration-integration/.
 Instrumentation is not a paired benchmark. Native20s still times out; exact
 mutation/provenance-safe retained-IR reuse is the next performance question.
 All owned test/probe/Devin sessions in this checkpoint terminal; M5/M7 open.
+
+### 2026-10-06 compiler-profile adapter slice (Devin worker, review pending)
+
+Explicit compiler profiles routed through the existing MS C round-trip owner.
+scripts/compiler_profile.py holds typed CompilerToolchain/CompilerIdentity/
+CompileBackend/CompilerProfileSelection backed by the repo-owned registry
+examples/compiler_coverage/toolchains.json: canonical msc51-*/bc31-* ids
+(bcpp31-* kept as explicit aliases), probe_id binding into the retained
+toolchain-probes-20261006/profiles.json (hash-pinned; per-profile product/
+model/model-flag/backend identity checked), SHA-256 pins on every tool,
+library and runner record; malformed/stale/mismatched records refuse, no
+silent MS C 6 substitution. ToolIdentity derives host_path from the e:-mounted
+dos_path so the hashed artifact is always the invoked artifact.
+build_msc6_examples.py dispatches each compile/link stage through the profile's
+typed backend: kvikdos argv rendering unchanged for msc6/msc51, pinned-config
+DOSBox batch with exact nonempty ERRORLEVEL marker gating (existence is not
+success; false-branch files exist empty) plus fresh-artifact and error-line
+checks for Borland DPMI tools; the profile's pinned kvikdos is enforced for
+both compile and program-run stages. Runner honors the profile's kvikdos
+record and records runner identities in provenance. msc6_ax built-in
+reproduces the historical commands exactly. Focused serial run: 277passed;
+scoped Ruff/doc/access and mypy-files clean. Live smokes through the shared
+boundary (no decompile): compare16 msc51-small, bc31-small and msc6_ax all
+build=ok run=ok exit255 (logs in .cache/compiler-coverage/adapter-20261006/
+smoke-*/). Noted drift: probe recorded kvikdos sha d20517... but the current
+binary (rebuilt 2026-10-06T10:27) hashes af4a3a...; registry pins the
+currently invoked binary. _run now decodes captured tool output with
+errors=replace (MS C 5.1 banner emits non-UTF8 bytes). No 16-case round trip;
+parent coordinates manifest and baseline review. Preimages in
+.cache/compiler-coverage/adapter-20261006/.
+
+First16 continuation (2026-10-06): retained source/runtime/catalogue inputs and
+`examples/compiler_coverage/first16.json` keep the 16-row denominator (8 sources
+x `msc51-small`/`bc31-small`), pinned expected exits and Csmith checksum. Shared
+runner now forwards schema-2 stage budgets into existing compile/link, original
+run, decompile invocation and rebuilt run ceilings; compiler/DOSBox stage
+timeouts remain capped at 120s and case timeout at 600s. Suite writes pending
+rows before execution and halts after a typed timeout/harness failure while
+recording remaining rows `not_attempted` with the cause. Manifest source/input
+pins require canonical repo-relative paths, and runtime source names cannot
+clobber the primary source or generated `INERTIA.C`. Profile verification now
+checks the compiler-child/DPMI/header dependency inventories from probe evidence
+and verifies those bytes with toolchain pins.
+
+Focused serial tests: 163 passed (manifest/runner/suite/profile) plus 41
+passing result-classifier refusal controls; scoped `lint-iteration`,
+`mypy-files` (compiler_profile/runner/build owners) and
+`architecture-check-fast` clean; after the final suite-summary compatibility
+edit, its serial focused module rerun passed 18/18. No native row launched:
+parent requested final patch review before baseline. Current `toolchains.json`
+probe digest is stale against the concurrently refreshed worker-owned
+`toolchain-probes.json`; the
+external KvikDOS binary also continues drifting. This continuation deliberately
+did not repin either artifact. Resume only with the worker's final durable probe
+receipt and parent's private frozen-runner overlay. First16 remains 0/16 accepted.
+
+## MSC8 rebuild validation — auto-mode PE32 sweep complete (2026-10-06)
+
+Ran `artifacts/msc8-z3cmp32/z3cmp32.py --mode auto --all-mapped` for all seven
+MS C v8 targets: DOS oracles vs fresh MSVC-built PE32 candidates
+(`rebuild/out/msc32/`, `*_pe32_cand.lst` generated via `tools/map2lst.py`
+with stdcall `@N` decoration stripped).
+
+Result: **216 unconditional `ssa_equal` proofs, 0 failed, 0 conditional**
+across all seven binaries (6294 refused = capability limits:
+calls/exceptions, conditional-exit superblocks, loops, unobserved IP,
+region lowering, indirect branches — not mismatches). Per-target passed:
+C13216 36, C1XX3216 90, C23216 58, C33216 13, CL 3, LINK 14, Q23 2.
+
+Same-generation codegen between DOS oracle and PE32 candidate means every
+completed obligation is a genuine semantic-equality proof; no observable
+mismatch found on the whole mapped surface.
+
+Comparator fixes this session: NaN/float-const guards in
+`flat32_cfg.py` (`static_next`/`value`/`_static_next`), `straightline_ssa.py`
+(const→IEEE bit-pattern lowering, `_const_expr_value` int guard),
+`binary_callee_control_target.py`, `symbolic_terminal.py`; auto mode now
+honors `--output-regs` and accepts ELF candidates with literal-VA layout.
+Prior leaf-mode work added scratch-frame/`edx`/return-width conditional
+tiers (`flat32_scratch.py`) and found+fixed a real `fits_bits`
+sign-extension bug (C13216/C1XX3216) now proving unconditionally.
+
+
+## Compiler coverage — parent review of bounded Devin slices (2026-10-06)
+
+Reviewed four Devin sessions with disjoint ownership: direct timeout result
+classification, shared IR/Alias deadline controls, frozen-stage descendant
+cleanup, and deadline-owner gate enrollment. Final parent focused checks:
+45 result tests, 120 profile/runner tests, and 45 deadline/per-edge tests passed
+(210 total across those cohorts). Independent before/after result replay keeps a
+complete validated fallback `passed`, while a direct top-level timeout without
+final fallback evidence changes from `decompile_failed` to `timed_out`.
+
+The controlled detached-child replay previously took 2.094s for a 1s timeout and
+let the child complete; the reviewed path returned after 1.010s, retained partial
+stdout, and the detached child was gone with no completion marker. It reuses the
+existing exact-root descendant snapshot before killing the root process group.
+Post-timeout pipe draining and wait attempts use explicit 0.5s cleanup allowances;
+the legacy no-cleanup path and shared absolute retry deadline remain unchanged.
+
+Direct Alias hydration and call/caller-premise recursion consume one minimum
+request/project/session deadline. Expiry retains typed refusals and complete
+accounting, avoids persistent partial-proof publication, and restores scopes.
+Count/depth limits remain unchanged. Parent MyPy on the light deadline owner and
+local cache passed; new-owner enrollment and QA inventory checks show zero
+violations. Wider IR/CLI scoped typing diagnostics remain reported in the worker
+logs; this is not a whole-repository green typing or semantic pipeline claim.
+
+The retained source-free `cmp_i16` CLI probe still required its outer 88.235s
+timeout before the decompilation banner, with source hashes stable and a recorded
+function-IR/SSA cache miss. Cooperative expiry checks cannot preempt one expensive
+operation, so this probe establishes no end-to-end speedup or accepted function.
+Current `/dev/kvm` open raises FileNotFoundError; first16 native round trips remain
+0/16. Do not replace frozen compiler/runner pins or broaden the coverage plan to
+hide these blockers. Parent receipts: `.cache/compiler-coverage/parent-review-20261006/`.
+
+
+## 2026-10-06 — compiler coverage: verified DOSBox execution route
+
+Devin added explicit DOSBox runtime routing to the existing build owner; the
+focused profile/runner cohort passed 143 tests, scoped lint/types and startup
+architecture/ownership checks passed. Parent review requested config-hash,
+mounted-executable and empty/invalid-entry MZ controls; followup remains pending.
+Parent independently replayed five real MZ exits (0/1/5/127/255), then fresh
+MS C5.1 and Borland3.1 small/large compile/link/run probes. All four EXEs are
+byte-identical retained images and return expected255. Exact tools/libraries,
+flags, sources and memory models are preserved. An explicit private DOSBox
+registry is verified at `.cache/compiler-coverage/dosbox-parent-probes-20261006/toolchains-dosbox.json`;
+default/frozen KvikDOS registries remain unchanged. This removes the execution
+blocker without requiring KVM; it is not decompiler round-trip acceptance.
+
+The new actual-CLI trace confirms minimum deadline propagation and expiry during
+recursive IR import. Optional proof/finalization work can still begin while
+imports unwind; a separate Devin owns narrow preserving/refusing checkpoints in
+`ir/vex_import.py`. No budget increase or measured speedup is claimed. Previous
+raw diagnostics are retained separately after a worker reused the old diagnostic
+directory. Acceptance remains 0/16; no fixture/compiler or required cell dropped.
+
+## 2026-10-06 — bounded comparator coverage delivery
+
+Reviewed/completed shared native i386 conditional reblocking, full-width
+successors, exit-evidenced return composition (MSC8 and BC5), explicit synthetic
+listing byte bounds, and offline typed refusal accounting. Existing REP summaries
+remain admitted before ordinary-exit safety checks. Changed-store/return,
+malformed-evidence and real16 controls stay active. No proof budget was raised.
+
+Final comparator gate: exit 0, 305 contracts and 1,363 comparator tests passed.
+Conditional module: 16 passed. Scoped lint, new-owner typing, architecture and
+ownership passed; full SSA owner retains 206 existing MyPy diagnostics, none in
+modified functions. No new unconditional real-corpus proofs: three C23216 leaves
+move from full-width-IP refusals to modeled mismatches caused by literal global
+address differences, independently reproduced with byte-verified Unicorn.
+Relocated-memory equivalence remains unestablished; candidate symbols produce
+an empty normalization map. Two other roots progress to loop/call refusals.
+
+Paired leaf cohort: 22.45 -> 15.10 seconds, peak RSS 399,612 -> 387,116 KiB;
+single samples with uncontrolled filesystem cache, not a universal speedup.
+Catalog diagnosis found 4,894 saved candidate overlaps across six range-bearing
+targets and 218 missing candidate names. Inclusive-byte interpretation removes
+numeric overlaps while retaining reachable closure requirements.
+
+Three sandboxed Devin sessions all ended at daily quota; parent reviewed and
+completed the bounded slice.
+Receipts: `.cache/comparator-coverage/devin-20261006/`. No decompiler-plan expansion.
+
+## 2026-10-06 — comparator coverage follow-up reviewed and validated
+
+Three successful bounded Devin tasks reviewed: shared DAG accounting in both
+PE32 region adapters, image-bound MSC LINK-map data correspondence, and opt-in
+128-block call-frontier retry. Parent added executable-section admission,
+map-consumption/publication race controls, full-observable LINK-map controls and
+actual-PE summary-reuse/retry controls. Existing ELF/Blob intake and mandatory
+Cython real16 lifting are preserved. No default proof budgets increased.
+
+Measured BCC budget cohort: 12 expression-limit refusals become 1 conditional
+(paired-call plus relocation premises), 3 modeled failures requiring triage,
+8 deeper refusals; no new unconditional real-corpus proof. MSC LINK-map leaves:
+sub_22870/sub_2B140 become conditional relocation results; sub_24340 remains
+failed under full observations. All three sampled block-cap callers remain
+refused after progressing to loop/recursive-call blockers. Two actual-PE
+callee-reuse controls and two public block-retry controls pass, including changed
+callee/arithmetic negatives. No full-corpus real16 improvement was measured.
+
+Final comparator gate exit 0: 305 contracts passed in 12.33s and 1,366 comparator
+tests in 149.39s with two workers, nice10/JIT1. An earlier fail-fast run found
+one Blob intake regression (1,322 passed/1 failed); parent corrected PE-only
+scope, retained the rejected receipt, and verified the 51-test compatibility
+cohort before the final gate. Scoped lint, eight light-owner MyPy, final guard
+typing, startup architecture and ownership passed. Legacy adapter/SSA typing
+debt remains explicitly reported; no broad decompiler acceptance is claimed.
+
+LINK-map cohort wall18.33→9.19s, RSS377,000→358,920KiB; block cohort
+wall19.92→11.94s, RSS354,648→355,528KiB. All paired measurements meet the
+predeclared1.20 RSS ratio; single samples with uncontrolled filesystem cache and
+host contention, not general speedup claims. Frozen receipts are preserved.
+The bounded report is complete; loops/indirect targets/differing recursive
+layouts and remaining mismatches stay separate unproved work.
+Receipts: `.cache/comparator-coverage/followup-20261006/`. No application C,
+decompiler M0–M7 expansion, commit or push.
+
+## 2026-10-06 — replacement comparator plan: loops and indirect calls
+
+At user request, replaced the completed bounded coverage report/handoff with a
+focused real16/PE32 loop-invariant and finite indirect-call plan. Active plan:
+[loops and indirect calls](reference/comparator-coverage-progress.md).
+
+Six unaccepted milestones (LI0–LI5): frozen baseline, bounded loop relations,
+public loop proofs, finite indirect calls, combined loop/callback transitions,
+and measured integration. Initial cohort at most16real-corpus roots; explicit
+proposal/refinement limits, unchanged proof budgets, corruption controls and
+per-feature real-corpus gains required. Existing proof owners were located via
+the indexed graph and source checks. No implementation, new comparator test
+run, or coverage gain is claimed by this documentation update. Status0/6.
+
+## 2026-10-07 — ADA consolidation and reference cleanup
+
+ADA implementation, private tests and provenance now live only in
+`tools/ada_script/`. Removed `vendor/ada_script/`, root `ada.py` and
+`vendor_bridge.py`; canonical imports and the `inertia-ada` entry point replace
+flat module loading. Updated component enrollment, commands and packaging.
+Focused evidence: 21 integration tests and 20 private tests passed; final IDC
+10-test rerun and independent 2-test signature/encoding review passed. Scoped
+lint, 2 component-coherence checks and startup architecture check passed.
+Logs: `.cache/ada-*-after.log`, `.cache/shim-removal/ada-*.log`.
+Three superseded reference archives were removed, active links and verified
+owner paths updated, and stale Cython acceptance history pruned.
+This records the ADA/documentation slice, not completion of all shim removal.
+
+## 2026-10-07 — canonical imports and reference cleanup
+
+Removed historical forwarding modules and updated their callers, packaging,
+native build inputs and test enrollment to canonical owners. ADA has one source
+home, `tools/ada_script/`. Removed eight additional obsolete reference reports
+and updated links; the Basta guide now describes current commands and limits.
+
+Scoped evidence: comparator tests 138 passed; dosunit/real16 tests 230 passed,
+5 skipped, 1 failed; affected collection 250 tests without errors; owner tests
+33 passed. The remaining shifted-callee failure reports control-proof budget
+exhaustion in unchanged proof code. Mypyc import smoke passed for 39 modules.
+Basta completed with 76 review candidates; no candidate was deleted solely on
+static reachability. Final collection passed: 21,891 tests, no errors. Installed
+wheel review passed with zero source mismatches, native lifting, corrupt-manifest
+refusal and isolated shared16 lowering. QA metadata checks preserve the expanded
+target sets; 213 focused tests and 150 final metadata tests passed. The full
+architecture scan found only two stale documentation markers; both were
+corrected, with two focused checks passing and scoped lint clean. File
+reorganization is complete; the unrelated proof-budget limitation remains
+visible. Logs: `.cache/shim-removal/`.

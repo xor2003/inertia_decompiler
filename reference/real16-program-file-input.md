@@ -79,7 +79,7 @@ handle-policy isolation, immutable snapshots and separate input/output budgets:
 
 ```sh
 PYTHON_JIT=1 .venv/bin/python -m pytest -n 3 --tb=short --durations=5 \
-  angr_platforms/tests/test_real16_program_file_copy.py
+  tools/dosunit/tests/test_real16_program_file_copy.py
 ```
 
 These are concrete controls under the declared synthetic service scope. They

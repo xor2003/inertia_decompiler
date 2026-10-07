@@ -15,8 +15,8 @@ import pyvex
 from pyvex.expr import IRExpr, Load
 from pyvex.stmt import CAS, LLSC, Dirty, IMark, IRStmt, LoadG, Store, StoreG
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import FactCounters
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.contracts.proof_contracts import FactCounters
 
 
 class NativeAccessKind(StrEnum):

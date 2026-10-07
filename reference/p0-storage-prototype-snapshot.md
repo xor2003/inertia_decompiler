@@ -46,7 +46,7 @@ signature repair or warning-suppressing harness cast was added.
   warnings are absent from scalar_types_io compiler output; no suppression
   flags or harness casts were added. Log:
   `/tmp/inertia-storage-snapshot-test-pipeline.log`. Mutable detailed reports:
-  `angr_platforms/.cache/test_pipeline/summary.json` and
+  `.cache/frontend/test_pipeline/summary.json` and
   `examples/build_msc6_tiny/report.json`.
 - Logs: `/tmp/inertia-storage-snapshot-{before,after,mypy,pyright}.log`;
   `/tmp/inertia-pickptr-loss-probe.log`;

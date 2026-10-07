@@ -43,7 +43,7 @@ Plan:
    `dosvm_snapshot_restore`, `dosvm_set_regs`, `dosvm_get_regs`,
    `dosvm_read_memory`, `dosvm_write_memory`, and `dosvm_run_until_trap`.
 3. Keep the existing `kvikdos` executable as a thin wrapper.
-4. Replace the generated include-wrapper in `tools/dosunit/kvikdos_backend.py`
+4. Replace the generated include-wrapper in `tools/dosunit/runtime/kvikdos_backend.py`
    with `ctypes` or `cffi` bindings to the stable library.
 
 Definition of done:
@@ -189,7 +189,7 @@ Plan:
 
 Definition of done:
 
-- `pytest -q angr_platforms/tests/test_dosunit_tool.py` passes with and without
+- `pytest -q tools/dosunit/tests/test_dosunit_tool.py` passes with and without
   `/dev/kvm`
 - a KVM-enabled run exercises real `libkvikdos` oracle recording
 - summary output distinguishes passed, failed, refused, faulted, and timeout

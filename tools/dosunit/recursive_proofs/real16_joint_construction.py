@@ -17,19 +17,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import Architecture, ContractIdentity
-from tools.dosunit.real16_call_contracts import FunctionCtx, initial_state
-from tools.dosunit.real16_call_evidence import block_source, group_functions
-from tools.dosunit.real16_call_frames import CallFrameKind
-from tools.dosunit.real16_call_graph_admission import (
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import FunctionCtx, initial_state
+from tools.dosunit.compare.real16_call_evidence import block_source, group_functions
+from tools.dosunit.compare.real16_call_frames import CallFrameKind
+from tools.dosunit.compare.real16_call_graph_admission import (
     AdmissionLimits,
     AdmissionReport,
     AdmissionVerdict,
     CallSiteRecord,
     admit_call_graph,
 )
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import Architecture, ContractIdentity
 from tools.dosunit.recursive_proofs.recursive_call_components import CallComponent, FunctionId
 from tools.dosunit.recursive_proofs.recursive_joint_admission import JointRefusal
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import (

@@ -56,7 +56,7 @@ markers to the new Lowering module; `git diff --check` also passes.
 
 Logs: `/tmp/inertia-flag-cycles-{final,msc,mypy,pyright,structuring-ruff,admission-ruff}.log`.
 
-This follows the [full-suite baseline](p0-full-suite-baseline-20260910.md).
+This follows the full-suite baseline (historical checkpoint).
 SetGear is not fixed and full-suite totals have not been refreshed.
 
 The direct-byte fast-path load in `lift_86_16.py::_load_abs8` executed an

@@ -47,9 +47,9 @@ used. Untagged references retain their existing coordinate rules.
   and `_inertia_ebp` at link time. Log:
   `/tmp/inertia-native-anchor-test-pipeline.log`; detailed mutable reports:
   `examples/build_msc6_tiny/report.json` and
-  `angr_platforms/.cache/test_pipeline/summary.json`.
+  `.cache/frontend/test_pipeline/summary.json`.
 - This run also reports the existing multithreaded fork deprecation at
-  `inertia_decompiler/fork_timeout.py:187`. SORTD InitBars and RunMenu tests
+  `inertia/cli/fork_timeout.py:187`. SORTD InitBars and RunMenu tests
   took 61.97s and 60.67s. Keep these as follow-up measurements, not a controlled
   regression or speedup claim. No warning was suppressed or timeout reduced.
 - Logs: `/tmp/inertia-native-anchor-{before,integrated,mypy,pyright}.log`;

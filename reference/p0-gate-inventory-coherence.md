@@ -8,7 +8,7 @@ It falsely reported missing ALU tests and missed two duplicate Ruff entries.
 The live DOS LoadProgram node was genuinely missing from QA_PYTEST_TARGETS.
 An ownership assertion also predated the added generic annotation regression.
 
-Extract literal Make word-list reading into `scripts/makefile_inventory.py`,
+Extract literal Make word-list reading into `tools/dev/makefile_inventory.py`,
 reducing the oversized architecture checker. Preserve assignment order,
 replacement, conditional defaults, continuation lines, comments, and duplicates.
 The reader does not execute Make or evaluate arbitrary Make expressions.
@@ -46,7 +46,7 @@ checkpoint cannot stand in for complete-suite or whole-SORTD acceptance.
 - Corrected reader: all 9 cases passed in 1.68s. It exposed the real missing
   node and exactly two duplicate Ruff entries, which were corrected.
 - Layer-boundary baseline: 2 failed, 12 passed in 19.49s. The module is a pure
-  re-export of `inertia_decompiler.acceptance_scorecard`; the MSC6 builder and
+  re-export of `inertia.cli.acceptance_scorecard`; the MSC6 builder and
   optimization guard import that canonical owner directly.
 - Focused final gate tests before grouping: 455 passed in 39.66s, including all
   four failing gate/ownership nodes from the full audit and the new contracts.

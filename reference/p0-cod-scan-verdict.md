@@ -5,7 +5,7 @@ repair of `__fimemset`.
 
 ## Root Cause
 
-`scripts/decompile_cod_dir.py` replaced a failed child's exit classification
+`tools/dev/decompile_cod_dir.py` replaced a failed child's exit classification
 with the success flag from a secondary `FunctionScanResult`. That result
 contains diagnostic counts and classifications, not replacement generated C.
 For a successful non-fallback scan the renderer selected the failed child's C;

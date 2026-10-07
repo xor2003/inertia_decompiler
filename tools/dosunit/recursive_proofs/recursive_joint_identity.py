@@ -9,9 +9,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from tools.dosunit.model import canonical_json_bytes
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
-from tools.dosunit.register_state_relations import MachineState
 
 
 def joint_proposal_hash(system: JointSystem, bootstrap: tuple[MachineState, MachineState]) -> str:
@@ -63,6 +63,11 @@ def control_view_model_hash() -> str:
     """
     parent = Path(__file__).resolve().parent.parent
     paths = (parent / "real16_control_boundary.py", parent / "real16_control_targets.py",
-             parent / "straightline_ssa.py", Path(__file__).with_name("recursive_static_control.py"))
+             parent / "straightline_ssa.py", parent / "contracts/ssa.py",
+             parent / "contracts/registers.py", parent / "contracts/comparison.py",
+             parent / "contracts/scanning.py",
+             parent / "ssa/identity.py", parent / "ssa/z3_ops.py",
+             parent / "ssa/translation.py", parent / "ssa/composition.py",
+             parent / "ssa/materialization.py", Path(__file__).with_name("recursive_static_control.py"))
     values = [hashlib.sha256(path.read_bytes()).hexdigest() for path in paths]
     return hashlib.sha256(canonical_json_bytes(values)).hexdigest()

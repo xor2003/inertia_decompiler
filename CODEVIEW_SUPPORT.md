@@ -50,7 +50,7 @@ Binary (EXE/COM)
 
 ## Module: `codeview_nb02_nb04.py`
 
-**Location**: `angr_platforms/angr_platforms/X86_16/codeview_nb02_nb04.py`
+**Location**: `inertia/cli/codeview_nb02_nb04.py`
 
 ### Key Functions
 

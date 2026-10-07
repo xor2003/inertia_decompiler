@@ -140,7 +140,7 @@ Pyright fails, and subsequent Vulture, Lizard, and pytest steps are skipped.
 The then-latest run, 34131575884 on e7b84fe8b, reported 49 Pyright errors in the
 first Make batch. This is not a full typing census or a pytest failure count.
 
-Run: https://github.com/xor2003/inertia_decompiler/actions/runs/34131575884
+Run: https://github.com/xor2003/inertia/cli/actions/runs/34131575884
 
 The project requires Python >=3.14 and CI installs 3.14.7, but the shared
 Pyright configuration still targeted 3.11. The local correction targets 3.14.
@@ -250,7 +250,7 @@ is not yet rerun. The Vulture findings are protocol parameter declarations,
 not established dead runtime code.
 
 COMP32 fixture follow-up: preserved the existing 4,187-byte executable, matching
-C source and COD/MAP files under `angr_platforms/tests/fixtures/msc6/compare32`.
+C source and COD/MAP files under `tests/fixtures/msc6/compare32`.
 The address-specific tests now use this versioned input instead of the ignored
 build directory. Four SHA-256 checks protect its identity; the original four
 decompiler assertions are unchanged. Before: four passed in 11.83s. After:
@@ -456,7 +456,7 @@ This checkpoint remains local pending the next verified commit batch.
 
 ### Verified Remote Baseline: 2026-09-07
 
-Run https://github.com/xor2003/inertia_decompiler/actions/runs/34141065397
+Run https://github.com/xor2003/inertia/cli/actions/runs/34141065397
 on `511b0d3cb` completed with failure. Pytest: **4425 passed, 42 failed**
 in 457.85s. Pyright: first batch zero errors, second batch 49 errors.
 Vulture reports unused interface parameters `propagator` and `timeout_millis`.

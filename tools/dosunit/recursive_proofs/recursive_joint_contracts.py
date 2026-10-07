@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from tools.dosunit.proof_contracts import ContractIdentity, ObligationReport, ProofStatus
+from tools.dosunit.contracts.proof_contracts import ContractIdentity, ObligationReport, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.recursive_call_components import FunctionId
 from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import StackInvariantProof
-from tools.dosunit.register_state_relations import MachineState
 
 
 class JointStepKind(StrEnum):

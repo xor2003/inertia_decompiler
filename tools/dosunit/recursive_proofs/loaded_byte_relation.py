@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from tools.dosunit.proof_contracts import Architecture
+from tools.dosunit.contracts.proof_contracts import Architecture
 
 ADDRESS_WIDTH: int = 32
 BYTE_WIDTH: int = 8

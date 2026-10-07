@@ -42,7 +42,7 @@ added to Rewrite, postprocess, or CLI.
   owners are segmented-load carriers, callsite prototype declarations, and
   the postprocess-stage compatibility bridge. No full-suite closure is claimed.
 - `quality-dev` also remains red: its selected MyPy scope reports `Any` returns
-  at `inertia_decompiler/cache.py:255` and `callsite_summary_codec.py:237`.
+  at `inertia/cli/cache.py:255` and `callsite_summary_codec.py:237`.
   Its downstream checks did not run; this is not a successful development gate.
 
 Logs: `/tmp/inertia-return-witness-{before,tests,admission,mypy,pyright,quality,architecture,pipeline,dev,types}.log`.

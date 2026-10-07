@@ -103,7 +103,7 @@ Native evidence: `/tmp/inertia-final-frame-observe.log`. The experiments are
 temporary diagnostics, not production dependencies.
 
 Follow-up: the complete suite reports 11,326 passed, 40 failed and 170 skipped;
-see [the full audit](p0-full-suite-audit-20260910.md). InitMenu remains green,
+see the full audit (historical checkpoint). InitMenu remains green,
 but this is not whole-decompiler closure. The direction helper was subsequently
 added to the positive persistent IR/SSA source manifest, with a failing-before
 test and eight passing cache regressions, to cover future helper edits.

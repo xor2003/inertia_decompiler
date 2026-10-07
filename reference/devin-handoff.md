@@ -32,8 +32,9 @@ current CLI pattern is:
 devin_repo=/home/xor/vextest
 ulimit -v 4194304
 rtk proxy "$devin_repo/.venv/bin/python" \
-  "$devin_repo/scripts/workspace_sandbox.py" -- \
-  env XDG_CONFIG_HOME="$devin_repo/.cache/devin-config" \
+  "$devin_repo/tools/dev/workspace_sandbox.py" -- \
+  env PATH="$devin_repo/.venv/bin:$PATH" \
+  XDG_CONFIG_HOME="$devin_repo/.cache/devin-config" \
   XDG_DATA_HOME="$devin_repo/.cache/devin-data" \
   XDG_STATE_HOME="$devin_repo/.cache/devin-state" \
   XDG_CACHE_HOME="$devin_repo/.cache/devin-cache" \

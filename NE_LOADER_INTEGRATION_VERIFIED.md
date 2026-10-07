@@ -153,7 +153,7 @@ Only attempts next layer if previous returned empty results.
 
 ## Files Modified
 
-1. **`angr_platforms/angr_platforms/X86_16/ne_exe_parse.py`** (NEW, 420+ lines)
+1. **`inertia/frontend/x86_16/ne_exe_parse.py`** (NEW, 420+ lines)
    - Function: `parse_ne_exe()` — accepts optional `project` parameter
    - Function: `_calculate_ne_linear_addr()` — uses loader's segment selectors
 

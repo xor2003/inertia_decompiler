@@ -32,7 +32,7 @@ IR/SSA/typed pipeline. No new C-body, signature or call repair is introduced.
   `scalar_types_io` still emits undefined EBP; `function_pointers` still has
   unresolved ESP/EBP at link time. Pointer argument-class warnings in
   `pick_ptr` remain visible. These are the same observed failures as before.
-  Reports: `angr_platforms/.cache/test_pipeline/summary.json` and
+  Reports: `.cache/frontend/test_pipeline/summary.json` and
   `examples/build_msc6_tiny/report.json` (mutable latest-run artifacts).
 - Logs: `/tmp/inertia-return-expression-preservation-{before,after,mypy,pyright}.log`;
   `/tmp/inertia-anchor-return-probe.log`;

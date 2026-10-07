@@ -86,7 +86,3 @@ Follow the comparator-specific commands and evidence ledger in the
 accepted by removing unrelated gate dependencies: verify their actual proof,
 corruption/refusal, public-contract, corpus, cache and resource requirements.
 Refresh only evidence whose relevant source/binary/contract dependencies changed.
-
-All older queue entries, broad-gate results and historical command lists are
-preserved in [the archived checklist](binary-behavior-acceptance-history-20261006.md).
-They are historical records, not additional current completion requirements.

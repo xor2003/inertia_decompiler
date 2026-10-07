@@ -91,7 +91,7 @@ inputs. Missing or unknown types cannot supply entry evidence.
 - Failure: wider physical storage silently initializes bytes absent from the
   C interface, or legitimate value reads are rejected solely for slot padding.
 
-`test_x86_16_validation_entry_stack_ranges.py` runs in the early contract gate.
+`tests.validation.test_x86_16_validation_entry_stack_ranges.py` runs in the early contract gate.
 
 These guards supplement, never replace, whole-tail validation, generated-C
 compilation and behavioral testing. The reduced MOV/LES compile/run regression

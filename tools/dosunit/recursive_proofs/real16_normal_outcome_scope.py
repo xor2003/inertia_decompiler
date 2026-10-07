@@ -19,10 +19,9 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from tools.dosunit import binary_environment as _binary_environment
-from tools.dosunit import flat32_replay as _flat32_replay
-from tools.dosunit import replay_machine_inputs as _replay_machine_inputs
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts import binary_environment as _binary_environment
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load
 from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationLimits,
@@ -65,7 +64,8 @@ from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     Real16EnvironmentScope,
 )
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
-from tools.dosunit.register_state_relations import MachineState
+from tools.dosunit.runtime import flat32_replay as _flat32_replay
+from tools.dosunit.runtime import replay_machine_inputs as _replay_machine_inputs
 
 
 class OutcomeScopeReason(StrEnum):

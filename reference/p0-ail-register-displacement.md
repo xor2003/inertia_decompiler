@@ -2,7 +2,7 @@
 
 ## Reason And Layer
 
-The current x86-16 Clinic wrapper in `inertia_decompiler/runtime_support.py`
+The current x86-16 Clinic wrapper in `inertia/cli/runtime_support.py`
 runs native statement/multistatement peepholes but bypasses expression
 peepholes. Native SSA propagation consequently leaves long constant Add/Sub
 chains in surviving register values. Re-enabling the entire expression

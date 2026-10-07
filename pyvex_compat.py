@@ -13,7 +13,7 @@ import threading
 from collections.abc import Iterator, Sequence
 from typing import Any, cast, overload
 
-from inertia_decompiler.runtime_support import AnalysisTimeout
+from inertia.cli.runtime_support import AnalysisTimeout
 
 _LOCK = threading.Lock()
 _APPLIED = False

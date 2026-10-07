@@ -5,7 +5,7 @@ Added comprehensive NE (New Executable) format support for Windows/OS/2 16-bit b
 
 ## Files Added
 
-### `angr_platforms/angr_platforms/X86_16/ne_exe_parse.py` (280+ lines)
+### `inertia/frontend/x86_16/ne_exe_parse.py` (280+ lines)
 **Purpose:** Parse NE executable headers and extract debug information
 
 **Key Components:**
@@ -34,7 +34,7 @@ Added comprehensive NE (New Executable) format support for Windows/OS/2 16-bit b
 
 ### `inertia_decompiler/sidecar_parsers.py`
 **Added:**
-- Import: `from angr_platforms.X86_16.ne_exe_parse import parse_ne_exe`
+- Import: `from inertia.frontend.x86_16.ne_exe_parse import parse_ne_exe`
 - `struct` module import (for struct.error exception handling)
 - Function: `_parse_ne_exe_metadata()` — Wrapper that:
   - Calls `parse_ne_exe()` with error handling

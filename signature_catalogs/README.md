@@ -13,11 +13,11 @@ Repo source packs:
 
 User flow:
 - import PAT/OBJ/LIB inputs into an additional source file with:
-  - `PYTHONPATH=.:angr_platforms .venv/bin/python scripts/import_patterns.py <paths...>`
+  - `PYTHONPATH=.:angr_platforms .venv/bin/python tools/signatures/import_patterns.py <paths...>`
 - with no explicit paths, the script imports the default Microsoft C roots into `signature_catalogs/imported_patterns.pat`
 
 Examples:
 - import the default Microsoft C compiler trees into an extra repo source pack:
-  - `PYTHONPATH=.:angr_platforms .venv/bin/python scripts/import_patterns.py`
+  - `PYTHONPATH=.:angr_platforms .venv/bin/python tools/signatures/import_patterns.py`
 - import your own local patterns into a separate source pack:
-  - `PYTHONPATH=.:angr_platforms .venv/bin/python scripts/import_patterns.py /path/to/my_patterns /path/to/extra.lib`
+  - `PYTHONPATH=.:angr_platforms .venv/bin/python tools/signatures/import_patterns.py /path/to/my_patterns /path/to/extra.lib`

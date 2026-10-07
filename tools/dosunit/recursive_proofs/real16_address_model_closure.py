@@ -48,10 +48,10 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
-
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load
 from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationLimits,
@@ -140,7 +140,6 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import (
     StackInvariantProof,
     StackObligation,
 )
-from tools.dosunit.register_state_relations import MachineState
 
 
 class AddressModelReason(StrEnum):

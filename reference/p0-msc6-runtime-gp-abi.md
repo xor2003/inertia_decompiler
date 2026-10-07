@@ -17,7 +17,7 @@ symbols was insufficient to preserve the ABI.
 
 Lowering now exposes its existing authoritative GP symbol inventory through
 `runtime_gp_state_symbols_8616`. The focused tooling module
-`scripts/msc6_runtime_support.py` consumes it to provide matching C89 externs
+`tools/compiler_toolchain/msc6_runtime_support.py` consumes it to provide matching C89 externs
 and definitions for all eight lanes. MS C uses 32-bit `unsigned long` for them.
 The known ABI declarations precede generic global preparation; there is no
 new text-based semantic inference, function repair or instruction emulation.

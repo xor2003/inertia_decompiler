@@ -11,18 +11,18 @@
 cd /home/xor/vextest
 source .venv/bin/activate
 python -m pytest \
-  angr_platforms/tests/test_x86_16_corpus_scan.py \
-  angr_platforms/tests/test_x86_16_recompilable_subset.py \
+  tests/cli/test_x86_16_corpus_scan.py \
+  tests/cli/test_x86_16_recompilable_subset.py \
   -v --tb=short
 ```
 
 ## Current Results (2026-04-05)
 
 ```
-angr_platforms/tests/test_x86_16_corpus_scan.py — 28 tests
+tests/cli/test_x86_16_corpus_scan.py — 28 tests
   ✅ All PASSED
 
-angr_platforms/tests/test_x86_16_recompilable_subset.py — 2 tests
+tests/cli/test_x86_16_recompilable_subset.py — 2 tests
   ✅ test_x86_16_recompilable_subset_description_is_stable PASSED
   ✅ test_x86_16_recompilable_subset_syntax_checks_pass PASSED
 

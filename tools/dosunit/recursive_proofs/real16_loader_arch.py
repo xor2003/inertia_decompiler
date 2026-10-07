@@ -3,7 +3,10 @@
 Responsibility: retain real16 instruction semantics while allowing CLE to map
 the complete loader-linear coordinate space, matching the DOS MZ loader.
 """
-from angr_platforms.X86_16.arch_86_16 import Arch86_16
+
+from __future__ import annotations
+
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 
 def real16_loader_arch() -> Arch86_16:

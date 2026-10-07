@@ -48,8 +48,8 @@ features that would make a whole-function symbolic formula expensive.
 Run:
 
 ```bash
-rtk pytest -q angr_platforms/tests/test_dosunit_tool.py -k 'complexity'
-rtk pytest -q angr_platforms/tests/test_dosunit_tool.py
+rtk pytest -q tools/dosunit/tests/test_dosunit_tool.py -k 'complexity'
+rtk pytest -q tools/dosunit/tests/test_dosunit_tool.py
 rtk python -m py_compile tools/dosunit/*.py dosunit.py
 ```
 

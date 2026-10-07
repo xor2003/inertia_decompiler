@@ -1,6 +1,6 @@
 # Required Cython 16-bit VEX lifter
 
-`lift_86_16.py` is the authoritative implementation for both backends. Cython
+`inertia/frontend/x86_16/lift_86_16.py` is the authoritative implementation for both backends. Cython
 compiles this ordinary Python file in pure Python mode; there is no `.pyx`
 copy or generated semantic code. Normal startup requires a verified compiled
 extension; Python interpretation remains an explicit diagnostic mode.
@@ -11,7 +11,7 @@ Install the build dependencies and compile locally:
 
 ```sh
 uv pip install --python .venv/bin/python 'Cython>=3.2,<4' setuptools
-PYTHON_JIT=1 .venv/bin/python scripts/build_cython_vex.py
+PYTHON_JIT=1 nice -n 10 .venv/bin/python tools/dev/build_cython_vex.py
 ```
 
 A C compiler and Python development headers are required. Generated C, objects,
@@ -28,8 +28,8 @@ HTML retain the lifter's source diagnostics.
 Choose the backend **before starting Python**, including pytest workers:
 
 ```sh
-INERTIA_VEX_BACKEND=cython PYTHON_JIT=1 .venv/bin/python decompile.py SORTDEMO.EXE
-INERTIA_VEX_BACKEND=python PYTHON_JIT=1 .venv/bin/python decompile.py SORTDEMO.EXE
+INERTIA_VEX_BACKEND=cython PYTHON_JIT=1 nice -n 10 .venv/bin/python decompile.py SORTDEMO.EXE
+INERTIA_VEX_BACKEND=python PYTHON_JIT=1 nice -n 10 .venv/bin/python decompile.py SORTDEMO.EXE
 ```
 
 The default `cython` mode requires a valid compiled artifact and raises an import error for a
@@ -71,9 +71,9 @@ ordinary unless a future measured change removes that dispatch cost.
 Run differential instruction checks and uncached real-binary SSA benchmarks:
 
 ```sh
-PYTHON_JIT=1 .venv/bin/python -m pytest angr_platforms/tests/test_x86_16_cython_backend.py -n 3 --tb=short --durations=5
-INERTIA_VEX_BACKEND=python PYTHON_JIT=1 .venv/bin/python scripts/benchmark_cython_vex.py --out .cache/cython-vex/bench-python
-INERTIA_VEX_BACKEND=cython PYTHON_JIT=1 .venv/bin/python scripts/benchmark_cython_vex.py --out .cache/cython-vex/bench-cython
+PYTHON_JIT=1 nice -n 10 .venv/bin/python -m pytest tests/frontend/test_lifter_backend.py tests/frontend/test_x86_16_lifter_cython_dependency.py -n 3 --tb=short --durations=5
+INERTIA_VEX_BACKEND=python PYTHON_JIT=1 nice -n 10 .venv/bin/python tools/dev/benchmark_cython_vex.py --out .cache/cython-vex/bench-python
+INERTIA_VEX_BACKEND=cython PYTHON_JIT=1 nice -n 10 .venv/bin/python tools/dev/benchmark_cython_vex.py --out .cache/cython-vex/bench-cython
 cmp .cache/cython-vex/bench-python/ssa.json .cache/cython-vex/bench-cython/ssa.json
 ```
 
@@ -87,11 +87,12 @@ Generate Cython's interaction heatmap without compiling C or changing the
 active backend, then correlate it with a current interpreted lowering profile:
 
 ```sh
-PYTHON_JIT=1 .venv/bin/python scripts/build_cython_vex.py --annotate-only
-INERTIA_VEX_BACKEND=python PYTHON_JIT=1 .venv/bin/python scripts/benchmark_cython_vex.py --functions 17 --profile .cache/cython-vex/lowering.prof --out .cache/cython-vex/profile
-PYTHON_JIT=1 .venv/bin/python scripts/report_cython_vex.py --annotation .cache/cython-vex/annotation/home/xor/vextest/angr_platforms/angr_platforms/X86_16/lift_86_16.html --profile .cache/cython-vex/lowering.prof --out .cache/cython-vex/interaction-report.md
+PYTHON_JIT=1 nice -n 10 .venv/bin/python tools/dev/build_cython_vex.py --annotate-only
+INERTIA_VEX_BACKEND=python PYTHON_JIT=1 nice -n 10 .venv/bin/python tools/dev/benchmark_cython_vex.py --functions 17 --profile .cache/cython-vex/lowering.prof --out .cache/cython-vex/profile
+PYTHON_JIT=1 nice -n 10 .venv/bin/python tools/dev/report_cython_vex.py --annotation "$ANNOTATION_HTML" --profile .cache/cython-vex/lowering.prof --out .cache/cython-vex/interaction-report.md
 ```
 
+Set `ANNOTATION_HTML` to the path printed by the annotation build.
 The build command prints the actual HTML path (its nested source path depends
 on the checkout location). Yellow lines use Python's C API; expand them to
 inspect generated C. Static annotation heat is not execution time. The report
@@ -99,47 +100,3 @@ ranks current interpreted self CPU time alongside interaction scores; profiling
 is disabled in production compiled builds, so this is not a compiled speed
 measurement. Keep profiled runs separate from uninstrumented timing comparisons.
 Use `--force` to regenerate annotations or rebuild compiler outputs explicitly.
-
-Local acceptance on 2026-09-28: the final build passed 13 backend/report
-checks, including differential VEX checks in interpreted, compiled,
-Cython-absent, and legacy-import modes. Forwarding tests cover live mutations,
-instruction precedence, `None`, dynamic metadata, descriptor fallback, and
-propagation of errors other than `AttributeError`.
-
-The annotation/profile report identified 41,709 forwarding calls. Replacing
-exception-driven fallback reduced the getter's peak static interaction score
-from 58 to 6. This score motivated the experiment; timing and identical SSA
-were the acceptance evidence. The compiled artifact shrank from approximately
-5.6 MiB to 1.3 MiB after omitting generated C debug symbols.
-
-A serial six-process comparison used three samples of the previous compiled
-build and three of the final compiled build. Because other agents were editing
-the repository, all processes imported the same immutable snapshot of 2,411
-Python sources while retaining original file origins for binary assets. Both
-extension hashes and source hashes were verified separately; production backend
-freshness checks remain intact. No VEX disk-cache hits occurred. All six SSA
-artifacts matched exactly: 17 SORTDEMO functions, 257 blocks, 246 SSA parts,
-11,650 assignments, and no lowering refusals. Profiled runs were separate.
-
-| Metric | Previous compiled build | Final compiled build |
-| --- | ---: | ---: |
-| Lowering CPU samples (seconds) | 9.69, 9.69, 10.01 | 8.97, 7.98, 4.73 |
-| Median lowering CPU (seconds) | 9.69 | 7.98 |
-| Maximum peak process RSS (MiB) | 281.4 | 279.0 |
-
-The sampled median CPU reduction was 17.7%. Host contention and timing variation
-were substantial; this bounded result does not establish a stable full-corpus
-or warm-cache comparator speedup. Warm cache hits bypass this lifter entirely.
-VEX object creation and third-party wrappers remain major costs.
-The local evidence is in `.cache/cython-vex-opt/frozen-summary.json`, the
-`frozen-*-*/ssa.json` artifacts, and `interaction-simple.md`; these ignored
-artifacts are machine-local. The commands above reproduce the supported
-benchmark and interaction report on the current source tree.
-
-Scoped Ruff and strict mypy passed, including the lifter. Broad project gates
-are reported separately from these focused checks; a bounded gate that times
-out or finds unrelated shared-tree debt is not a full green result.
-The final scoped `quality-dev` attempt passed its lint/type/build-smoke and
-startup architecture steps, then stopped at `test-ownership-check`: the shared
-`test_real16_binary_compare.py` contains skip/xfail in fast-owned tests. The
-pipeline and optimization-quality suite were therefore not reached.

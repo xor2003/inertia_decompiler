@@ -14,8 +14,6 @@ from enum import StrEnum
 import angr
 import capstone
 import pyvex
-from angr_platforms.X86_16.arch_86_16 import Arch86_16
-from angr_platforms.X86_16.capstone_memory_segment import effective_capstone_memory_segment_8616
 from capstone.x86 import X86OpMem
 from capstone.x86_const import (
     X86_INS_ADD,
@@ -36,8 +34,10 @@ from capstone.x86_const import (
     X86_OP_MEM,
 )
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import FactCounters
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.capstone_memory_segment import effective_capstone_memory_segment_8616
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.contracts.proof_contracts import FactCounters
 from tools.dosunit.recursive_proofs.real16_loader_arch import real16_loader_arch
 from tools.dosunit.recursive_proofs.real16_native_memory_access import (
     NativeAccessFact,

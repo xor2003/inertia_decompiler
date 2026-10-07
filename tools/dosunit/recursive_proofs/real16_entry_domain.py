@@ -15,10 +15,10 @@ from typing import cast
 
 import z3
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.register_state_relations import MachineState
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 
 
 class EntryDomainReason(StrEnum):

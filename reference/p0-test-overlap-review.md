@@ -26,7 +26,7 @@ This bounded pilot does not profile or deduplicate the full suite.
 
 ## Expensive-Test Inspection
 
-In `angr_platforms/tests/test_x86_16_cod_regressions.py`, the three
+In `tests/cli/test_x86_16_cod_regressions.py`, the three
 `_openFileWrapper` cases use the same `_run_cod_proc` command and default
 timeout. Their latest full-audit durations total 315.86 test-seconds, not
 necessarily wall-clock seconds saved. All invoke a subprocess, whose internal
@@ -66,7 +66,7 @@ The same review then removed six further repeated invocations: four remaining
 recoverability cases (BIOS clear-key-flags, DOS get-free-space, load-overlay and
 get-return-code), and two declaration cases (get-free-space and load-overlay).
 Their existing obligations now run in the corresponding dedicated behavior
-regressions. `scripts/pytest_inventory_review.py` maps all eight retired node IDs
+regressions. `tools.dev.pytest_inventory_review` maps all eight retired node IDs
 to their replacements. The unused signature-anchor data was removed with the
 redundant function; it was never asserted and is not claimed as preserved proof.
 

@@ -128,7 +128,7 @@ _install_early_log_levels()
 _enable_line_buffered_stdio()
 _configure_python_recursion_limit()
 
-from inertia_decompiler.architecture_runtime_guard import (  # noqa: E402
+from inertia.cli.architecture_runtime_guard import (  # noqa: E402
     DecompilerArchitectureGuardError,
     assert_decompiler_architecture_clean,
 )
@@ -145,7 +145,7 @@ _CLI_MODULE: ModuleType | None = None
 def _ensure_cli() -> ModuleType:
     global _CLI_MODULE
     if _CLI_MODULE is None:
-        _CLI_MODULE = __import__("inertia_decompiler.cli", fromlist=["*"])
+        _CLI_MODULE = __import__("inertia.cli.cli", fromlist=["*"])
         if _DECOMPILE_DISABLE_CLI_LAZY_IMPORTS:
             # Dynamic boundary: third-party CLI plugin module can vary by package layout.
             for _name in vars(_CLI_MODULE):
@@ -191,7 +191,7 @@ sys.modules[__name__].__class__ = _EntrypointCompatModule
 
 def _run_entrypoint() -> int:
     """Use lightweight validated reuse before loading the full CLI stack."""
-    from inertia_decompiler.direct_request_fast_path import try_direct_request_fast_path_8616
+    from inertia.cli.direct_request_fast_path import try_direct_request_fast_path_8616
 
     fast_status = try_direct_request_fast_path_8616()
     if fast_status is not None:
@@ -205,7 +205,7 @@ if __name__ == "__main__":
         _entrypoint_status = _run_entrypoint()
     finally:
         if _CLI_MODULE is not None:
-            from inertia_decompiler.telemetry import emit_compact_summary
+            from inertia.cli.telemetry import emit_compact_summary
 
             emit_compact_summary()
     raise SystemExit(_entrypoint_status)

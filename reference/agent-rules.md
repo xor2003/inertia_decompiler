@@ -94,7 +94,7 @@ Compact telemetry for slow decompilation:
 
 ```bash
 INERTIA_OTEL_SPANS=1 \
-INERTIA_OTEL_SPAN_FILE=angr_platforms/.cache/otel.trace.txt \
+INERTIA_OTEL_SPAN_FILE=.cache/frontend/otel.trace.txt \
 ./decompile.py ./SORTDEMO.EXE
 ```
 
@@ -105,10 +105,10 @@ Use JSON/JSONL traces only for parsers. Human and agent handoff should use compa
 For long autonomous repair sessions:
 
 ```bash
-./.venv/bin/python scripts/codex_resume_loop.py \
+./.venv/bin/python tools/dev/codex_resume_loop.py \
   --prompt "go on. fix function by function. Finish only when all functions are fixed." \
-  --goal-cmd 'jq -e ".stop_reason==\"goals_met\"" angr_platforms/.cache/auto_decomp_loop/DONE.marker.json >/dev/null 2>&1' \
-  --status-cmd 'test -f angr_platforms/.cache/auto_decomp_loop/DONE.marker.json' \
+  --goal-cmd 'jq -e ".stop_reason==\"goals_met\"" .cache/frontend/auto_decomp_loop/DONE.marker.json >/dev/null 2>&1' \
+  --status-cmd 'test -f .cache/frontend/auto_decomp_loop/DONE.marker.json' \
   --max-iterations 200 \
   --stagnation-limit 30
 ```

@@ -1,5 +1,14 @@
 # Stability-First Execution
 
+2026-10-06 scope update: the active [compiler coverage plan](compiler-coverage-plan.md)
+builds systematic small witnesses for C constructs and emitted patterns under
+MS C 5.1 and Borland 3.1. Eight sources/sixteen round trips are only its first
+batch; completion requires its declared coverage matrix, including a targeted
+large-model subset. Historical whole-program repair queues and unrelated broad
+gates below do not become prerequisites. Preserve them as separate history/backlog.
+After MS/Borland acceptance, the plan requires a final Watcom 11.0b 16-bit lane
+over the same corpus; it does not delay or expand the initial batch.
+
 User priority, September 20: decompilation stability, then correctness, then
 the remaining agreed plan. This changes execution order, not the promised
 Ghidra/Reko features or the full Steps 10-12 completion requirements.
@@ -140,12 +149,12 @@ Targeted timeout recheck: InBoxLng passes, while loadprog and SetGear still
 time out. Track these as open gate failures; do not dismiss them as contention
 without an isolated measurement. Global quality-fast still reports lint debt.
 
-The new `scripts/cod_stability_sweep.py` provides durable per-procedure CLI
+The new `tools/dev/cod_stability_sweep.py` provides durable per-procedure CLI
 attempts, source/code/settings fingerprints, artifact hashes, process-tree
 timeouts and bounded workers. Example (run only one writer per output directory):
 
 ```sh
-PYTHON_JIT=1 PYTHONHASHSEED=0 .venv/bin/python scripts/cod_stability_sweep.py \
+PYTHON_JIT=1 PYTHONHASHSEED=0 .venv/bin/python tools/dev/cod_stability_sweep.py \
   cod .cache/cod-stability-current --limit 8 --workers 2
 ```
 
@@ -341,7 +350,7 @@ listed example successfully decompiled. `test_x86_16_readability_set.py` checks
 inventory metadata rather than executing the examples. Keep these checks, but
 do not use them as substitutes for the new smoke/behavior verdicts.
 
-The inspected default `scripts/test_pipeline.py` list does not directly include
+The inspected default `tools/dev/test_pipeline.py` list does not directly include
 the full COD-samples module. This is not a claim that no COD-derived fixtures
 run elsewhere. Graph coverage was unavailable (`Transport closed`); the bounded
 source reads above establish these limitations.

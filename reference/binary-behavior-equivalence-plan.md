@@ -2,7 +2,7 @@
 
 Status: complete for the declared comparator contracts, accepted 2026-10-06.
 This is capability/implementation acceptance, not proof of all corpus functions.
-This file is the current plan; dated progress history is archived separately.
+This file contains the current plan and acceptance boundary.
 
 ## Scope and completion boundary
 
@@ -114,13 +114,13 @@ rtk proxy nice -n 10 env PYTHON_JIT=1 PYTHONHASHSEED=0 CI=1 PYRIGHT_WATCH=0 \
   PYTEST_WORKERS=2 COMPARATOR_PYTEST_WORKERS=2
 rtk proxy nice -n 10 env PYTHON_JIT=1 PYTHONHASHSEED=0 CI=1 PYRIGHT_WATCH=0 \
   ./.venv/bin/python -m pytest -q -n 2 \
-  angr_platforms/tests/test_dosunit_tool.py
+  tools/dosunit/tests/test_dosunit_tool.py
 rtk proxy nice -n 10 env PYTHON_JIT=1 PYTHONHASHSEED=0 CI=1 PYRIGHT_WATCH=0 \
   ./.venv/bin/python -m pytest -q -n 2 \
-  artifacts/msc8-z3cmp32/test_z3cmp32.py
+  tools/comparator/tests/test_msc8_driver.py
 rtk proxy nice -n 10 env PYTHON_JIT=1 PYTHONHASHSEED=0 CI=1 PYRIGHT_WATCH=0 \
   ./.venv/bin/python -m pytest -q -n 2 \
-  artifacts/bc5-z3cmp32/test_z3cmp32.py
+  tools/comparator/tests/test_bc5_driver.py
 ```
 
 Run the adapter files separately: both are named `test_z3cmp32.py`, so pytest's
@@ -133,11 +133,8 @@ and missing-original-obligation controls when these groups do not cover them.
 Retain full logs, commands, exits/counts, source/binary identities, elapsed time,
 RSS, budgets and refusal/assumption details. No all-green claim from partial runs.
 
-## History and completion notification
+## Completion notification
 
-[Full pre-correction history](binary-behavior-equivalence-history-20261006.md)
-retains all previous receipts, failure records, proposed experiments and estimates.
-Its obsolete gate lists and work queues are historical, not active instructions.
 Use the [current checklist](binary-behavior-acceptance-checklist.md) for acceptance.
 
 When every original comparator requirement is accepted, explicitly notify the
@@ -170,7 +167,7 @@ baseline before implementation.
 
 | Surface | Existing mechanism | Work to establish or extend |
 | --- | --- | --- |
-| `tools/dosunit/straightline_ssa.py` | `_run_callee_proof_fixpoint`, matched-delta `_compare_region_transition_system`, bounded region comparison and connectivity gates | Audit complete-function proof promotion, internal-state coverage, call dependencies and normalization assumptions; extend beyond matching deltas. |
+| `tools/dosunit/compare/straightline_ssa.py` | `_run_callee_proof_fixpoint`, matched-delta `_compare_region_transition_system`, bounded region comparison and connectivity gates | Audit complete-function proof promotion, internal-state coverage, call dependencies and normalization assumptions; extend beyond matching deltas. |
 | 16-bit execution specification | Acyclic region comparison; symbolic paths exhausting loop bounds refuse | Preserve this rule; separate fully discharged finite bounds from incomplete exploration. |
 | `artifacts/msc8-z3cmp32/flat32_cfg.py` | Closed matched-CFG block induction, with call boundaries refused | Reuse the induction strategy through architecture-specific state contracts. |
 | MSC8/BC5 `z3cmp32.py` drivers | Auto loop retry limited to eight blocks and 250 ms per block | Make resource refusal explicit; budget increases are not new proof capabilities. |

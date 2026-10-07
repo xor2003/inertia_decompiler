@@ -14,7 +14,7 @@ from monkeytype.config import DefaultConfig  # pyright: ignore[reportMissingImpo
 from monkeytype.db.base import CallTraceStore  # pyright: ignore[reportMissingImports]
 from monkeytype.db.sqlite import SQLiteStore  # pyright: ignore[reportMissingImports]
 
-from inertia_decompiler.monkeytype_tools import MONKEYTYPE_DB_PATH, ensure_monkeytype_dirs, monkeytype_code_filter
+from inertia.cli.monkeytype_tools import MONKEYTYPE_DB_PATH, ensure_monkeytype_dirs, monkeytype_code_filter
 
 
 class InertiaMonkeyTypeConfig(DefaultConfig):  # type: ignore[misc]  # MonkeyType ships an untyped base class.

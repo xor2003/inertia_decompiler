@@ -43,7 +43,7 @@ compiler-library signatures and preserve runtime-call ABI/effects.
 
 ## Verification Limits
 
-The new regression is enrolled in `scripts/test_pipeline.py`. The pipeline's
+The new regression is enrolled in `tools/dev/test_pipeline.py`. The pipeline's
 268-test contract preflight passed. The main suite reported 6,370 passed and one
 28-second decompilation timeout in the DOS loadProgram regression (458.47 seconds
 total). All eight tiny MS C round trips and the QuickC lane passed. The failing

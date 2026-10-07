@@ -13,7 +13,7 @@ addresses and 11,582 instruction executions on this startup path. It is
 path-specific evidence, not a complete execution inventory. The captured
 load segment is `0x01A2`.
 
-The integrated `/home/xor/vextest/ada.py` consumed that trace with `--full
+The integrated `tools.ada_script.cli` consumed that trace with `--full
 --xrefs --no-signatures`, producing `analysis.db`, `CUP386.lst`, and
 `CUP386.asm`. Ada reported 32,224 disassembled instructions and 543 candidate
 functions. `functions.json` lists their starts, ends, names and flags; 16
@@ -46,7 +46,7 @@ the linked MZ stack header did not change that divergence.
 Run this from `/home/xor/vextest`, using a fresh writable work directory:
 
 ```sh
-PYTHON_JIT=1 .venv/bin/python ada.py \
+PYTHON_JIT=1 .venv/bin/python -m tools.ada_script.cli \
   /home/xor/games/cadaver/CUP386.EXE \
   --work-dir /home/xor/vextest/.cache/cup386/ada-recheck \
   --runtime /home/xor/vextest/artifacts/cadaver-cup386/CUP386.runtime.json \

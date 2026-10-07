@@ -49,7 +49,7 @@ cases share a machine call tail but supply distinct ScaleRotate arguments.
 Log: `/home/xor/.cache/step9-tid-current.log`. The run interval was
 05:04:44-05:06:33 +02:00 on 2026-09-13. This is execution time, not a measured
 engineering estimate. The current failure-details artifact is
-`angr_platforms/.cache/tail_validation_details/COCKPIT.a7bc21539c80.tail_validation_surface.tail_validat.json`.
+`.cache/frontend/tail_validation_details/COCKPIT.a7bc21539c80.tail_validation_surface.tail_validat.json`.
 
 ## Nested Call Argument Traversal (2026-09-13)
 

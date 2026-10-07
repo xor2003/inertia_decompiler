@@ -1,3 +1,5 @@
-/home/xor/vextest/inertia_decompiler/default_signature_catalog.py|4414|1789913269155956622
-/home/xor/vextest/signature_catalog.py|14277|1790450640131914940
-/home/xor/vextest/omf_pat.py|73392|1790451141222754148
+/home/xor/vextest/inertia/cli/default_signature_catalog.py|4560|1791333827216141294
+/home/xor/vextest/tools/signatures/signature_catalog.py|14622|1791310291005754056
+/home/xor/vextest/tools/signatures/omf_pat.py|75516|1791310227931088373
+/home/xor/vextest/tools/signatures/flair_paths.py|2870|1791309981984853434
+/home/xor/vextest/tools/signatures/signature_matching_policy.py|536|1791309981985062350

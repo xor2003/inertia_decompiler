@@ -11,7 +11,7 @@ from enum import StrEnum
 
 import z3
 
-from tools.dosunit.proof_contracts import ProofStatus
+from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.recursive_proofs.stack.recursive_stack_domains import StackWordDomain
 
 

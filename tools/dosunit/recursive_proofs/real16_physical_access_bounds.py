@@ -27,9 +27,10 @@ import angr
 import pyvex
 import z3
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import materialize_function
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load, ImageBindingRefusal
 from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationLimits,
@@ -72,7 +73,6 @@ from tools.dosunit.recursive_proofs.real16_native_memory_access import (
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
 from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import _state_exprs
-from tools.dosunit.register_state_relations import MachineState
 
 PHYSICAL_MODEL_LIMIT: int = 0x100000
 MAX_ACCESS_ASSIGNMENTS: int = 4096

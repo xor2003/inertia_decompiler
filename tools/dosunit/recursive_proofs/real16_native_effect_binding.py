@@ -19,18 +19,17 @@ import angr
 import capstone
 import pyvex
 
-from tools.dosunit import ssa_provenance
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.binary_environment import (
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import initial_state
+from tools.dosunit.contracts.binary_environment import (
     external_effects,
     instruction_port_effect,
     instruction_requires_machine_state,
     requires_environment_contract,
 )
-from tools.dosunit.flat32_replay import _instruction_scope
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import initial_state
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load, ImageBindingRefusal
 from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationLimits,
@@ -44,7 +43,8 @@ from tools.dosunit.recursive_proofs.native_effect_equality import (
     prove_native_effect_identity,
 )
 from tools.dosunit.recursive_proofs.real16_loader_arch import real16_loader_arch
-from tools.dosunit.register_state_relations import MachineState
+from tools.dosunit.reporting import ssa_provenance
+from tools.dosunit.runtime.flat32_replay import _instruction_scope
 
 MAX_NATIVE_REQUESTS: int = 4096
 MAX_NATIVE_BLOCK_BYTES: int = 4096

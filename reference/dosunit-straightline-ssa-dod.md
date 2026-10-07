@@ -82,8 +82,8 @@ satisfiable, the result is failed and includes a concrete counterexample model.
 Run:
 
 ```bash
-rtk pytest -q angr_platforms/tests/test_dosunit_tool.py -k 'ssa'
-rtk pytest -q angr_platforms/tests/test_dosunit_tool.py
+rtk pytest -q tools/dosunit/tests/test_dosunit_tool.py -k 'ssa'
+rtk pytest -q tools/dosunit/tests/test_dosunit_tool.py
 rtk python -m py_compile tools/dosunit/*.py dosunit.py
 ```
 

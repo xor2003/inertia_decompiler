@@ -12,9 +12,10 @@ from typing import cast
 
 import z3
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import Architecture, FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import materialize_function
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import Architecture, FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load, ImageBindingRefusal
 from tools.dosunit.recursive_proofs.loaded_byte_native_transition import (
     _check_states,
@@ -40,7 +41,6 @@ from tools.dosunit.recursive_proofs.real16_entry_domain import (
     native_effect_hash,
 )
 from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import _state_exprs
-from tools.dosunit.register_state_relations import MachineState
 
 
 @dataclass(slots=True)

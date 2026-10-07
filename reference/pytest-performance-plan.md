@@ -1203,7 +1203,7 @@ the CMP16, LOOPS, and FPTR pure-Python/default quality comparisons.
 
 ### Architecture contract
 
-`scripts/check_decompiler_architecture.py` under `cProfile`:
+`tools/dev/check_decompiler_architecture.py` under `cProfile`:
 
 - 64.09 s profiler time;
 - 117,619,314 calls;
@@ -1219,7 +1219,7 @@ construction and traversal are.
 
 ### Ownership manifest
 
-`scripts/test_ownership_manifest.py --check` under `cProfile`:
+`tools/dev/test_ownership_manifest.py --check` under `cProfile`:
 
 - 11.09 s profiler time;
 - 325 `ast.parse` calls;

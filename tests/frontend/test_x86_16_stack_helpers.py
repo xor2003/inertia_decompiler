@@ -1,0 +1,716 @@
+import pytest
+from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
+from inertia.frontend.x86_16.regs import reg16_t, reg32_t, sgreg_t
+from inertia.frontend.x86_16.stack_helpers import (
+    branch_rel8,
+    branch_rel16,
+    branch_rel32,
+    emit_far_call16,
+    emit_far_jump16,
+    emit_near_call16,
+    emit_near_call32,
+    emit_near_jump16,
+    emit_near_jump32,
+    enter16,
+    enter32,
+    far_linear_target_8616,
+    leave16,
+    near_relative_target16,
+    near_relative_target32,
+    near_return_ip16,
+    pop16,
+    pop16_register,
+    pop32_register,
+    pop_all16,
+    pop_all32,
+    pop_far_return_frame16,
+    pop_far_return_frame32,
+    pop_flags16,
+    pop_flags32,
+    pop_interrupt_frame16,
+    pop_interrupt_frame32,
+    pop_segment16,
+    pop_segment32,
+    push16,
+    push16_register,
+    push32_register,
+    push_all16,
+    push_all32,
+    push_far_return_frame16,
+    push_far_return_frame32,
+    push_flags16,
+    push_flags32,
+    push_immediate16,
+    push_immediate32,
+    push_privilege_stack32,
+    push_segment16,
+    push_segment32,
+    return_far16,
+    return_far32,
+    return_interrupt16,
+    return_interrupt32,
+    return_near16,
+    return_near32,
+)
+
+
+class _RegisterBank(dict):
+    @staticmethod
+    def _reg_key(reg):
+        return (type(reg), reg)
+
+    def __init__(self, pairs=()):
+        super().__init__((self._reg_key(reg), value) for reg, value in pairs)
+
+    def __getitem__(self, reg):
+        if reg is reg16_t.SP:
+            return super().__getitem__(self._reg_key(reg32_t.ESP)) & 0xFFFF
+        return super().__getitem__(self._reg_key(reg))
+
+    def __setitem__(self, reg, value):
+        if reg is reg16_t.SP:
+            reg, value = reg32_t.ESP, (self[reg32_t.ESP] & 0xFFFF0000) | (value & 0xFFFF)
+        super().__setitem__(self._reg_key(reg), value)
+
+    def get(self, reg, default=None):
+        if reg is reg16_t.SP:
+            return self[reg]
+        return super().get(self._reg_key(reg), default)
+
+
+class _StackEmu:
+    def __init__(self):
+        self.control_address_domain = ControlAddressDomain.LOADER_LINEAR
+        gpreg_pairs = (
+            (reg16_t.AX, 0x1111),
+            (reg16_t.CX, 0x2222),
+            (reg16_t.DX, 0x3333),
+            (reg16_t.BX, 0x4444),
+            (reg16_t.BP, 0x2222),
+            (reg16_t.SI, 0x5555),
+            (reg16_t.DI, 0x6666),
+            (reg16_t.IP, 0x0100),
+            (reg32_t.EAX, 0x11111111),
+            (reg32_t.ECX, 0x22222222),
+            (reg32_t.EDX, 0x33333333),
+            (reg32_t.EBX, 0x44444444),
+            (reg32_t.ESP, 0x1000),
+            (reg32_t.EBP, 0x55555555),
+            (reg32_t.ESI, 0x66666666),
+            (reg32_t.EDI, 0x77777777),
+        )
+        self.gpregs = _RegisterBank(gpreg_pairs)
+        self.sgregs = {sgreg_t.CS: 0x1234, sgreg_t.SS: 0x2000}
+        self.memory = {}
+        self.irsb = type("_IRSB", (), {"next": None, "jumpkind": None})()
+        self.lifter_instruction = type("_Lifter", (), {"addr": 0x100, "jump": self._jump})()
+        self.flags = 0xF002
+
+    def update_gpreg(self, reg, delta):
+        self.gpregs[reg] = self.gpregs[reg] + delta
+
+    def get_gpreg(self, reg):
+        return self.gpregs[reg]
+
+    def set_gpreg(self, reg, value):
+        self.gpregs[reg] = value
+        if reg == reg16_t.FLAGS:
+            self.flags = value
+
+    def set_eip(self, value):
+        self.gpregs[reg32_t.EIP] = value
+
+    def get_eip(self):
+        return self.gpregs.get(reg32_t.EIP, 0)
+
+    def get_sgreg(self, reg):
+        if isinstance(reg, str):
+            reg = sgreg_t[reg]
+        return self.sgregs[reg]
+
+    def v2p(self, seg, off):
+        return (seg << 4) + off
+
+    def set_sgreg(self, reg, value):
+        if isinstance(reg, str):
+            reg = sgreg_t[reg]
+        self.sgregs[reg] = value
+
+    def get_segment(self, reg):
+        return self.get_sgreg(reg)
+
+    def set_segment(self, reg, value):
+        self.set_sgreg(reg, value)
+
+    def get_flags(self):
+        return self.flags
+
+    def set_flags(self, value):
+        self.flags = value
+
+    def get_eflags(self):
+        return self.flags
+
+    def set_eflags(self, value):
+        self.flags = value
+
+    def write_mem16_seg(self, seg, addr, value, *, address_bits=None):
+        assert address_bits == 16
+        self.memory[(seg, addr)] = value
+
+    def read_mem16_seg(self, seg, addr, *, address_bits=None):
+        assert address_bits == 16
+        return self.memory[(seg, addr)]
+
+    def write_mem32_seg(self, seg, addr, value, *, address_bits=None):
+        assert address_bits == 16
+        self.memory[(seg, addr)] = value
+
+    def read_mem32_seg(self, seg, addr, *, address_bits=None):
+        assert address_bits == 16
+        return self.memory[(seg, addr)]
+
+    def constant(self, value, _ty):
+        return value
+
+    def _jump(self, _cond, target, jumpkind):
+        self.irsb.next = target
+        self.irsb.jumpkind = jumpkind
+
+
+def test_stack_helpers_push_and_pop_16_bit_values():
+    emu = _StackEmu()
+
+    push16(emu, 0xABCD)
+    assert emu.get_gpreg(reg16_t.SP) == 0x0FFE
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0xABCD
+    assert pop16(emu) == 0xABCD
+    assert emu.get_gpreg(reg16_t.SP) == 0x1000
+
+
+def test_stack_helpers_register_immediate_and_flags_primitives_cover_both_widths():
+    emu = _StackEmu()
+
+    push16_register(emu, reg16_t.AX)
+    push32_register(emu, reg32_t.EAX)
+    push_immediate16(emu, 0xBEEF)
+    push_immediate32(emu, 0xCAFEBABE)
+    push_flags16(emu)
+    push_flags32(emu)
+
+    assert emu.memory[(sgreg_t.SS, 0x0FFA)] == 0x11111111
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x1111
+    assert emu.memory[(sgreg_t.SS, 0x0FF8)] == 0xBEEF
+    assert emu.memory[(sgreg_t.SS, 0x0FF4)] == 0xCAFEBABE
+    assert emu.memory[(sgreg_t.SS, 0x0FF2)] == 0xF002
+    assert emu.memory[(sgreg_t.SS, 0x0FEE)] == 0xF002
+
+    assert pop_flags32(emu) == 0xF002
+    assert pop_flags16(emu) == 0x0002
+
+    pop32_register(emu, reg32_t.EAX)
+    pop16_register(emu, reg16_t.AX)
+    assert emu.get_gpreg(reg32_t.EAX) == 0xCAFEBABE
+    assert emu.get_gpreg(reg16_t.AX) == 0xBEEF
+
+
+def test_stack_helpers_push16_register_preserves_original_sp_value():
+    emu = _StackEmu()
+
+    push16_register(emu, reg16_t.SP)
+
+    assert emu.get_gpreg(reg16_t.SP) == 0x0FFE
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x1000
+
+
+def test_stack_helpers_enter32_uses_real_mode_16bit_nesting_addresses():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x2000
+    emu.gpregs[reg32_t.EBP] = 0x12340010
+    emu.memory[(sgreg_t.SS, 0x000C)] = 0xAABBCCDD
+
+    enter32(emu, 0x10, 2)
+
+    assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x12340010
+    assert emu.memory[(sgreg_t.SS, 0x1FF8)] == 0xAABBCCDD
+    assert emu.memory[(sgreg_t.SS, 0x1FF4)] == 0x1FFC
+    assert emu.get_gpreg(reg32_t.EBP) == 0x1FFC
+    assert emu.get_gpreg(reg32_t.ESP) == 0x1FE4
+
+
+def test_stack_helpers_segment16_helpers_round_trip_segment_registers():
+    emu = _StackEmu()
+    emu.sgregs[sgreg_t.DS] = 0xBEEF
+
+    push_segment16(emu, sgreg_t.DS)
+    emu.sgregs[sgreg_t.DS] = 0
+    pop_segment16(emu, sgreg_t.DS)
+
+    assert emu.get_sgreg(sgreg_t.DS) == 0xBEEF
+    assert emu.get_gpreg(reg16_t.SP) == 0x1000
+
+
+def test_stack_helpers_flags16_helpers_mask_reserved_bits():
+    emu = _StackEmu()
+    emu.flags = 0xAAAA
+
+    push_flags16(emu)
+    emu.flags = 0
+    masked = pop_flags16(emu)
+
+    assert masked == ((0xAAAA & 0x0FD5) | 0x0002)
+    assert emu.get_flags() == masked
+
+
+def test_stack_helpers_form_far_call_frames_in_cs_ip_order():
+    emu = _StackEmu()
+
+    push_far_return_frame16(emu, 0x0105)
+
+    assert emu.get_gpreg(reg16_t.SP) == 0x0FFC
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x1234
+    assert emu.memory[(sgreg_t.SS, 0x0FFC)] == 0x0105
+    assert pop_far_return_frame16(emu) == (0x0105, 0x1234)
+
+
+def test_stack_helpers_pop_interrupt_frames_in_ip_cs_flags_order():
+    emu = _StackEmu()
+    emu.gpregs[reg16_t.SP] = 0x0FF8
+    emu.memory[(sgreg_t.SS, 0x0FF8)] = 0xAAAA
+    emu.memory[(sgreg_t.SS, 0x0FFA)] = 0xBBBB
+    emu.memory[(sgreg_t.SS, 0x0FFC)] = 0xCCCC
+
+    assert pop_interrupt_frame16(emu) == (0xAAAA, 0xBBBB, 0xCCCC)
+
+
+def test_stack_helpers_return_helpers_restore_far_and_interrupt_state():
+    emu = _StackEmu()
+    emu.gpregs[reg16_t.SP] = 0x0FF8
+    emu.memory[(sgreg_t.SS, 0x0FF8)] = 0xAAAA
+    emu.memory[(sgreg_t.SS, 0x0FFA)] = 0xBBBB
+    emu.memory[(sgreg_t.SS, 0x0FFC)] = 0xCCCC
+
+    assert return_far16(emu, 4) == (0xAAAA, 0xBBBB)
+    assert emu.get_gpreg(reg16_t.SP) == 0x1000
+    assert emu.get_gpreg(reg16_t.IP) == 0xAAAA
+    assert emu.get_sgreg(sgreg_t.CS) == 0xBBBB
+    assert emu.irsb.jumpkind == "Ijk_Ret"
+
+    emu.gpregs[reg16_t.SP] = 0x0FF8
+    emu.irsb.next = None
+    emu.irsb.jumpkind = None
+
+    assert return_interrupt16(emu) == (0xAAAA, 0xBBBB, 0xCCCC)
+    assert emu.get_gpreg(reg16_t.IP) == 0xAAAA
+    assert emu.get_sgreg(sgreg_t.CS) == 0xBBBB
+    assert emu.get_flags() == (0xCCCC & 0x0FD5) | 0x0002
+    assert emu.irsb.jumpkind == "Ijk_Ret"
+
+
+def test_stack_helpers_32bit_far_and_interrupt_helpers_use_dword_frames():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x1FF0
+    emu.memory[(sgreg_t.SS, 0x1FF0)] = 0x11112222
+    emu.memory[(sgreg_t.SS, 0x1FF4)] = 0x33334444
+    emu.memory[(sgreg_t.SS, 0x1FF8)] = 0x55556666
+
+    assert push_far_return_frame32(emu, 0x77778888) == 0x77778888
+    assert emu.memory[(sgreg_t.SS, 0x1FE8)] == 0x77778888
+    assert emu.memory[(sgreg_t.SS, 0x1FEC)] == 0x1234
+
+    emu.gpregs[reg32_t.ESP] = 0x1FF0
+    emu.irsb.next = None
+    emu.irsb.jumpkind = None
+    assert pop_far_return_frame32(emu) == (0x11112222, 0x33334444)
+
+    emu.gpregs[reg32_t.ESP] = 0x1FF0
+    emu.irsb.next = None
+    emu.irsb.jumpkind = None
+    assert return_far32(emu, 4) == (0x11112222, 0x33334444)
+    assert emu.get_gpreg(reg32_t.ESP) == 0x1FFC
+    assert emu.get_gpreg(reg32_t.EIP) == 0x11112222
+    assert emu.get_sgreg(sgreg_t.CS) == 0x4444
+
+    emu.gpregs[reg32_t.ESP] = 0x1FF0
+    emu.irsb.next = None
+    emu.irsb.jumpkind = None
+    assert pop_interrupt_frame32(emu) == (0x11112222, 0x33334444, 0x55556666)
+
+    emu.gpregs[reg32_t.ESP] = 0x1FF0
+    emu.irsb.next = None
+    emu.irsb.jumpkind = None
+    assert return_interrupt32(emu) == (0x11112222, 0x33334444, 0x55556666)
+    assert emu.get_gpreg(reg32_t.EIP) == 0x11112222
+    assert emu.get_sgreg(sgreg_t.CS) == 0x4444
+    assert emu.get_eflags() == 0x55556666 | 0x00000002
+
+
+def test_stack_helpers_privilege_stack_save_uses_ss_and_esp_order():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x1FF0
+
+    saved_ss, saved_esp = push_privilege_stack32(emu)
+
+    assert saved_ss == 0x2000
+    assert saved_esp == 0x1FF0
+    assert emu.memory[(sgreg_t.SS, 0x1FEC)] == 0x2000
+    assert emu.memory[(sgreg_t.SS, 0x1FE8)] == 0x1FF0
+
+
+def test_stack_helpers_enter_and_leave_manage_the_frame_pointer():
+    emu = _StackEmu()
+    emu.gpregs[reg16_t.SP] = 0x1000
+    emu.gpregs[reg16_t.BP] = 0x1111
+
+    enter16(emu, 4, 0)
+
+    assert emu.get_gpreg(reg16_t.BP) == 0x0FFE
+    assert emu.get_gpreg(reg16_t.SP) == 0x0FFA
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x1111
+
+    leave16(emu)
+
+    assert emu.get_gpreg(reg16_t.BP) == 0x1111
+    assert emu.get_gpreg(reg16_t.SP) == 0x1000
+
+
+def test_stack_helpers_compute_near_return_ip_from_instruction_size():
+    emu = _StackEmu()
+    emu.lifter_instruction.addr = (0x1234 << 4) + 0x0100
+
+    assert near_return_ip16(emu, 3) == 0x0103
+
+
+def test_control_coordinate_domain_is_part_of_frontend_cache_identity():
+    """Native and loader lifting of identical bytes cannot share cached IR."""
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
+    loader = Arch86_16()
+    native = Arch86_16(control_address_domain=ControlAddressDomain.ARCHITECTURAL_OFFSET)
+    assert loader.lifting_semantics_key_8616() != native.lifting_semantics_key_8616()
+
+
+def test_native_return_offset_uses_declared_architectural_instruction_address():
+    """Native IP is already an offset even when CS is nonzero."""
+    emu = _StackEmu()
+    emu.control_address_domain = ControlAddressDomain.ARCHITECTURAL_OFFSET
+    emu.lifter_instruction.addr = 0xFFFF
+    assert near_return_ip16(emu, 3) == 2
+
+
+@pytest.mark.parametrize("code,width", [(bytes.fromhex("e80000"), 2), (bytes.fromhex("66e800000000"), 4)])
+def test_near_call_and_return_coordinates_match_independent_guest(code, width):
+    """Decoded loader addresses save offsets and RET rejoins the CS base."""
+    from unicorn import UC_ARCH_X86, UC_MODE_16, Uc
+    from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_IP, UC_X86_REG_SP, UC_X86_REG_SS
+
+    guest = Uc(UC_ARCH_X86, UC_MODE_16)
+    guest.mem_map(0, 0x100000)
+    guest.reg_write(UC_X86_REG_CS, 0x1234)
+    guest.reg_write(UC_X86_REG_SS, 0x2000)
+    guest.reg_write(UC_X86_REG_SP, 0x1000)
+    linear = (0x1234 << 4) + 0x0100
+    ret = b"\xc3" if width == 2 else b"\x66\xc3"
+    guest.mem_write(linear, code + ret)
+    guest.emu_start(linear, 0x100000, count=1)
+    stack_offset = 0x1000 - width
+    saved = int.from_bytes(guest.mem_read((0x2000 << 4) + stack_offset, width), "little")
+    assert saved == 0x0100 + len(code)
+    assert guest.reg_read(UC_X86_REG_SP) == stack_offset
+
+    emu = _StackEmu()
+    emu.lifter_instruction.addr = linear
+    emu.gpregs[reg32_t.EIP] = linear
+    if width == 2:
+        emit_near_call16(emu, linear + len(code), instruction_size=len(code))
+    else:
+        from inertia.frontend.x86_16.stack_helpers import near_return_eip32
+
+        emit_near_call32(emu, linear + len(code), near_return_eip32(emu, len(code)))
+    assert emu.memory[(sgreg_t.SS, stack_offset)] == saved
+
+    guest.emu_start(linear + len(code), 0x100000, count=1)
+    if width == 2:
+        assert return_near16(emu) == saved
+    else:
+        assert return_near32(emu) == saved
+    assert emu.irsb.next == (0x1234 << 4) + guest.reg_read(UC_X86_REG_IP)
+    assert emu.get_gpreg(reg16_t.SP) == guest.reg_read(UC_X86_REG_SP) == 0x1000
+
+
+def test_stack_helpers_compute_relative_targets_from_decoded_addresses():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.EIP] = 0x1000
+
+    assert near_relative_target16(emu, 4, 3) == 0x0107
+    # EIP storage does not supply the decoded instruction's loader address.
+    assert near_relative_target32(emu, 8, 5) == 0x010D
+
+
+def test_indirect_near_call_saves_architectural_ip_from_decoded_address():
+    """The generic instruction path uses the same saved-IP contract."""
+    from types import SimpleNamespace
+
+    from inertia.frontend.x86_16.instr16 import Instr16
+
+    emu = _StackEmu()
+    emu.lifter_instruction.addr = (0x1234 << 4) + 0x0100
+    emu.gpregs[reg16_t.IP] = emu.lifter_instruction.addr & 0xFFFF
+    instruction = SimpleNamespace(
+        emu=emu, instr=SimpleNamespace(size=2), get_rm16=lambda: 0x0200,
+        _active_stack_emulator=lambda: emu,
+    )
+    Instr16.call_rm16(instruction)
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x0102
+
+
+def test_stack_helpers_push_all16_preserves_original_sp_slot():
+    emu = _StackEmu()
+
+    push_all16(emu)
+
+    assert emu.get_gpreg(reg16_t.SP) == 0x0FF0
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x1111
+    assert emu.memory[(sgreg_t.SS, 0x0FFC)] == 0x2222
+    assert emu.memory[(sgreg_t.SS, 0x0FFA)] == 0x3333
+    assert emu.memory[(sgreg_t.SS, 0x0FF8)] == 0x4444
+    assert emu.memory[(sgreg_t.SS, 0x0FF6)] == 0x1000
+    assert emu.memory[(sgreg_t.SS, 0x0FF4)] == 0x2222
+    assert emu.memory[(sgreg_t.SS, 0x0FF2)] == 0x5555
+    assert emu.memory[(sgreg_t.SS, 0x0FF0)] == 0x6666
+
+
+def test_stack_helpers_pop_all16_restores_registers_and_skips_saved_sp():
+    emu = _StackEmu()
+    emu.gpregs[reg16_t.SP] = 0x0FF0
+    emu.memory[(sgreg_t.SS, 0x0FF0)] = 0x6666
+    emu.memory[(sgreg_t.SS, 0x0FF2)] = 0x5555
+    emu.memory[(sgreg_t.SS, 0x0FF4)] = 0x2222
+    emu.memory[(sgreg_t.SS, 0x0FF6)] = 0x1000
+    emu.memory[(sgreg_t.SS, 0x0FF8)] = 0x4444
+    emu.memory[(sgreg_t.SS, 0x0FFA)] = 0x3333
+    emu.memory[(sgreg_t.SS, 0x0FFC)] = 0x2222
+    emu.memory[(sgreg_t.SS, 0x0FFE)] = 0x1111
+
+    pop_all16(emu)
+
+    assert emu.get_gpreg(reg16_t.DI) == 0x6666
+    assert emu.get_gpreg(reg16_t.SI) == 0x5555
+    assert emu.get_gpreg(reg16_t.BP) == 0x2222
+    assert emu.get_gpreg(reg16_t.BX) == 0x4444
+    assert emu.get_gpreg(reg16_t.DX) == 0x3333
+    assert emu.get_gpreg(reg16_t.CX) == 0x2222
+    assert emu.get_gpreg(reg16_t.AX) == 0x1111
+    assert emu.get_gpreg(reg16_t.SP) == 0x1000
+
+
+def test_stack_helpers_return_near16_sets_ip_and_ret_jumpkind():
+    emu = _StackEmu()
+    emu.gpregs[reg16_t.SP] = 0x0FFE
+    emu.memory[(sgreg_t.SS, 0x0FFE)] = 0x3456
+
+    assert return_near16(emu) == 0x3456
+    assert emu.get_gpreg(reg16_t.IP) == 0x3456
+    assert emu.get_gpreg(reg16_t.SP) == 0x1000
+    assert emu.irsb.next == (0x1234 << 4) + 0x3456
+    assert emu.irsb.jumpkind == "Ijk_Ret"
+
+
+def test_stack_helpers_return_near16_applies_extra_stack_adjust():
+    emu = _StackEmu()
+    emu.gpregs[reg16_t.SP] = 0x0FFE
+    emu.memory[(sgreg_t.SS, 0x0FFE)] = 0x3456
+
+    return_near16(emu, stack_adjust=4)
+
+    assert emu.get_gpreg(reg16_t.IP) == 0x3456
+    assert emu.get_gpreg(reg16_t.SP) == 0x1004
+
+
+def test_stack_helpers_emit_near_call_and_jump_set_control_transfer_edges():
+    emu = _StackEmu()
+    emu.lifter_instruction.addr = (0x1234 << 4) + 0x0100
+    emu.gpregs[reg32_t.EIP] = 0x1000
+
+    emit_near_call16(emu, 0x2222, instruction_size=3)
+    assert emu.get_gpreg(reg16_t.IP) == 0x2222
+    assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x0103
+    assert emu.irsb.jumpkind == "Ijk_Call"
+
+    emu.gpregs[reg16_t.SP] = 0x1000
+    emit_near_jump16(emu, 0x3333)
+    assert emu.get_gpreg(reg16_t.IP) == 0x3333
+    assert emu.irsb.jumpkind == "Ijk_Boring"
+
+    emu.gpregs[reg32_t.ESP] = 0x2000
+    emit_near_call32(emu, 0x2000)
+    assert emu.get_gpreg(reg32_t.EIP) == 0x2000
+    assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x0100
+    assert emu.irsb.jumpkind == "Ijk_Call"
+
+    emit_near_jump32(emu, 0x3000)
+    assert emu.get_gpreg(reg32_t.EIP) == 0x3000
+    assert emu.irsb.jumpkind == "Ijk_Boring"
+
+
+def test_stack_helpers_branch_rel32_uses_shared_jump_emission_for_taken_branches():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.EIP] = 0x1000
+    emu.lifter_instruction.addr = 0x1000
+
+    assert branch_rel32(emu, True, 0x20) == 0x1020
+    assert emu.get_gpreg(reg32_t.EIP) == 0x1020
+    assert emu.irsb.jumpkind == "Ijk_Boring"
+
+    emu.gpregs[reg32_t.EIP] = 0x2000
+    emu.lifter_instruction.addr = 0x2000
+    assert branch_rel32(emu, False, 0x20) is None
+    assert emu.get_gpreg(reg32_t.EIP) == 0x2000
+
+
+def test_stack_helpers_branch_rel8_and_rel16_share_relative_target_emission():
+    emu = _StackEmu()
+
+    emu.gpregs[reg16_t.IP] = 0x0100
+    assert branch_rel8(emu, True, 0x10) == 0x0112
+    assert emu.get_gpreg(reg16_t.IP) == 0x0112
+
+    emu.gpregs[reg16_t.IP] = 0x0200
+    emu.lifter_instruction.addr = 0x0200
+    assert branch_rel16(emu, True, 0x20, instruction_size=4) == 0x0224
+    assert emu.get_gpreg(reg16_t.IP) == 0x0224
+
+    emu.gpregs[reg16_t.IP] = 0x0300
+    emu.lifter_instruction.addr = 0x0300
+    assert branch_rel8(emu, False, 0x10) is None
+    assert branch_rel16(emu, False, 0x20, instruction_size=4) is None
+
+
+def test_stack_helpers_push_and_pop_all32_preserve_saved_esp_slot():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x2000
+
+    push_all32(emu)
+
+    assert emu.get_gpreg(reg32_t.ESP) == 0x1FE0
+    assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x11111111
+    assert emu.memory[(sgreg_t.SS, 0x1FF8)] == 0x22222222
+    assert emu.memory[(sgreg_t.SS, 0x1FF4)] == 0x33333333
+    assert emu.memory[(sgreg_t.SS, 0x1FF0)] == 0x44444444
+    assert emu.memory[(sgreg_t.SS, 0x1FEC)] == 0x2000
+    assert emu.memory[(sgreg_t.SS, 0x1FE8)] == 0x55555555
+    assert emu.memory[(sgreg_t.SS, 0x1FE4)] == 0x66666666
+    assert emu.memory[(sgreg_t.SS, 0x1FE0)] == 0x77777777
+
+    pop_all32(emu)
+
+    assert emu.get_gpreg(reg32_t.EAX) == 0x11111111
+    assert emu.get_gpreg(reg32_t.ECX) == 0x22222222
+    assert emu.get_gpreg(reg32_t.EDX) == 0x33333333
+    assert emu.get_gpreg(reg32_t.EBX) == 0x44444444
+    assert emu.get_gpreg(reg32_t.EBP) == 0x55555555
+    assert emu.get_gpreg(reg32_t.ESI) == 0x66666666
+    assert emu.get_gpreg(reg32_t.EDI) == 0x77777777
+    assert emu.get_gpreg(reg32_t.ESP) == 0x2000
+
+
+def test_stack_helpers_segment32_helpers_round_trip_segment_registers():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x2000
+    emu.sgregs[sgreg_t.DS] = 0xBEEF
+
+    push_segment32(emu, sgreg_t.DS)
+    emu.sgregs[sgreg_t.DS] = 0
+    pop_segment32(emu, sgreg_t.DS)
+
+    assert emu.get_sgreg(sgreg_t.DS) == 0xBEEF
+    assert emu.get_gpreg(reg32_t.ESP) == 0x2000
+
+
+def test_stack_helpers_return_near32_sets_eip_and_ret_jumpkind():
+    emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x1FFC
+    emu.memory[(sgreg_t.SS, 0x1FFC)] = 0x12345678
+
+    assert return_near32(emu) == 0x12345678
+    assert emu.get_gpreg(reg32_t.ESP) == 0x2000
+    assert emu.irsb.next == (0x1234 << 4) + 0x12345678
+    assert emu.irsb.jumpkind == "Ijk_Ret"
+
+
+def test_stack_helpers_far_call_emits_flat_linear_target():
+    emu = _StackEmu()
+
+    returned = emit_far_call16(emu, 0x100E, 0x02C8, 0x0105)
+
+    assert returned == 0x0105
+    assert emu.irsb.next == ((0x100E << 4) + 0x02C8)
+    assert emu.irsb.jumpkind == "Ijk_Call"
+    assert emu.get_sgreg(sgreg_t.CS) == 0x100E
+    assert emu.get_eip() == 0x02C8
+
+
+def test_stack_helpers_far_call_wraps_linear_target_at_one_megabyte():
+    emu = _StackEmu()
+
+    emit_far_call16(emu, 0xFFFF, 0xFFFF, 0x0105)
+
+    assert emu.irsb.next == 0x0FFEF
+
+
+def test_stack_helpers_native_far_call_uses_architectural_offset():
+    emu = _StackEmu()
+    emu.control_address_domain = ControlAddressDomain.ARCHITECTURAL_OFFSET
+    symbolic_segment = object()
+
+    emit_far_call16(emu, symbolic_segment, 0x02C8, 0x0105)
+
+    assert emu.irsb.next == 0x02C8
+    assert emu.irsb.jumpkind == "Ijk_Call"
+
+
+def test_stack_helpers_far_jump_emits_flat_linear_target():
+    emu = _StackEmu()
+
+    returned = emit_far_jump16(emu, 0x100E, 0x02C8)
+
+    assert returned == 0x02C8
+    assert emu.irsb.next == ((0x100E << 4) + 0x02C8)
+    assert emu.irsb.jumpkind == "Ijk_Boring"
+    assert emu.get_sgreg(sgreg_t.CS) == 0x100E
+
+
+def test_stack_helpers_far_linear_target_resolution_contract():
+    assert far_linear_target_8616(0x100E, 0x02C8) == ((0x100E << 4) + 0x02C8)
+    assert far_linear_target_8616(0, 0) == 0
+    assert far_linear_target_8616(object(), 0x02C8) is None
+    assert far_linear_target_8616(0x100E, object()) is None
+
+
+def test_loader_far_call_retains_symbolic_segment_in_control_target():
+    """A symbolic segment contributes its base instead of disappearing."""
+    from pyvex.lifting.util.vex_helper import Type
+
+    class Coordinate:
+        def __init__(self, value):
+            self.value = value
+
+        def cast_to(self, ty):
+            bits = {Type.int_8: 8, Type.int_16: 16, Type.int_32: 32}[ty]
+            return Coordinate(self.value & ((1 << bits) - 1))
+
+        def __lshift__(self, other):
+            return Coordinate(self.value << other.value)
+
+        def __add__(self, other):
+            return Coordinate(self.value + other.value)
+
+        def __and__(self, other):
+            return Coordinate(self.value & other.value)
+
+    emu = _StackEmu()
+    emu.constant = lambda value, ty: Coordinate(value).cast_to(ty)
+    # The frame is explicit here so fake expression arithmetic is confined
+    # to the composed control target rather than stack-address arithmetic.
+    emit_far_jump16(emu, Coordinate(0x1234), Coordinate(0x5678))
+    assert emu.irsb.next.value == (0x1234 << 4) + 0x5678

@@ -13,7 +13,7 @@ operands; this fixture adds signed widening across the call boundary.
 ## Reproduce
 
 ```sh
-PYTHON_JIT=1 PYTHONHASHSEED=0 .venv/bin/python scripts/build_msc6_examples.py \
+PYTHON_JIT=1 PYTHONHASHSEED=0 .venv/bin/python tools.compiler_toolchain.build_msc6_examples \
   --only-constructs mixwidth --out-dir .cache/mixwidth-msc6 \
   --kvikdos /home/xor/kvikdos/kvikdos \
   --msc6-root '/home/xor/inertia_player/dos_compilers/Microsoft C v6ax' \
@@ -80,7 +80,7 @@ as unsigned long and `ptrdiff_t` as int32_t, conflicting with MS C's `STDDEF.H`
 definitions (unsigned int and int). The linker then reports missing OBJ; that
 is secondary to the C2086 compiler errors. Fix the toolchain compatibility
 header owner, not generated C. The similar shim in
-`scripts/compare_msc6_ssa_examples.py` also needs coherent ownership.
+`tools.comparator.compare_msc6_ssa_examples` also needs coherent ownership.
 
 Remaining: repair/retest the header contract, compile all required generated
 functions, execute the rebuilt fixture, inspect remaining branch-evidence
@@ -90,7 +90,7 @@ control-flow checks. This remains a failing end-to-end development reproducer.
 
 ## Header Repair And Complete-Function Gate
 
-The header contract is now repaired in `scripts/msc6_compat_headers.py`.
+The header contract is now repaired in `tools.compiler_toolchain.msc6_compat_headers`.
 Both build and SSA tooling delegate to it. `size_t`/`ptrdiff_t` are imported
 from the target's `<stddef.h>`, not redefined by the fixed-width shim.
 Four tests failed before the fix (both owners, both include orders); all 60
@@ -239,7 +239,7 @@ rather than suppressing compiler diagnostics or rewriting function semantics.
   intermittent timeout is not proven permanently eliminated.
 - Logs: `.cache/mixwidth-zero-quality-fast.log`,
   `.cache/mixwidth-zero-test-pipeline.log`. Structured lane report:
-  `angr_platforms/.cache/test_pipeline/summary.json` (overwritten by future runs).
+  `.cache/frontend/test_pipeline/summary.json` (overwritten by future runs).
 
 The existing tiny lane's green result does not cover the new linked mixed-width
 fixture end to end; its declaration/export failure above remains blocking.
@@ -277,7 +277,7 @@ gates after closing the fixture entry/rebuild contract.
 
 ## Linked Entry And Round Trip
 
-`scripts/msc6_entrypoint.py` now inspects generated declarations with the
+`tools.compiler_toolchain.msc6_entrypoint` now inspects generated declarations with the
 existing C parser. Given the fixture's same-build `main` address, it appends
 only `int main(void) { return (int)sub_<address>(); }` when exactly one matching
 zero-argument integer definition exists. It preserves the complete generated

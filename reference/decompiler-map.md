@@ -18,16 +18,16 @@ leave the late pass as a temporary consumer only.
 
 | Layer | Owner paths | Owns |
 | --- | --- | --- |
-| Frontend | `angr_platforms/angr_platforms/X86_16/`, `angr_platforms/angr_platforms/X86_16/lift_86_16.py` | arch, loader/lift hooks, instruction facts |
-| IR | `X86_16/ir/` | typed `Value`, `Address`, `Condition`, instruction facts |
-| Semantics | `X86_16/semantics/` | instruction effects, flags, branch meaning |
-| Alias | `X86_16/alias/` | storage identity, stack/global alias proof |
-| Widening | `X86_16/widening/` | proven byte/word/pointer joins after alias |
-| Types and Lowering | `X86_16/lowering/`, `type_*.py` | stack/global object materialization, callsite facts, segmented memory lowering |
-| Structuring | `X86_16/structuring/`, `decompiler_structuring_stage.py` | CFG shape, loops, switches, structured condition lowering |
-| Rewrite/Postprocess | `X86_16/postprocess/`, `decompiler_postprocess_*.py`, `decompiler_postprocess_stage.py` | formatting, cleanup, validation-gated compatibility consumers |
-| Validation | `X86_16/tail_validation*.py`, `validation_*.py` | semantic equivalence checks and honest failure reporting |
-| CLI | `inertia_decompiler/` | orchestration, fallback choice, reports, timeouts |
+| Frontend | `inertia/frontend/x86_16/` | arch, loaders, VEX lifter, SimOS, instruction facts |
+| IR | `inertia/ir/` | typed `Value`, `Address`, `Condition`, instruction facts |
+| Semantics | `inertia/semantics/` | instruction effects, flags, branch meaning |
+| Alias | `inertia/alias/` | storage identity, stack/global alias proof |
+| Widening | `inertia/widening/` | proven byte/word/pointer joins after alias |
+| Types and Lowering | `inertia/lowering/` | stack/global object materialization, callsite facts, segmented memory lowering |
+| Structuring | `inertia/structuring/` | CFG shape, loops, switches, structured condition lowering |
+| Rewrite/Postprocess | `inertia/postprocess/` | formatting, cleanup, validation-gated compatibility consumers |
+| Validation | `inertia/validation/` | semantic equivalence checks and honest failure reporting |
+| CLI | `inertia/cli/` | orchestration, fallback choice, reports, timeouts |
 
 Per-module evidence, ownership, and consumer facts for each layer live in
 [`decompiler-evidence-owners.md`](decompiler-evidence-owners.md); consult that
@@ -38,17 +38,18 @@ guide for the relevant semantic consumers before editing.
 - Do not add semantic recovery to `decompiler_postprocess_jcc.py`.
 - Do not add call argument/signature/body repair to postprocess or CLI.
 - Do not add stack identity, global identity, or type recovery to rewrite.
-- Do not add behavior to root compatibility shims such as `alias_model.py` and
-  `alias_domains.py`.
+- Import and extend canonical layer owners directly. Historical root compatibility
+  shims have been removed; do not recreate them.
 - Do not recover semantics from rendered C, assembly text, or regex matches.
 
 ## Compatibility Debt
 
-Root `decompiler_postprocess_*.py` files are guarded compatibility bridges.
+Existing `inertia/postprocess/decompiler_postprocess_*.py` owners retain guarded
+legacy cross-layer edges during relocation; new recovery belongs in its semantic layer.
 Their headers say what they may consume and where their debt must move.  The
 current debt is also visible through:
 
-- `angr_platforms/angr_platforms/X86_16/decompiler_postprocess_inventory.py`
+- `inertia/postprocess/decompiler_postprocess_inventory.py`
 - `reference/layer-module-status.md`
 - `reference/decompiler-fix-plan.md`
 
@@ -82,8 +83,8 @@ make test-pipeline-expanded PYTHON=./.venv/bin/python
 ```
 
 `make architecture-check PYTHON=./.venv/bin/python` is the ratchet for future
-agents. It checks postprocess guard headers, protected import exceptions, root
-compatibility shims, CLI imports, runtime guard entrypoints, documentation
+agents. It checks postprocess guard headers, protected import exceptions,
+canonical CLI imports, runtime guard entrypoints, documentation
 markers, ownership manifests, and docs/types/dot-access ratchets. If it fails,
 either move the work to the correct layer or explicitly update the architecture
 allowlist with a documented migration reason and regression.

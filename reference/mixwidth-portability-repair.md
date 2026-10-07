@@ -77,7 +77,7 @@ The final routine pipeline passed all three lanes:
 6,115 main-lane tests (305.67 seconds), QuickC fixtures (33.809 seconds),
 and all eight MS C tiny examples (107.540 seconds). Evidence:
 `.cache/mixwidth-view-final-pipeline.log` and
-`angr_platforms/.cache/test_pipeline/summary.json`. This is the routine selected
+`.cache/frontend/test_pipeline/summary.json`. This is the routine selected
 scope, not the whole repository test suite. `quality-fast` remains blocked by
 global lint debt; changed lowering/validation types, docs and Ruff checks pass.
 

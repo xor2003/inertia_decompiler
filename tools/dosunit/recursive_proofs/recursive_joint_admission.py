@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.flat32_call_contracts import _initial_state as flat_initial_state
-from tools.dosunit.flat32_call_contracts import _register_widths
-from tools.dosunit.proof_contracts import Architecture
-from tools.dosunit.real16_call_contracts import initial_state
-from tools.dosunit.real16_control_targets import ControlDomainFailure
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.flat32_call_contracts import _initial_state as flat_initial_state
+from tools.dosunit.compare.flat32_call_contracts import _register_widths
+from tools.dosunit.compare.real16_call_contracts import initial_state
+from tools.dosunit.compare.real16_control_targets import ControlDomainFailure
+from tools.dosunit.contracts.proof_contracts import Architecture
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointNodeId,
     JointProvedControl,
@@ -29,7 +30,6 @@ from tools.dosunit.recursive_proofs.recursive_static_control import (
     resolve_static_control,
 )
 from tools.dosunit.recursive_proofs.stack.recursive_stack_domains import StackWordLayout
-from tools.dosunit.register_state_relations import MachineState
 
 
 class JointRefusal(Exception):

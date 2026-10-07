@@ -1,0 +1,32 @@
+{
+  "name": "debugger",
+  "description": "interactive debugger",
+  "sources": [
+    "tools/debugger",
+    "tools/debugger/cli.py"
+  ],
+  "public_api": [
+    "tools.debugger.gdb_client.GDBClient",
+    "tools.debugger.gdb_tui.GDBTUIApp",
+    "tools.debugger.cli.main"
+  ],
+  "dependencies": [],
+  "guide": "tools/debugger/README.md",
+  "tests": [
+    "tools/debugger/tests/test_step_over.py",
+    "tools/debugger/tests/test_cli.py"
+  ],
+  "focus": [
+    "tools/debugger/tests/test_step_over.py",
+    "tools/debugger/tests/test_cli.py"
+  ],
+  "consumers": [],
+  "quality_sources": [
+    "tools/debugger/gdb_client.py",
+    "tools/debugger/gdb_tui.py",
+    "tools/debugger/tui_widgets.py",
+    "tools/debugger/cli.py"
+  ],
+  "routine_tests": [],
+  "order": 12
+}

@@ -69,7 +69,7 @@ not the complete test collection.
 All four function-pointer fixture functions already decompiled with clean
 validation in that run, but the fixture oracle rejected `ax = apply_twice(...);`
 followed by register restores and `return ax`. It required literal return-call
-syntax. The tooling-only `scripts/generated_c_return_contract.py` now follows
+syntax. The tooling-only `tools/compiler_toolchain/generated_c_return_contract.py` now follows
 unchanged local definitions in parsed C. It refuses overwritten values,
 arithmetic changes, uncertain joins, intervening calls and indirect writes.
 It never changes generated code or claims whole-program equivalence.

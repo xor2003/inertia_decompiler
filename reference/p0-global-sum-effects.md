@@ -289,7 +289,7 @@ passed in 18.46s. Afterward the materialization file has 13 passes; the combined
 native-load, global-sum-effect and word-materialization set has 31 passes in
 14.59s. An earlier combined command used the wrong path for the carry oracle
 and collected zero tests: that command is not passing evidence. The oracle is
-enrolled at `angr_platforms/tests/test_msc_storage_carry_oracle.py` and ran in
+enrolled at `tests/test_msc_storage_carry_oracle.py` and ran in
 the subsequent mandatory pipeline.
 
 The legacy sum reconstruction now declines when effects are unconsumed, keeping

@@ -12,7 +12,7 @@ offset arguments. It avoids DOS environment contents and unresolved object
 relocations. MS C 6 produces `mov es,cx; mov ax,es:[bx]` in `read_far`.
 
 ```sh
-PYTHON_JIT=1 PYTHONHASHSEED=0 .venv/bin/python scripts/build_msc6_examples.py \
+PYTHON_JIT=1 PYTHONHASHSEED=0 .venv/bin/python tools.compiler_toolchain.build_msc6_examples \
   --examples-dir examples/stability --only-constructs segcopy \
   --out-dir .cache/segcopy-msc6 \
   --kvikdos /home/xor/kvikdos/kvikdos \

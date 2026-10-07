@@ -16,7 +16,7 @@ from typing import cast
 
 import z3
 
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     ADDRESS_WIDTH,
     BYTE_WIDTH,

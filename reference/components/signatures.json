@@ -1,0 +1,80 @@
+{
+  "name": "signatures",
+  "description": "library signatures, catalogs and symbol identification",
+  "sources": [
+    "tools/signatures/signature_catalog.py",
+    "tools/signatures/omf_pat.py",
+    "tools/signatures/pat_literal_filter.py",
+    "tools/signatures",
+    "tools/signatures/flair_paths.py",
+    "tools/signatures/signature_matching_policy.py",
+    "tools/signatures/cli.py"
+  ],
+  "public_api": [
+    "tools.signatures.flair_paths.resolve_flair_root",
+    "tools.signatures.signature_matching_policy.signature_matching_disabled",
+    "tools.signatures.omf_pat.PatModule",
+    "tools.signatures.signature_catalog.build_signature_catalog",
+    "tools.signatures.signature_catalog.match_signature_catalog",
+    "tools.signatures.cli.main"
+  ],
+  "dependencies": [],
+  "guide": "tools/signatures/README.md",
+  "tests": [
+    "tests/integration/test_ada_signature_integration.py",
+    "tools/signatures/tests/test_binary_signature_metadata.py",
+    "tests/cli/test_borland_mangling.py",
+    "tests/integration/test_default_signature_catalog.py",
+    "tests/integration/test_default_signature_provenance.py",
+    "tools/signatures/tests/test_discovery_library_boundaries.py",
+    "tools/signatures/tests/test_discovery_signature_isolation.py",
+    "tools/signatures/tests/test_library_function_classifier.py",
+    "tools/signatures/tests/test_omf_pat_far_transfer_variants.py",
+    "tools/signatures/tests/test_omf_pat_fixup_encoding.py",
+    "tools/signatures/tests/test_omf_pat_fixup_widths.py",
+    "tools/signatures/tests/test_omf_pat_lidata.py",
+    "tools/signatures/tests/test_omf_pat_x87_emulator_variants.py",
+    "tools/signatures/tests/test_omf_pat_zero_displacement.py",
+    "tools/signatures/tests/test_pat_catalog_cache_identity.py",
+    "tools/signatures/tests/test_pat_literal_prefilter.py",
+    "tests/integration/test_signature_catalog_without_flair.py",
+    "tools/signatures/tests/test_signature_match_ambiguity.py",
+    "tests/integration/test_signature_matching_policy.py",
+    "tests/integration/test_signature_region_bounds.py",
+    "tools/signatures/tests/test_x86_16_life_signature_matches.py",
+    "tools/signatures/tests/test_configuration.py"
+  ],
+  "focus": [
+    "tools/signatures/tests/test_configuration.py",
+    "tools/signatures/tests/test_pat_catalog_cache_identity.py",
+    "tests/integration/test_signature_matching_policy.py"
+  ],
+  "consumers": [
+    "tools/signatures/omf_pat.py",
+    "tools/signatures/signature_catalog.py",
+    "inertia/cli/default_signature_catalog.py"
+  ],
+  "quality_sources": [
+    "tools/signatures/__init__.py",
+    "tools/signatures/flair_paths.py",
+    "tools/signatures/signature_matching_policy.py",
+    "tools/signatures/pat_literal_filter.py",
+    "tools/signatures/signature_catalog.py",
+    "tools/signatures/cli.py",
+    "tools/signatures/__main__.py",
+    "tools/signatures/omf_pat.py"
+  ],
+  "routine_tests": [
+    "tools/signatures/tests/test_configuration.py",
+    "tools/signatures/tests/test_omf_pat_far_transfer_variants.py",
+    "tools/signatures/tests/test_omf_pat_fixup_encoding.py",
+    "tools/signatures/tests/test_omf_pat_fixup_widths.py",
+    "tools/signatures/tests/test_omf_pat_lidata.py",
+    "tools/signatures/tests/test_omf_pat_x87_emulator_variants.py",
+    "tools/signatures/tests/test_omf_pat_zero_displacement.py",
+    "tools/signatures/tests/test_pat_literal_prefilter.py",
+    "tools/signatures/tests/test_pat_catalog_cache_identity.py",
+    "tools/signatures/tests/test_signature_match_ambiguity.py"
+  ],
+  "order": 2
+}

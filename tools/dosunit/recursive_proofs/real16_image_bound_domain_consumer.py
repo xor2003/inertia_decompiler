@@ -11,7 +11,8 @@ import time
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load, ImageBindingRefusal
 from tools.dosunit.recursive_proofs.loaded_byte_native_transition import (
     LoadedTransitionReason,
@@ -47,7 +48,6 @@ from tools.dosunit.recursive_proofs.real16_native_effect_binding import (
 from tools.dosunit.recursive_proofs.recursive_joint_admission import JointRefusal
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason, JointSystem
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
-from tools.dosunit.register_state_relations import MachineState
 
 
 class DomainConsumptionObligation(StrEnum):

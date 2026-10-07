@@ -32,7 +32,7 @@ Scoped Ruff, MyPy and Pyright pass. Final fast/default test lanes each pass
 3,562 tests (159.34s/146.68s); executable guards and all three default pipeline
 lanes pass. The combined Make command still exits 2 on global Ruff debt.
 The subsequent complete audit remains red; see
-[full-suite follow-up](p0-full-suite-followup-20260910.md).
+full-suite follow-up (historical checkpoint).
 Logs: `/tmp/inertia-hello-before.log`, `/tmp/inertia-hello-frame.log`,
 `/tmp/inertia-frame-byte-final.log`, `/tmp/inertia-hello-after.log`.
 
@@ -85,7 +85,7 @@ The structured pipeline result is authoritative: the failed lane is
 failed earlier attempts even when the accepted round trip passes; these fields
 alone do not identify the failing lane.
 Log: `/tmp/inertia-caller-width-gates.log`; structured evidence:
-`angr_platforms/.cache/test_pipeline/summary.json` and
+`.cache/frontend/test_pipeline/summary.json` and
 `examples/build_ultra_quickc_pipeline/ultra_quickc_fixtures.json`.
 Logs: `/tmp/inertia-caller-no-guess.log`, `/tmp/inertia-caller-store-width.log`,
 `/tmp/inertia-caller-width-final.log`, `/tmp/inertia-caller-owner-tests.log`.

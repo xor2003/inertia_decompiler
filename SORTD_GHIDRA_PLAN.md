@@ -656,7 +656,7 @@ result. The broad refresh is red: 5,201 curated tests passed / 10 failed in
 262.73s; three unit failures were subsequently corrected (74 related tests
 passed in 9.42s). Seven live failures remain unclosed from that run. MS C tiny
 remains 5/7; QuickC also fails. Full MyPy reports 25 errors in three legacy
-files (`omf_pat.py`, `scripts/verify_borrow_real_mode.py`, and
+files (`omf_pat.py`, `tools/dev/verify_borrow_real_mode.py`, and
 `scripts/report_compiler_matches.py`). The new composite-owner redundant cast
 found by promoted typing was removed. `quality-fast` remains red on lint debt;
 39-module mypyc import smoke passes. No refreshed all-green routine or complete
@@ -925,7 +925,7 @@ Its assertions are unchanged; the original failure was reproduced, and all
 five related tests pass (9.30s). It is enrolled in routine gates. Six of the
 original 47 failures are individually resolved; **41 remain unresolved against
 that baseline**. This is not a refreshed complete-suite result. Sleep remains
-open. Details: [Complete Audit](reference/p0-full-suite-20260912.md).
+open. Details: Complete Audit (historical checkpoint).
 
 Routine gate refresh: `test-pipeline` passed on the current changes:
 268 preliminary checks, 4,929 curated tests (246.85s), QuickC fixtures,
@@ -983,7 +983,7 @@ MyPy pass, legacy tests retain visible lint debt. Missing files are admitted to
 the routine gates. Together with the manifest correction, five of 47 retained
 failures are individually closed; **42 remain unresolved**, not a new full-suite
 count. Sleep's real uninitialized AX/DX failure is reproduced and remains open.
-See [Complete Audit](reference/p0-full-suite-20260912.md). Step 9 is NOT complete.
+See Complete Audit (historical checkpoint). Step 9 is NOT complete.
 
 23:57 +02:00: **Exact complete audit: 12,560 passed / 47 failed / 167 skipped**,
 12,774 nodes, 1,906.54s; source stable, complete node accounting, memory under
@@ -991,7 +991,7 @@ See [Complete Audit](reference/p0-full-suite-20260912.md). Step 9 is NOT complet
 passes, Ruff clean); 46 retained failures still require resolution or documented
 supersession. Do not treat this as a new full-suite count. The loop-refusal
 surface passes 125 tests and scoped MyPy. Expanded and required quality gates
-remain open. See [Complete Audit](reference/p0-full-suite-20260912.md) for
+remain open. See Complete Audit (historical checkpoint) for
 failure groups, exact artifacts and ordered next actions. Step 9 is NOT complete.
 
 23:13 +02:00: **RunMenu's original sidecar-free regression and the mandatory
@@ -1872,7 +1872,7 @@ red. See [native evidence and boundaries](reference/p0-return-address-evidence.m
 **Latest full audit, 2026-09-11:** 11,750 passed, 21 failed, 170 skipped out of
 11,941 tests; 1,180.89s, source stable, no missing/duplicate outcomes, memory
 below 2 GiB. This supersedes the historical baseline below. The goal remains
-open. See [current failures, repair order and slow tests](reference/p0-full-suite-post-bios-20260911.md).
+open. See current failures, repair order and slow tests (historical checkpoint).
 
 LIFE follow-up: repaired logical frame-word evidence and false preservation
 of escaped word bytes, including wrapped BP pointers. Operand load provenance
@@ -1910,7 +1910,7 @@ no missing or duplicate node IDs. This supersedes the older 23-failure audit.
 Three previous failing nodes pass, six additional nodes fail. A curated green
 lane would not establish repository-wide acceptance. The immediate priority is
 to clear this full list, not add unrelated semantic or performance work. See
-[full-suite baseline and repair order](reference/p0-full-suite-baseline-20260910.md).
+full-suite baseline and repair order (historical checkpoint).
 
 2026-09-11 follow-up: the full architecture checker now passes (374 related
 tests), and the CLI load-program regression passes stronger compiled behavior
@@ -2155,7 +2155,7 @@ module/wiring checks pass (297 tests). Both routine lanes now pass 3,595 tests
 (199.82s/139.43s), all three executable quality guards pass, and the default
 pipeline passes all three lanes including MS C round trips. Global lint and
 strict BIOS compilation remain open. This is not full-suite closure. See the
-[live segment repair](reference/p0-full-suite-followup-20260910.md).
+live segment repair (historical checkpoint).
 
 Full architecture scope reconciliation closes all **29** recorded findings;
 all **371 architecture tests pass**, with no checker relaxation. The follow-up
@@ -2178,7 +2178,7 @@ Exact saved-BP pair ownership now repairs QuickC `hello`; both routine lanes
 pass 3,562 tests and the default pipeline passes all three lanes, including
 the MS C round trips. Global Ruff debt remains.
 
-The fresh [full-suite follow-up](reference/p0-full-suite-followup-20260910.md)
+The fresh full-suite follow-up (historical checkpoint)
 accounts for all 11,625 tests: 11,420 passed, 35 failed, 170 skipped in 1,257.89s.
 Four failures subsequently pass focused reruns; this is not a new full-suite
 count. Prioritize the remaining call-argument evidence failures and corpus
@@ -2241,7 +2241,7 @@ three executable guards pass, and seven MS C round trips pass. The combined
 quality command still fails on 6,322 promoted-scope Ruff findings. This does not
 close the complete audit or wider plan.
 
-The [fresh complete audit](reference/p0-full-suite-audit-20260910.md) accounts for
+The fresh complete audit (historical checkpoint) accounts for
 all 11,536 tests: **11,326 passed, 40 failed, 170 skipped**, in 1,326.65 seconds.
 Source was stable, no nodes were missing/duplicated, and peak RSS stayed below
 2 GiB. This supersedes the older 52-failure baseline; routine passing counts
@@ -3135,7 +3135,7 @@ fixes the CMP32 signed-long acceptance failure: both direct recovery branches
 now transport hashes together with their newly accepted C. The focused corpus
 and integrity tests pass; no validation gate was relaxed.
 
-The [September 8 full-suite refresh](reference/p0-full-suite-20260908.md)
+The September 8 full-suite refresh (historical checkpoint)
 reports **10,351 passed, 48 failed, 170 skipped in 753.15s**. This supersedes
 the older census below. InitMenu is not currently accepted: sidecar-free cases
 fail pointer/register compilation and its named case fails whole-tail checks.
@@ -3253,7 +3253,7 @@ pipeline passes 2,202 unit tests and seven MS C round trips; global
 `quality-fast` still fails with 121 MyPy errors. Full-suite and remote CI
 closure remain open.
 
-The [source-stable full audit](reference/p0-full-suite-20260907.md) reports
+The source-stable full audit (historical checkpoint) reports
 **10,166 passed, 49 failed, 170 skipped out of 10,385 in 901.38s**. Current
 InitBars and other control-flow validation failures mean
 the earlier SORTD acceptance below is historical, not a current green claim.
@@ -6812,7 +6812,7 @@ Measured progress on 2026-08-21:
   seven MS C tiny compile/run/decompile/recompile/decompiled-run constructs
 - the sidecar-free SORTD indexed-aggregate regression passes recompilation and
   validation in 23.34s after the main-path IR/Alias artifacts were enabled
-- `scripts/indexed_address_parity_inventory.py SORTD.EXE` now runs the canonical
+- `tools/dev/indexed_address_parity_inventory.py SORTD.EXE` now runs the canonical
   sidecar-free, non-library function catalog and writes deterministic JSON to
   stdout (or `--report-out PATH`); the durable measured report and work order
   are recorded in this section, while the JSON is reproducible and is not kept
@@ -7187,7 +7187,7 @@ passes. Use this map as the handoff:
 | function memory SSA | `ir/ssa_function.py`, `ir/effects.py`, `ir/address_ir.py` | extend SSA keys from scalar `IRValue` identity to exact `Address` ranges; do not add AST-local SSA | `test_x86_16_ir_ssa.py`, `test_x86_16_segment_stack_restore.py` |
 | stack identity and call clobbers | `alias/state.py`, `alias/transfer.py`, `alias/callsite_stack_merge.py` | replace any later inference of stack identity from C variables | `test_x86_16_alias_state_transfer.py`, `test_x86_16_segmented_stack_alias.py` |
 | split-value/carry widening | `widening/stack_widening.py`, `widening/register_widening.py`, `widening/word_projection_recomposition.py` | move semantic work out of instruction-to-C recovery in `structuring/compare32_recovery.py`; Structuring may consume the resulting wide `Condition` only | `test_x86_16_alias_api_and_widening_proof.py`, `test_x86_16_compare32_recovery.py` |
-| function contracts | `lowering/stack_prototype_materialization.py`, `lowering/callee_argument_interface.py`, `lowering/return_type_evidence.py` | remove prototype discovery/reconciliation from `decompiler_postprocess.py` and `decompiler_postprocess_stage.py` as equivalent typed consumers become available earlier | `test_x86_16_stack_prototype_promotion.py`, `test_x86_16_return_type_evidence.py`, `test_x86_16_validation_call_argument_sources.py` |
+| function contracts | `lowering/stack_prototype_materialization.py`, `lowering/callee_argument_interface.py`, `lowering/return_type_evidence.py` | remove prototype discovery/reconciliation from `decompiler_postprocess.py` and `decompiler_postprocess_stage.py` as equivalent typed consumers become available earlier | `test_x86_16_stack_prototype_promotion.py`, `test_x86_16_return_type_evidence.py`, `tests.validation.test_x86_16_validation_call_argument_sources.py` |
 | aggregate ranges | `lowering/stack_aggregate_objects.py`, `lowering/object_lowering.py`, `type_equivalence_classes.py`, `type_array_matching.py` | replace Capstone-derived aggregate facts with IR/Alias range facts; postprocess may replay an accepted type but may not discover it | `test_x86_16_stack_aggregate_objects.py`, `test_x86_16_sortd_indexed_aggregate_regression.py` |
 | region structuring | `structuring/loop_recovery.py`, `structuring/control_flow.py`, `structuring/condition_lowering.py`, `structuring/typed_switch_seqnode.py` | retire direct assembly-shape semantic recovery as typed CFG regions cover each case | `test_x86_16_loop_recovery.py`, `test_x86_16_structuring_switch.py`, `test_x86_16_typed_switch_seqnode.py` |
 

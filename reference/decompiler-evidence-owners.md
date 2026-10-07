@@ -51,7 +51,7 @@ copy endpoint identity, and the closed discovered-function census in
 `alias/indexed_address_program.py`. `widening/indexed_global_object_layout.py`
 alone joins proven byte/word views and whole-value copy families; Lowering only
 consumes its closed artifact and materializes accepted objects. The CLI module
-`inertia_decompiler/indexed_alias_program_context.py` transports a complete
+`inertia/cli/indexed_alias_program_context.py` transports a complete
 discovery catalog into Alias once and never classifies semantic evidence.
 `lowering/global_object_program_requirement.py` owns that typed need decision from local Alias roles and proven outgoing pointer-call sources; CLI only sequences it.
 Legacy instruction-backed collectors are per-function rendering/parity debt, not an alternate project-layout owner. The read-only parity modules in Lowering may

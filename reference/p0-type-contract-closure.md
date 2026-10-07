@@ -219,7 +219,7 @@ InitBars 65.15s, RunMenu ESC preservation 60.83s, indexed-address inventory
 39.39s. All four selected QuickC fixtures validate, and all seven MS C tiny
 compile/run/decompile/recompile/exit-code round trips pass. Log:
 `/tmp/inertia-control-stack-pipeline.log`; structured evidence:
-`angr_platforms/.cache/test_pipeline/summary.json`. This is the curated default
+`.cache/frontend/test_pipeline/summary.json`. This is the curated default
 pipeline, not a refreshed full-suite census, and does not close InitMenu or P0.
 
 ## Stack SSA Storage Contracts (2026-09-08)
@@ -305,7 +305,7 @@ fixtures validated, all seven MS C tiny round trips passed, no failed/skipped/
 timed-out lanes. The unit lane still exceeds its advisory budget. Slowest tests:
 InitBars 58.52s, RunMenu ESC preservation 57.56s, indexed-address inventory 33.40s.
 Evidence: `/tmp/inertia-logical-address-pipeline.log` and
-`angr_platforms/.cache/test_pipeline/summary.json`. InitMenu acceptance and the
+`.cache/frontend/test_pipeline/summary.json`. InitMenu acceptance and the
 full-suite failure census remain open; this curated result does not replace them.
 
 ## Condition View Operand Guard (2026-09-08)

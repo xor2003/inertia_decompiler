@@ -46,7 +46,7 @@ compile.
   run retains 81 findings; no global linter closure is claimed.
 - Startup architecture and ownership checks passed before the final mask
   enrollment. Conversion and mask regressions are enrolled in both Make
-  routine lists and `scripts/test_pipeline.py`.
+  routine lists and `tools/dev/test_pipeline.py`.
 
 ## Aggregate Blocker (Now Resolved)
 
@@ -97,7 +97,7 @@ all three stages: 5,494 routine tests in 268.95s, four QuickC fixtures in
 41.961s, and all seven MS C tiny compile/decompile/recompile/execute cases in
 92.413s. The prerequisite stage passed 268 tests in 10.77s. Evidence is
 `/tmp/step9-extension-pipeline.log` and
-`angr_platforms/.cache/test_pipeline/summary.json`. This is not the expanded
+`.cache/frontend/test_pipeline/summary.json`. This is not the expanded
 pipeline or exact complete collection.
 
 `make quality-fast` failed in its linter stage: 6,238 Ruff findings and 586

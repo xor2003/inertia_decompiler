@@ -70,7 +70,7 @@ original EXE + function catalog
 Run these before treating region/effect work as done:
 
 ```bash
-rtk pytest -q angr_platforms/tests/test_dosunit_tool.py \
+rtk pytest -q tools/dosunit/tests/test_dosunit_tool.py \
   -k 'region_effects or region_compare or cli_regions'
 ```
 

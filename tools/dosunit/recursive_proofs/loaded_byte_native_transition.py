@@ -14,10 +14,11 @@ from typing import Any
 
 import z3
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.flat32_call_contracts import CallCompositionRefusal, _initial_state, _register_widths
-from tools.dosunit.proof_contracts import Architecture, FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import initial_state, materialize_function
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.flat32_call_contracts import CallCompositionRefusal, _initial_state, _register_widths
+from tools.dosunit.compare.real16_call_contracts import initial_state, materialize_function
+from tools.dosunit.contracts.proof_contracts import Architecture, FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_relation import (
     LoadedRelationLimits,
     LoadedRelationReason,
@@ -37,8 +38,7 @@ from tools.dosunit.recursive_proofs.real16_entry_domain import (
     native_effect_hash,
 )
 from tools.dosunit.recursive_proofs.recursive_joint_proof import strict_state_document
-from tools.dosunit.register_state_relations import MachineState
-from tools.dosunit.ssa_output_lemmas import OutputEqualityResult, prove_output_equalities
+from tools.dosunit.ssa.ssa_output_lemmas import OutputEqualityResult, prove_output_equalities
 
 
 class LoadedTransitionReason(StrEnum):

@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load
 from tools.dosunit.recursive_proofs.loaded_byte_relation import LoadedRelationLimits
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import LoadedRelationProof
@@ -26,7 +27,6 @@ from tools.dosunit.recursive_proofs.real16_image_bound_domain_consumer import (
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import NativeBlockRequest
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
-from tools.dosunit.register_state_relations import MachineState
 
 
 class PrefixIntakeReason(StrEnum):

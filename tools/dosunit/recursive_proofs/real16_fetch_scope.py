@@ -17,15 +17,15 @@ from pathlib import Path
 from typing import cast
 
 import z3
-from angr_platforms.X86_16 import control_coordinates
-from angr_platforms.X86_16.control_coordinates import ControlAddressDomain
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import materialize_function
+from inertia.frontend.x86_16 import control_coordinates
+from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.real16_entry_domain import Real16ScalarDomain, entry_domain_model_hash
 from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import _state_exprs
-from tools.dosunit.register_state_relations import MachineState
 
 SEGMENT_EXTENT: int = 0x10000
 PHYSICAL_EXTENT: int = 0x100000

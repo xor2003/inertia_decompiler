@@ -13,7 +13,8 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load
 from tools.dosunit.recursive_proofs.loaded_byte_native_transition import (
     LoadedTransitionReason,
@@ -37,7 +38,6 @@ from tools.dosunit.recursive_proofs.real16_image_bound_domain_consumer import (
 )
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import NativeBlockRequest
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointModelRequirement, JointSystem
-from tools.dosunit.register_state_relations import MachineState
 
 
 class ImageBoundNativeReason(StrEnum):

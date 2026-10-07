@@ -1,0 +1,35 @@
+{
+  "name": "compiler_detector",
+  "description": "compiler and compiler-option identification",
+  "sources": [
+    "tools/compiler_id",
+    "tools/compiler_id/report.py"
+  ],
+  "public_api": [
+    "tools.compiler_id.report.main",
+    "tools.compiler_id.cli.main"
+  ],
+  "dependencies": [
+    "signatures"
+  ],
+  "guide": "tools/compiler_id/README.md",
+  "tests": [
+    "tools/compiler_id/tests/test_flags.py"
+  ],
+  "focus": [
+    "tools/compiler_id/tests/test_flags.py"
+  ],
+  "consumers": [
+    "tools/compiler_toolchain/import_ultra_quickc_fixtures.py"
+  ],
+  "quality_sources": [
+    "tools/compiler_id/__init__.py",
+    "tools/compiler_id/__main__.py",
+    "tools/compiler_id/cli.py",
+    "tools/compiler_id/report.py"
+  ],
+  "routine_tests": [
+    "tools/compiler_id/tests/test_flags.py"
+  ],
+  "order": 1
+}

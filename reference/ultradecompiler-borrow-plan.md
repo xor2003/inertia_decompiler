@@ -79,7 +79,7 @@ Selection rules:
 - Fixture metadata must include source path, toolchain root, compiler, linker,
   library, compile flags, link flags, memory model, run args, expected exit
   behavior, and expected decompile target functions.
-- Keep the default set small enough for `scripts/test_pipeline.py --tier fast`.
+- Keep the default set small enough for `tools/dev/test_pipeline.py --tier fast`.
 
 DoD:
 
@@ -90,7 +90,7 @@ DoD:
   target functions.
 - Any candidate excluded from the default set has an explicit reason recorded in
   code or test data.
-- `./.venv/bin/python scripts/test_pipeline.py --tier fast` still completes
+- `./.venv/bin/python tools/dev/test_pipeline.py --tier fast` still completes
   within the expected lane budgets in the prepared workspace.
 
 ### 3. Feed QuickC Outputs Into Compiler Matcher Tests
@@ -175,7 +175,7 @@ only as an isolated command.
 Required command:
 
 ```bash
-./.venv/bin/python scripts/test_pipeline.py --tier default --require-external
+./.venv/bin/python tools/dev/test_pipeline.py --tier default --require-external
 ```
 
 Requirements:
@@ -190,7 +190,7 @@ Requirements:
 
 DoD:
 
-- `scripts/test_pipeline.py --tier default --require-external` selects exactly
+- `tools/dev/test_pipeline.py --tier default --require-external` selects exactly
   the expected normal lanes, including `ultra-quickc-fixtures`.
 - Missing `kvikdos`, QuickC, or MSC6 dependencies fail under
   `--require-external`; tests cover that behavior.
@@ -231,7 +231,7 @@ DoD:
 - Every selected fixture has explicit run expectations and decompile targets.
 - Failing or unsupported fixtures are represented with explicit skip/xfail
   reasons.
-- `scripts/test_pipeline.py --tier fast` remains practical.
+- `tools/dev/test_pipeline.py --tier fast` remains practical.
 
 ### Compiler Matcher Coverage
 
@@ -251,7 +251,7 @@ DoD:
 - `make architecture-check PYTHON=./.venv/bin/python` passes.
 - Changed-file checks pass with
   `make check-files PYTHON=./.venv/bin/python FILES="..."`.
-- `./.venv/bin/python scripts/test_pipeline.py --tier default --require-external`
+- `./.venv/bin/python tools/dev/test_pipeline.py --tier default --require-external`
   passes in the prepared workspace.
 - No new DOSBox-X dependency is introduced.
 - No new semantic recovery is added to rewrite/postprocess compatibility files.

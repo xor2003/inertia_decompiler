@@ -312,7 +312,7 @@ declared whole-image code scope; this is not completed program acceptance.
 
 The invocation-domain census can also consume this explicitly declared service.
 Mint a `DeclaredInterruptService8616` with
-`tools.dosunit.real16_declared_invocation8616.declared_int21_version_service_8616`,
+`tools.dosunit.runtime.real16_declared_invocation8616.declared_int21_version_service_8616`,
 binding the environment, caller and interrupt callsite. Pass the resulting
 relation through the proof API's `declared_services` tuple; its default is empty.
 The census must independently prove the AH/AL selector and revalidate the
@@ -325,7 +325,7 @@ frame enters the write ledger and must not overlap instruction bytes, including
 future fetches. Frame contents are not inferred: subsequent loads remain unknown.
 An absent declaration, altered response, foreign environment or unsupported
 selector remains a refusal. The shared response encoding lives in
-`angr_platforms.real16_version_response8616`; both execution and census derive
+`inertia.frontend.real16_version_response8616`; both execution and census derive
 their response words from that owner. This API adds no KVM dependency.
 
 ## Symbolic terminal comparison

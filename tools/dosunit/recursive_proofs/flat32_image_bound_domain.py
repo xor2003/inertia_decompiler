@@ -19,12 +19,14 @@ from typing import Any, cast
 
 import z3
 
-from tools.dosunit import flat32_call_contracts, flat32_call_lowering, flat32_pe_loader, ssa_provenance
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.flat32_call_contracts import CallCompositionRefusal, _term_nodes
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import Architecture, FactCounters, ProofStatus
-from tools.dosunit.real16_call_contracts import materialize_function
+from tools.dosunit.architectures import flat32_pe_loader
+from tools.dosunit.compare import flat32_call_contracts, flat32_call_lowering
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.flat32_call_contracts import CallCompositionRefusal, _register_widths, _term_nodes
+from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import Architecture, FactCounters, ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs import (
     flat32_pe_component,
     loaded_byte_image_binding,
@@ -66,7 +68,7 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_domains import (
     StackWordDomain,
     StackWordLayout,
 )
-from tools.dosunit.register_state_relations import MachineState
+from tools.dosunit.reporting import ssa_provenance
 
 MAX_DOMAIN_ACCESSES: int = 4096
 MAX_DOMAIN_EFFECT_NODES: int = 262144
@@ -209,7 +211,7 @@ def flat32_domain_model_hash() -> str:
                                             "recursive_stack_*.py"))],
                    "snapshot_owner": native_model_snapshot_owner_hash(),
                    "semantic": ssa_provenance._semantic_hash(),
-                   "registers": S._ssa_register_widths()}
+                   "registers": _register_widths()}
     return hashlib.sha256(canonical_json_bytes(description)).hexdigest()
 
 

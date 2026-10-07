@@ -14,10 +14,10 @@ import sqlite3
 from enum import StrEnum
 from pathlib import Path
 
-from inertia_decompiler.default_signature_catalog import default_signature_catalog_path
+from inertia.cli.default_signature_catalog import default_signature_catalog_path
+from tools.ada_script.contracts import DatabaseView
 from tools.ada_script.map_writer import write_map
 from tools.ada_script.signatures import apply_signatures
-from tools.ada_script.vendor_bridge import DatabaseView, vendor_module
 
 LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -58,7 +58,9 @@ def _apply_inputs(args: argparse.Namespace, db: DatabaseView) -> None:
     """Apply upstream IDC and runtime inputs before proposing signature names."""
     if args.idc_script is not None:
         try:
-            script = vendor_module("idc_engine").parse_idc(args.idc_script.read_text(), db, strict=True)
+            from tools.ada_script.idc_engine import parse_idc
+
+            script = parse_idc(args.idc_script.read_text(), db, strict=True)
         except SyntaxError as exc:
             raise ValueError(f"IDC parse failed: {args.idc_script}") from exc
         if script is None:
@@ -70,7 +72,9 @@ def _apply_inputs(args: argparse.Namespace, db: DatabaseView) -> None:
         load_segment = meta.get("DosboxLoadSeg") if isinstance(meta, dict) else None
         if type(load_segment) is not int or not 0 <= load_segment <= 0xFFFF:
             raise ValueError(f"Runtime trace requires Meta.DosboxLoadSeg: {args.runtime}")
-        vendor_module("runtime_info").load_runtime_json(str(args.runtime), db)
+        from tools.ada_script.runtime_info import load_runtime_json
+
+        load_runtime_json(str(args.runtime), db)
 
 
 def _catalogs(args: argparse.Namespace) -> tuple[Path, ...]:
@@ -97,10 +101,14 @@ def _require_dos_mz_image(binary: bytes) -> None:
 
 
 def _run_pipeline(args: argparse.Namespace) -> None:
-    """Adapt legacy database/analyzer objects at one explicit upstream boundary."""
+    """Run the qualified ADA analyzer modules with optional backend dependencies."""
+    from tools.ada_script.analysis_backend import AnalysisOptions
+    from tools.ada_script.mz_parser import MZParser
+    from tools.ada_script.output_generator import OutputGenerator
+
     binary = args.binary.read_bytes()
     _require_dos_mz_image(binary)
-    db: DatabaseView = vendor_module("mz_parser").MZParser(binary).parse()
+    db: DatabaseView = MZParser(binary).parse()
     try:
         db.binary = binary
         _apply_inputs(args, db)
@@ -109,11 +117,17 @@ def _run_pipeline(args: argparse.Namespace) -> None:
                                   cache_dir=args.work_dir / "signature-cache", backend=args.pat_backend,
                                   enabled=not args.no_signatures)
         report.write(args.work_dir / "signatures.json")
-        options = vendor_module("analysis_backend").AnalysisOptions(args.full, args.classify, args.xrefs)
-        module = vendor_module(f"{args.backend}_backend")
-        analyzer = module.CapstoneBackend(binary, db, options) if args.backend == "capstone" else module.RizinBackend(binary, db, options)
+        options = AnalysisOptions(args.full, args.classify, args.xrefs)
+        if args.backend == "capstone":
+            from tools.ada_script.capstone_backend import CapstoneBackend
+
+            analyzer = CapstoneBackend(binary, db, options)
+        else:
+            from tools.ada_script.rizin_backend import RizinBackend
+
+            analyzer = RizinBackend(binary, db, options)
         analyzer.analyze()
-        generator = vendor_module("output_generator").OutputGenerator(db, args.binary.name)
+        generator = OutputGenerator(db, args.binary.name)
         generator.generate_lst(str(args.work_dir / f"{args.binary.stem}.lst"))
         generator.generate_asm(str(args.work_dir / f"{args.binary.stem}.asm"),
                                exact_code_bytes=args.asm_code_encoding is AsmCodeEncoding.EXACT)
@@ -155,3 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         os.chdir(previous)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

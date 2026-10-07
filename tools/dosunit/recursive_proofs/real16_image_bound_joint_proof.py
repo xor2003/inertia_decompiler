@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from tools.dosunit.proof_contracts import (
+from tools.dosunit.contracts.proof_contracts import (
     ContractIdentity,
     FactCounters,
     Obligation,
@@ -26,6 +26,7 @@ from tools.dosunit.proof_contracts import (
     ProofStatus,
     evaluate_obligations,
 )
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs import recursive_joint_admission as _admission_owner
 from tools.dosunit.recursive_proofs import recursive_joint_contracts as _contracts_owner
 from tools.dosunit.recursive_proofs import recursive_static_control as _static_control_owner
@@ -117,7 +118,6 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import (
     StackObligation,
     prove_stack_step,
 )
-from tools.dosunit.register_state_relations import MachineState
 
 
 @dataclass(frozen=True, slots=True)

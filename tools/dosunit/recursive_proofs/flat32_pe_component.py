@@ -14,8 +14,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.flat32_call_contracts import (
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.flat32_call_contracts import (
     CallCompositionLimits,
     CallCompositionRefusal,
     _ComposeSession,
@@ -25,9 +25,10 @@ from tools.dosunit.flat32_call_contracts import (
     _register_widths,
     _term_nodes,
 )
-from tools.dosunit.flat32_call_lowering import _lift_block
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import Architecture, ContractIdentity
+from tools.dosunit.compare.flat32_call_lowering import _lift_block
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import Architecture, ContractIdentity
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.flat32_native_effect_binding import Flat32NativeBlockRequest
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundFlat32Load
 from tools.dosunit.recursive_proofs.loaded_byte_relation import LoadedRelationLimits
@@ -38,7 +39,6 @@ from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointStepPair,
     JointSystem,
 )
-from tools.dosunit.register_state_relations import MachineState
 
 MAX_COMPONENT_BLOCKS: int = 1024
 MAX_COMPONENT_EFFECT_NODES: int = 262144

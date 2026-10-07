@@ -18,18 +18,12 @@ from pathlib import Path
 
 import z3
 
-from tools.dosunit import (
-    binary_environment,
-    flat32_call_contracts,
-    flat32_call_lowering,
-    flat32_pe_loader,
-    flat32_replay,
-    ssa_provenance,
-)
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.flat32_call_contracts import CallCompositionRefusal
-from tools.dosunit.model import canonical_json_bytes
-from tools.dosunit.proof_contracts import (
+from tools.dosunit.architectures import flat32_pe_loader
+from tools.dosunit.compare import flat32_call_contracts, flat32_call_lowering
+from tools.dosunit.compare.flat32_call_contracts import CallCompositionRefusal, _register_widths
+from tools.dosunit.contracts import binary_environment
+from tools.dosunit.contracts.model import canonical_json_bytes
+from tools.dosunit.contracts.proof_contracts import (
     Architecture,
     ContractIdentity,
     FactCounters,
@@ -40,6 +34,7 @@ from tools.dosunit.proof_contracts import (
     ProofStatus,
     evaluate_obligations,
 )
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs import (
     flat32_image_bound_domain,
     flat32_native_effect_binding,
@@ -115,7 +110,8 @@ from tools.dosunit.recursive_proofs.recursive_joint_proof import check_joint_sys
 from tools.dosunit.recursive_proofs.stack import recursive_stack_domains as stack_domains
 from tools.dosunit.recursive_proofs.stack.recursive_stack_domains import StackWordLayout
 from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import StackInvariantProof
-from tools.dosunit.register_state_relations import MachineState
+from tools.dosunit.reporting import ssa_provenance
+from tools.dosunit.runtime import flat32_replay
 
 
 class Flat32ModelRequirement(StrEnum):
@@ -177,7 +173,7 @@ def flat32_joint_model_hash() -> str:
                                             "recursive_stack_*.py"))],
                    "snapshot_owner": native_model_snapshot_owner_hash(),
                    "semantic": ssa_provenance._semantic_hash(),
-                   "registers": S._ssa_register_widths()}
+                   "registers": _register_widths()}
     return hashlib.sha256(canonical_json_bytes(description)).hexdigest()
 
 

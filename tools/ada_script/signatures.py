@@ -13,8 +13,8 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from inertia_decompiler.signature_matching_policy import signature_matching_disabled
-from omf_pat import load_cached_pat_regex_specs, match_pat_modules
+from tools.signatures.omf_pat import load_cached_pat_regex_specs, match_pat_modules
+from tools.signatures.signature_matching_policy import signature_matching_disabled
 
 
 class MatchStatus(StrEnum):

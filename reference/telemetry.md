@@ -9,7 +9,7 @@ Enable compact spans:
 
 ```bash
 INERTIA_OTEL_SPANS=1 \
-INERTIA_OTEL_SPAN_FILE=angr_platforms/.cache/otel.trace.txt \
+INERTIA_OTEL_SPAN_FILE=.cache/frontend/otel.trace.txt \
 ./.venv/bin/python ./decompile.py ./SORTDEMO.EXE
 ```
 
@@ -47,7 +47,7 @@ Use slow mode when only the longest spans matter:
 ```bash
 INERTIA_OTEL_SPANS=1 \
 INERTIA_OTEL_SPAN_FORMAT=slow \
-INERTIA_OTEL_SPAN_FILE=angr_platforms/.cache/otel.slow.txt \
+INERTIA_OTEL_SPAN_FILE=.cache/frontend/otel.slow.txt \
 ./.venv/bin/python ./decompile.py examples/build_msc6/CMP16.EXE
 ```
 
@@ -79,7 +79,7 @@ JSON output remains available for tools:
 Convert existing full JSONL traces before giving them to an agent:
 
 ```bash
-./.venv/bin/python scripts/compact_trace.py otlp.jsonl > trace.agent.txt
+./.venv/bin/python tools/dev/compact_trace.py otlp.jsonl > trace.agent.txt
 ```
 
 Implementation:

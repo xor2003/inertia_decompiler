@@ -8,7 +8,7 @@
 - Command:
 
 ```bash
-./.venv/bin/python scripts/import_ultra_quickc_fixtures.py --only args --output-root /tmp/inertia_ultra_quickc_args_triage_omf_retry --decompile-timeout 30
+./.venv/bin/python tools.compiler_toolchain.import_ultra_quickc_fixtures --only args --output-root /tmp/inertia_ultra_quickc_args_triage_omf_retry --decompile-timeout 30
 ```
 
 ## Current Status

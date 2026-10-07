@@ -38,10 +38,10 @@ INERTIA_ENABLE_TAIL_VALIDATION=1 \
 .venv/bin/python -m pytest angr_platforms/tests/ -x -v
 
 # Run specific test file
-.venv/bin/python -m pytest angr_platforms/tests/test_x86_16_sortdemo_regressions.py -x -v
+.venv/bin/python -m pytest tests/cli/test_x86_16_sortdemo_regressions.py -x -v
 
 # Run single test
-.venv/bin/python -m pytest angr_platforms/tests/test_x86_16_sortdemo_regressions.py::test_name -x -v
+.venv/bin/python -m pytest tests/cli/test_x86_16_sortdemo_regressions.py::test_name -x -v
 ```
 
 ## Project structure
@@ -130,7 +130,7 @@ INERTIA_DEBUG_TAIL_SNAPSHOT=1
 ## Test organization
 
 - `test_x86_16_sortdemo_regressions.py` — SORTDEMO.EXE end-to-end acceptance
-- `test_x86_16_tail_validation_fingerprint.py` — tail validation snapshot stability
+- `tests.validation.test_x86_16_tail_validation_fingerprint.py` — tail validation snapshot stability
 - `test_x86_16_decompiler_postprocess_calls.py` — call-site rewriting
 - `test_x86_16_decompiler_postprocess_callsites.py` — call-site discovery
 - `test_x86_16_cli.py` — main integration test (440K)

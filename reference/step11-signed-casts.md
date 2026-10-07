@@ -86,7 +86,7 @@ Local reports: `.cache/step11-sortd.{txt,json,log}`,
 `.cache/step11-compilation.json`, `.cache/step11-behavior/`,
 `.cache/step11-{focused,insertion-before,insertion-after,mask-before,mypy,quality-fast,pipeline}.log`.
 Final pipeline evidence: `.cache/step11-pipeline-repeat.log` and
-`angr_platforms/.cache/test_pipeline/summary.json`; the earlier failure is
+`.cache/frontend/test_pipeline/summary.json`; the earlier failure is
 retained in `.cache/step11-pipeline-initial-summary.json` and its original log.
 Slowest routine test on the repeat: the SORTD indexed-address inventory, 38.91s.
 Use the Step 9 reproduction commands with these Step 11 output paths.

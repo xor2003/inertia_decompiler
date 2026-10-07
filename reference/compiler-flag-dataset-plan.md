@@ -12,8 +12,8 @@ This plan is based on measurements of:
 
 - `/home/xor/nndecomp/artifacts/dataset/cod_combo_strict_10x.jsonl`
 - `/home/xor/vextest/deep/output_*.COD`
-- the flag-profile and matching tools in `scripts/build_msc51_flag_profiles.py`
-  and `scripts/report_compiler_matches.py`
+- the flag-profile and matching tools in `tools/compiler_toolchain/build_msc51_flag_profiles.py`
+  and `tools/compiler_id/report.py`
 - the build and dataset tools under `/home/xor/nndecomp/scripts/`
 
 ## Current Corpus Measurements

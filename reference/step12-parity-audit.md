@@ -46,7 +46,7 @@ pending. Conversely, do not mark the mechanism complete from this table.
   These synthetic controls do not establish full live inventory coverage.
 
 Transport trace for the next 7.2 investigation:
-`inertia_decompiler/serial_clean_worker_evidence.py` schema 7 carries caller-return
+`inertia.cli.serial_clean_worker_evidence` schema 7 carries caller-return
 evidence, callsite censuses, program summaries, pointer evidence and global
 layout/range/source evidence. Its explicit write/read/hydrate fields do not
 carry `ProgramStorageResolution8616`. The inspected in-process transfer owner,

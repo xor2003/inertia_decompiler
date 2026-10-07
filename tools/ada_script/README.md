@@ -4,7 +4,7 @@ Run from a checkout with Inertia dependencies and the `ada` extra:
 
 ```sh
 .venv/bin/python -m pip install -e '.[ada]'
-PYTHON_JIT=1 .venv/bin/python ada.py /path/GAME.EXE \
+PYTHON_JIT=1 nice -n 10 .venv/bin/python -m tools.ada_script /path/GAME.EXE \
   --work-dir .cache/ada/game --full --xrefs \
   --signature-catalog /path/runtime.pat
 ```
@@ -12,8 +12,9 @@ PYTHON_JIT=1 .venv/bin/python ada.py /path/GAME.EXE \
 With a uv-managed environment, use
 `uv pip install --python .venv/bin/python -e '.[ada]'` instead of pip.
 
-The imported source is in `vendor/ada_script`; an external `/home/xor/ada_script`
-checkout is no longer needed. The source CLI remains there for compatibility.
+The analyzer, backends, database, tests and upstream provenance live in this
+package. The command is `inertia-ada` or `python -m tools.ada_script`; no external
+checkout or import-path mutation is needed.
 The integrated CLI supports IDC (`--idc-script`), runtime JSON (`--runtime`),
 Capstone/Rizin backends, `--full`, `--classify`, `--xrefs`, and report `--output`.
 Rizin is selected explicitly with `--backend rizin`; Capstone does not silently
@@ -62,7 +63,7 @@ payloads behind an MZ stub are refused before the analysis database is reset.
 Focused gate:
 
 ```sh
-PYTHON_JIT=1 .venv/bin/python -m pytest \
-  angr_platforms/tests/test_ada_signature_integration.py \
-  -n 7 --tb=short --durations=5 -q
+PYTHON_JIT=1 nice -n 10 .venv/bin/python -m pytest \
+  tests/integration/test_ada_signature_integration.py \
+  -n 2 --tb=short --durations=5 -q
 ```

@@ -1,0 +1,48 @@
+{
+  "name": "loader",
+  "description": "executable loading and address-space setup",
+  "sources": [
+    "inertia/frontend/x86_16/arch_86_16.py",
+    "inertia/frontend/x86_16/control_coordinates.py",
+    "inertia/frontend/x86_16/load_dos_mz.py",
+    "inertia/frontend/x86_16/load_dos_ne.py",
+    "inertia/frontend/x86_16/ne_resources.py"
+  ],
+  "public_api": [
+    "inertia.frontend.x86_16.arch_86_16.Arch86_16",
+    "inertia.frontend.x86_16.control_coordinates.ControlAddressDomain",
+    "inertia.frontend.x86_16.load_dos_mz.DOSMZ",
+    "inertia.frontend.x86_16.load_dos_ne.DOSNE"
+  ],
+  "dependencies": [],
+  "guide": "inertia/frontend/x86_16/README.md",
+  "tests": [
+    "tests/cli/test_cli_loader_memory_boundary.py",
+    "tests/cli/test_project_loading_cache.py",
+    "tests/cli/test_project_loading_diagnostics.py",
+    "tests/frontend/test_real16_loader_arch.py",
+    "tests/frontend/test_dos_mz_loader.py",
+    "tests/frontend/test_dos_ne_loader.py",
+    "tests/frontend/test_namespace.py",
+    "tests/frontend/test_ne_resources.py"
+  ],
+  "focus": [
+    "tests/frontend/test_namespace.py",
+    "tests/frontend/test_real16_loader_arch.py"
+  ],
+  "consumers": [
+    "inertia/cli/project_loading.py",
+    "tools/dosunit/recursive_proofs/real16_loader_arch.py",
+    "tools/dosunit/ssa/vex_cache_identity.py",
+    "tools/dosunit/catalog/binary_callee_control_target.py"
+  ],
+  "quality_sources": [
+    "inertia/frontend/x86_16/arch_86_16.py",
+    "inertia/frontend/x86_16/control_coordinates.py",
+    "inertia/frontend/x86_16/load_dos_mz.py",
+    "inertia/frontend/x86_16/load_dos_ne.py",
+    "inertia/frontend/x86_16/ne_resources.py"
+  ],
+  "routine_tests": [],
+  "order": 8
+}

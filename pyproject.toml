@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61", "wheel", "Cython>=3.2,<4"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "vextest-x86-16"
 version = "0.1"
 description = "angr-based 16-bit x86 real-mode decompiler workspace"
-readme = "angr_platforms/README.md"
+readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.14"
 dependencies = [
@@ -63,12 +63,22 @@ cython = [
 
 [project.scripts]
 decompile-x86-16 = "decompile:main"
+inertia-compiler-id = "tools.compiler_id.cli:main"
+inertia-signatures = "tools.signatures.cli:main"
+inertia-compiler-coverage = "tools.compiler_toolchain.compiler_coverage_suite:main"
+inertia-compare-bc5 = "tools.comparator.bc5_cli:main"
+inertia-compare-msc8 = "tools.comparator.msc8_cli:main"
+inertia-debugger = "tools.debugger.cli:main"
+inertia-ada = "tools.ada_script.cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "angr_platforms"}
+package-dir = {"" = "."}
+py-modules = ["decompile", "pyvex_compat"]
 
 [tool.setuptools.packages.find]
-where = ["angr_platforms"]
+where = ["."]
+include = ["inertia", "inertia.*", "tools", "tools.ada_script", "tools.compiler_id", "tools.comparator", "tools.debugger", "tools.dev", "tools.signatures", "tools.compiler_toolchain", "tools.dosunit", "tools.dosunit.catalog", "tools.dosunit.compare", "tools.dosunit.runtime", "tools.dosunit.reporting", "tools.dosunit.contracts", "tools.dosunit.architectures", "tools.dosunit.ssa", "tools.dosunit.recursive_proofs", "tools.dosunit.recursive_proofs.stack"]
+namespaces = false
 
 [tool.ruff]
 line-length = 120
@@ -80,6 +90,7 @@ extend-exclude = [
     "dist",
     "examples/build_msc6",
     "examples/build_msc6_tiny",
+    "pytest-of-*",
 ]
 
 [tool.ruff.lint]
@@ -124,47 +135,68 @@ max-complexity = 10
 max-bool-expr = 5
 
 [tool.ruff.lint.per-file-ignores]
-"angr_platforms/tests/*.py" = ["ANN", "D", "E402"]
-"angr_platforms/angr_platforms/X86_16/analysis_helpers.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/annotations.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/ir/condition_ir.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/lift_86_16.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/lowering/condition_transfer.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/lowering/segmented_global_loads.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/lowering/stack_lowering_impl.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/pipeline/contracts.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/segmented_memory_reasoning.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/widening/widening_copyprop_8616.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/widening/widening_memory_fold_8616.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/widening/segmented_load_identity.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/widening/segmented_load_widening.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/tail_validation_fingerprint.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/callsite_summary.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/decompiler_postprocess.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/decompiler_postprocess_jcc.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/decompiler_postprocess_utils.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/decompiler_return_compat.py" = ["ANN", "D"]
-"angr_platforms/angr_platforms/X86_16/render_compat.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/type_array_matching.py" = ["D"]
-"angr_platforms/angr_platforms/X86_16/stack_probe_fact_trace.py" = ["ANN", "D"]
-"inertia_decompiler/cli.py" = ["D", "F822"] # Lazy exports are resolved by the typed module boundary.
-"inertia_decompiler/cli_c_text_postprocess.py" = ["ANN", "D"]
-"inertia_decompiler/cli_decompilation.py" = ["ANN", "D"]
-"inertia_decompiler/runtime_support.py" = ["ANN", "D"]
-"omf_pat.py" = ["ANN", "D"]
-"scripts/decompile_cod_dir.py" = ["ANN", "D", "E402"]
+"inertia/lowering/analysis_helpers.py" = ["D"]
+"inertia/lowering/annotations.py" = ["D"]
+"inertia/ir/condition_ir.py" = ["ANN", "D"]
+"inertia/frontend/x86_16/lift_86_16.py" = ["ANN", "D"]
+"inertia/lowering/condition_transfer.py" = ["D"]
+"inertia/lowering/segmented_global_loads.py" = ["D"]
+"inertia/lowering/stack_lowering_impl.py" = ["ANN", "D"]
+"inertia/pipeline/contracts.py" = ["D"]
+"inertia/lowering/segmented_memory_reasoning.py" = ["D"]
+"inertia.widening.widening_copyprop_8616" = ["D"]
+"inertia.widening.widening_memory_fold_8616" = ["D"]
+"inertia.widening.segmented_load_identity" = ["D"]
+"inertia.widening.segmented_load_widening" = ["D"]
+"inertia/validation/tail_validation_fingerprint.py" = ["ANN", "D"]
+"inertia/semantics/callsite_summary.py" = ["D"]
+"inertia/postprocess/decompiler_postprocess.py" = ["ANN", "D"]
+"inertia/postprocess/decompiler_postprocess_jcc.py" = ["ANN", "D"]
+"inertia/postprocess/decompiler_postprocess_utils.py" = ["ANN", "D"]
+"inertia/frontend/x86_16/decompiler_return_compat.py" = ["ANN", "D"]
+"inertia/frontend/x86_16/render_compat.py" = ["D"]
+"inertia/lowering/type_array_matching.py" = ["D"]
+"inertia/semantics/stack_probe_fact_trace.py" = ["ANN", "D"]
+"inertia/cli/cli.py" = ["D", "F822"] # Lazy exports are resolved by the typed module boundary.
+"inertia/cli/cli_c_text_postprocess.py" = ["ANN", "D"]
+"inertia/cli/cli_decompilation.py" = ["ANN", "D"]
+"inertia/cli/runtime_support.py" = ["ANN", "D"]
+"tools/signatures/omf_pat.py" = ["ANN", "D"] # Existing parser debt transferred with its owner.
+"tools/dev/decompile_cod_dir.py" = ["ANN", "D", "E402"]
 "scripts/*.py" = ["D"]
+"tools/compiler_toolchain/build_debug_info_corpus.py" = ["D"]
+"tools/compiler_toolchain/probe_compiler_versions.py" = ["D"]
+"tools/compiler_toolchain/verify_msc_example_runtime_gate.py" = ["D"]
+"tools/dev/auto_decomp_loop.py" = ["D"]
+"tools/dev/capture_sortdemo_debug_bundle.py" = ["D"]
+"tools/dev/compare_discovery_backends.py" = ["D"]
+"tools/dev/run_plan3_checks.py" = ["D"]
+"tools/dev/write_recovery_artifact.py" = ["D"]
+"tools/signatures/import_patterns.py" = ["D"]
+"tools/compiler_id/report.py" = ["D"] # Preserve the pilot's existing script documentation debt.
+"tools/*/tests/**/*.py" = ["ANN", "D", "E402"]
+"tests/cli/*.py" = ["ANN", "D", "E402"] # Preserve relocated CLI test policy.
+"tests/lowering/*.py" = ["ANN", "D", "E402"] # Preserve relocated lowering test policy.
+"tests/fixtures/x86_16_condition_definition_fixtures.py" = ["ANN", "D", "E402"] # Preserve the relocated fixture policy.
+"tests/integration/*.py" = ["ANN", "D", "E402"] # Preserve the moved tests' existing policy.
+"tests/frontend/*.py" = ["ANN", "D", "E402"] # Preserve frontend tests' policy during namespace moves.
+"tests/ir/*.py" = ["ANN", "D", "E402"] # Preserve the migrated IR tests' existing policy.
+"tests/structuring/*.py" = ["ANN", "D", "E402"]
+"tests/postprocess/*.py" = ["ANN", "D", "E402"]
+"tests/alias/*.py" = ["ANN", "D", "E402"]
+"tests/widening/*.py" = ["ANN", "D", "E402"]
+"tests/validation/*.py" = ["ANN", "D", "E402"] # Preserve moved validation test policy.
+"tests/semantics/*.py" = ["ANN", "D", "E402"] # Preserve semantic tests' policy during moves.
 
 [tool.mypy]
 python_version = "3.14"
 mypy_path = ["typings"]
 files = [
-    "angr_platforms/angr_platforms/X86_16",
-    "inertia_decompiler",
-    "scripts",
+    "inertia",
+    "tools",
     "decompile.py",
     "monkeytype_config.py",
-    "omf_pat.py",
+    "tools/signatures/omf_pat.py",
 ]
 strict = true
 follow_imports = "skip"
@@ -184,26 +216,43 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = [
-    "inertia_decompiler.cache_io",
-    "angr_platforms.angr_platforms.X86_16.ir.native_stack_anchor",
-    "angr_platforms.angr_platforms.X86_16.callsite_summary",
-    "angr_platforms.angr_platforms.X86_16.lowering.linear_global_decomposition_cache",
-    "angr_platforms.angr_platforms.X86_16.pipeline.result_contracts",
-    "angr_platforms.angr_platforms.X86_16.postprocess.pass_validation_policy",
-    "angr_platforms.angr_platforms.X86_16.postprocess.rollback_snapshot_cache",
-    "angr_platforms.angr_platforms.X86_16.postprocess.validation_contracts",
-    "angr_platforms.angr_platforms.X86_16.validation.control_flow_ast_index",
-    "angr_platforms.angr_platforms.X86_16.analysis_helpers",
-    "angr_platforms.angr_platforms.X86_16.call_target_identity",
-    "angr_platforms.angr_platforms.X86_16.lowering.call_target_ssa_binder",
-    "angr_platforms.angr_platforms.X86_16.lowering.call_target_ssa_contracts",
+    "inertia.cli.cache_io",
+    "inertia.ir.native_stack_anchor",
+    "inertia.semantics.callsite_summary",
+    "inertia.lowering.linear_global_decomposition_cache",
+    "inertia.pipeline.result_contracts",
+    "inertia.postprocess.pass_validation_policy",
+    "inertia.postprocess.rollback_snapshot_cache",
+    "inertia.postprocess.validation_contracts",
+    "inertia.validation.control_flow_ast_index",
+    "inertia.pipeline.structured_ast_query_index",
+    "inertia.lowering.analysis_helpers",
+    "inertia.semantics.call_target_identity",
+    "inertia.lowering.call_target_ssa_binder",
+    "inertia.lowering.call_target_ssa_contracts",
 ]
 follow_imports = "normal"
 
 [tool.pytest.ini_options]
 testpaths = [
-    "angr_platforms/tests",
-    "test_components.py",
+    "tools/compiler_id/tests",
+    "tools/signatures/tests",
+    "tools/compiler_toolchain/tests",
+    "tools/dosunit/tests",
+    "tools/comparator/tests",
+    "tools/debugger/tests",
+    "tests/integration",
+    "tests/frontend",
+    "tests/ir",
+    "tests/semantics",
+    "tests/widening",
+    "tests/alias",
+    "tests/postprocess",
+    "tests/structuring",
+    "tests/lowering",
+    "tests/validation",
+    "tests/cli",
+    "tools/dev/tests",
 ]
 markers = [
     "repository_contract: validates current whole-repository state and runs as an explicit hard gate outside focused pytest lanes",
@@ -217,14 +266,10 @@ addopts = [
 
 [tool.pyright]
 include = [
-    "angr_platforms/angr_platforms/X86_16",
-    "angr_platforms/tests",
-    "inertia_decompiler",
+    "inertia",
+    "inertia/cli",
 ]
-extraPaths = [
-    "angr_platforms",
-    "angr_platforms/tests",
-]
+extraPaths = ["."]
 exclude = [
     "**/__pycache__",
     ".venv",

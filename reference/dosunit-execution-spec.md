@@ -660,7 +660,7 @@ self/equivalent-changed pairs, corruptions, domain exclusions and budget refusal
 
 ### 7.9 Symbolic terminal-service comparison
 
-`tools.dosunit.symbolic_terminal.compare_symbolic_terminals` lifts actual MZ
+`tools.dosunit.compare.symbolic_terminal.compare_symbolic_terminals` lifts actual MZ
 or PE32 bytes into the shared SSA model. It compares bounded acyclic paths to
 DOS INT21/AH4C or a caller-declared PE32 exit gateway. The result retains both
 native traces, byte/boot/environment identities, assumptions, counters and
@@ -805,7 +805,7 @@ new recursive PE32 component path.
 
 ### 7.11 Explicit real16 boot invocation source
 
-`tools.dosunit.real16_scoped_invocation.install_declared_invocation_source_8616`
+`tools.dosunit.catalog.real16_scoped_invocation.install_declared_invocation_source_8616`
 accepts a loaded project and an explicitly declared `ProgramBoot`. It checks
 the retained MZ source, header entry and stack, relocated image, and mapped
 loader bytes before installing the source used by scoped IR proofs. It never
@@ -823,7 +823,7 @@ inventory. Every preparation first clears any earlier installed source; a
 refusal or raised input/programming error cannot retain stale authority.
 
 ```python
-from tools.dosunit.real16_scoped_invocation import install_declared_invocation_source_8616
+from tools.dosunit.catalog.real16_scoped_invocation import install_declared_invocation_source_8616
 
 receipt = install_declared_invocation_source_8616(project, declared_boot)
 if not receipt.installed:
@@ -2059,7 +2059,7 @@ These are modeled entry states, not collected runtime states.
 
 ### Guarded runtime boundary capture
 
-`tools.dosunit.real16_replay.capture` and `flat32_replay.capture` accept the
+`tools.dosunit.runtime.real16_replay.capture` and `flat32_replay.capture` accept the
 same loaded image, entry and vector as replay, plus a declared executable
 boundary. They share replay's initialization and execution guards, and stop
 before the boundary instruction executes. The typed capture result includes

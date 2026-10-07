@@ -1,7 +1,7 @@
 # DOS game toolchain integration
 
 Current integration: ada_script's tracked sources are preserved in
-`vendor/ada_script`, with the root `ada.py` CLI and owned adapters in
+`tools/ada_script`, with its CLI and owned adapters in
 `tools/ada_script`. Library naming uses the shared PAT matcher before rendering,
 preserves explicit user names, and records conflicts/provenance. See
 [usage and tests](../tools/ada_script/README.md). masm2c and libdosbox remain
@@ -176,7 +176,7 @@ not complete capability audits or fresh game execution results.
   documents MZ/8086 scope; presence of those executables does not establish
   386 or protected-mode support. They were not executed in this assessment.
 
-* [ada.py](/home/xor/ada_script/ada.py) uses an MZ parser, IDC application,
+* [ADA CLI](../tools/ada_script/cli.py) uses an MZ parser, IDC application,
   optional `--runtime` JSON, Capstone/Rizin analysis, then ASM/LST output.
   The README's Unicorn-centric/dataclass description is stale relative to
   this CLI and the SQLite [database](/home/xor/ada_script/database.py).

@@ -1,0 +1,53 @@
+diff --git a/pyvex/lifting/util/lifter_helper.py b/pyvex/lifting/util/lifter_helper.py
+index 3140abb..4ecf590 100644
+--- a/pyvex/lifting/util/lifter_helper.py
++++ b/pyvex/lifting/util/lifter_helper.py
+@@ -132,7 +132,7 @@ class GymratLifter(Lifter):
+             dst = irsb_c.irsb.addr + irsb_c.irsb.size
+             dst_ty = vex_int_class(irsb_c.irsb.arch.bits).type
+             irsb_c.irsb.next = irsb_c.mkconst(dst, dst_ty)
+-        log.debug(str(self.irsb))
++        log.debug("%s", self.irsb)
+         if self.dump_irsb:
+             self.irsb.pp()
+         return self.irsb
+diff --git a/tests/test_gymrat_logging.py b/tests/test_gymrat_logging.py
+new file mode 100644
+index 0000000..b46e658
+--- /dev/null
++++ b/tests/test_gymrat_logging.py
+@@ -0,0 +1,34 @@
++"""Regression controls for lazy Gymrat IRSB diagnostics."""
++import logging
++from unittest.mock import patch
++
++import archinfo
++import pyvex
++from pyvex.lifting.util import GymratLifter, Instruction
++
++
++class Nop(Instruction):
++    bin_format = "00000000"
++    name = "logging_nop"
++
++    def compute_result(self):
++        return None
++
++
++class TinyLifter(GymratLifter):
++    instrs = [Nop]
++
++
++def test_disabled_debug_does_not_format_irsb():
++    logger = logging.getLogger("pyvex.lifting.util.lifter_helper")
++    with patch.object(logger, "level", logging.WARNING):
++        with patch.object(pyvex.IRSB, "__str__", side_effect=AssertionError("eager formatting")):
++            block = TinyLifter(archinfo.ArchX86(), 0x1000).lift(b"\x00")
++    assert block.size == 1
++
++
++def test_enabled_debug_formats_irsb(caplog):
++    with caplog.at_level(logging.DEBUG, logger="pyvex.lifting.util.lifter_helper"):
++        block = TinyLifter(archinfo.ArchX86(), 0x1000).lift(b"\x00")
++    assert block.size == 1
++    assert any("IRSB" in record.getMessage() for record in caplog.records)

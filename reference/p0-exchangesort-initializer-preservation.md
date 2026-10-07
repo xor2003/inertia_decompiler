@@ -75,7 +75,7 @@ unsigned-to-signed 16-bit semantic cast was absent from the final expression.
 The validator was correct to refuse it; no validator changes were necessary.
 
 Structural before/after tracing isolated `_simplify_structured_c_expressions`
-in `inertia_decompiler/cli_c_ast_rewrites.py`. Its `_unwrap_c_casts` helper
+in `inertia.cli.cli_c_ast_rewrites`. Its `_unwrap_c_casts` helper
 unconditionally erased Lowering's `CSemanticCast8616` from binary operands.
 Copy-alias rebuilding could also replace a semantic conversion with an ordinary
 cast, discarding its class and metadata.

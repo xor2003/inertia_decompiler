@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tools.ada_script.vendor_bridge import DatabaseView
+    from tools.ada_script.contracts import DatabaseView
 
 _HEADER = """#
 # Size of the executable's load module covered by the map

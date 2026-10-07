@@ -57,10 +57,10 @@ The upstream project is available at <https://github.com/angr/angr-platforms>.
 
 ### Imported ada_script snapshot
 
-`vendor/ada_script/` contains tracked sources from
+`tools/ada_script/` contains tracked sources from
 <https://github.com/xor2003/ada_script>, revision
 `cf5ac66c2c82f51e78bc5e17802994d9c7d515a6`. Per-file hashes and import boundaries
-are recorded in `vendor/ada_script/UPSTREAM.json` and `IMPORT.md`.
+are recorded in `tools/ada_script/UPSTREAM.json` and `IMPORT.md`.
 The imported checkout did not include a tracked LICENSE file; this notice
 records provenance and does not assign a new license to the imported code.
 The repository's blanket Inertia licensing must not be assumed to cover this

@@ -36,7 +36,7 @@ both external lanes, but predates the latest refusal/prefix changes.
 
 Newer bounded checkpoint: the default pipeline passes 5,819 routine tests and
 both external lanes. A separate 317-test validation surface has one failure:
-`test_x86_16_tail_validation.py::test_tail_validation_compare_classifies_switch_decision_tree_without_helper_delta`.
+`tests.validation.test_x86_16_tail_validation.py::test_tail_validation_compare_classifies_switch_decision_tree_without_helper_delta`.
 It persists after removing the rejected captured-call fingerprint experiment
 and restoring the accepted production digest. Track this separately; do not
 report the curated pipeline as a green full collection.

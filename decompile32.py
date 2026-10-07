@@ -1,48 +1,18 @@
-#!/usr/bin/env python3
-"""Legacy 32-bit angr decompiler experiment.
+"""Compatibility import and command for development tooling.
 
-Layer: Tooling/gates.
+Layer: Tooling/compatibility.
+Responsibility: preserve the historical script while tools.dev owns implementation.
 """
 
+from __future__ import annotations
+
 import sys
+from pathlib import Path
 
-import angr
-from angr.analyses import CallingConventionAnalysis, CFGFast, Decompiler, VariableRecoveryFast
-from angr_platforms.X86_16.lift_86_16 import Lifter86_16  # noqa
-from angr_platforms.X86_16.simos_86_16 import SimCC8616MSC  # noqa
+REPO_ROOT: Path = Path(__file__).resolve().parents[0]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-# logging.getLogger('angr').setLevel('DEBUG')
-# logging.getLogger('angr.calling_conventions').setLevel('DEBUG')
-# logging.getLogger('pyvex.lifting.util').setLevel('DEBUG')
-# logging.getLogger('angr_platforms.angr_platforms.X86_16.lift_86_16').setLevel('DEBUG')
+from tools.dev import decompile32 as _implementation  # noqa: E402
 
-
-# arch_32 = ArchX86()  # get architecture
-project = angr.Project(sys.argv[1], auto_load_libs=False)
-print("After load")
-
-# block = project.factory.block(project.entry, max_size=len(byte_string))
-
-print("After disasm")
-# force_complete_scan=False - because it is mix of code and data
-cfg = project.analyses[CFGFast].prep()(force_complete_scan=False, data_references=True, normalize=True)
-
-for node in cfg.graph.nodes():
-    block = project.factory.block(node.addr, size=node.size)
-    if block.size == 0:
-        continue
-    print(f"Block at {hex(node.addr)}, size: {block.size}")
-
-    block.pp()
-    block.vex.pp()
-    print()
-
-for func in cfg.functions.values():
-    _ = project.analyses[VariableRecoveryFast].prep()(func)
-    cca = project.analyses[CallingConventionAnalysis].prep()(func, cfg=cfg.model)
-    func.calling_convention = cca.cc
-    func.prototype = cca.prototype
-
-    dec = project.analyses[Decompiler].prep()(func, cfg=cfg.model)
-    assert dec.codegen is not None, f"Failed to decompile function {func!r}."
-    print(f"Decompiled function {func!r}\n{dec.codegen.text}")
+sys.modules[__name__] = _implementation

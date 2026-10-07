@@ -52,8 +52,8 @@ the broad pipeline was not rerun after this neutral-root refinement.
 
 New helper/test Ruff and focused MyPy pass; full architecture passes after
 registering the helper in promoted gates. Global MyPy reports 25 diagnostics
-across `omf_pat.py`, `scripts/report_compiler_matches.py` and
-`scripts/verify_borrow_real_mode.py`. `quality-fast` remains red on lint;
+across `tools/signatures/omf_pat.py`, `tools/compiler_id/report.py` and
+`tools/dev/verify_borrow_real_mode.py`. `quality-fast` remains red on lint;
 its 39-module mypyc import smoke passes. The touched legacy branch validator
 still has five Ruff complexity/Boolean-expression findings. No Step 9 or
 whole-suite completion is claimed.
@@ -368,9 +368,9 @@ MS C tiny remains 5/7 (`simple_control` and `loops_jumps` fail); QuickC also
 fails. Lane times were 263.303s curated, 46.511s QuickC, and 145.524s MS C tiny.
 `quality-fast` remains red. The new composite guard's redundant cast reported
 by promoted MyPy was removed; `step9-pipeline-followup-mypy.log` records the
-full MyPy inventory's 25 errors: 22 in `omf_pat.py`, one in
-`scripts/verify_borrow_real_mode.py`, and two in
-`scripts/report_compiler_matches.py`. No suppressions were introduced.
+full MyPy inventory's 25 errors: 22 in `tools/signatures/omf_pat.py`, one in
+`tools/dev/verify_borrow_real_mode.py`, and two in
+`tools/compiler_id/report.py`. No suppressions were introduced.
 
 Next investigate InitMenu's precision mismatch: the diagnostic's normalized
 current predicate equals the displayed precision candidate, so compare the raw

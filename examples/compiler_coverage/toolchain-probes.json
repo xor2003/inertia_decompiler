@@ -1,0 +1,222 @@
+{
+  "schema": 1,
+  "generated": "2026-10-06",
+  "purpose": "Durable compiler-probe evidence for the toolchain registry (probe measurements, not decompiler acceptance). Raw logs and binaries remain in .cache/compiler-coverage/toolchain-probes-*.",
+  "probe_source": {
+    "repo_path": "examples/compiler_coverage/toolchain-probe.c",
+    "sha256": "7a76093636dff4c7fe25b40d05037a88b94555c219275f62340c560302fd35b6",
+    "language": "C89",
+    "expectation_macros": ["EXPECTED_DATA_PTR", "EXPECTED_FUNC_PTR"],
+    "success_exit_code": 255,
+    "failure_exit_code": "small positive count of failed checks",
+    "note": "byte-identical to the retained private probe source; handwritten cases return 255 while Csmith-generated cases return 0 (per-case expected_exit_code, not per-compiler)"
+  },
+  "runners": {
+    "kvikdos": {
+      "path": "/home/xor/kvikdos/kvikdos",
+      "sha256": "9fa1e481a9ae08370311f1602c27a412a20c7947c4092919d452ea98f19171fb",
+      "sha256_historical": [
+        "d20517094f333564e2b104af2b386c3d95db00785cca7d9a5f95c551034e501a",
+        "af4a3a25186466a14ee0cc549f40ae622ec96b2a1cea9f54da8418ef1fc901fd"
+      ],
+      "note": "real-mode DOS only; refuses DPMI-hosted tools. Mutable installation probe generations are d20517 -> af4a3a -> 9fa1e4; see frozen_generations for the separately pinned 869fe0 snapshot. The path's later/live bytes are not asserted current by this record. All measured generations produced byte-identical EXEs. DOS exit status propagates to host return code."
+    },
+    "dosbox": {
+      "path": "/usr/bin/dosbox",
+      "version": "DOSBox 0.74-3",
+      "sha256": "9213fb131e11cb195bdff40c24513740ce497c5caf1cef1900ad1faad5c5026b",
+      "note": "required for DPMI-hosted Borland tools; does not propagate DOS exit codes, so stages report via nonempty ERRORLEVEL OK marker files (FAIL marker file may exist but must be empty)"
+    }
+  },
+  "frozen_generations": [
+    {
+      "id": "kvikdos-frozen-869fe0",
+      "verified_at": "2026-10-06",
+      "runner": {
+        "snapshot_path": "/home/xor/vextest/.cache/compiler-coverage/frozen-runner-20261006/kvikdos-869fe0cec87aa948c246919046e87828927a5b47a2dca8ee033f647c1a2597e1",
+        "snapshot_sha256": "869fe0cec87aa948c246919046e87828927a5b47a2dca8ee033f647c1a2597e1",
+        "mode": "0555",
+        "capture_path": "/home/xor/vextest/.cache/compiler-coverage/frozen-runner-20261006/capture.json",
+        "capture_sha256": "35c0d0e97cc21507b9ad796f0ff3f18db7ffbeff3edb2881a28d4efc13c9710a",
+        "original_source_path": "/home/xor/kvikdos/kvikdos",
+        "original_source_sha256_at_capture": "869fe0cec87aa948c246919046e87828927a5b47a2dca8ee033f647c1a2597e1",
+        "original_source_sha256_observed_after_run": "869fe0cec87aa948c246919046e87828927a5b47a2dca8ee033f647c1a2597e1",
+        "caveat": "The probes executed the immutable snapshot path above, not the live installation path. Its matching hash at the after-run observation does not assert that the mutable installation remains current later."
+      },
+      "registry_overlay": {
+        "path": "/home/xor/vextest/.cache/compiler-coverage/frozen-runner-20261006/toolchains-frozen.json",
+        "sha256_used": "5a17b528047b6365d3dded86714221c1e34cfabc700de9ae60910afdd36b6fb6",
+        "sha256_after_probe_pin_update": "not_embedded_to_avoid_mutual_hash_cycle",
+        "probe_evidence_path": "/home/xor/vextest/examples/compiler_coverage/toolchain-probes.json",
+        "probe_evidence_sha256_used": "2b5b83d4f247b393750f035b3c0b3f4dd4a2799eea1915a65228b43031cd6ab7"
+      },
+      "execution": {
+        "workdir": "/home/xor/vextest/.cache/compiler-coverage/frozen-runner-20261006/run-frozen-869fe0",
+        "probe_source_path": "/home/xor/vextest/examples/compiler_coverage/toolchain-probe.c",
+        "probe_source_sha256": "7a76093636dff4c7fe25b40d05037a88b94555c219275f62340c560302fd35b6",
+        "staged_source_sha256_all_four": "7a76093636dff4c7fe25b40d05037a88b94555c219275f62340c560302fd35b6",
+        "profile_helper": "/home/xor/vextest/scripts/compiler_profile.py",
+        "profile_helper_sha256_before_and_after": "a066e0bad53e02bc616fd111488238c9b5d1897bbbb03c7e9e08dcaff3fe675a",
+        "coverage_runner_source_sha256_before_and_after": "8e4e54fdb5823428bf25113d599412225199c91f932d2afedef10c1c158ec8b7",
+        "driver_sha256": "245052da8c9f73a8217240d67f4c44628405982668010f39d44ce10a7e6f3cb1",
+        "driver_method": "same private refreshed driver; load_compiler_profiles(private overlay), profile compile_argv/link_argv/dosbox_batch methods; no hand-built compiler/linker argument templates",
+        "raw_commands": "run-frozen-869fe0/steps.jsonl; Borland .BAT files retain exact DOS batch commands and ERRORLEVEL checks",
+        "runner_env": {"PYTHON_JIT": "1", "PYTHONHASHSEED": "0", "CI": "1", "nice": 10},
+        "timeouts": "120s per invocation; no timeout occurred; one serial compiler transaction at a time"
+      },
+      "results": [
+        {"profile": "msc51-small", "flags": ["/AS", "/Od", "/W3", "/c", "/Foc:\\PROBE.OBJ", "/Fcc:\\PROBE.COD"], "compile_rc": 0, "link_rc": 0, "run_rc": 255, "stdout": "probe int=2 long=4 data_ptr=2 func_ptr=2 ui=0 ul=65536 fn=42 | probe result=PASS failures=0", "exe_sha256": "a20f565146c1b80f8d8160883dc040f966edea4bb247b63cf5fb9f905512514a", "format": "MZ/USE16 real-mode", "code_segments": ["_TEXT"], "relocations": 4, "matches_all_prior_generations": true},
+        {"profile": "msc51-large", "flags": ["/AL", "/Od", "/W3", "/c", "/Foc:\\PROBE.OBJ", "/Fcc:\\PROBE.COD"], "compile_rc": 0, "link_rc": 0, "run_rc": 255, "stdout": "probe int=2 long=4 data_ptr=4 func_ptr=4 ui=0 ul=65536 fn=42 | probe result=PASS failures=0", "exe_sha256": "5b11f851f3238baa575fefd593f3d85c6ec1c8f6d909f80774dca2db6ef0ae34", "format": "MZ/USE16 real-mode", "code_segments": ["PROBE_TEXT", "_TEXT"], "relocations": 72, "matches_all_prior_generations": true},
+        {"profile": "bc31-small", "flags": ["-Od", "-ms", "-IE:\\INCLUDE", "-c", "-oc:\\PROBE.OBJ"], "compile_marker": "COMPILE_OK", "link_marker": "LINK_OK", "fail_markers_empty": true, "run_rc": 255, "stdout": "probe int=2 long=4 data_ptr=2 func_ptr=2 ui=0 ul=65536 fn=42 | probe result=PASS failures=0", "exe_sha256": "71739e0eff851bda9bc8b2fc95b67d1ab05bc86d4879c78f4628acbeff53ed08", "format": "MZ/USE16 real-mode", "code_segments": ["_TEXT"], "relocations": 1, "matches_all_prior_generations": true},
+        {"profile": "bc31-large", "flags": ["-Od", "-ml", "-IE:\\INCLUDE", "-c", "-oc:\\PROBE.OBJ"], "compile_marker": "COMPILE_OK", "link_marker": "LINK_OK", "fail_markers_empty": true, "run_rc": 255, "stdout": "probe int=2 long=4 data_ptr=4 func_ptr=4 ui=0 ul=65536 fn=42 | probe result=PASS failures=0", "exe_sha256": "eaa93898c84bd10e798452f0b55dae7a6564d0619e30406bad2264683d262951", "format": "MZ/USE16 real-mode", "code_segments": ["_TEXT", "PROBE_TEXT"], "relocations": 11, "matches_all_prior_generations": true}
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "id": "msc51-small",
+      "compiler": {
+        "product": "Microsoft C 5.1",
+        "banner": "Microsoft (R) C Optimizing Compiler Version 5.10",
+        "host_kind": "16-bit real-mode DOS; CL.EXE spawns C1.EXE, C2.EXE, C3.EXE (kvikdos exec diagnostic)"
+      },
+      "model": "small",
+      "model_flag": "/AS",
+      "compile_runner": "kvikdos",
+      "run_runner": "kvikdos",
+      "measured": {
+        "sizes": {"int": 2, "long": 4, "data_ptr": 2, "func_ptr": 2},
+        "stdout": "probe int=2 long=4 data_ptr=2 func_ptr=2 ui=0 ul=65536 fn=42 | probe result=PASS failures=0",
+        "exit_code": 255
+      },
+      "image": {
+        "format": "MZ 16-bit real-mode segmented EXE",
+        "sha256": "a20f565146c1b80f8d8160883dc040f966edea4bb247b63cf5fb9f905512514a",
+        "code_segments": ["_TEXT"],
+        "relocations": 4,
+        "proc_distance": {"_main": "NEAR", "add_seven": "NEAR"},
+        "ret_opcode": "c3 (RETN)"
+      },
+      "verified_runs": {
+        "2026-10-06 d20517 kvikdos": "pass, exe sha256 a20f5651",
+        "2026-10-06 af4a3a kvikdos (registry-rendered argv)": "pass, byte-identical exe",
+        "2026-10-06 9fa1e4 kvikdos (registry-rendered argv)": "pass, byte-identical exe"
+      }
+    },
+    {
+      "id": "msc51-large",
+      "compiler": {
+        "product": "Microsoft C 5.1",
+        "banner": "Microsoft (R) C Optimizing Compiler Version 5.10",
+        "host_kind": "16-bit real-mode DOS; CL.EXE spawns C1.EXE, C2.EXE, C3.EXE (kvikdos exec diagnostic)"
+      },
+      "model": "large",
+      "model_flag": "/AL",
+      "compile_runner": "kvikdos",
+      "run_runner": "kvikdos",
+      "measured": {
+        "sizes": {"int": 2, "long": 4, "data_ptr": 4, "func_ptr": 4},
+        "stdout": "probe int=2 long=4 data_ptr=4 func_ptr=4 ui=0 ul=65536 fn=42 | probe result=PASS failures=0",
+        "exit_code": 255
+      },
+      "image": {
+        "format": "MZ 16-bit real-mode segmented EXE",
+        "sha256": "5b11f851f3238baa575fefd593f3d85c6ec1c8f6d909f80774dca2db6ef0ae34",
+        "code_segments": ["PROBE_TEXT", "_TEXT"],
+        "relocations": 72,
+        "proc_distance": {"_main": "FAR", "add_seven": "FAR"},
+        "ret_opcode": "cb (RETF)"
+      },
+      "verified_runs": {
+        "2026-10-06 d20517 kvikdos": "pass, exe sha256 5b11f851",
+        "2026-10-06 af4a3a kvikdos (registry-rendered argv)": "pass, byte-identical exe",
+        "2026-10-06 9fa1e4 kvikdos (registry-rendered argv)": "pass, byte-identical exe"
+      }
+    },
+    {
+      "id": "bcpp31-small",
+      "compiler": {
+        "product": "Borland C++ 3.1 (C mode; .c extension compiles as C)",
+        "banner": "Borland C++  Version 3.1 Copyright (c) 1992 Borland International",
+        "host_kind": "DPMI-hosted DOS program; requires bundled DPMI16BI.OVL + DPMILOAD.EXE; kvikdos cannot run it, DOSBox 0.74-3 can"
+      },
+      "model": "small",
+      "model_flag": "-ms",
+      "compile_runner": "dosbox",
+      "run_runner": "kvikdos",
+      "measured": {
+        "sizes": {"int": 2, "long": 4, "data_ptr": 2, "func_ptr": 2},
+        "stdout": "probe int=2 long=4 data_ptr=2 func_ptr=2 ui=0 ul=65536 fn=42 | probe result=PASS failures=0",
+        "exit_code": 255
+      },
+      "image": {
+        "format": "MZ 16-bit real-mode segmented EXE",
+        "sha256": "71739e0eff851bda9bc8b2fc95b67d1ab05bc86d4879c78f4628acbeff53ed08",
+        "code_segments": ["_TEXT"],
+        "relocations": 1,
+        "proc_distance": {"_main": "NEAR", "add_seven": "NEAR"},
+        "ret_opcode": "ret inside proc near (RETN)"
+      },
+      "verified_runs": {
+        "2026-10-06 d20517 kvikdos run / dosbox compile": "pass, exe sha256 71739e0e",
+        "2026-10-06 af4a3a kvikdos run / dosbox compile with ERRORLEVEL markers": "pass, byte-identical exe",
+        "2026-10-06 9fa1e4 kvikdos run / dosbox compile with ERRORLEVEL markers": "pass, byte-identical exe"
+      }
+    },
+    {
+      "id": "bcpp31-large",
+      "compiler": {
+        "product": "Borland C++ 3.1 (C mode; .c extension compiles as C)",
+        "banner": "Borland C++  Version 3.1 Copyright (c) 1992 Borland International",
+        "host_kind": "DPMI-hosted DOS program; requires bundled DPMI16BI.OVL + DPMILOAD.EXE; kvikdos cannot run it, DOSBox 0.74-3 can"
+      },
+      "model": "large",
+      "model_flag": "-ml",
+      "compile_runner": "dosbox",
+      "run_runner": "kvikdos",
+      "measured": {
+        "sizes": {"int": 2, "long": 4, "data_ptr": 4, "func_ptr": 4},
+        "stdout": "probe int=2 long=4 data_ptr=4 func_ptr=4 ui=0 ul=65536 fn=42 | probe result=PASS failures=0",
+        "exit_code": 255
+      },
+      "image": {
+        "format": "MZ 16-bit real-mode segmented EXE",
+        "sha256": "eaa93898c84bd10e798452f0b55dae7a6564d0619e30406bad2264683d262951",
+        "code_segments": ["_TEXT", "PROBE_TEXT"],
+        "relocations": 11,
+        "proc_distance": {"_main": "FAR", "add_seven": "FAR"},
+        "ret_opcode": "ret inside proc far (assembles to RETF)"
+      },
+      "verified_runs": {
+        "2026-10-06 d20517 kvikdos run / dosbox compile": "pass, exe sha256 eaa93898",
+        "2026-10-06 af4a3a kvikdos run / dosbox compile with ERRORLEVEL markers": "pass, byte-identical exe",
+        "2026-10-06 9fa1e4 kvikdos run / dosbox compile with ERRORLEVEL markers": "pass, byte-identical exe"
+      }
+    }
+  ],
+  "toolchain_children": {
+    "note": "CL.EXE/BCC.EXE pins alone do not cover the toolchain; these are the child tools and headers the probe actually required.",
+    "msc51": {
+      "e:\\bin\\C1.EXE": "210077572465c8c1f11c309cbcf594a31a723846823c897013661dc8d201c295",
+      "e:\\bin\\C2.EXE": "88ee0c07e150ccb0313210f502eae763873a1a932830c558c0427317ed657509",
+      "e:\\bin\\C3.EXE": "66537ee88f84ea9ad03319f353f327bfd6cba2d3e31ac4fbcce32ee3989894c4",
+      "e:\\bin\\LINK.EXE": "124a3c800edc16b60f696d35a9dfec798b68b78fe2ca90c5988ea76bdeab1a8a",
+      "e:\\INCLUDE\\STDIO.H": "5f33039b1deea27b376dc48ebf42d2716aa074c59a520744e01534229d373434"
+    },
+    "bcpp31": {
+      "e:\\BIN\\TLINK.EXE": "ab8b8b96c1bde5ff6f56c8be2c3b928d21ead7430e72b01e3b22f1fa179ad006",
+      "e:\\BIN\\DPMI16BI.OVL": "ab194635a1b7dce76a5da94322dee0e4764e44c2695e95b8f78dd5add8871de2",
+      "e:\\BIN\\DPMILOAD.EXE": "3532fa13f0bfae5b7942d4e969e009986993fcf694721ddc7efc320bf8c81fe6",
+      "e:\\INCLUDE\\STDIO.H": "a11e0f45a8ef21d9ea702b49001da1e9980ef664c999b1c88a78ef7571c594ac",
+      "e:\\INCLUDE\\_DEFS.H": "650a4264602e05373f4a89be0b0e3385ee029cd54c39090ab1d3a34b71735db9",
+      "e:\\INCLUDE\\_NFILE.H": "f6cf70ec6fe8197383998907461e7c5b029ba6dae30ccdd73341e25c7230f691",
+      "e:\\INCLUDE\\_NULL.H": "f6f0a111fb3efa55b0ba557d81076586d3a888ba0af0b6823700c8008137fdf8"
+    }
+  },
+  "quirks": [
+    "MSC 5.1 CL ignores /D options written after the source filename; options must precede the source argument",
+    "DOSBox eager redirect creates the FAIL marker file empty even when the OK path runs; success requires nonempty exact OK content",
+    "a .bat invoked via dosbox -c consumes subsequent -c commands; the batch must end with exit",
+    "DOS 8.3 filename truncation and uppercase naming apply to DOS-created files"
+  ]
+}

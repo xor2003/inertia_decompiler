@@ -72,7 +72,10 @@ The root `./decompile.py` wrapper re-execs through `./.venv/bin/python` when tha
 
 The 16-bit VEX lifter uses a required
 [Cython build from the same Python source](reference/cython-vex.md).
-Build it with `PYTHON_JIT=1 .venv/bin/python scripts/build_cython_vex.py`.
+Build it with `PYTHON_JIT=1 .venv/bin/python tools/dev/build_cython_vex.py`.
+Wheel builds compile and bundle the lifter with its source/ABI/hash manifest;
+building a wheel requires a C compiler and Python development headers. Installed
+packages use that verified bundle rather than the repository build cache.
 Normal startup rejects missing or stale builds. Select
 `INERTIA_VEX_BACKEND=python` only when explicitly requesting interpretation.
 
@@ -212,13 +215,13 @@ Run ada_script in an isolated working directory: its loader recreates
 
 ada_script is now included in this checkout. Install its IDC parser dependency
 with `uv pip install --python "$PY" -e "$VEXTEST[ada]"` (or use pip from that
-environment). The imported sources are pinned under `vendor/ada_script`; the
-integrated CLI and signature adapter are under `tools/ada_script`.
+environment). The analyzer, CLI and signature adapter are maintained together under
+`tools/ada_script`.
 
 ```bash
 (
   cd "$WORK/analysis"
-  "$PY" "$ADA/ada.py" "$ORIGINAL" \
+  PYTHONPATH="$VEXTEST" "$PY" -m tools.ada_script.cli "$ORIGINAL" \
     --runtime "$TRACE" --full --classify --xrefs \
     -o "$WORK/reports/ada.md"
 )
@@ -417,7 +420,7 @@ functions stay in the denominator. See the
 Main entry points:
 
 - `./decompile.py`
-- `python -m inertia_decompiler.cli`
+- `python -m inertia.cli.cli`
 - installed script: `decompile-x86-16`
 
 Common runs:
@@ -456,7 +459,7 @@ When a run is slow, capture compact telemetry:
 
 ```bash
 INERTIA_OTEL_SPANS=1 \
-INERTIA_OTEL_SPAN_FILE=angr_platforms/.cache/otel.trace.txt \
+INERTIA_OTEL_SPAN_FILE=.cache/frontend/otel.trace.txt \
 ./decompile.py PROGRAM.EXE --addr 0x11423
 ```
 
@@ -501,7 +504,7 @@ segment.
 Build one deduplicated catalog from FLAIR `.pat`, OMF `.obj`, and OMF `.lib` inputs:
 
 ```bash
-python scripts/build_signature_catalog.py signature_catalogs/ QLINK/ \
+python tools.signatures.cli signature_catalogs/ QLINK/ \
   --output signature_catalogs/local.pat
 ```
 
@@ -514,13 +517,13 @@ Use it during decompilation:
 Build a shareable all-compilers bundle when the local compiler archive exists:
 
 ```bash
-python scripts/build_compiler_catalog_bundle.py
+python tools/signatures/build_compiler_catalog_bundle.py
 ```
 
 Report likely compiler/runtime matches for a binary:
 
 ```bash
-python scripts/report_compiler_matches.py PROGRAM.EXE \
+python -m tools.compiler_id PROGRAM.EXE \
   --catalog signature_catalogs/all_compilers_catalog_bundle.zip
 ```
 
@@ -531,11 +534,11 @@ Add `--compilers-only` for a short ranked compiler list.
 The compiler matcher can also score likely Microsoft C 5.1 flag combinations when profile data is available:
 
 ```bash
-python scripts/build_msc51_flag_profiles.py \
+python tools.compiler_toolchain.build_msc51_flag_profiles \
   --cod-dir deep \
   --output signature_catalogs/msc51_flag_profiles.json
 
-python scripts/report_compiler_matches.py PROGRAM.EXE \
+python -m tools.compiler_id PROGRAM.EXE \
   --catalog signature_catalogs/all_compilers_catalog_bundle.zip \
   --detect-flags-msc51 \
   --msc51-flag-profiles signature_catalogs/msc51_flag_profiles.json
@@ -608,13 +611,13 @@ Other useful comparator subcommands:
 Start an angr-backed DOS GDB remote server:
 
 ```bash
-python -m inertia_decompiler.debug_dos PROGRAM.EXE --host 127.0.0.1 --port 1234
+python -m inertia.cli.debug_dos PROGRAM.EXE --host 127.0.0.1 --port 1234
 ```
 
 Connect with the Textual TUI:
 
 ```bash
-python -m inertia_decompiler.gdb_tui --host 127.0.0.1 --port 1234 --arch x86_16
+python -m tools.debugger.gdb_tui --host 127.0.0.1 --port 1234 --arch x86_16
 ```
 
 The debugger exposes 16-bit registers, segment registers, flags, memory, breakpoints, and stepping through the GDB remote protocol.
@@ -624,7 +627,7 @@ The debugger exposes 16-bit registers, segment registers, flags, memory, breakpo
 Decompile a `.COD` corpus into sibling `.dec` files:
 
 ```bash
-python scripts/decompile_cod_dir.py cod --timeout 20 --max-memory-mb 1024
+python tools/dev/decompile_cod_dir.py cod --timeout 20 --max-memory-mb 1024
 ```
 
 Useful filters include `--cod-file`, `--proc-name`, `--skip-existing`, and `--write-tail-validation-baseline`.
@@ -632,7 +635,7 @@ Useful filters include `--cod-file`, `--proc-name`, `--skip-existing`, and `--wr
 Compare discovery engines:
 
 ```bash
-python scripts/compare_discovery_backends.py PROGRAM.EXE \
+python tools/dev/compare_discovery_backends.py PROGRAM.EXE \
   --backends all \
   --json-output /tmp/discovery.json
 ```
@@ -659,7 +662,7 @@ Optional native speedups are available for selected pure-Python modules:
 
 ```bash
 python -m pip install ".[mypyc]"
-python scripts/build_mypyc.py build_ext --inplace
+python tools/dev/build_mypyc.py build_ext --inplace
 ```
 
 If `mypyc` is unavailable, normal `.py` execution is unchanged.
@@ -713,7 +716,7 @@ When exact signatures are not proven, output should keep an honest fallback prot
 
 The signature pipeline accepts existing FLAIR `.pat` files and Microsoft OMF `.obj` / `.lib` inputs.
 
-For OMF inputs, the parser extracts module blobs, public names, fixup references, segment bytes, module lengths, tail bytes, source path, and compiler provenance. Each module is converted to PAT-style pattern data, then `signature_catalog.py` deduplicates modules by pattern bytes, length, public names, referenced names, and tail bytes.
+For OMF inputs, the parser extracts module blobs, public names, fixup references, segment bytes, module lengths, tail bytes, source path, and compiler provenance. Each module is converted to PAT-style pattern data, then `tools/signatures/signature_catalog.py` deduplicates modules by pattern bytes, length, public names, referenced names, and tail bytes.
 
 At match time, the loaded binary image is scanned with either the portable Python regex backend or Hyperscan when available. Matches become code labels, code ranges, library-function classifications, and probable compiler names. Unsupported archive formats are detected defensively and skipped instead of crashing.
 

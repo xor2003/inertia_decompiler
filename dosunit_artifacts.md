@@ -38,7 +38,7 @@ Date: 2026-06-13
   - `--max-insns-per-function 64`
   - follow direct call fallthrough by default (opt-out via `--no-follow-call-fallthrough`)
 - Region comparison now includes direct-cycle transition-system fallback for callable lowered blocks, using proven direct-successor deltas to normalize layout-shifted constants.
-- Added/updated regression tests around target normalization and cyclic region equality in `angr_platforms/tests/test_dosunit_tool.py`.
+- Added/updated regression tests around target normalization and cyclic region equality in `tools/dosunit/tests/test_dosunit_tool.py`.
 
 ## Notes
 

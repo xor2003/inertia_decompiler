@@ -11,8 +11,9 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from tools.dosunit import straightline_ssa as S
-from tools.dosunit.proof_contracts import (
+from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import (
     FactCounters,
     Obligation,
     ObligationEvidence,
@@ -21,7 +22,7 @@ from tools.dosunit.proof_contracts import (
     evaluate_obligations,
     proof_status_from_legacy,
 )
-from tools.dosunit.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.recursive_call_continuation import (
     CallContinuationRequest,
     CallSide,
@@ -43,7 +44,6 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import (
     StackObligation,
     prove_stack_step,
 )
-from tools.dosunit.register_state_relations import MachineState
 
 
 @dataclass(slots=True)

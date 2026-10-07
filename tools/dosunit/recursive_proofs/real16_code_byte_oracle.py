@@ -14,7 +14,7 @@ from typing import cast
 
 import z3
 
-from tools.dosunit.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 
 
 class CodeByteReason(StrEnum):

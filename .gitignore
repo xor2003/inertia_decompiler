@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+pytest-of-*/
 .ruff_cache/
 .mypy_cache/
 
@@ -60,3 +61,12 @@ signature_catalogs/catalog_specs.pickle
 /VIKINGS_decomp_first5_after_flags/
 /comparisons/reko/
 /meta_harness/
+# Generated native editable-build bundles and setuptools temporary directories
+/angr_platforms/angr_platforms/X86_16/cython-vex/
+/inertia/frontend/x86_16/cython-vex/
+/tmp*.build-temp/
+/tmp*.build-lib/
+
+# Local test/runtime scratch, not source or fixtures
+/relative/root/
+/tmptzteh3qv/

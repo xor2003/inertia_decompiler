@@ -1,0 +1,67 @@
+{
+  "name": "lifter",
+  "description": "instruction decoding and VEX lifting, including native builds",
+  "sources": [
+    "inertia/frontend/x86_16/direction_step.py",
+    "inertia/frontend/x86_16/vex_value_contract.py",
+    "inertia/frontend/__init__.py",
+    "inertia/frontend/x86_16/__init__.py",
+    "inertia/frontend/x86_16/lift_86_16.py",
+    "inertia/frontend/x86_16/lifter_backend.py",
+    "inertia/frontend/x86_16/lifter_backend_selection.py",
+    "inertia/frontend/x86_16/lifter_import.py"
+  ],
+  "public_api": [
+    "inertia.frontend.x86_16.lifter_backend.LifterBackend",
+    "inertia.frontend.x86_16.lifter_backend.activate_lifter_backend",
+    "inertia.frontend.x86_16.lift_86_16.Lifter86_16"
+  ],
+  "dependencies": [],
+  "guide": "inertia/frontend/x86_16/README.md",
+  "tests": [
+    "tools/dev/tests/test_cython_vex_report.py",
+    "tests/integration/test_mypyc_vex_bundle.py",
+    "tests/frontend/test_x86_16_aam_fault.py",
+    "tests/frontend/test_x86_16_alu_effect_order.py",
+    "tests/frontend/test_x86_16_borrow_80286_lifter_corpus.py",
+    "tests/frontend/test_x86_16_borrow_80386_lifter_corpus.py",
+    "tests/frontend/test_x86_16_condition_cache_relift.py",
+    "tests/frontend/test_x86_16_condition_cache_relift_fast_path.py",
+    "tests/frontend/test_x86_16_condition_lift_capture.py",
+    "tests/frontend/test_x86_16_condition_relift_arch_cache.py",
+    "tests/frontend/test_lifter_backend.py",
+    "tests/frontend/test_x86_16_dead_flags_rotate_lift.py",
+    "tests/frontend/test_x86_16_far_probe_lifting.py",
+    "tests/frontend/test_x86_16_flag_lookahead_boundaries.py",
+    "tests/frontend/test_x86_16_immediate_port_vex.py",
+    "tests/frontend/test_x86_16_io.py",
+    "tests/frontend/test_x86_16_jcc_result_condition.py",
+    "tests/frontend/test_x86_16_lift_condition.py",
+    "tests/frontend/test_x86_16_lifted_integer_constants.py",
+    "tests/frontend/test_x86_16_lifter_condition_cache.py",
+    "tests/frontend/test_x86_16_lifter_cython_dependency.py",
+    "tests/frontend/test_x86_16_lifting_opcode_tables.py",
+    "tests/frontend/test_x86_16_partial_register_lifting.py",
+    "tests/frontend/test_x86_16_pyvex_compat.py",
+    "tests/frontend/test_x86_16_smoketest.py",
+    "tests/frontend/test_x86_16_stack_probe_lifting.py",
+    "tests/frontend/test_x86_16_status_flag_lift_context.py"
+  ],
+  "focus": [
+    "tests/frontend/test_lifter_backend.py"
+  ],
+  "consumers": [
+    "inertia/frontend/x86_16/lifter_backend_selection.py",
+    "tools/dev/mypyc_build_cache.py",
+    "setup.py",
+    "tools/dev/build_cython_vex.py"
+  ],
+  "quality_sources": [
+    "inertia/frontend/x86_16/direction_step.py",
+    "inertia/frontend/x86_16/vex_value_contract.py",
+    "inertia/frontend/x86_16/lifter_backend.py",
+    "inertia/frontend/x86_16/lifter_import.py"
+  ],
+  "routine_tests": [],
+  "order": 6
+}

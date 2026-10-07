@@ -1,0 +1,337 @@
+{
+  "schema": 1,
+  "profiles": [
+    {
+      "id": "msc51-small",
+      "probe_id": "msc51-small",
+      "aliases": [],
+      "dependency_group": "msc51",
+      "compiler": "Microsoft C v5.1",
+      "memory_model": "small",
+      "declared_flags": [
+        "/Od",
+        "/AS"
+      ],
+      "compile_backend": "kvikdos",
+      "run_backend": "kvikdos",
+      "toolchain_root": "/home/xor/inertia_player/dos_compilers/Microsoft C v5.1",
+      "tools": {
+        "compiler": {
+          "dos_path": "e:\\bin\\CL.EXE",
+          "sha256": "4d113d023c6e986367f456c1557a290692fc70c60006561cbfec7b3295aa1c50"
+        },
+        "linker": {
+          "dos_path": "e:\\bin\\LINK.EXE",
+          "sha256": "124a3c800edc16b60f696d35a9dfec798b68b78fe2ca90c5988ea76bdeab1a8a"
+        }
+      },
+      "libraries": [
+        {
+          "dos_path": "e:\\lib\\SLIBCE.LIB",
+          "sha256": "e2e9efe9f66aa4f6d4093867dd85015521785f5b1ed7ab8b0acc525548296c28"
+        }
+      ],
+      "compiler_path_dos": [
+        "e:\\bin"
+      ],
+      "linker_path_dos": [],
+      "compiler_environment": [
+        [
+          "INCLUDE",
+          "E:\\INCLUDE;C:\\"
+        ],
+        [
+          "LIB",
+          "E:\\LIB"
+        ],
+        [
+          "TMP",
+          "C:\\"
+        ]
+      ],
+      "linker_environment": [
+        [
+          "LIB",
+          "E:\\LIB"
+        ]
+      ],
+      "compile_arguments": [
+        "/AS",
+        "/Od",
+        "/W3",
+        "/c",
+        "/Foc:\\{obj}",
+        "{cod_option}",
+        "c:\\{source}"
+      ],
+      "cod_argument": "/Fcc:\\{cod}",
+      "link_argument": "c:\\{obj}{extra_objs},c:\\{exe},c:\\{map},e:\\lib\\SLIBCE.LIB;",
+      "extra_object_format": "+c:\\{extra_obj}"
+    },
+    {
+      "id": "msc51-large",
+      "probe_id": "msc51-large",
+      "aliases": [],
+      "dependency_group": "msc51",
+      "compiler": "Microsoft C v5.1",
+      "memory_model": "large",
+      "declared_flags": [
+        "/Od",
+        "/AL"
+      ],
+      "compile_backend": "kvikdos",
+      "run_backend": "kvikdos",
+      "toolchain_root": "/home/xor/inertia_player/dos_compilers/Microsoft C v5.1",
+      "tools": {
+        "compiler": {
+          "dos_path": "e:\\bin\\CL.EXE",
+          "sha256": "4d113d023c6e986367f456c1557a290692fc70c60006561cbfec7b3295aa1c50"
+        },
+        "linker": {
+          "dos_path": "e:\\bin\\LINK.EXE",
+          "sha256": "124a3c800edc16b60f696d35a9dfec798b68b78fe2ca90c5988ea76bdeab1a8a"
+        }
+      },
+      "libraries": [
+        {
+          "dos_path": "e:\\lib\\LLIBCE.LIB",
+          "sha256": "7961eafce689dbf17acc3fd6fe34be6bc000f60d0f02fb1af2602b09112f3d2e"
+        }
+      ],
+      "compiler_path_dos": [
+        "e:\\bin"
+      ],
+      "linker_path_dos": [],
+      "compiler_environment": [
+        [
+          "INCLUDE",
+          "E:\\INCLUDE;C:\\"
+        ],
+        [
+          "LIB",
+          "E:\\LIB"
+        ],
+        [
+          "TMP",
+          "C:\\"
+        ]
+      ],
+      "linker_environment": [
+        [
+          "LIB",
+          "E:\\LIB"
+        ]
+      ],
+      "compile_arguments": [
+        "/AL",
+        "/Od",
+        "/W3",
+        "/c",
+        "/Foc:\\{obj}",
+        "{cod_option}",
+        "c:\\{source}"
+      ],
+      "cod_argument": "/Fcc:\\{cod}",
+      "link_argument": "c:\\{obj}{extra_objs},c:\\{exe},c:\\{map},e:\\lib\\LLIBCE.LIB;",
+      "extra_object_format": "+c:\\{extra_obj}"
+    },
+    {
+      "id": "bc31-small",
+      "probe_id": "bcpp31-small",
+      "aliases": [
+        "bcpp31-small"
+      ],
+      "dependency_group": "bcpp31",
+      "compiler": "Borland C++ 3.1",
+      "memory_model": "small",
+      "declared_flags": [
+        "-Od",
+        "-ms"
+      ],
+      "compile_backend": "dosbox",
+      "run_backend": "kvikdos",
+      "toolchain_root": "/home/xor/inertia_player/dos_compilers/Borland C++ v3.1",
+      "tools": {
+        "compiler": {
+          "dos_path": "e:\\BIN\\BCC.EXE",
+          "sha256": "87c6dfbad817eeca31c069043f08063f7122663e51932ad089e6d1c563450d3b"
+        },
+        "linker": {
+          "dos_path": "e:\\BIN\\TLINK.EXE",
+          "sha256": "ab8b8b96c1bde5ff6f56c8be2c3b928d21ead7430e72b01e3b22f1fa179ad006"
+        }
+      },
+      "libraries": [
+        {
+          "dos_path": "e:\\LIB\\C0S.OBJ",
+          "sha256": "60d3fad4463b8dd1985e4c357519fa9a54bcea0654e3ddf17751c25a68bb9d1d"
+        },
+        {
+          "dos_path": "e:\\LIB\\CS.LIB",
+          "sha256": "8225b75ea4e29e04eccd45f8b5b3bd3cc75a71c3c41d462005b21731ad0eb2b4"
+        },
+        {
+          "dos_path": "e:\\LIB\\EMU.LIB",
+          "sha256": "d5c8b31685c30fb351d23da2d3b22f6c7036e97889858bf86df9433385104ecc"
+        },
+        {
+          "dos_path": "e:\\LIB\\MATHS.LIB",
+          "sha256": "1c392e9449aaf81a75113e461dd02ee85f8f7fab6029afd507823ef66d69d873"
+        }
+      ],
+      "compiler_path_dos": [
+        "e:\\BIN"
+      ],
+      "linker_path_dos": [
+        "e:\\BIN"
+      ],
+      "compiler_environment": [
+        [
+          "INCLUDE",
+          "e:\\INCLUDE;c:\\"
+        ],
+        [
+          "LIB",
+          "e:\\LIB"
+        ]
+      ],
+      "linker_environment": [
+        [
+          "INCLUDE",
+          "e:\\INCLUDE;c:\\"
+        ],
+        [
+          "LIB",
+          "e:\\LIB"
+        ]
+      ],
+      "compile_arguments": [
+        "-Od",
+        "-ms",
+        "-IE:\\INCLUDE",
+        "-c",
+        "-oc:\\{obj}",
+        "c:\\{source}"
+      ],
+      "cod_argument": null,
+      "link_argument": "/m /s e:\\LIB\\C0S+c:\\{obj}{extra_objs},c:\\{exe},c:\\{map},e:\\LIB\\CS e:\\LIB\\EMU e:\\LIB\\MATHS",
+      "extra_object_format": "+c:\\{extra_obj}"
+    },
+    {
+      "id": "bc31-large",
+      "probe_id": "bcpp31-large",
+      "aliases": [
+        "bcpp31-large"
+      ],
+      "dependency_group": "bcpp31",
+      "compiler": "Borland C++ 3.1",
+      "memory_model": "large",
+      "declared_flags": [
+        "-Od",
+        "-ml"
+      ],
+      "compile_backend": "dosbox",
+      "run_backend": "kvikdos",
+      "toolchain_root": "/home/xor/inertia_player/dos_compilers/Borland C++ v3.1",
+      "tools": {
+        "compiler": {
+          "dos_path": "e:\\BIN\\BCC.EXE",
+          "sha256": "87c6dfbad817eeca31c069043f08063f7122663e51932ad089e6d1c563450d3b"
+        },
+        "linker": {
+          "dos_path": "e:\\BIN\\TLINK.EXE",
+          "sha256": "ab8b8b96c1bde5ff6f56c8be2c3b928d21ead7430e72b01e3b22f1fa179ad006"
+        }
+      },
+      "libraries": [
+        {
+          "dos_path": "e:\\LIB\\C0L.OBJ",
+          "sha256": "1004f6318f4c0854fc84a02b1c954517dbde408d0d3cad76887764b0336a591a"
+        },
+        {
+          "dos_path": "e:\\LIB\\CL.LIB",
+          "sha256": "57a3103f5df4d6965c0cb809f0b7cf209a1b8f63a13db87d2f4aadcacddd8124"
+        },
+        {
+          "dos_path": "e:\\LIB\\EMU.LIB",
+          "sha256": "d5c8b31685c30fb351d23da2d3b22f6c7036e97889858bf86df9433385104ecc"
+        },
+        {
+          "dos_path": "e:\\LIB\\MATHL.LIB",
+          "sha256": "e03133e8e79146d7249e41f67d695e230a9eae7e707e5af79ea110e3a703303c"
+        }
+      ],
+      "compiler_path_dos": [
+        "e:\\BIN"
+      ],
+      "linker_path_dos": [
+        "e:\\BIN"
+      ],
+      "compiler_environment": [
+        [
+          "INCLUDE",
+          "e:\\INCLUDE;c:\\"
+        ],
+        [
+          "LIB",
+          "e:\\LIB"
+        ]
+      ],
+      "linker_environment": [
+        [
+          "INCLUDE",
+          "e:\\INCLUDE;c:\\"
+        ],
+        [
+          "LIB",
+          "e:\\LIB"
+        ]
+      ],
+      "compile_arguments": [
+        "-Od",
+        "-ml",
+        "-IE:\\INCLUDE",
+        "-c",
+        "-oc:\\{obj}",
+        "c:\\{source}"
+      ],
+      "cod_argument": null,
+      "link_argument": "/m /s e:\\LIB\\C0L+c:\\{obj}{extra_objs},c:\\{exe},c:\\{map},e:\\LIB\\CL e:\\LIB\\EMU e:\\LIB\\MATHL",
+      "extra_object_format": "+c:\\{extra_obj}"
+    }
+  ],
+  "runners": {
+    "kvikdos": {
+      "path": "/home/xor/kvikdos/kvikdos",
+      "sha256": "3d9d534cdcf770ef6c3e392dc7c7c8e69d2c80d71a719c24a7c5cad58914d0cd"
+    },
+    "dosbox": {
+      "path": "/usr/bin/dosbox",
+      "sha256": "9213fb131e11cb195bdff40c24513740ce497c5caf1cef1900ad1faad5c5026b",
+      "host_environment": {
+        "SDL_VIDEODRIVER": "dummy",
+        "SDL_AUDIODRIVER": "dummy"
+      }
+    }
+  },
+  "dependencies": {
+    "msc51": {
+      "e:\\bin\\C1.EXE": "210077572465c8c1f11c309cbcf594a31a723846823c897013661dc8d201c295",
+      "e:\\bin\\C2.EXE": "88ee0c07e150ccb0313210f502eae763873a1a932830c558c0427317ed657509",
+      "e:\\bin\\C3.EXE": "66537ee88f84ea9ad03319f353f327bfd6cba2d3e31ac4fbcce32ee3989894c4",
+      "e:\\INCLUDE\\STDIO.H": "5f33039b1deea27b376dc48ebf42d2716aa074c59a520744e01534229d373434"
+    },
+    "bcpp31": {
+      "e:\\BIN\\DPMI16BI.OVL": "ab194635a1b7dce76a5da94322dee0e4764e44c2695e95b8f78dd5add8871de2",
+      "e:\\BIN\\DPMILOAD.EXE": "3532fa13f0bfae5b7942d4e969e009986993fcf694721ddc7efc320bf8c81fe6",
+      "e:\\INCLUDE\\STDIO.H": "a11e0f45a8ef21d9ea702b49001da1e9980ef664c999b1c88a78ef7571c594ac",
+      "e:\\INCLUDE\\_DEFS.H": "650a4264602e05373f4a89be0b0e3385ee029cd54c39090ab1d3a34b71735db9",
+      "e:\\INCLUDE\\_NFILE.H": "f6cf70ec6fe8197383998907461e7c5b029ba6dae30ccdd73341e25c7230f691",
+      "e:\\INCLUDE\\_NULL.H": "f6f0a111fb3efa55b0ba557d81076586d3a888ba0af0b6823700c8008137fdf8"
+    }
+  },
+  "probe_evidence": {
+    "path": "examples/compiler_coverage/toolchain-probes.json",
+    "sha256": "2b5b83d4f247b393750f035b3c0b3f4dd4a2799eea1915a65228b43031cd6ab7"
+  }
+}

@@ -507,7 +507,7 @@ Git history through `3ca6f9497` retains their implementation and evidence.
   pass; no native build or first changed-input smoke is skipped.
 - Generated-C quality metrics now live in the CLI/reporting-owned acceptance
   scorecard instead of forcing reporting tools through the X86_16 frontend
-  package bootstrap. The historical `angr_platforms.X86_16.quality` module is
+  package bootstrap. The historical `inertia.cli.acceptance_scorecard` module is
   a typed compatibility re-export, and an identity test proves both APIs expose
   the same objects. Fresh direct frontend-quality imports previously took
   3.94-5.89 seconds and about 198 MiB RSS; the reporting owner takes 0.05

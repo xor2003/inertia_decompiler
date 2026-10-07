@@ -91,9 +91,9 @@ Failure: presenting a curated run as the full suite, calling a red gate green,
 silently skipping a required run, using stale acceptance after source changes,
 or expanding Step 9 into new unrelated repair families.
 
-The SORTD gates are `scripts/check_sortd_sidecar_free.py`,
-`scripts/check_generated_translation_unit.py`, and
-`scripts/check_sortd_generated_sort_core.py`, using the same freshly generated
+The SORTD gates are `tools/dev/check_sortd_sidecar_free.py`,
+`tools/dev/check_generated_translation_unit.py`, and
+`tools/dev/check_sortd_generated_sort_core.py`, using the same freshly generated
 function artifacts. Whole-collection and unrelated expanded-lane audits remain
 in the separate quality backlog; do not claim they passed or silently select a
 smaller collection under their names.

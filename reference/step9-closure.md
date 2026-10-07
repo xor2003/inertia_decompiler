@@ -55,7 +55,7 @@ All Python runs use `PYTHON_JIT=1` and the project venv; pytest uses `-n 7`.
 | Generated translation unit | exit 0, 0 errors, 0 warnings | `.cache/step9-final-compilation.json` |
 | Generated behavior | exit 0, 19 functions | `.cache/step9-final-behavior/` |
 
-Pipeline summary: `angr_platforms/.cache/test_pipeline/summary.json`, written
+Pipeline summary: `.cache/frontend/test_pipeline/summary.json`, written
 22:55:33 +02:00; selected 3, passed 3, failed/skipped/timed_out 0. Seven MS C
 constructs are compare16, simple_control, loops_jumps, storage_classes,
 function_pointers, pointer_memory and scalar_types_io; each records build,
@@ -74,14 +74,14 @@ Run `make test-pipeline PYTHON=./.venv/bin/python` and the quality commands
 above with `PYTHON_JIT=1`. Whole SORTD used `PYTHONHASHSEED=0` and:
 
 ```sh
-.venv/bin/python scripts/check_sortd_sidecar_free.py --source-binary SORTD.EXE \
+.venv/bin/python tools/dev/check_sortd_sidecar_free.py --source-binary SORTD.EXE \
   --transcript-out .cache/step9-final-sortd.txt \
   --report-out .cache/step9-final-sortd.json \
   --function-c-dir .cache/step9-final-sortd-functions
-.venv/bin/python scripts/check_generated_translation_unit.py \
+.venv/bin/python tools/dev/check_generated_translation_unit.py \
   --function-c-dir .cache/step9-final-sortd-functions \
   --output .cache/step9-final-combined.c --report-out .cache/step9-final-compilation.json
-.venv/bin/python scripts/check_sortd_generated_sort_core.py \
+.venv/bin/python tools/dev/check_sortd_generated_sort_core.py \
   --transcript .cache/step9-final-sortd.txt \
   --function-c-dir .cache/step9-final-sortd-functions \
   --build-dir .cache/step9-final-behavior

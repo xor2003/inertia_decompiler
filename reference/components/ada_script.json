@@ -1,0 +1,27 @@
+{
+  "name": "ada_script",
+  "description": "integrated ADA assembly tooling",
+  "sources": [
+    "tools/ada_script"
+  ],
+  "public_api": [
+    "tools.ada_script.cli"
+  ],
+  "dependencies": [
+    "signatures"
+  ],
+  "guide": "reference/decompiler-map.md",
+  "tests": [
+    "tests/integration/test_ada_signature_integration.py",
+    "tools/ada_script/tests/test_cli.py",
+    "tools/ada_script/tests/test_error_reporting.py",
+    "tools/ada_script/tests/test_grammar.py",
+    "tools/ada_script/tests/test_idc_engine.py",
+    "tools/ada_script/tests/test_mz_parser.py"
+  ],
+  "focus": [],
+  "consumers": [],
+  "quality_sources": [],
+  "routine_tests": [],
+  "order": 5
+}

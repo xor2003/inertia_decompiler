@@ -67,7 +67,7 @@ Status: implemented and verified.
 
 DoD evidence:
 
-- `scripts/test_pipeline.py --lane ultra-quickc-fixtures` records compact lane
+- `tools/dev/test_pipeline.py --lane ultra-quickc-fixtures` records compact lane
   details from the nested QuickC report.
 - Lane details include selected/passed/decompiled/validated/evidence-gap
   counts and the nested report path.
@@ -135,10 +135,10 @@ Last verified gate set:
   `rtk make architecture-check PYTHON=./.venv/bin/python`
   passed.
 - QuickC lane:
-  `rtk ./.venv/bin/python scripts/test_pipeline.py --lane ultra-quickc-fixtures ...`
+  `rtk ./.venv/bin/python tools/dev/test_pipeline.py --lane ultra-quickc-fixtures ...`
   passed with 1 selected, 1 passed.
 - Default external tier:
-  `rtk ./.venv/bin/python scripts/test_pipeline.py --tier default --require-external`
+  `rtk ./.venv/bin/python tools/dev/test_pipeline.py --tier default --require-external`
   passed with 3 selected, 3 passed, 0 failed, 0 timed out.
 
 ## Current State

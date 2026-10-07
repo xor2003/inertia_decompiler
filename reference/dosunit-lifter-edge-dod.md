@@ -77,7 +77,7 @@ original EXE + function catalog
 Run these before treating edge-generation changes as done:
 
 ```bash
-rtk pytest -q angr_platforms/tests/test_dosunit_tool.py \
+rtk pytest -q tools/dosunit/tests/test_dosunit_tool.py \
   -k 'edge_vectors or tiny_example or byte_decoder_fallback'
 ```
 

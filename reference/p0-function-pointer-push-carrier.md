@@ -100,7 +100,7 @@ links without the prior runtime-register errors or compiler warnings.
 The three lane durations total 233.461s; this is an observed run, not a
 controlled optimization comparison. Log:
 `/tmp/inertia-runtime-push-test-pipeline.log`. Mutable detailed reports:
-`angr_platforms/.cache/test_pipeline/summary.json` and
+`.cache/frontend/test_pipeline/summary.json` and
 `examples/build_msc6_tiny/report.json`.
 
 This bounded carrier repair has passed its routine gates. The broader SORTD

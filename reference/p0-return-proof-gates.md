@@ -33,7 +33,7 @@ Reason: GCC `-fsyntax-only -Wall -Werror` exits zero for a non-void function
 that falls off its end. It therefore did not enforce the advertised compile
 acceptance contract. GCC `-c` reports the missing return.
 
-Owner: `inertia_decompiler/recompile_check.py`, compiler acceptance/reporting.
+Owner: `inertia/cli/recompile_check.py`, compiler acceptance/reporting.
 No emitted C is repaired. Compile to the null device without linking, so
 external calls need declarations but not host implementations.
 

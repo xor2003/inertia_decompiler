@@ -2,7 +2,7 @@
 
 Repository tests receive pytest component markers from
 [test-components.json](test-components.json), loaded by the root
-`pytest_components.py` plugin. This includes explicitly selected comparator
+`tools/dev/pytest_components.py` plugin. This includes explicitly selected comparator
 artifact tests. Every parametrized case inherits its module's labels.
 
 | Marker | Component |
@@ -37,10 +37,10 @@ rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest -m 'compiler_de
 rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest -m ada_script
 
 # An artifact adapter, selected explicitly as before
-rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest artifacts/bc5-z3cmp32/test_z3cmp32.py -m ssa_z3
+rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest tools/comparator/tests/test_bc5_driver.py -m ssa_z3
 
 # Cheap ownership/selection regression, also included in default pytest
-rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest test_components.py
+rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest tools/dev/tests/test_components.py
 ```
 
 Add new test module paths to the appropriate component lists in the JSON

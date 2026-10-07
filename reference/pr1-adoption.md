@@ -1,6 +1,6 @@
 # PR 1 Review And Adoption
 
-Scope: selective adoption of https://github.com/xor2003/inertia_decompiler/pull/1,
+Scope: selective adoption of https://github.com/xor2003/inertia/cli/pull/1,
 not a blanket merge into the shared worktree. September 20, 2026.
 
 ## Catalog Budget

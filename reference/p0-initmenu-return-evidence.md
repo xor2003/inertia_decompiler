@@ -82,7 +82,7 @@ They must never become recovery rules or address-specific exceptions.
 Before this repair, `semantics/call_return_segment.py::_callee_refusal_8616`
 required a closed native Function endpoint census. It correctly refused missing
 evidence but left separately pushed return segments in the native SP chain.
-`inertia_decompiler/cli_decompilation.py::_create_or_update_direct_call_stub_8616`
+`inertia.cli.cli_decompilation::_create_or_update_direct_call_stub_8616`
 creates callee objects and seeds names/prototypes/returning status; those fields
 do not establish a machine return frame.
 

@@ -241,7 +241,7 @@ instead of relying on an address-only expression map with no function CFG.
 - Full collection and expanded acceptance have not been refreshed.
 
 Logs: `/home/xor/.cache/runmenu-definition-{before,after,corpus,pipeline}.log`;
-gate summary: `angr_platforms/.cache/test_pipeline/summary.json`.
+gate summary: `.cache/frontend/test_pipeline/summary.json`.
 
 ## Remaining Acceptance
 

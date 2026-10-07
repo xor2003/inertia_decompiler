@@ -21,7 +21,7 @@ The direct candidate restores EDI from the function-pointer local. Strict GCC
 rejects pointer-to-integer casts and shifting a function pointer. The final
 fallback emits separate saved-register bytes and passes final tail validation.
 The rejected payload is
-`angr_platforms/.cache/validation_failed_payloads/payload_1789181816_dd4920a97e84.c`.
+`.cache/frontend/validation_failed_payloads/payload_1789181816_dd4920a97e84.c`.
 
 ## What Was Actually Observed
 

@@ -34,7 +34,7 @@ or duplicating continuation effects.
 
 ## Required Tests
 
-- `test_x86_16_validation_call_return_storage.py` covers storage identity,
+- `tests.validation.test_x86_16_validation_call_return_storage.py` covers storage identity,
   condition polarity, observed locations, and refusal cases.
 - `test_x86_16_stored_call_return_early_exit.py` covers both terminal returns,
   continuation effects, refusal cases, and idempotence.
