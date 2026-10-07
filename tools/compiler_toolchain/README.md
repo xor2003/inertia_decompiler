@@ -17,14 +17,14 @@ rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m tools.compiler_toolcha
 rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest tools/compiler_toolchain/tests -m 'not requires_kvm' -q --tb=short --durations=5 -n 2
 ```
 
-The installed command is `inertia-compiler-coverage`. Legacy `scripts.compiler_*`
-imports and runner/suite/Csmith commands alias their canonical modules, retaining
-monkeypatch and class identity. Remove aliases only after actual consumers migrate.
+The installed command is `inertia-compiler-coverage`. Import compiler tooling
+from `tools.compiler_toolchain`; historical `scripts.compiler_*` aliases have
+been removed.
 
 The QuickC fixture importer is `import_ultra_quickc_fixtures` in this package.
 Run `python -m tools.compiler_toolchain.import_ultra_quickc_fixtures --help`.
-The historical script remains supported; its private tests live beside the
-importer. Compiler execution and fixture selection are unchanged by the move.
+Its private tests live beside the importer. Compiler execution and fixture
+selection are unchanged by the move.
 
 Inputs: explicit JSON manifests, source fixtures, profile registries and external
 compiler/runtime binaries. Outputs: isolated case artifacts, logs, provenance and
@@ -34,8 +34,8 @@ copy proprietary compilers or generated artifacts into this package.
 
 Dependencies: shared process measurements in `tools.dev.process_metrics`, optional
 signatures, and the native orchestration owner `build_msc6_examples.py` here.
-The legacy build script aliases it; generic decompiler batching remains in its
-existing CLI owner. The builder still needs decomposition during the large-owner
+Generic decompiler batching uses `tools/dev/batch_decompile_procs.py`.
+The builder still needs decomposition during the large-owner
 step; this move introduces no semantic recovery or duplicate runtime.
 Case implementation fingerprints include these migrated owners, so old receipts
 must be regenerated. Test lanes retain explicit native/process budgets; no glob

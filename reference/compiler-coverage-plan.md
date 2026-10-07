@@ -286,8 +286,14 @@ none of these on their own. Report covered/required cells separately for languag
 output and compiler/model configuration; also accepted cases per batch, exact
 blocking families, next bounded action, time and peak memory.
 
-Current state: no fresh compiler probes or sixteen-case baseline under this revised
-plan. Historical results are not automatically current acceptance. If a blocker
+Current state (2026-10-07): all 36 source entries are present or retained and
+hash-pinned; this does not establish emitted coverage. Verified primary DOSBox
+profiles exist in the private probe registry. One of sixteen first-batch cases
+has been attempted: MS C 5.1 word comparisons compiles/runs the original, but
+decompilation still times out at the unchanged 120-second limit. Acceptance is
+0/16; the other fifteen baseline attempts and full matrix acceptance remain open.
+See `compiler-coverage-matrix.md` and `../PROGRESS.md` for current evidence.
+Historical results are not automatically current acceptance. If a blocker
 requires a substantial new subsystem, report the concrete dependency and leave
 its case open; do not silently expand or weaken the plan. Large-program repair
 queues and unrelated gates stay separate. Required missing constructs remain

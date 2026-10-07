@@ -5,7 +5,19 @@ from types import SimpleNamespace
 import pytest
 
 import tools.signatures.omf_pat as omf_pat
+import tools.signatures.pat_literal_filter as pat_literal_filter
 import tools.signatures.signature_catalog as signature_catalog
+
+
+def test_catalog_match_identity_covers_existing_parser_and_literal_owners():
+    """Matching cache invalidation must retain both relocated dependencies."""
+    components = signature_catalog._SIGNATURE_MATCH_CACHE_COMPONENTS
+    assert components == (
+        Path(signature_catalog.__file__).resolve(),
+        Path(omf_pat.__file__).resolve(),
+        Path(pat_literal_filter.__file__).resolve(),
+    )
+    assert all(path.is_file() for path in components)
 
 
 def test_pattern_cache_key_canonicalizes_relative_catalog_path(tmp_path, monkeypatch):
@@ -50,8 +62,8 @@ def test_catalog_specs_reused_across_binary_artifact_directories(tmp_path, monke
 
 
 def test_pattern_cache_identity_includes_literal_implementation(tmp_path, monkeypatch):
-    tool = tmp_path / "tools/signatures/omf_pat/py.py"
-    helper = tmp_path / "tools/signatures/pat_literal_filter/py.py"
+    tool = tmp_path / "omf_pat.py"
+    helper = tmp_path / "pat_literal_filter.py"
     tool.write_text("# pattern implementation\n")
     helper.write_text("# original literal implementation\n")
     monkeypatch.setattr(omf_pat, "__file__", str(tool))

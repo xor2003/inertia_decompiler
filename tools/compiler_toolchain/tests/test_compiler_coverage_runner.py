@@ -51,7 +51,9 @@ def test_external_fixture_uses_existing_owner_and_fingerprints_headers(tmp_path,
     )
     assert result is CoverageOutcome.HARNESS_FAILED  # No report, not a fabricated pass.
     command = execute.call_args.args[0]
-    assert command[1].endswith("tools/compiler_toolchain/build_msc6_examples.py")
+    assert command[:3] == [
+        sys.executable, "-m", "tools.compiler_toolchain.build_msc6_examples",
+    ]
     assert "--decompile-ignore-local-sidecar-hints" in command
     assert command[command.index("--compiler-profile") + 1] == "msc6_ax"
     assert "--profile-evidence" not in command

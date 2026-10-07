@@ -255,7 +255,7 @@ def _case_command(
 ) -> list[str]:
     """Build the pinned child command for one source round-trip."""
     command = [
-        sys.executable, str(ROOT / "scripts" / "build_msc6_examples.py"),
+        sys.executable, "-m", "tools.compiler_toolchain.build_msc6_examples",
         "--only-constructs", case, "--out-dir", str(output),
         "--examples-dir", str(source.parent), "--harvest-success-code", str(expected_exit_code),
         "--decompile-mode", "functions", "--decompile-max-functions", "0",

@@ -794,8 +794,8 @@
     {
       "id": "char_boundaries",
       "path": "examples/msc6_constructs/char_boundaries.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "51ca9c79248f9150fe0d657e21f0d37990b1bf5a2332b08e6410dd3a9d352e3b",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -811,13 +811,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "ulong_carry",
       "path": "examples/msc6_constructs/ulong_carry.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "0c2a98560327fff0644051579fda1394ae2cbe511dd7aff9a50d4c4bc53f2afb",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -832,13 +833,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "long_arith",
       "path": "examples/msc6_constructs/long_arith.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "24301128736c2d991476d3ebb61bb66305d0abd1d8b750435bcc479b9efcaf92",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -854,13 +856,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "long_shift",
       "path": "examples/msc6_constructs/long_shift.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "c74de759b61d7ec9ea10a062697a510cffb16d23245e070f31b76528257cc644",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -876,13 +879,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "dense_switch",
       "path": "examples/msc6_constructs/dense_switch.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "41a7ead96f055047935fa416d17f94681e21b6f65aa76b20a331eee1e52340ff",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -896,13 +900,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "cond_side_effects",
       "path": "examples/msc6_constructs/cond_side_effects.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "014c3cadcbcc4ea826f4e3db8fe77cd77c23ce71eb055766d0292133b334ab91",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -917,13 +922,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/results.json"
     },
     {
       "id": "variadic_args",
       "path": "examples/msc6_constructs/variadic_args.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "9e5b37d1daef51ad866bc0c1c366f1f2b25e030a662263130e1a7fb695fd38f6",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -937,13 +943,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "bounded_recursion",
       "path": "examples/msc6_constructs/bounded_recursion.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "092db84b1284c1ccf49c13cadfacb0e14b0c1a4cd936eb227cb742c2b49ca7e3",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -957,13 +964,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/results.json"
     },
     {
       "id": "explicit_far_abi",
       "path": "examples/msc6_constructs/explicit_far_abi.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "498bd2820d368653971991eb60062df2de3fa7b9873430bb193077e7c1ccd6dd",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -983,13 +991,14 @@
         "wtc11-small",
         "wtc11-large"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "nested_struct",
       "path": "examples/msc6_constructs/nested_struct.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "71fcd818fa3175adb6c358f7e9cdc264a39a7fbf585a80920d34c75f1784da01",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1006,13 +1015,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/results.json"
     },
     {
       "id": "union_widths",
       "path": "examples/msc6_constructs/union_widths.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "aba71990b17f13c12aa918fe3f7ae3562020df592c4326cb592964e9c5e3b849",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1030,13 +1040,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "bitfield_signed",
       "path": "examples/msc6_constructs/bitfield_signed.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "c599a15187394648549120dae8fced20ba3d2741e5d8d2763dcb8e09cbbf5507",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1054,13 +1065,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "enum_variants",
       "path": "examples/msc6_constructs/enum_variants.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "9f5a0a2191dcc07987c3b95c755f736c2ee54956af1a7df5eb25253fb9fc551e",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1079,13 +1091,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/results.json"
     },
     {
       "id": "pointer_ops",
       "path": "examples/msc6_constructs/pointer_ops.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "634753fab0adf1b8e50729119244b6d58a3f627775e8d702bd0f4d5390ba0bb6",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1104,13 +1117,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/results.json"
     },
     {
       "id": "array_init",
       "path": "examples/msc6_constructs/array_init.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "cb98c25610b45e912639acc59eb570a7f5e19d1603ffb1ec58e8806d4819148d",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1132,13 +1146,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/results.json"
     },
     {
       "id": "library_call_boundary",
       "path": "examples/msc6_constructs/library_call_boundary.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "5bd1ce2b0665ab00099e28c39202ddc600b0cfa0e542fa9f5569a511dcee8bbd",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -1152,13 +1167,14 @@
         "bc31-small",
         "wtc11-small"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
     },
     {
       "id": "probe_char_signedness",
       "path": "examples/compiler_coverage/probes/char_signedness.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "8d877bec59c5dd83272491eef89524522708b1c7e9d808e7715316341433dc8e",
       "kind": "compile_probe",
       "batch": null,
       "oracle": "compile_time_assert",
@@ -1172,13 +1188,14 @@
         "bc31-probe",
         "wtc11-probe"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/probe-results.json"
     },
     {
       "id": "probe_bitfield_layout",
       "path": "examples/compiler_coverage/probes/bitfield_layout.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "7e323639cf296e9377cb65f093519068ff74608c59025dae45538306a106f08e",
       "kind": "compile_probe",
       "batch": null,
       "oracle": "compile_time_assert",
@@ -1193,13 +1210,14 @@
         "bc31-probe",
         "wtc11-probe"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/probes-repaired.json"
     },
     {
       "id": "probe_aggregate_layout",
       "path": "examples/compiler_coverage/probes/aggregate_layout.c",
-      "state": "planned_not_implemented",
-      "sha256": null,
+      "state": "existing",
+      "sha256": "361ff5e26ebaed32d8d4ad5b1bb3efcce88d6b288b6c8a952b6694b87b66a1eb",
       "kind": "compile_probe",
       "batch": null,
       "oracle": "compile_time_assert",
@@ -1215,7 +1233,8 @@
         "bc31-probe",
         "wtc11-probe"
       ],
-      "roundtrip": "not_attempted"
+      "roundtrip": "not_attempted",
+      "host_oracle_evidence": ".cache/compiler-coverage/parent-host-20261007/probes-repaired.json"
     }
   ],
   "cells": [
@@ -2465,10 +2484,10 @@
     ]
   },
   "summary": {
-    "note": "Planning counts; recomputed by the private check script. Nothing here is a pass count.",
+    "note": "Planning counts checked by tools.compiler_toolchain.compiler_coverage_matrix. Nothing here is a pass count.",
     "sources_total": 36,
-    "sources_existing": 16,
-    "sources_planned_not_implemented": 19,
+    "sources_existing": 35,
+    "sources_planned_not_implemented": 0,
     "sources_generated_retained": 1,
     "runtime_sources": 32,
     "compile_probes": 4,

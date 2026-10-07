@@ -74,7 +74,7 @@ DEFAULT_OUT_DIR: Path = REPO_ROOT / "examples" / "build_msc6"
 DEFAULT_KVIKDOS: Path = Path("/home/xor/kvikdos/kvikdos")
 DEFAULT_MSC6_ROOT: Path = Path("/home/xor/inertia_player/dos_compilers/Microsoft C v6ax")
 DEFAULT_DECOMPILE: Path = REPO_ROOT / "decompile.py"
-DEFAULT_BATCH_DECOMPILE_PROCS: Path = REPO_ROOT / "scripts" / "batch_decompile_procs.py"
+DEFAULT_BATCH_DECOMPILE_PROCS: Path = REPO_ROOT / "tools" / "dev" / "batch_decompile_procs.py"
 MSC6_BATCH_MAX_WORKERS: int = 4
 DEFAULT_DECOMPILE_SKIP: tuple[str, ...] = ()
 HARNESS_SUCCESS_EXIT_CODE: int = 255
@@ -1373,7 +1373,9 @@ def _inject_ms_c89_forward_decls(raw_c_text: str) -> str:
     return "\n".join(lines[:insert_idx]) + "\n" + decl_block + "\n".join(lines[insert_idx:])
 
 
-def _lookup_sidecar_code_labels(binary_path: Path) -> dict[str, int]:
+def _lookup_sidecar_code_labels(
+    binary_path: Path, *, signature_catalog: Path | None = None,
+) -> dict[str, int]:
     """Read labels belonging to the fixture's linked binary and build sidecars."""
     project = _build_project(
         binary_path,
@@ -1381,7 +1383,7 @@ def _lookup_sidecar_code_labels(binary_path: Path) -> dict[str, int]:
         base_addr=0x10000,
         entry_point=0,
     )
-    metadata = _load_lst_metadata(binary_path, project, pat_backend=None, signature_catalog=None)
+    metadata = _load_lst_metadata(binary_path, project, pat_backend=None, signature_catalog=signature_catalog)
     labels: dict[str, int] = {}
     if metadata is None:
         return labels
@@ -2190,11 +2192,13 @@ def _scan_cod_candidate_line(
 def _resolve_main_candidates_from_metadata(
     exe_path: Path,
     cod_path: Path | None,
+    *, signature_catalog: Path | None = None,
 ) -> list[dict[str, object]]:
+    """Collect optional entrypoint labels under the caller's selected catalog."""
     candidates: list[dict[str, object]] = []
     seen: set[tuple[str, int]] = set()
 
-    sidecar_labels = _lookup_sidecar_code_labels(exe_path)
+    sidecar_labels = _lookup_sidecar_code_labels(exe_path, signature_catalog=signature_catalog)
     for candidate in DECOMPILE_MAIN_NAMES:
         candidate_lower = candidate.lower()
         mapped_addr = sidecar_labels.get(candidate_lower)
@@ -3406,6 +3410,7 @@ def _decompile(
         decompile_cod_path=decompile_cod_path,
         decompile_max_functions=decompile_max_functions,
         profile=profile,
+        decompile_signature_catalog=decompile_signature_catalog,
     )
 
     attempts: list[dict[str, object]] = []
@@ -3632,10 +3637,13 @@ def _main_mode_candidates(
     decompile_cod_path: Path | None,
     decompile_max_functions: int,
     profile: dict[str, object],
+    decompile_signature_catalog: Path | None = None,
 ) -> list[dict[str, object]]:
     """Select decompile candidates for the requested mode and record the choice."""
     if decompile_mode == "main":
-        candidates = _resolve_main_candidates_from_metadata(exe_path, decompile_cod_path)
+        candidates = _resolve_main_candidates_from_metadata(
+            exe_path, decompile_cod_path, signature_catalog=decompile_signature_catalog,
+        )
         if not candidates:
             selected_count = max(1, decompile_max_functions)
             candidates = [
@@ -4146,7 +4154,9 @@ def _try_function_fallback(
     binary_targets: tuple[BinaryFunctionTarget, ...] | None = None
     if options.decompile_ignore_local_sidecar_hints:
         binding = bind_function_targets(
-            fallback_functions, _lookup_sidecar_code_labels(options.exe_path), prefix=fallback_prefix,
+            fallback_functions,
+            _lookup_sidecar_code_labels(options.exe_path, signature_catalog=options.decompile_signature_catalog),
+            prefix=fallback_prefix,
         )
         fallback_debug["target_binding_status"] = binding.status.value
         if binding.status is not TargetBindingStatus.BOUND:
@@ -4352,7 +4362,9 @@ def _rebuild_and_run(
 
     entry = bind_msc6_fixture_entrypoint(
         decomp_src.read_text(encoding="utf-8"),
-        main_address=_lookup_sidecar_code_labels(options.exe_path).get("main"),
+        main_address=_lookup_sidecar_code_labels(
+            options.exe_path, signature_catalog=options.decompile_signature_catalog,
+        ).get("main"),
     )
     decompile_profile["entrypoint_binding"] = {"status": entry.status.value, "symbol": entry.symbol, "detail": entry.detail}
     decomp_src.write_text(entry.source, encoding="utf-8")
@@ -4485,6 +4497,25 @@ _DOS_EXAMPLE_NAMES: dict[str, str] = {
     "bitfield_neighbors": "BITNBR.C",
     "multidim_alias": "MDALIAS.C",
     "csmith": "CSMITH.C",
+    "cond_side_effects": "CONDSIDE.C",
+    "bounded_recursion": "RECURSE.C",
+    "pointer_ops": "PTROPS.C",
+    "nested_struct": "NESTSTRU.C",
+    "enum_variants": "ENUMVAR.C",
+    "array_init": "ARRINIT.C",
+    "char_signedness": "CHARSGN.C",
+    "bitfield_layout": "BITLAY.C",
+    "aggregate_layout": "AGGLAY.C",
+    "char_boundaries": "CHARBND.C",
+    "ulong_carry": "ULONGCAR.C",
+    "long_arith": "LONGAR.C",
+    "long_shift": "LONGSHFT.C",
+    "dense_switch": "DENSW.C",
+    "variadic_args": "VARARGS.C",
+    "explicit_far_abi": "FARABI.C",
+    "union_widths": "UNWIDTH.C",
+    "bitfield_signed": "BITSGN.C",
+    "library_call_boundary": "LIBCALL.C",
 }
 
 _DOS_83_STAGE_NAME = re.compile(r"^[A-Z0-9_.$-]{1,8}\.[A-Z0-9_.$-]{1,3}$")

@@ -38,7 +38,7 @@ is named.
 
 | Measure | Count |
 | --- | --- |
-| Sources | 36 = 16 existing + 19 planned + 1 generated |
+| Sources | 36 = 35 existing + 0 planned + 1 generated |
 | Runtime sources / compile probes | 32 / 4 |
 | Cells | 40 (39 admitted, 1 undecided: `types.plain_char`) |
 | Obligations | 202 = 138 covered / 48 later / 8 excluded / 8 undecided |
@@ -46,7 +46,7 @@ is named.
 | Watcom pairs | 40, all `not_started` |
 | First batch | 16 = baseline 8 + directed 6 + csmith 2 |
 
-## First batch (16 cases, all `not_attempted`)
+## First batch (16 cases, acceptance 0/16)
 
 `word_comparisons`=compare16.c, `array_pointer_writes`=pointer_memory.c,
 `branches_loops`=simple_control.c, `call_composition`=function_pointers.c,
@@ -57,9 +57,9 @@ Each × `msc51-small` + `bc31-small`.
 ## What remains
 
 - All 16 first-batch round trips attempted under the verified profiles.
-- 19 planned sources implemented (paths are recorded, files intentionally
-  absent), including `library_call_boundary` (blocked on the runtime
-  signature boundary) and Csmith runtime-signature resolution.
+- Target compilation and emitted-mechanism inspection for the ten newly
+  implemented sources, including `library_call_boundary`; runtime signature
+  resolution remains required for that case and Csmith.
 - `emitted.switch_jump_table` requires observed table emission — a switch in
   source never counts.
 - Optimization probes (`msc51-small-opt`, `bc31-small-opt`), the compile
@@ -68,8 +68,42 @@ Each × `msc51-small` + `bc31-small`.
 
 ## Checks
 
-`.cache/compiler-coverage/matrix-20261006/check_matrix.py` verifies: JSON
-validity, path/hash links, ID uniqueness, obligation partition, family
-coverage, both primary lanes per runtime source, Watcom `not_started`
-representation, and all denominators. Last run: all checks passed
-(`.cache/compiler-coverage/matrix-20261006/check-output.txt`).
+Run `make compiler-coverage-matrix PYTHON=./.venv/bin/python` for the durable
+consistency audit. The owner is
+`tools/compiler_toolchain/compiler_coverage_matrix.py`; it checks identities,
+source hashes, obligation partitions and denominators. Earned runtime statuses
+require existing runner reports and verified toolchain registries; empty profile
+sets and forged receipts refuse. Mechanism artifacts require reviewed
+observations and hashes; the checker does not itself prove the mechanism.
+Compile-probe acceptance needs its separate evidence contract and currently
+refuses earned claims rather than treating a runtime receipt as layout proof.
+
+Sixteen directed runtime sources and three layout/signedness probes now have host
+oracle/control checks. These establish source readiness, not DOS layout,
+emitted-pattern coverage or decompiler acceptance. First16 acceptance remains
+0/16; one MS C 5.1 comparison round trip reached its 120-second decompile budget.
+
+### Target layout probes (2026-10-07)
+
+Original-only small-model probes ran through the verified DOSBox profiles.
+All six originals and six correct expectation controls built and exited 255;
+six incorrect expectation controls failed on negative array sizes. These are
+compiler/layout observations, not decompiler round trips or earned matrix cells.
+Exact source/tool identities and logs:
+`.cache/compiler-coverage/probe-refresh-20261007/probe-evidence.json`.
+
+| Observation | MS C 5.1 | Borland C++ 3.1 |
+| --- | --- | --- |
+| Mixed struct size | 10 | 9 |
+| Word / long / pointer offsets | 2 / 4 / 8 | 1 / 3 / 7 |
+| Union size / enclosing offset | 4 / 2 | 4 / 1 |
+| Enum size | 2 | 2 |
+| Bitfield struct size / tag offset | 6 / 4 | 4 / 3 |
+| Zero-width-split struct size / tag offset | 6 / 4 | 3 / 2 |
+| Plain-int bitfield signed | no | yes |
+| Plain char signed / CHAR_BIT | yes / 8 | yes / 8 |
+
+MS C's header reports `CHAR_MIN=-127`, while Borland reports `-128`; these
+are recorded header values, not a portable guarantee for out-of-range casts.
+MS C warns that the plain bitfield must be unsigned. Explicit signed-bitfield
+fixture behavior therefore still needs its own target check.

@@ -1603,6 +1603,7 @@
     "tests/integration/test_build_msc6_examples.py",
     "tools/compiler_toolchain/tests/test_compiler_coverage_cross_unit.py",
     "tools/compiler_toolchain/tests/test_compiler_coverage_csmith.py",
+    "tools/compiler_toolchain/tests/test_compiler_coverage_matrix.py",
     "tools/compiler_toolchain/tests/test_compiler_coverage_manifest.py",
     "tools/compiler_toolchain/tests/test_compiler_coverage_pointer_oracle.py",
     "tools/compiler_toolchain/tests/test_compiler_coverage_profile.py",

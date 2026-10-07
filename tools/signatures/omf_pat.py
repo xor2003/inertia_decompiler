@@ -2140,7 +2140,7 @@ def _omf_pat_tool_cache_fingerprint() -> str:
     """
     tool_path = Path(__file__).resolve()
     fingerprints: list[str] = []
-    for path in (tool_path, tool_path.with_name("tools/signatures/pat_literal_filter.py")):
+    for path in (tool_path, tool_path.with_name("pat_literal_filter.py")):
         stat = path.stat()
         fingerprints.append(f"{path}:{stat.st_mtime_ns}:{stat.st_size}")
     return "|".join(fingerprints)

@@ -1,5 +1,6 @@
 # Candidate round trips; semantic feature witnesses are reported separately.
 COMPILER_COVERAGE_TYPED_OWNERS := \
+	tools/compiler_toolchain/compiler_coverage_matrix.py \
 	tools/compiler_toolchain/compiler_profile.py \
 	tools/compiler_toolchain/msc6_memory_model.py \
 	inertia/lowering/callsite_pointer_values.py \
@@ -8,6 +9,7 @@ COMPILER_COVERAGE_TYPED_OWNERS := \
 	inertia/cli/discovery_candidate_ranges.py \
 	inertia/cli/metadata_evidence.py
 COMPILER_COVERAGE_REGRESSION_FILES := \
+	tools/compiler_toolchain/tests/test_compiler_coverage_matrix.py \
 	tools/compiler_toolchain/tests/test_compiler_coverage_profile.py \
 	tools/compiler_toolchain/tests/test_msc6_memory_model.py \
 	tools/compiler_toolchain/tests/test_msc6_dos_tmp.py \
@@ -17,6 +19,7 @@ COMPILER_COVERAGE_REGRESSION_FILES := \
 	tests/cli/test_metadata_evidence.py \
 	tools/signatures/tests/test_binary_signature_metadata.py
 COMPILER_COVERAGE_QA_OWNERS := \
+	tools/compiler_toolchain/compiler_coverage_matrix.py \
 	inertia/lowering/callsite_pointer_values.py \
 	inertia/lowering/near_pointer_argument_values.py \
 	inertia/cli/binary_signature_metadata.py \
@@ -36,10 +39,13 @@ CSMITH_SEED ?= 2
 CSMITH_RUNTIME_SOURCE ?= /home/xor/csmith/runtime
 CSMITH_RUNTIME_BUILD ?= $(abspath $(dir $(CSMITH))/../runtime)
 
-.PHONY: compiler-coverage compiler-coverage-batch compiler-coverage-contracts compiler-coverage-generate compiler-coverage-csmith
+.PHONY: compiler-coverage compiler-coverage-batch compiler-coverage-contracts compiler-coverage-generate compiler-coverage-csmith compiler-coverage-matrix
+compiler-coverage-matrix:
+	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m tools.compiler_toolchain.compiler_coverage_matrix
+
 compiler-coverage-csmith:
 	$(Q)test -x "$(CSMITH)" || { printf 'Set CSMITH to the pinned MS-DOS generator executable\n' >&2; exit 2; }
-	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m scripts.compiler_coverage_csmith \
+	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m tools.compiler_toolchain.compiler_coverage_csmith \
 		--csmith "$(CSMITH)" --seed "$(CSMITH_SEED)" --out-dir "$(COMPILER_COVERAGE_OUT)" \
 		--roundtrip --runtime-source "$(CSMITH_RUNTIME_SOURCE)" --runtime-build "$(CSMITH_RUNTIME_BUILD)" \
 		--memory-model "$(MODEL)" --case-timeout "$(COMPILER_COVERAGE_TIMEOUT)" \
@@ -47,7 +53,7 @@ compiler-coverage-csmith:
 
 compiler-coverage-generate:
 	$(Q)test -x "$(CSMITH)" || { printf 'Set CSMITH to the pinned MS-DOS generator executable\n' >&2; exit 2; }
-	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m scripts.compiler_coverage_csmith \
+	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m tools.compiler_toolchain.compiler_coverage_csmith \
 		--csmith "$(CSMITH)" --seed "$(CSMITH_SEED)" --out-dir "$(COMPILER_COVERAGE_OUT)"
 
 compiler-coverage-batch:
@@ -73,7 +79,8 @@ compiler-coverage-contracts:
 		tools/compiler_toolchain/tests/test_msc6_original_evidence.py \
 		tools/compiler_toolchain/tests/test_compiler_coverage_csmith.py \
 		tools/compiler_toolchain/tests/test_compiler_coverage_manifest.py \
-		angr_platforms/tests/test_compiler_coverage_pointer_oracle.py \
+		tools/compiler_toolchain/tests/test_compiler_coverage_matrix.py \
+		tools/compiler_toolchain/tests/test_compiler_coverage_pointer_oracle.py \
 		tools/compiler_toolchain/tests/test_compiler_coverage_profile.py \
 		tools/compiler_toolchain/tests/test_compiler_coverage_provenance.py \
 		tools/compiler_toolchain/tests/test_compiler_coverage_result.py \

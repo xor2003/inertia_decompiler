@@ -33,8 +33,8 @@ from tools.signatures.signature_matching_policy import signature_matching_disabl
 
 _SIGNATURE_MATCH_CACHE_COMPONENTS = (
     Path(__file__).resolve(),
-    Path(__file__).resolve().parent / "tools/signatures/omf_pat.py",
-    Path(__file__).resolve().parent / "tools/signatures/pat_literal_filter.py",
+    Path(__file__).resolve().with_name("omf_pat.py"),
+    Path(__file__).resolve().with_name("pat_literal_filter.py"),
 )
 
 
@@ -272,7 +272,7 @@ def _load_filtered_catalog_specs(
     # Pattern specs depend on the catalog and builder, not the executable.
     # Fresh per-case artifact directories must not force repeated parsing.
     effective_cache_dir = cache_dir or (DECOMPILATION_CACHE_DIR / "signature_catalog_specs")
-    specs = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
+    specs: tuple[CachedPatRegexSpec, ...] = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
     if not specs:
         return ()
     filtered_specs = _filter_specs_by_compiler_names(specs, compiler_names)

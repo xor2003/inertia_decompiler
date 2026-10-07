@@ -4,6 +4,28 @@
 
 # Progress
 
+## 2026-10-07 — Compiler coverage resumed after execution-tool outage
+
+The finite matrix now has 35 existing sources and one retained Csmith source;
+no planned source paths remain absent. This is source readiness, not emitted
+coverage. Ten corrected fixtures passed strict host C89 at O0/O2 (20 originals
+and 20 rejecting mutation controls). Matrix identities and hashes pass the
+durable consistency checker. Layout-probe hashes reflect the MS C 5.1
+`offsetof` compatibility repair; target layout acceptance remains open.
+
+Cold real16 project construction registers the verified native lifter before
+CFG analysis. Eight focused tests pass, including the actual clean CLI worker;
+its test uses an explicit empty signature catalog to avoid an unrelated global
+catalog build. Runner/matrix/signature-cache regressions: 60 passed.
+
+First16 acceptance remains **0/16**. The fresh `word_comparisons@msc51-small`
+attempt built and ran the original (exit 255), then exceeded the unchanged
+120-second decompile stage; total case time 131.953s. Its log also exposes an
+angr API error assigning the read-only `Function.is_prototype_guessed` property.
+That boundary is the next bounded repair. Receipt:
+`.cache/compiler-coverage/resumed-first16-20261007/summary.json`.
+Neither these focused tests nor host fixtures complete the plan.
+
 ## 2026-10-06 — Original comparator M0–M7 plan complete
 
 Final parent reconciliation accepted the real16 and PE32 comparator contracts;

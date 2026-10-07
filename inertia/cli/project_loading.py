@@ -57,6 +57,12 @@ def _describe_exception(ex: Exception) -> str:
 
 
 def _finalize_x86_16_project(project: angr.Project) -> angr.Project:
+    """Register the verified lifter before exposing a real-mode project to analyses."""
+    if isinstance(project.arch, Arch86_16):
+        # Architecture registration alone does not install the PyVEX lifter in
+        # a clean worker. The canonical import enforces native-backend checks.
+        import inertia.frontend.x86_16.lift_86_16  # noqa: F401
+
     hook_x86_16_known_compiler_helpers_8616(project)
     return project
 
@@ -305,11 +311,13 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
                 _debug_print(f"[dbg] {exe_backend} load base={hex(explicit_base)}")
                 _debug_print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
                 proj = _defer_mz_static_invocation_8616(proj, project_input)
-                return _finalize_x86_16_project(_mark_packed_project(proj, packed_detection))
             except Exception as ex:
                 _debug_print(
                     f"[dbg] explicit {exe_backend} load failed at {hex(explicit_base)}: {_describe_exception(ex)}"
                 )
+            else:
+                # Backend verification failures must escape the loader retry.
+                return _finalize_x86_16_project(_mark_packed_project(proj, packed_detection))
 
         try:
             proj = angr.Project(_project_source(project_input), auto_load_libs=False)
