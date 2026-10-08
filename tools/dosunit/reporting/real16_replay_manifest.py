@@ -118,7 +118,12 @@ def _frame(raw: object, field: str) -> CallerFrame:
         frame_kind = FrameKind(kind)
     except ValueError as error:
         raise DosUnitError(f"{field}.kind: expected {_FRAME_KINDS}") from error
-    return CallerFrame(frame_kind, _seg_offset(raw.get("target"), f"{field}.target"))
+    guard = raw.get("sp_guard", False)
+    if not isinstance(guard, bool):
+        raise DosUnitError(f"{field}.sp_guard: expected a boolean")
+    return CallerFrame(
+        frame_kind, _seg_offset(raw.get("target"), f"{field}.target"), guard
+    )
 
 
 def _name_map(raw: object, field: str, allowed: set[str]) -> tuple[tuple[str, int], ...]:

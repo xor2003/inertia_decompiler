@@ -174,10 +174,20 @@ class CallerFrame:
     ``NEAR16`` installs a 2-byte IP; the target segment must equal the entry
     CS, which is what a near ``call`` implies. ``FAR16`` installs a 4-byte
     CS:IP pair. All other frame shapes are refused by this contract's type.
+
+    ``sp_guard`` selects return detection by stack boundary instead of a
+    fetch at ``target``: a ret-family instruction fetched while SP still
+    points at this frame consumes the synthetic caller's return address —
+    it is ``RETURNED`` before executing.  This is required when no offset
+    in the entry segment can hold the trap (a loaded image >= 64K spans
+    every reachable in-CS offset).  The target bytes are still pushed —
+    the frame is real — but the target is never required to be fetchable,
+    so the trap-overlap check does not apply.
     """
 
     kind: FrameKind
     target: SegOffset
+    sp_guard: bool = False
 
     def push_bytes(self) -> bytes:
         """Return the stack bytes the corresponding call would have pushed."""

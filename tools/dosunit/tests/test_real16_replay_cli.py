@@ -18,8 +18,8 @@ import pytest
 
 import tools.dosunit.reporting.real16_replay_cli as real16_replay_cli
 import tools.dosunit.reporting.real16_replay_manifest as real16_replay_manifest
-from tools.dosunit.dosunit import build_parser
 from tools.dosunit.contracts.model import DosUnitError
+from tools.dosunit.dosunit import build_parser
 
 LOAD = 0x1000  # default load paragraph, matches DEFAULT_LOAD_SEGMENT
 STACK_SEG = 0x7000
@@ -197,6 +197,27 @@ def test_budget_exhaustion_is_incomplete(cli: ModuleType, tmp_path: Path) -> Non
     assert row["oracle"]["status"] == "budget_exhausted"
 
 
+def test_sp_guard_frame_runs_over_in_image_target(cli: ModuleType, tmp_path: Path) -> None:
+    """sp_guard parses from JSON; ret at the frame boundary is RETURNED even
+    with the pushed target inside the loaded image (>=64K images need it)."""
+    vector = _vector(
+        oracle_entry={"segment": LOAD, "offset": 4},
+        candidate_entry={"segment": LOAD, "offset": 4},
+        frame={
+            "kind": "near16",
+            "target": {"segment": LOAD, "offset": 0},
+            "sp_guard": True,
+        },
+    )
+    code = bytes.fromhex("90 90 90 90 b8 34 12 c3")
+    status, report = _run_cli(cli, tmp_path, code, code, [vector])
+    assert status == 0
+    row = report["results"][0]
+    assert row["status"] == "agreed"
+    assert row["oracle"]["status"] == "returned"
+    assert row["oracle"]["registers"]["ax"] == "0x1234"
+
+
 @pytest.mark.parametrize(
     "vectors",
     [
@@ -204,6 +225,8 @@ def test_budget_exhaustion_is_incomplete(cli: ModuleType, tmp_path: Path) -> Non
         [{**_vector(), "id": "v"}, {**_vector(), "id": "v"}],
         [{"id": "v1"}],
         [_vector(frame={"kind": "ring0", "target": {"segment": LOAD, "offset": TRAP_OFF}})],
+        [_vector(frame={"kind": "near16", "target": {"segment": LOAD, "offset": TRAP_OFF},
+                        "sp_guard": "yes"})],
         [_vector(registers={"ax": True, "sp": STACK_SP})],
         [_vector(registers={"ax": 0x1_0000, "sp": STACK_SP})],
         [_vector(observables=["ax"])],
@@ -211,8 +234,8 @@ def test_budget_exhaustion_is_incomplete(cli: ModuleType, tmp_path: Path) -> Non
     ],
     ids=[
         "empty", "duplicate_ids", "missing_fields", "bad_frame_kind",
-        "bool_register", "u16_overflow", "observables_drop_preserved",
-        "observables_duplicate",
+        "non_bool_sp_guard", "bool_register", "u16_overflow",
+        "observables_drop_preserved", "observables_duplicate",
     ],
 )
 def test_malformed_selections_refuse(

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import pytest
 
+import tools.dosunit.reporting.real16_replay_report as report_mod
 import tools.dosunit.runtime.real16_mz_load as mz_load
 import tools.dosunit.runtime.real16_replay as replay_mod
 import tools.dosunit.runtime.real16_replay_model as model
-import tools.dosunit.reporting.real16_replay_report as report_mod
 
 CallerFrame = model.CallerFrame
 A20Policy = model.A20Policy
@@ -212,6 +212,72 @@ def test_near_frame_rejects_mismatched_segment():
     bad = _vector(frame=CallerFrame(FrameKind.NEAR16, SegOffset(0x4000, TRAP_OFF)))
     with pytest.raises(ValueError, match="near16 frame"):
         _run(image, bad)
+
+
+def test_sp_guard_returns_over_in_image_trap_target():
+    """An sp_guard frame returns on the stack boundary, so the pushed
+    target may live inside the loaded image — required for >=64K images
+    whose whole in-CS window is instruction bytes."""
+    # 4-byte pad prologue (never executed); routine at 4: mov ax,1234h; ret
+    image = _image(bytes.fromhex("90 90 90 90 b8 34 12 c3"), code_size=8)
+    vector = _vector(frame=CallerFrame(
+        FrameKind.NEAR16, SegOffset(LOAD, 0), sp_guard=True))
+    result = replay_mod.replay(image, SegOffset(LOAD, 4), vector)
+    assert result.status is Real16ReplayStatus.RETURNED
+    assert dict(result.registers)["ax"] == 0x1234
+    # the ret fetch was intercepted before consuming the pushed bytes
+    assert dict(result.registers)["sp"] == STACK_SP
+
+
+def test_in_image_trap_target_requires_sp_guard():
+    """The same in-image trap target is refused without the guard."""
+    image = _image(bytes.fromhex("90 90 90 90 b8 34 12 c3"), code_size=4)
+    vector = _vector(frame=CallerFrame(FrameKind.NEAR16, SegOffset(LOAD, 0)))
+    with pytest.raises(ValueError, match="return trap overlaps"):
+        _run(image, vector)
+
+
+def test_sp_guard_nested_call_returns_only_at_frame_top():
+    """An inner ret (SP below the synthetic frame) executes; only the
+    top-level ret at the frame boundary classifies RETURNED."""
+    # 0-3 pad; 4: e8 +5 -> helper at 0xc; 7: c3 ret; 8-b pad;
+    # c: mov ax,7; f: c3 ret
+    image = _image(
+        bytes.fromhex("90 90 90 90 e8 05 00 c3 90 90 90 90 b8 07 00 c3"),
+        code_size=0x10)
+    vector = _vector(frame=CallerFrame(
+        FrameKind.NEAR16, SegOffset(LOAD, 0), sp_guard=True))
+    result = replay_mod.replay(image, SegOffset(LOAD, 4), vector)
+    assert result.status is Real16ReplayStatus.RETURNED
+    assert dict(result.registers)["ax"] == 7
+
+
+def test_sp_guard_ret_n_and_far16_retf():
+    """ret N at the frame boundary returns; far frames return on retf."""
+    image = _image(bytes.fromhex("90 90 90 90 c2 04 00"), code_size=7)
+    vector = _vector(frame=CallerFrame(
+        FrameKind.NEAR16, SegOffset(LOAD, 0), sp_guard=True))
+    result = replay_mod.replay(image, SegOffset(LOAD, 4), vector)
+    assert result.status is Real16ReplayStatus.RETURNED
+
+    far = _image(bytes.fromhex("90 90 90 90 b8 34 12 cb"), code_size=8)
+    far_vector = _vector(frame=CallerFrame(
+        FrameKind.FAR16, SegOffset(0x4000, 0x10), sp_guard=True))
+    result = replay_mod.replay(far, SegOffset(LOAD, 4), far_vector)
+    assert result.status is Real16ReplayStatus.RETURNED
+    assert dict(result.registers)["ax"] == 0x1234
+
+
+def test_sp_guard_pop_and_jump_still_returns():
+    """A routine that pops the pushed return offset and jumps to it lands
+    on the declared target — the trap fetch check still recognizes the
+    return under the guard."""
+    # 0-3 pad; 4: 58 pop ax (takes pushed offset 0); 5: ff e0 jmp ax -> CS:0
+    image = _image(bytes.fromhex("90 90 90 90 58 ff e0"), code_size=7)
+    vector = _vector(frame=CallerFrame(
+        FrameKind.NEAR16, SegOffset(LOAD, 0), sp_guard=True))
+    result = replay_mod.replay(image, SegOffset(LOAD, 4), vector)
+    assert result.status is Real16ReplayStatus.RETURNED
 
 
 def test_segment_alias_preserves_physical_addresses():

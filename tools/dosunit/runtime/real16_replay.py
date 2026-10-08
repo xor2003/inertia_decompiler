@@ -314,6 +314,15 @@ class _HookCtx:
     trap: int
     state: _RunState
     capture: _CaptureState | None = None
+    frame_top: int = 0
+    sp_guard: bool = False
+
+
+# Ret-family ids that consume the synthetic caller frame at its top; an iret
+# is excluded — it pops past the frame and stays a typed refusal.
+RETURN_INSTRUCTION_IDS: frozenset[int] = frozenset({
+    x86_ids.X86_INS_RET, x86_ids.X86_INS_RETF,
+}) if x86_ids is not None else frozenset()
 
 
 def _boundary_stop(uc: Uc, address: int, capture: _CaptureState | None) -> bool:
@@ -355,6 +364,13 @@ def _code_hook(uc: Uc, address: int, size: int, ctx: _HookCtx) -> None:
         kind = ReplayEventKind.DECODE_FAILED if insn_id < 0 else ReplayEventKind.UNSUPPORTED_INSTRUCTION
         ctx.state.status, ctx.state.detail = Real16ReplayStatus.UNSUPPORTED, detail
         ctx.state.events.append(ReplayEvent(kind, detail, address, raw))
+        uc.emu_stop()
+        return
+    if (ctx.sp_guard and insn_id in RETURN_INSTRUCTION_IDS
+            and int(uc.reg_read(registers.UC_X86_REG_SP)) == ctx.frame_top):
+        # A ret fetched with SP still at the synthetic caller frame is the
+        # top-level return; it is stopped before consuming the pushed bytes.
+        ctx.state.status = Real16ReplayStatus.RETURNED
         uc.emu_stop()
 
 
@@ -446,7 +462,11 @@ def replay(
     decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
     decoder.detail = True
     state = _RunState()
-    ctx = _HookCtx(image, policy, decoder, vector.frame.target.linear(), state)
+    ctx = _HookCtx(
+        image, policy, decoder, vector.frame.target.linear(), state,
+        frame_top=dict(vector.registers).get("sp", 0),
+        sp_guard=vector.frame.sp_guard,
+    )
     _install_hooks(guest, ctx)
     _run_guest(guest, ctx, entry, instruction_limit)
     observed: list[tuple[int, bytes]] = []
@@ -513,7 +533,11 @@ def capture(
     decoder.detail = True
     state = _RunState()
     capture_state = _CaptureState(boundary_linear, trace_limit)
-    ctx = _HookCtx(image, policy, decoder, trap, state, capture_state)
+    ctx = _HookCtx(
+        image, policy, decoder, trap, state, capture_state,
+        frame_top=dict(vector.registers).get("sp", 0),
+        sp_guard=vector.frame.sp_guard,
+    )
     _install_hooks(guest, ctx)
     _run_guest(guest, ctx, entry, instruction_limit)
     snapshot = _coalesced_writes(guest, state.writes)

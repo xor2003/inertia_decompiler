@@ -128,9 +128,10 @@ def _checked_regions(
             raise ValueError("declared memory region overlaps instruction bytes")
     if not any(region.contains(entry.linear()) for region in image.code_ranges):
         raise ValueError("entry is outside declared code ranges")
-    trap = vector.frame.target.linear()
-    if any(address <= trap < address + len(data) for address, data in image.chunks):
-        raise ValueError("return trap overlaps loaded image bytes")
+    if not vector.frame.sp_guard:
+        trap = vector.frame.target.linear()
+        if any(address <= trap < address + len(data) for address, data in image.chunks):
+            raise ValueError("return trap overlaps loaded image bytes")
 
 def _checked_vector(
     image: Real16Image, entry: SegOffset, vector: Real16Vector, policy: Real16ReplayPolicy,
