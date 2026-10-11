@@ -70,3 +70,6 @@ signature_catalogs/catalog_specs.pickle
 # Local test/runtime scratch, not source or fixtures
 /relative/root/
 /tmptzteh3qv/
+
+# Local codebase index; regenerate with codebase-memory instead of committing.
+/.codebase-memory/
