@@ -73,3 +73,8 @@ signature_catalogs/catalog_specs.pickle
 
 # Local codebase index; regenerate with codebase-memory instead of committing.
 /.codebase-memory/
+
+# Downloaded Python packages and local recompilation work directories.
+/*.whl
+/inertia-recompile-*/
+/inertia-selected-recompile-*/
