@@ -72,6 +72,7 @@ from inertia.semantics.branch_target_return import (
     terminal_ax_return_effect_8616 as terminal_ax_return_effect_8616,
 )
 from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
+from inertia.semantics.register_value_preservation import register_value_family_8616
 from inertia.semantics.return_register_preservation import instruction_preserves_return_registers_8616
 from inertia.semantics.terminal_call_paths import (
     TerminalCallPathCallbacks8616,
@@ -867,6 +868,9 @@ class BranchTargetReturnScanCallbacks8616:
     materialize_direct_global_load: Callable[[int, int], object | None]
     materialize_ax_alu_imm: Callable[[object, str, int], object | None]
     materialize_ax_incdec: Callable[[object, str], object | None]
+    # Optional exact-instruction source-register proof adapter. When absent,
+    # full-word register copies refuse instead of guessing incoming state.
+    materialize_reg_copy: Callable[[int, str], object | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1495,35 +1499,105 @@ def _ax_update_effect_8616(
     return None
 
 
+@dataclass(slots=True)
+class BranchTargetReturnRegisterState8616:
+    """Retain written return halves and killed incoming sources across CFG jumps."""
+
+    ax_value: object | None = None
+    dx_value: object | None = None
+    clobbered_sources: set[str] = field(default_factory=set)
+
+
+def _preserve_write_registers_8616(insn: object) -> tuple[str, ...]:
+    """Return registers written by an instruction already proven AX/DX-preserving.
+
+    Epilogue steps that pass the return-register preservation check can still
+    write other registers (``pop bx``, ``leave``, ``mov sp, bp``). Source
+    registers copied later in the block must observe those writes, so callers
+    refuse a copy whose source was clobbered after branch entry.
+    """
+    mnemonic = str(getattr(insn, "mnemonic", "")).lower()
+    operands = tuple(getattr(insn, "operands", ()) or ())
+    if mnemonic == "leave":
+        return ("sp", "bp")
+    if mnemonic == "pop":
+        name = _return_chain_reg_name_8616(insn, operands[0]) if operands else ""
+        return (name, "sp") if name else ("sp",)
+    if mnemonic == "mov" and operands:
+        name = _return_chain_reg_name_8616(insn, operands[0])
+        return (name,) if name else ()
+    return ()
+
+
+def _branch_copy_source_8616(
+    instruction_addr: int,
+    register: str,
+    callbacks: BranchTargetReturnScanCallbacks8616,
+    state: BranchTargetReturnRegisterState8616,
+) -> object | None:
+    """Resolve a tracked write or exact-instruction incoming source, never a high half."""
+    if register == "ax" and state.ax_value is not None:
+        return state.ax_value
+    if register == "dx" and state.dx_value is not None:
+        return state.dx_value
+    if register in state.clobbered_sources or callbacks.materialize_reg_copy is None:
+        return None
+    return callbacks.materialize_reg_copy(instruction_addr, register)
+
+
+def _apply_branch_return_move_8616(
+    effect: BranchTargetReturnEffect8616,
+    insn: object,
+    callbacks: BranchTargetReturnScanCallbacks8616,
+    state: BranchTargetReturnRegisterState8616,
+) -> bool:
+    """Consume one fully materialized write to a return half."""
+    if effect.kind is BranchTargetReturnEffectKind8616.MOV_REG_REG:
+        # Dynamic Capstone boundary: the proof sink is this exact native instruction.
+        value = _branch_copy_source_8616(
+            int(getattr(insn, "address", -1)), effect.src_reg or "", callbacks, state,
+        )
+    else:
+        value = _mov_effect_value_8616(effect, callbacks)
+    if value is None:
+        return False
+    if effect.dst_reg == "ax":
+        state.ax_value = value
+    elif effect.dst_reg == "dx":
+        state.dx_value = value
+    else:
+        return False
+    return True
+
+
+def _record_preserved_source_clobbers_8616(
+    insn: object, state: BranchTargetReturnRegisterState8616,
+) -> None:
+    """Kill every alias of an epilogue-written source for subsequent CFG blocks."""
+    for register in _preserve_write_registers_8616(insn):
+        state.clobbered_sources.update(register_value_family_8616(register))
+
+
 def scan_branch_target_return_block_8616(
     block: object,
     callbacks: BranchTargetReturnScanCallbacks8616,
+    *,
+    register_state: BranchTargetReturnRegisterState8616 | None = None,
 ) -> BranchTargetReturnBlockResult8616:
-    """Consume every effect or prove return-register preservation before reuse."""
-    ax_value: object | None = None
-    dx_value: object | None = None
+    """Consume effects with optional path state that survives transparent jumps."""
+    state = register_state if register_state is not None else BranchTargetReturnRegisterState8616()
 
     def _combined_return_expr() -> object | None:
-        return callbacks.combine_return_expr(ax_value, dx_value)
+        return callbacks.combine_return_expr(state.ax_value, state.dx_value)
 
     insns = tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ())
     for insn in insns:
         effect = branch_target_return_effect_8616(insn, callbacks.branch_target_imm)
-        if effect.kind in {
-            BranchTargetReturnEffectKind8616.MOV_REG_IMM,
-            BranchTargetReturnEffectKind8616.MOV_REG_STACK,
-            BranchTargetReturnEffectKind8616.MOV_REG_DIRECT_GLOBAL,
-        }:
-            value = _mov_effect_value_8616(effect, callbacks)
-            if value is not None:
-                if effect.dst_reg == "ax":
-                    ax_value = value
-                elif effect.dst_reg == "dx":
-                    dx_value = value
-                continue
-        next_ax = _ax_update_effect_8616(effect, ax_value, callbacks)
+        if _apply_branch_return_move_8616(effect, insn, callbacks, state):
+            continue
+        next_ax = _ax_update_effect_8616(effect, state.ax_value, callbacks)
         if next_ax is not None:
-            ax_value = next_ax
+            state.ax_value = next_ax
             continue
         terminal = _terminal_effect_result_8616(effect, _combined_return_expr())
         if terminal is not None:
@@ -1532,6 +1606,7 @@ def scan_branch_target_return_block_8616(
         # previous AX/DX value merely because the scanner did not consume them.
         if not instruction_preserves_return_registers_8616(insn):
             return BranchTargetReturnBlockResult8616()
+        _record_preserved_source_clobbers_8616(insn, state)
     return BranchTargetReturnBlockResult8616()
 
 

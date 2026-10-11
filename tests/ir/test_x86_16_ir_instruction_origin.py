@@ -4,14 +4,14 @@ import pickle
 from dataclasses import replace
 
 import pyvex
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.instruction_origin import IRInstructionOrigin8616, vex_instruction_origin_8616
 from inertia.ir.ssa import build_x86_16_block_local_ssa
 from inertia.ir.ssa_memory import build_x86_16_function_memory_ssa
+from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
 from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 from tests.semantics.test_x86_16_call_stack_effects import _artifact, _summary
-
-from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
 
 
 def test_segmented_load_retains_exact_address_temporary():

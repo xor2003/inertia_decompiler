@@ -5,7 +5,13 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import angr
+
+from inertia.alias.carry_borrow_projection import (
+    CarryBorrowAliasFailure8616,
+    project_carry_borrow_aliases_8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import IRAddress, IRFunctionArtifact, IRInstr, MemSpace
 from inertia.ir.logical_memory_contracts import (
     IRLogicalMemoryAccess8616,
@@ -24,12 +30,6 @@ from inertia.ir.ssa_function import (
     build_x86_16_function_ssa,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
-from inertia.alias.carry_borrow_projection import (
-    CarryBorrowAliasFailure8616,
-    project_carry_borrow_aliases_8616,
-)
 from inertia.semantics.carry_borrow_contracts import (
     CarryBorrowEvidence8616,
     CarryBorrowOperandUse8616,

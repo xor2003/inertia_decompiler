@@ -18,6 +18,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from inertia.frontend.real16_dosbox_entry_policy import (
+    DosBoxInt21EntryPolicy8616,
+    dosbox_entry_policy_document,
+    dosbox_entry_policy_matches,
+)
+from inertia.frontend.real16_dosbox_resize import DosboxResizePolicy
 from inertia.frontend.x86_16.mz_invocation_source import mz_boot_coordinates_8616
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.reporting.real16_program_input_manifest import input_policy_document
@@ -31,7 +37,10 @@ from tools.dosunit.runtime.real16_program_memory import (
     program_memory_layout,
 )
 from tools.dosunit.runtime.real16_program_output import OutputPolicy
-from tools.dosunit.runtime.real16_program_resize import TailResizePolicy, resize_policy_document
+from tools.dosunit.runtime.real16_program_resize import (
+    TailResizePolicy,
+    resize_policy_document,
+)
 from tools.dosunit.runtime.real16_program_rom import ProgramRom, check_rom, rom_document
 from tools.dosunit.runtime.real16_program_vectors import VectorPolicy, check_vector_policy, vector_policy_document
 from tools.dosunit.runtime.real16_program_version import VersionPolicy, version_policy_document
@@ -115,7 +124,12 @@ class ProgramEnvironment:
     exact INT21/AH30 AL00 response bytes — a bounded caller-supplied answer,
     never a claim about an installed DOS. ``resize_policy`` adds a declared
     first/final native MCB before the arena and bounded tail-block resize;
-    the physical bytes stay mapped after shrink. ``extra_memory`` supplies
+    the physical bytes stay mapped after shrink. It is an explicit union:
+    the KvikDOS ``TailResizePolicy`` keeps its fixed loader profile, while
+    the reviewed ``DosboxResizePolicy`` declares the complete initial MCB
+    chain whose single PSP-owned final block is exactly this arena and
+    requires the matching explicit ``dosbox_int21_entry_policy`` premise.
+    ``extra_memory`` supplies
     disjoint conventional-RAM snapshots outside the allocation; it changes no
     loader grant or executable scope. ``vector_policy`` enables live IVT
     queries/updates under an unchanged declared external DOS entry, with every
@@ -140,13 +154,14 @@ class ProgramEnvironment:
     output_policy: OutputPolicy | None = None
     input_policy: InputPolicy | None = None
     version_policy: VersionPolicy | None = None
-    resize_policy: TailResizePolicy | None = None
+    resize_policy: TailResizePolicy | DosboxResizePolicy | None = None
     extra_memory: tuple[InitialMemoryRegion, ...] = ()
     vector_policy: VectorPolicy | None = None
     device_info_policy: DeviceInfoPolicy | None = None
     video_policy: VideoQueryPolicy | None = None
     video_state_policy: VideoStatePolicy | None = None
     rom: ProgramRom | None = None
+    dosbox_int21_entry_policy: DosBoxInt21EntryPolicy8616 | None = None
 
     def __post_init__(self) -> None:
         """Validate the arena shape, ceiling and complete register file."""
@@ -158,6 +173,7 @@ class ProgramEnvironment:
             raise ValueError("version_policy requires a typed VersionPolicy")
         if self.device_info_policy is not None and not isinstance(self.device_info_policy, DeviceInfoPolicy):
             raise ValueError("device_info_policy requires a typed DeviceInfoPolicy")
+        self._check_entry_policy()
         _checked_u16(self.psp_segment, "psp_segment")
         _checked_u16(self.fs, "fs")
         _checked_u16(self.gs, "gs")
@@ -170,14 +186,42 @@ class ProgramEnvironment:
         if self.psp_segment * 16 + size > CONVENTIONAL_CEILING:
             raise ValueError("arena must end at or below the conventional-memory ceiling")
         object.__setattr__(self, "registers", _checked_registers(self.registers))
-        if self.resize_policy is not None:
-            if not isinstance(self.resize_policy, TailResizePolicy):
-                raise ValueError("resize_policy requires a typed TailResizePolicy")
-            self.resize_policy.check_arena(self.psp_segment, size)
+        self._check_resize_policy(size)
         check_vector_policy(self.vector_policy, self.memory_layout())
         check_video_policy(self.video_policy, self.memory_layout())
         self._check_video_state()
         check_rom(self.rom)
+
+    def _check_entry_policy(self) -> None:
+        """Require an explicitly typed entry premise bound to this PSP."""
+        if not dosbox_entry_policy_matches(self.dosbox_int21_entry_policy, self.psp_segment):
+            raise ValueError("DOSBox entry policy must bind the exact environment PSP")
+
+    def _check_resize_policy(self, allocation_size: int) -> None:
+        """Dispatch the optional declared resize profile on its type."""
+        if isinstance(self.resize_policy, TailResizePolicy):
+            self.resize_policy.check_arena(self.psp_segment, allocation_size)
+        elif isinstance(self.resize_policy, DosboxResizePolicy):
+            self._check_dosbox_resize(self.resize_policy)
+        elif self.resize_policy is not None:
+            raise ValueError("resize_policy requires a declared typed resize policy")
+
+    def _check_dosbox_resize(self, policy: DosboxResizePolicy) -> None:
+        """Bind the DOSBox allocator to this exact PSP arena and entry premise.
+
+        The declared chain's single final block must be this program's own
+        arena: its data segment is the environment PSP and its size in
+        paragraphs exactly covers the declared allocation bytes. The DOSBox
+        allocator semantics only exist under the explicitly declared
+        register-save INT21 prologue of the same backend — never inferred.
+        """
+        final = policy.final_entry
+        if policy.psp_segment != self.psp_segment or final.data_segment != self.psp_segment:
+            raise ValueError("DOSBox resize requires the arena PSP to own the final block")
+        if len(self.allocation) != final.size * 16:
+            raise ValueError("DOSBox resize requires the allocation to equal the final block")
+        if self.dosbox_int21_entry_policy is None:
+            raise ValueError("DOSBox resize requires an explicit DOSBox INT21 entry policy")
 
     def _check_video_state(self) -> None:
         """Require every live source byte and one coherent BIOS service entry."""
@@ -348,6 +392,7 @@ def _boot_identity(image: Real16Image, exe: MzExe, environment: ProgramEnvironme
         "video_policy": video_policy_document(environment.video_policy),
         "video_state_policy": video_state_document(environment.video_state_policy),
         "rom": rom_document(environment.rom),
+        "dosbox_int21_entry": dosbox_entry_policy_document(environment.dosbox_int21_entry_policy),
     })
     environment_digest = hashlib.sha256(
         environment.psp_segment.to_bytes(2, "little")

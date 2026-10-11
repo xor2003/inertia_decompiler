@@ -23,8 +23,33 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeChar, SimTypePointer, SimTypeShort, TypeRef
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+from capstone.x86_const import (
+    X86_INS_ADD,
+    X86_INS_CALL,
+    X86_INS_CMP,
+    X86_INS_CWD,
+    X86_INS_IDIV,
+    X86_INS_INC,
+    X86_INS_MOV,
+    X86_INS_SHL,
+    X86_INS_SUB,
+    X86_OP_IMM,
+    X86_OP_MEM,
+    X86_OP_REG,
+    X86_REG_AL,
+    X86_REG_AX,
+    X86_REG_BP,
+    X86_REG_BX,
+    X86_REG_DL,
+    X86_REG_DX,
+    X86_REG_ES,
+    X86_REG_INVALID,
+    X86_REG_SP,
+)
+
+import inertia.lowering.segmented_global_loads as segmented_global_loads_module
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.frontend.x86_16.cod_extract import CODGlobalAddressRef, CODGlobalRef
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.segment_contract import (
     SegmentAccessFact,
@@ -32,7 +57,7 @@ from inertia.ir.segment_contract import (
     SegmentFactVerdict,
     SegmentFunctionContract,
 )
-import inertia.lowering.segmented_global_loads as segmented_global_loads_module
+from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
 from inertia.lowering.global_declarations import (
     GlobalDeclarationCType8616,
     NamedAggregateDeclarationCType8616,
@@ -100,33 +125,30 @@ from inertia.lowering.storage_identity_facts import (
     StorageIdentityEvidenceKind8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-from capstone.x86_const import (
-    X86_INS_ADD,
-    X86_INS_CALL,
-    X86_INS_CMP,
-    X86_INS_CWD,
-    X86_INS_IDIV,
-    X86_INS_INC,
-    X86_INS_MOV,
-    X86_INS_SHL,
-    X86_INS_SUB,
-    X86_OP_IMM,
-    X86_OP_MEM,
-    X86_OP_REG,
-    X86_REG_AL,
-    X86_REG_AX,
-    X86_REG_BP,
-    X86_REG_BX,
-    X86_REG_DL,
-    X86_REG_DX,
-    X86_REG_ES,
-    X86_REG_INVALID,
-    X86_REG_SP,
-)
-
-from inertia.frontend.x86_16.cod_extract import CODGlobalAddressRef, CODGlobalRef
-from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.structuring.simple_loop_recovery import InsnSummary8616
+
+
+def _empty_test_knowledge_base() -> SimpleNamespace:
+    """Provide labels and explicit empty function lookup for address-only codegen."""
+    def missing_function(*, addr: int, create: bool = False) -> None:
+        assert isinstance(addr, int)
+        assert create is False
+        return None
+
+    return SimpleNamespace(labels={}, functions=SimpleNamespace(function=missing_function))
+
+
+def _bind_binary_fixture_function(project: SimpleNamespace, *, addr: int, size: int) -> None:
+    """Expose the explicit byte-fixture extent through legacy function lookup."""
+    assert size > 0
+    function = SimpleNamespace(addr=addr, size=size, name="byte_fixture")
+
+    def lookup(*, addr: int, create: bool = False) -> SimpleNamespace | None:
+        assert create is False
+        return function if addr == function.addr else None
+
+    project.kb.functions.function = lookup
 
 
 class _DummyCodegen:
@@ -305,7 +327,7 @@ def _global_indexed(name: str, base_addr: int, index, codegen):
 
 
 def test_segmented_global_load_materializes_named_ds_word_global():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     rhs = CFunctionCall(
         "SEG_U16",
@@ -894,7 +916,7 @@ def test_compare_register_global_carrier_evidence_from_direct_load_cmp():
 
 
 def test_compare_register_global_carrier_materializes_cmp_operand():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     cmp_expr = CBinaryOp("CmpGE", _stack(-4, codegen, name="i"), _reg(project, codegen, "ax"), codegen=codegen)
     root = CStatements([cmp_expr], addr=0x4010, codegen=codegen)
@@ -994,7 +1016,7 @@ def test_dword_global_zero_test_replay_materializes_complete_projection_pair():
 
 
 def test_indexed_segmented_global_load_materializes_array_element():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1156,7 +1178,7 @@ def test_indexed_global_recovery_refuses_mismatched_sidecar_join():
 
 
 def test_indexed_segmented_global_load_materializes_array_element_in_if_condition():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_row_min = _stack(-6, codegen, name="iRowMin")
     i_row_next = _stack(-2, codegen, name="iRowNext")
@@ -1191,7 +1213,7 @@ def test_indexed_segmented_global_load_materializes_array_element_in_if_conditio
 
 
 def test_indexed_segmented_global_load_folds_raw_byte_pair_word_load():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_row_next = _stack(-2, codegen, name="iRowNext")
     scaled = CBinaryOp("Shl", i_row_next, _const(1, codegen), codegen=codegen)
@@ -1223,7 +1245,7 @@ def test_indexed_segmented_global_load_folds_raw_byte_pair_word_load():
 
 
 def test_indexed_segmented_global_load_materializes_direct_constant_global():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     rhs = CFunctionCall("SEG_U16", None, [_ds(project, codegen), _const(0xBA2, codegen)], codegen=codegen)
     condition = CBinaryOp("CmpGT", rhs, _stack(-2, codegen, name="i"), codegen=codegen)
@@ -1245,7 +1267,7 @@ def test_indexed_segmented_global_load_materializes_direct_constant_global():
 
 
 def test_indexed_segmented_global_assignment_preserves_read_write_access_roles():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     lhs = CFunctionCall(
         "SEG_U16",
@@ -1305,7 +1327,7 @@ def test_indexed_segmented_global_assignment_preserves_read_write_access_roles()
 
 @pytest.mark.parametrize("materializer", ("named", "indexed"))
 def test_segmented_global_assignment_treats_lvalue_address_as_read(materializer):
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     pointer_load = CFunctionCall(
         "SEG_U16",
@@ -1370,7 +1392,7 @@ def test_segmented_global_assignment_treats_lvalue_address_as_read(materializer)
 
 
 def test_indexed_direct_subword_replay_retains_exact_segment_access_provenance(monkeypatch):
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     helper = CFunctionCall(
         "SEG_U16",
@@ -1438,7 +1460,7 @@ def test_indexed_direct_subword_replay_retains_exact_segment_access_provenance(m
 
 
 def test_indexed_segmented_global_pointer_materializes_array_address():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1465,7 +1487,7 @@ def test_indexed_segmented_global_pointer_materializes_array_address():
 
 
 def test_indexed_segmented_global_pointer_refuses_shape_only_aggregate_type():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1502,7 +1524,7 @@ def test_indexed_segmented_global_pointer_refuses_shape_only_aggregate_type():
 
 
 def test_named_global_aggregate_declaration_replays_after_type_store_appears():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1628,7 +1650,7 @@ def test_named_global_aggregate_reconcile_initializes_empty_declaration_contract
 
 
 def test_indexed_segmented_global_materializes_heapsort_call_and_loop_shape():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-2, codegen, name="i")
     c_row_load = CFunctionCall("SEG_U16", None, [_ds(project, codegen), _const(0xBA2, codegen)], codegen=codegen)
@@ -1679,7 +1701,7 @@ def test_indexed_segmented_global_materializes_heapsort_call_and_loop_shape():
 
 
 def test_segment_pointer_over_indexed_near_pointer_table_materializes_table_element():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen._inertia_global_declaration_specs_8616 = (("unsigned short", "aszMenu", 1),)
     i_var = _stack(-4, codegen, name="i")
@@ -1708,7 +1730,7 @@ def test_segment_pointer_over_indexed_near_pointer_table_materializes_table_elem
 
 
 def test_segment_pointer_over_raw_indexed_near_pointer_load_materializes_table_element():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen._inertia_global_declaration_specs_8616 = (("unsigned short", "aszMenu", 1),)
     i_var = _stack(-4, codegen, name="i")
@@ -1741,7 +1763,7 @@ def test_segment_pointer_over_raw_indexed_near_pointer_load_materializes_table_e
 
 
 def test_indexed_segmented_byte_field_load_keeps_byte_access_with_array_address():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1769,7 +1791,7 @@ def test_indexed_segmented_byte_field_load_keeps_byte_access_with_array_address(
 
 
 def test_direct_symbol_ref_evidence_materializes_constant_and_indexed_segment_pointers():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1811,7 +1833,7 @@ def test_direct_symbol_ref_evidence_materializes_constant_and_indexed_segment_po
 
 
 def test_direct_symbol_ref_evidence_materializes_indexed_segment_pointer_with_element_displacement():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1852,7 +1874,7 @@ def test_direct_symbol_ref_evidence_materializes_indexed_segment_pointer_with_el
 
 
 def test_indexed_evidence_prefers_field_displacement_over_conflicting_same_offset_word_ref():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1891,7 +1913,7 @@ def test_indexed_evidence_prefers_field_displacement_over_conflicting_same_offse
 
 
 def test_indexed_byte_load_prefers_word_stride_projection_when_word_array_evidence_exists():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -1929,7 +1951,7 @@ def test_indexed_byte_load_prefers_word_stride_projection_when_word_array_eviden
 
 
 def test_indexed_byte_load_accepts_lowered_runtime_ds_state() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index = _stack(-4, codegen, name="i")
     offset = CBinaryOp(
@@ -1965,7 +1987,7 @@ def test_indexed_byte_load_accepts_lowered_runtime_ds_state() -> None:
 
 
 def test_indexed_byte_load_refuses_lowered_runtime_es_state() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index = _stack(-4, codegen, name="i")
     offset = CBinaryOp(
@@ -2000,7 +2022,7 @@ def test_indexed_byte_load_refuses_lowered_runtime_es_state() -> None:
 
 
 def test_indexed_word_load_propagates_proven_struct_type_to_stack_copy():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-2, codegen, name="iRow")
     bar_temp = _stack(-8, codegen, name="barTemp")
@@ -2169,7 +2191,7 @@ def test_indexed_word_load_refuses_aggregate_without_function_type_store():
 
 
 def test_indexed_byte_load_keeps_element_displacement_when_projecting_word_array_evidence():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -2276,7 +2298,7 @@ def test_offset_symbol_refs_use_structured_address_refs_and_summary_immediate():
 
 
 def test_structured_address_literal_materializes_segment_pointer_to_string_constant():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     call = CFunctionCall(
         "sprintf",
@@ -2325,7 +2347,7 @@ def test_collect_global_address_literal_evidence_matches_summary_immediate(addre
 
 
 def test_indexed_segmented_global_store_evidence_recovers_shifted_stack_index():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_index = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2352,7 +2374,7 @@ def test_indexed_segmented_global_store_evidence_recovers_shifted_stack_index():
 
 
 def test_indexed_global_store_refuses_binary_proven_pointer_argument():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_pointer = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2374,7 +2396,7 @@ def test_indexed_global_store_refuses_binary_proven_pointer_argument():
 
 
 def test_indexed_segmented_global_load_site_evidence_recovers_shifted_stack_index():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_index = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2434,7 +2456,7 @@ def test_indexed_segmented_global_load_site_evidence_recovers_shifted_stack_inde
 
 
 def test_indexed_load_site_evidence_recovers_comparison_memory_consumer():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_index = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2477,7 +2499,7 @@ def test_indexed_load_site_evidence_recovers_comparison_memory_consumer():
 
 
 def test_indexed_load_site_materializes_raw_dereference_without_vvar_shape_guessing():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     raw_pointer = CBinaryOp(
         "Add",
@@ -2511,7 +2533,7 @@ def test_indexed_load_site_materializes_raw_dereference_without_vvar_shape_guess
 
 
 def test_indexed_segmented_global_store_evidence_recovers_source_index():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_source_index = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2567,7 +2589,7 @@ def test_indexed_segmented_global_store_evidence_recovers_source_index():
 
 
 def test_indexed_segmented_global_store_evidence_recovers_stack_source():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_source = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2614,7 +2636,7 @@ def test_indexed_segmented_global_store_evidence_recovers_stack_source():
 
 
 def test_indexed_segmented_global_store_evidence_recovers_signed_remainder_source() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     load_dividend = SimpleNamespace(
         address=0x1050,
         id=X86_INS_MOV,
@@ -2681,7 +2703,7 @@ def test_indexed_segmented_global_store_evidence_recovers_signed_remainder_sourc
 
 
 def test_indexed_word_store_lvalue_materializes_source_index_evidence():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     up_var = _stack(-4, codegen, name="up")
     down_var = _stack(-6, codegen, name="down")
@@ -2715,7 +2737,7 @@ def test_indexed_word_store_lvalue_materializes_source_index_evidence():
 
 
 def test_indexed_word_store_preserves_exact_sidecar_free_affine_source() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index_var = _stack(-4, codegen, name="row")
     lhs = _global_indexed("g_0044", 0x44, index_var, codegen)
@@ -2772,7 +2794,7 @@ def test_indexed_word_store_preserves_exact_sidecar_free_affine_source() -> None
 
 
 def test_indexed_word_store_rebases_immediately_adjacent_affine_source() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index_var = _stack(-4, codegen, name="row")
     assignment = CAssignment(
@@ -2820,7 +2842,7 @@ def test_indexed_word_store_rebases_immediately_adjacent_affine_source() -> None
 
 
 def test_indexed_word_store_keeps_named_source_identity() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index_var = _stack(-4, codegen, name="row")
     assignment = CAssignment(
@@ -2871,7 +2893,7 @@ def test_indexed_word_store_keeps_named_source_identity() -> None:
 
 
 def test_indexed_word_store_lvalue_materializes_from_store_index_evidence():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     bad_carrier = CVariable(SimRegisterVariable(0x200, 2, name="v17"), codegen=codegen)
@@ -2903,7 +2925,7 @@ def test_indexed_word_store_lvalue_materializes_from_store_index_evidence():
 
 
 def test_indexed_word_store_lvalue_joins_multiple_facts_by_instruction_address():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_tmp = _stack(-4, codegen, name="row_tmp")
     stale_row_tmp = _stack(-4, codegen, name="local_2")
@@ -2982,7 +3004,7 @@ def test_indexed_word_store_lvalue_joins_multiple_facts_by_instruction_address()
 
 
 def test_indexed_word_store_lvalue_refuses_ambiguous_untagged_facts():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_tmp = _stack(-4, codegen, name="row_tmp")
     bar_temp = _stack(-8, codegen, name="barTemp")
@@ -3043,7 +3065,7 @@ def test_indexed_word_store_lvalue_refuses_ambiguous_untagged_facts():
 
 
 def test_indexed_memory_helper_load_materializes_array_element():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Mul", i_var, _const(2, codegen), codegen=codegen)
@@ -3068,7 +3090,7 @@ def test_indexed_memory_helper_load_materializes_array_element():
 
 
 def test_indexed_global_store_lvalue_materializes_rhs_memory_helper_source():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-2, codegen, name="iRow")
     dst = CIndexedVariable(
@@ -3108,7 +3130,7 @@ def test_indexed_global_store_lvalue_materializes_rhs_memory_helper_source():
 
 
 def test_indexed_global_store_source_carrier_read_is_removed_after_materialization():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-2, codegen, name="iRow")
     stale_index = CVariable(SimRegisterVariable(0x200, 2, name="local_0"), codegen=codegen)
@@ -3158,7 +3180,7 @@ def test_indexed_global_store_source_carrier_read_is_removed_after_materializati
 
 
 def test_indexed_word_store_pair_reruns_lvalue_source_materialization():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_var = _stack(-2, codegen, name="iRow")
     source_carrier = CVariable(SimRegisterVariable(0x200, 2, name="v8"), codegen=codegen)
@@ -3228,7 +3250,7 @@ def test_indexed_word_store_pair_reruns_lvalue_source_materialization():
 
 
 def test_indexed_word_store_pairs_preserve_provenance_across_reverse_structured_order():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_tmp = _stack(-4, codegen, name="iRowTmp")
     stale_row_tmp = _stack(-4, codegen, name="local_2")
@@ -3355,7 +3377,7 @@ def test_indexed_word_store_pairs_preserve_provenance_across_reverse_structured_
 
 
 def test_indexed_word_store_pair_folds_direct_low_source_with_equivalent_high_carrier():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_var = _stack(-2, codegen, name="iRow")
     source_carrier = CVariable(SimRegisterVariable(0x200, 2, name="v15"), codegen=codegen)
@@ -3409,7 +3431,7 @@ def test_indexed_word_store_pair_folds_direct_low_source_with_equivalent_high_ca
 
 
 def test_indexed_byte_memory_helper_load_materializes_low_byte_from_word_stride():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Mul", i_var, _const(2, codegen), codegen=codegen)
@@ -3435,7 +3457,7 @@ def test_indexed_byte_memory_helper_load_materializes_low_byte_from_word_stride(
 
 
 def test_indexed_byte_memory_helper_load_materializes_low_byte_from_indexed_global_reference():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     rhs = CFunctionCall("MEM_U8", None, [_ref(_global_indexed("g_work", 0x44, i_var, codegen), codegen)], codegen=codegen)
@@ -3461,7 +3483,7 @@ def test_indexed_byte_memory_helper_load_materializes_low_byte_from_indexed_glob
 
 
 def test_indexed_byte_memory_helper_load_uses_typed_indexed_global_reference_without_word_evidence():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     indexed = _global_indexed("g_work", 0x44, i_var, codegen)
@@ -3485,7 +3507,7 @@ def test_indexed_byte_memory_helper_load_uses_typed_indexed_global_reference_wit
 
 
 def test_indexed_byte_segment_load_uses_adjacent_stride_evidence_for_field():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Shl", i_var, _const(1, codegen), codegen=codegen)
@@ -3520,7 +3542,7 @@ def test_indexed_byte_segment_load_uses_adjacent_stride_evidence_for_field():
 
 
 def test_indexed_byte_memory_helper_load_materializes_high_byte_from_word_stride():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     scaled_i = CBinaryOp("Mul", i_var, _const(2, codegen), codegen=codegen)
@@ -3548,7 +3570,7 @@ def test_indexed_byte_memory_helper_load_materializes_high_byte_from_word_stride
 
 
 def test_indexed_byte_store_lvalue_materializes_high_byte_from_word_stride_with_index_copy():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     index_carrier = CVariable(SimRegisterVariable(0x202, 2, name="v61"), codegen=codegen)
@@ -3587,7 +3609,7 @@ def test_indexed_byte_store_lvalue_materializes_high_byte_from_word_stride_with_
 
 
 def test_indexed_byte_store_lvalue_does_not_resolve_mutable_stack_index_as_copy():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-2, codegen, name="i")
     prior_value = _mem(0x120, codegen, name="prior_value")
@@ -3616,7 +3638,7 @@ def test_indexed_byte_store_lvalue_does_not_resolve_mutable_stack_index_as_copy(
 
 
 def test_indexed_byte_store_lvalue_prefers_unique_decoded_stack_index():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     evidenced_index = _stack(-2, codegen, name="i")
     wrong_raw_index = _stack(0, codegen, name="wrong_index")
@@ -3646,7 +3668,7 @@ def test_indexed_byte_store_lvalue_prefers_unique_decoded_stack_index():
 
 
 def test_indexed_byte_store_materializes_exact_stack_source() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     evidenced_index = _stack(-2, codegen, name="i")
     source = _stack(-4, codegen, name="iLength")
@@ -3695,7 +3717,7 @@ def test_indexed_byte_store_materializes_exact_stack_source() -> None:
 
 
 def test_instruction_backed_mk_fp_byte_stores_materialize_exact_lvalues_and_sources() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index = _stack(-2, codegen, name="iRow")
     source = _stack(-114, codegen, name="iLength")
@@ -3823,7 +3845,7 @@ def test_instruction_backed_mk_fp_byte_stores_materialize_exact_lvalues_and_sour
 
 
 def test_instruction_backed_mk_fp_store_refuses_ambiguous_statement_join() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index = _stack(-2, codegen, name="iRow")
     pointer = CBinaryOp(
@@ -3883,7 +3905,7 @@ def test_instruction_backed_mk_fp_store_refuses_ambiguous_statement_join() -> No
 
 
 def test_instruction_backed_mk_fp_store_fails_closed_for_missing_proven_source() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     index = _stack(-2, codegen, name="iRow")
     pointer = CBinaryOp(
@@ -3941,7 +3963,7 @@ def test_instruction_backed_mk_fp_store_fails_closed_for_missing_proven_source()
 
 
 def test_indexed_byte_store_materializes_signed_remainder_source() -> None:
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     evidenced_index = _stack(-2, codegen, name="i")
     dividend = _stack(-4, codegen, name="iLength")
@@ -4011,7 +4033,7 @@ def test_indexed_byte_store_materializes_signed_remainder_source() -> None:
 
 
 def test_indexed_byte_pair_store_materializes_word_array_assignment():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     tmp_var = _stack(-2, codegen, name="tmp")
@@ -4050,7 +4072,7 @@ def test_indexed_byte_pair_store_materializes_word_array_assignment():
 
 
 def test_indexed_byte_pair_store_matches_memory_helper_low_lvalue():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     tmp_var = _stack(-2, codegen, name="tmp")
@@ -4093,7 +4115,7 @@ def test_indexed_byte_pair_store_matches_memory_helper_low_lvalue():
 
 
 def test_indexed_byte_pair_store_uses_store_evidence_for_clobbered_global_source():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_var = _stack(-2, codegen, name="row")
     row_tmp = _stack(-4, codegen, name="row_tmp")
@@ -4158,7 +4180,7 @@ def test_indexed_byte_pair_store_uses_store_evidence_for_clobbered_global_source
 
 
 def test_indexed_byte_pair_store_uses_store_evidence_for_stack_source():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     row_var = _stack(-2, codegen, name="row")
     row_tmp = _stack(-4, codegen, name="row_tmp")
@@ -4227,7 +4249,7 @@ def test_indexed_byte_pair_store_uses_store_evidence_for_stack_source():
 
 
 def test_indexed_byte_pair_store_folds_across_independent_assignment():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     tmp_var = _stack(-2, codegen, name="tmp")
@@ -4266,7 +4288,7 @@ def test_indexed_byte_pair_store_folds_across_independent_assignment():
 
 
 def test_indexed_byte_pair_store_matches_materialized_global_source():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     source_carrier = CVariable(SimRegisterVariable(0x200, 2, name="v14"), codegen=codegen)
@@ -4312,7 +4334,7 @@ def test_indexed_byte_pair_store_matches_materialized_global_source():
 
 
 def test_indexed_byte_pair_store_uses_high_byte_source_when_low_is_frame_artifact():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     down_var = _stack(-6, codegen, name="down")
     pivot_var = _stack(-2, codegen, name="pivot")
@@ -4355,7 +4377,7 @@ def test_indexed_byte_pair_store_uses_high_byte_source_when_low_is_frame_artifac
 
 
 def test_indexed_byte_pair_store_materializes_two_swap_pairs():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     tmp_var = CVariable(
@@ -4451,7 +4473,7 @@ def test_indexed_byte_pair_store_materializes_two_swap_pairs():
 
 
 def test_indexed_byte_pair_store_syncs_duplicate_cfunc_roots():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     i_var = _stack(-4, codegen, name="i")
     source_carrier = CVariable(SimRegisterVariable(0x200, 2, name="v14"), codegen=codegen)
@@ -4603,7 +4625,7 @@ def test_direct_global_cvariable_materializes_array_element_from_symbol_ref():
 
     project = SimpleNamespace(
         arch=Arch86_16(),
-        kb=SimpleNamespace(labels={}),
+        kb=_empty_test_knowledge_base(),
         loader=SimpleNamespace(memory=_Memory()),
     )
     codegen = _DummyCodegen()
@@ -4620,6 +4642,7 @@ def test_direct_global_cvariable_materializes_array_element_from_symbol_ref():
     expr = CBinaryOp("Add", left, right, codegen=codegen)
     root = CStatements([expr], addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x4010, size=8, statements=root, body=root)
+    _bind_binary_fixture_function(project, addr=0x4010, size=8)
 
     changed = materialize_named_segmented_global_loads_8616(project, codegen, {0x44: ("g_work", 12)})
 
@@ -4651,7 +4674,7 @@ def test_direct_global_cvariable_requires_entry_ds_physical_source(
 
     project = SimpleNamespace(
         arch=Arch86_16(),
-        kb=SimpleNamespace(labels={}),
+        kb=_empty_test_knowledge_base(),
         loader=SimpleNamespace(memory=_Memory()),
     )
     codegen = _DummyCodegen()
@@ -4664,6 +4687,7 @@ def test_direct_global_cvariable_requires_entry_ds_physical_source(
     expr = CBinaryOp("Add", direct, CConstant(1, SimTypeShort(False), codegen=codegen), codegen=codegen)
     root = CStatements([expr], addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x4010, size=4, statements=root, body=root)
+    _bind_binary_fixture_function(project, addr=0x4010, size=4)
     codegen._inertia_segment_function_contract = SegmentFunctionContract(
         function_addr=0x4010,
         accesses=(
@@ -4818,7 +4842,7 @@ def test_binary_proven_scalar_declaration_replaces_equal_width_one_element_view(
 
 
 def test_direct_dword_global_load_materializes_from_adjacent_word_refs():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     rhs = CFunctionCall("SEG_U32", None, [_ds(project, codegen), _const(0xB48, codegen)], codegen=codegen)
     assignment = CAssignment(_stack(-4, codegen, name="elapsed"), rhs, codegen=codegen)
@@ -4855,7 +4879,7 @@ def test_direct_dword_subword_cvariables_materialize_as_scalar_projections_from_
 
     project = SimpleNamespace(
         arch=Arch86_16(),
-        kb=SimpleNamespace(labels={}),
+        kb=_empty_test_knowledge_base(),
         loader=SimpleNamespace(memory=_Memory()),
     )
     codegen = _DummyCodegen()
@@ -4863,6 +4887,7 @@ def test_direct_dword_subword_cvariables_materialize_as_scalar_projections_from_
     high_condition = CBinaryOp("CmpEQ", _mem(0x134, codegen, name="mem_0134"), _const(0, codegen), codegen=codegen)
     root = CStatements([low_condition, high_condition], addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x4010, size=11, statements=root, body=root)
+    _bind_binary_fixture_function(project, addr=0x4010, size=11)
 
     changed = materialize_named_segmented_global_loads_8616(project, codegen, {0x132: ("clPause", 4)})
 
@@ -4879,7 +4904,7 @@ def test_direct_dword_subword_cvariables_materialize_as_scalar_projections_from_
 
 
 def test_direct_dword_subword_replay_retains_exact_segment_access_provenance(monkeypatch):
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     high_word = CVariable(
         SimMemoryVariable(0x134, 2, name="mem_0134"),
@@ -4961,7 +4986,7 @@ def test_dword_zero_test_replay_records_closed_materialization_evidence():
 
     project = SimpleNamespace(
         arch=Arch86_16(),
-        kb=SimpleNamespace(labels={}),
+        kb=_empty_test_knowledge_base(),
         loader=SimpleNamespace(memory=_Memory()),
     )
     codegen = _DummyCodegen()
@@ -4973,6 +4998,7 @@ def test_dword_zero_test_replay_records_closed_materialization_evidence():
     )
     root = CStatements([condition], addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x4010, size=9, statements=root, body=root)
+    _bind_binary_fixture_function(project, addr=0x4010, size=9)
 
     first_changed = materialize_named_segmented_global_loads_8616(
         project,
@@ -5011,7 +5037,7 @@ def test_dword_zero_test_replay_records_closed_materialization_evidence():
 
 
 def test_direct_word_global_load_materializes_from_adjacent_byte_pair():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     rhs = CBinaryOp(
         "Or",
@@ -5033,7 +5059,7 @@ def test_direct_word_global_load_materializes_from_adjacent_byte_pair():
 
 
 def test_direct_word_global_load_materializes_from_dirty_byte_pair_carrier():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     pair_carrier = _dirty(20, codegen)
     pair_rhs = CBinaryOp(
@@ -5058,7 +5084,7 @@ def test_direct_word_global_load_materializes_from_dirty_byte_pair_carrier():
 
 
 def test_direct_word_global_load_materializes_from_dirty_byte_half_carriers():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     low_carrier = _dirty(21, codegen)
     high_carrier = _dirty(22, codegen)
@@ -5085,7 +5111,7 @@ def test_direct_word_global_load_materializes_from_dirty_byte_half_carriers():
 
 
 def test_direct_dword_global_load_materializes_from_adjacent_word_pair():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     rhs = CBinaryOp(
         "Or",
@@ -5195,7 +5221,7 @@ def test_direct_global_symbol_store_pairs_fold_split_dword_scalar_store():
 
 
 def test_direct_global_symbol_store_pairs_fold_wide_call_return_scalar_store():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     low_word = CVariable(
         SimRegisterVariable(0x20, 2, name="v_ax"),
@@ -5357,7 +5383,7 @@ def test_collect_scalar_call_return_global_store_after_stack_cleanup(monkeypatch
 
 
 def test_sidecar_free_scalar_call_return_reconnects_standalone_ax_carrier():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen.project = project
     carrier = _reg(project, codegen, "ax")
@@ -5427,7 +5453,7 @@ def test_sidecar_free_scalar_call_return_reconnects_standalone_ax_carrier():
 
 
 def test_sidecar_free_scalar_call_return_refuses_inexact_store_tag():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen.project = project
     carrier = _reg(project, codegen, "ax")
@@ -5479,7 +5505,7 @@ def test_sidecar_free_scalar_call_return_refuses_inexact_store_tag():
 
 
 def test_scalar_call_return_global_store_consumes_only_exact_ax_carrier():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen.project = project
     destination = CVariable(
@@ -5553,7 +5579,7 @@ def test_scalar_call_return_global_store_consumes_only_exact_ax_carrier():
 
 
 def test_direct_global_symbol_store_pairs_preserve_registers_without_original_call():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     low_word = _reg(project, codegen, "ax")
     high_word = _reg(project, codegen, "dx")
@@ -5612,7 +5638,7 @@ def test_direct_global_symbol_store_pairs_preserve_registers_without_original_ca
 
 
 def test_direct_global_call_return_store_keeps_recombine_without_original_call():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen.project = project
     low_word = _reg(project, codegen, "ax")
@@ -5679,7 +5705,7 @@ def test_direct_global_call_return_store_keeps_recombine_without_original_call()
 
 
 def test_direct_global_call_return_store_folds_evidenced_nested_carrier_group():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen.project = project
     call_result = _reg(project, codegen, "ax")
@@ -5792,7 +5818,7 @@ def test_direct_global_call_return_store_folds_evidenced_nested_carrier_group():
 
 
 def test_sidecar_free_dword_call_return_store_materializes_generic_global():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     codegen.project = project
     clock_call = CFunctionCall(
@@ -5977,7 +6003,7 @@ def test_sidecar_free_dword_update_refs_refuse_nonmatching_high_word(
 
 
 def test_direct_global_symbol_store_pairs_keep_byte_carriers_without_original_call():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     ax_offset, ax_size = project.arch.registers["ax"]
     dx_offset, dx_size = project.arch.registers["dx"]
@@ -6056,7 +6082,7 @@ def test_direct_global_symbol_store_pairs_keep_byte_carriers_without_original_ca
 
 
 def test_direct_global_symbol_store_pairs_keep_nonadjacent_call_carrier_from_byte_stores():
-    project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
+    project = SimpleNamespace(arch=Arch86_16(), kb=_empty_test_knowledge_base())
     codegen = _DummyCodegen()
     ax_offset, ax_size = project.arch.registers["ax"]
     dx_offset, dx_size = project.arch.registers["dx"]
@@ -7382,7 +7408,7 @@ def test_synthetic_direct_global_ref_materializes_segment_helper_load():
 
     project = SimpleNamespace(
         arch=Arch86_16(),
-        kb=SimpleNamespace(labels={}),
+        kb=_empty_test_knowledge_base(),
         loader=SimpleNamespace(memory=_Memory()),
     )
     codegen = _DummyCodegen()
@@ -7395,6 +7421,7 @@ def test_synthetic_direct_global_ref_materializes_segment_helper_load():
     assignment = CAssignment(_stack(-2, codegen), rhs, codegen=codegen)
     root = CStatements([assignment], addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x4010, size=4, statements=root, body=root)
+    _bind_binary_fixture_function(project, addr=0x4010, size=4)
 
     changed = materialize_named_segmented_global_loads_8616(
         project,
@@ -7619,3 +7646,60 @@ def test_direct_global_symbol_store_drops_redundant_for_initializer_high_byte_pr
     assert changed is True
     assert loop.initializer is None
     assert stats.direct_symbol_store_materialized_count == 1
+
+
+@pytest.mark.parametrize("default_owner_present", [False, True])
+def test_active_global_evidence_uses_retained_function_extent(default_owner_present):
+    """Adjacent binary stores are not obligations of the retained caller."""
+    import angr
+
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    # Exact caller bytes from CMP16.EXE, relocated as a byte fixture. The
+    # unrelated startup store retains its original distance from this entry.
+    caller = bytes.fromhex("558becb80000e88e0457568b4604034606e900005e5f8be55dc3")
+    store_offset = 0x10452 - 0x101B3
+    code = caller + b"\x90" * (store_offset - len(caller)) + bytes.fromhex("89360200")
+    project = _project_from_bytes(code)
+    owner = angr.KnowledgeBase(project)
+    function = owner.functions.function(addr=0x1000, create=True)
+    function._local_blocks[0x1000] = angr.codenode.BlockNode(0x1000, len(caller), bytestr=caller)
+    function._block_sizes[0x1000] = len(caller)
+    if default_owner_present:
+        wrong = project.kb.functions.function(addr=0x1000, create=True)
+        wrong._local_blocks[0x1000] = angr.codenode.BlockNode(0x1000, len(code), bytestr=code)
+        wrong._block_sizes[0x1000] = len(code)
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000), _func=function)
+
+    selected = segmented_global_loads_module._active_function_8616(project, codegen)
+    evidence = recover_direct_segmented_global_store_evidence_8616(project, selected)
+
+    assert evidence == ()
+    assert selected is function
+    assert function._function_manager._kb is owner
+
+
+def test_active_global_evidence_without_function_metadata_refuses():
+    project = SimpleNamespace(kb=SimpleNamespace(functions=SimpleNamespace(function=lambda **_kwargs: None)))
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000))
+
+    selected = segmented_global_loads_module._active_function_8616(project, codegen)
+
+    assert selected is None
+    assert recover_direct_segmented_global_store_evidence_8616(project, selected) == ()
+
+
+
+def test_active_global_evidence_refuses_foreign_function_owner():
+    import angr
+
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    source_project = _project_from_bytes(bytes.fromhex("c3"))
+    target_project = _project_from_bytes(bytes.fromhex("c3"))
+    owner = angr.KnowledgeBase(source_project)
+    function = owner.functions.function(addr=0x1000, create=True)
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000), _func=function)
+
+    with pytest.raises(PipelineHardError, match="different project"):
+        segmented_global_loads_module._active_function_8616(target_project, codegen)

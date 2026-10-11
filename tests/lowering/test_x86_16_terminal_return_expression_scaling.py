@@ -5,8 +5,9 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable, SimTemporaryVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.lowering.terminal_return_expressions as terminal_return_expressions
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.terminal_return_render_projection import (
     TerminalReturnRenderProjectionStatus8616,
     project_terminal_return_renderability_8616,

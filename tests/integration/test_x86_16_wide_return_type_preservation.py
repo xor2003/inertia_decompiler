@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.calling_convention_compat import _wide_stack_arithmetic_prototype_from_evidence_8616
 from inertia.widening.stack_argument_widths import WideStackArgumentWidthEvidence8616
 

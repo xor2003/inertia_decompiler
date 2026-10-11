@@ -2,12 +2,14 @@
 
 Layer: Structuring.
 Responsibility: configure third-party Clinic so lifter-emitted flag-value ITEs
-remain data expressions and cannot be rewritten as synthetic CFG branches.
+remain data expressions and cannot be rewritten as synthetic CFG branches;
+keep native optimization queries bound to their originating function knowledge base.
 Owns CFG shape, loops, switches, and structured condition lowering from proven
 IR/semantic evidence.
 Do not perform alias-state ownership, widening, type/materialization recovery,
 rewrite cleanup, postprocess, or CLI/reporting work here.
-Owns only architecture-specific structuring options. It does not recover
+Owns architecture-specific structuring options and native optimization KB routing.
+It does not recover
 conditions, alter instruction semantics, or clean rendered C.
 
 The X86-16 lifter uses ITE expressions to select individual arithmetic flag
@@ -23,9 +25,13 @@ angr's default until ITE provenance can be selected individually.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
+from angr import KnowledgeBase
 from angr.analyses.decompiler.clinic import Clinic
+from angr.analyses.decompiler.optimization_passes.optimization_pass import BaseOptimizationPass
+
+from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616
 
 type ClinicOption8616 = tuple[str, object]
 
@@ -85,8 +91,29 @@ def enforce_x86_16_clinic_options_8616(
     return protected
 
 
+_OPTIMIZATION_KB_PATCHED_8616 = False
+
+
+def _bind_native_optimization_function_kb_8616() -> None:
+    """Keep native pass function knowledge separate from its variable-recovery KB."""
+    global _OPTIMIZATION_KB_PATCHED_8616
+    if _OPTIMIZATION_KB_PATCHED_8616:
+        return
+    original = BaseOptimizationPass.kb.fget
+
+    def _kb_8616(self: BaseOptimizationPass) -> KnowledgeBase:
+        """Resolve the retained function manager, never an unrelated project default."""
+        if self.project.arch.name != "86_16":
+            return cast(Any, original)(self)
+        return function_knowledge_base_8616(self.project, self._func)
+
+    cast(Any, BaseOptimizationPass).kb = property(_kb_8616)
+    _OPTIMIZATION_KB_PATCHED_8616 = True
+
+
 def apply_x86_16_clinic_option_policy_8616() -> None:
     """Enforce the shared policy for native and CLI callers before AIL splitting."""
+    _bind_native_optimization_function_kb_8616()
     original = cast(Callable[[Clinic], None], Clinic._analyze_for_decompiling)
     if original.__name__ == "_analyze_with_x86_16_clinic_policy":
         return

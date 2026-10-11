@@ -811,6 +811,15 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("tools/compiler_toolchain/tests/test_msc6_dos_tmp.py",),
     ),
     TestOwnershipRule(
+        owner="compiler-toolchain-profiles",
+        paths=(
+            "tools/compiler_toolchain/compiler_profile.py",
+            "examples/compiler_coverage/toolchains.json",
+            "examples/compiler_coverage/toolchain-probes.json",
+        ),
+        tests=("tools/compiler_toolchain/tests/test_kvikdos_profile_mode.py",),
+    ),
+    TestOwnershipRule(
         owner="optimization-quality-diagnostics",
         paths=("tools/dev/benchmark_optimization_quality_guard.py",),
         tests=("tests/cli/test_optimization_quality_guard_diagnostics.py",),
@@ -1503,6 +1512,51 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "tests/integration/test_x86_16_boot_call_prefix.py",
             "tests/ir/test_x86_16_invocation_unused_premise.py",
         ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-prefix-cut",
+        paths=("inertia/ir/real16_prefix_cut.py", "inertia/ir/real16_census_fact_ownership.py"),
+        tests=("tests/ir/test_real16_prefix_cut.py", "tests/ir/test_real16_census_fact_ownership.py"),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-declared-entry-pipeline",
+        paths=("inertia/ir/declared_entry_pipeline.py",),
+        tests=("tests/ir/test_declared_entry_pipeline_attach.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-prefix-transcript",
+        paths=("inertia/ir/real16_prefix_transcript.py",),
+        tests=("tests/ir/test_real16_prefix_transcript.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-prefix-capture-core",
+        paths=("inertia/ir/real16_invocation_domain.py",),
+        tests=("tests/ir/test_real16_prefix_capture_core.py", "tests/ir/test_real16_prefix_extension_controls.py",
+               "tests/ir/test_real16_prefix_extension_pool_binding.py",
+               "tests/ir/test_real16_prefix_profitable_selection.py",
+               "tests/ir/test_real16_prefix_identical_native_rebind.py"),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-feasibility-call-cut",
+        paths=("inertia/ir/real16_edge_feasibility8616.py",),
+        tests=("tests/ir/test_feasibility_call_cut_state.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-root-snapshot-observation",
+        paths=(
+            "inertia/ir/real16_invocation_domain.py",
+            "inertia/ir/real16_edge_feasibility8616.py",
+            "inertia/ir/real16_repeated_store8616.py",
+        ),
+        tests=("tests/ir/test_root_load_snapshot.py", "tests/ir/test_root_snapshot_observers.py"),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-native-prefix-copy",
+        paths=(
+            "inertia/ir/native_import_surface_cache.py",
+            "inertia/ir/real16_invocation_domain.py",
+        ),
+        tests=("tests/ir/test_native_prefix_copy.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-declared-interrupt-boundary",

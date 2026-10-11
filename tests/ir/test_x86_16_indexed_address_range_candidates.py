@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 from inertia.ir.indexed_address_evidence import (

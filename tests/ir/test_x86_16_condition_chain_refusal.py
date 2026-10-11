@@ -5,9 +5,10 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CBreak, CConstant, CContinue, CStatements, CUnaryOp
 from angr.sim_type import SimTypeShort
+
+import inertia.structuring.condition_materialization as owner
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
-import inertia.structuring.condition_materialization as owner
 
 
 class _Codegen:

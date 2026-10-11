@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from inertia.pipeline.errors import PipelineHardError
 from inertia.pipeline.result_contracts import (
     require_optional_result_type_8616,

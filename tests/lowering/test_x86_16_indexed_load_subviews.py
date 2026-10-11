@@ -6,6 +6,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CVariable
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.indexed_load_subviews import (
     project_indexed_load_subview_8616,

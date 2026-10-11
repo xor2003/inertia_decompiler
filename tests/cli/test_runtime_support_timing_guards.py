@@ -5,12 +5,13 @@ import signal
 import threading
 import time
 
-import inertia.structuring.decompiler_structuring_stage as decompiler_structuring_stage
-import inertia.lowering.stack_lowering_from_facts as stack_lowering_from_facts
 import pytest
 
-import inertia.validation.tail_validation as tail_validation
 import inertia.cli.analysis_timeout as analysis_timeout_support
+import inertia.cli.runtime_support as runtime_support
+import inertia.lowering.stack_lowering_from_facts as stack_lowering_from_facts
+import inertia.structuring.decompiler_structuring_stage as decompiler_structuring_stage
+import inertia.validation.tail_validation as tail_validation
 from inertia.cli.runtime_support import (
     AnalysisTimeout,
     guard_angr_structuring_codegen_internal_timing,
@@ -31,6 +32,114 @@ def test_process_alarm_timeout_does_not_leave_daemon_work_running():
         )
 
     assert all(thread.name != thread_name for thread in threading.enumerate())
+
+
+def test_process_alarm_enables_and_cancels_stack_dump_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enabled_calls: list[int] = []
+    cancels: list[bool] = []
+
+    def _fake_enable() -> int | None:
+        enabled_calls.append(1)
+        return 5
+
+    monkeypatch.setattr(runtime_support, "_enable_thread_stack_dump_8616", _fake_enable)
+    monkeypatch.setattr(
+        runtime_support.faulthandler,
+        "cancel_dump_traceback_later",
+        lambda: cancels.append(True),
+    )
+
+    result = run_with_timeout_in_daemon_thread(
+        lambda: "ok",
+        timeout=30,
+        thread_name_prefix="process-alarm-sampler-success",
+        prefer_process_alarm=True,
+    )
+
+    assert result == "ok"
+    assert enabled_calls == [1]
+    assert cancels == [True]
+
+
+def test_process_alarm_cancels_stack_dump_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancels: list[bool] = []
+    monkeypatch.setattr(runtime_support, "_enable_thread_stack_dump_8616", lambda: 5)
+    monkeypatch.setattr(
+        runtime_support.faulthandler,
+        "cancel_dump_traceback_later",
+        lambda: cancels.append(True),
+    )
+
+    def _boom() -> None:
+        raise RuntimeError("analysis failed")
+
+    with pytest.raises(RuntimeError, match="analysis failed"):
+        run_with_timeout_in_daemon_thread(
+            _boom,
+            timeout=30,
+            thread_name_prefix="process-alarm-sampler-error",
+            prefer_process_alarm=True,
+        )
+
+    assert cancels == [True]
+
+
+def test_process_alarm_cancels_stack_dump_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancels: list[bool] = []
+    monkeypatch.setattr(runtime_support, "_enable_thread_stack_dump_8616", lambda: 5)
+    monkeypatch.setattr(
+        runtime_support.faulthandler,
+        "cancel_dump_traceback_later",
+        lambda: cancels.append(True),
+    )
+
+    def _timeout() -> None:
+        raise AnalysisTimeout
+
+    with pytest.raises(AnalysisTimeout):
+        run_with_timeout_in_daemon_thread(
+            _timeout,
+            timeout=30,
+            thread_name_prefix="process-alarm-sampler-timeout",
+            prefer_process_alarm=True,
+        )
+
+    assert cancels == [True]
+
+
+def test_process_alarm_stack_dump_disabled_skips_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enabled_calls: list[int] = []
+    cancels: list[bool] = []
+
+    def _fake_enable() -> int | None:
+        enabled_calls.append(1)
+        return None
+
+    monkeypatch.setattr(runtime_support, "_enable_thread_stack_dump_8616", _fake_enable)
+    monkeypatch.setattr(
+        runtime_support.faulthandler,
+        "cancel_dump_traceback_later",
+        lambda: cancels.append(True),
+    )
+
+    result = run_with_timeout_in_daemon_thread(
+        lambda: "ok",
+        timeout=30,
+        thread_name_prefix="process-alarm-sampler-disabled",
+        prefer_process_alarm=True,
+    )
+
+    assert result == "ok"
+    assert enabled_calls == [1]
+    assert cancels == []
 
 
 def test_process_alarm_defers_timeout_inside_finalizer(monkeypatch: pytest.MonkeyPatch) -> None:

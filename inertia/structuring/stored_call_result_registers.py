@@ -16,13 +16,13 @@ from __future__ import annotations
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from inertia.lowering.gp_register_state import (
     runtime_gp_live_in_name_8616,
     runtime_gp_name_for_variable_8616,
 )
 from inertia.lowering.physical_registers import physical_register_view_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class _ArchSurface8616(Protocol):

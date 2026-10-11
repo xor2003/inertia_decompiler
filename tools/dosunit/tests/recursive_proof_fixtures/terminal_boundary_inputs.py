@@ -13,18 +13,18 @@ from pathlib import Path
 from typing import Any, cast
 
 import angr
-import inertia.frontend.x86_16.simos_86_16  # noqa: F401
-from inertia.frontend.x86_16.load_dos_mz import DOSMZ  # noqa: F401
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, _proposal
-from tools.dosunit.tests.recursive_proof_fixtures.real16_joint_system import build_real16_joint_system
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
+import inertia.frontend.x86_16.simos_86_16  # noqa: F401
 import tools.dosunit.compare.straightline_ssa as S
+from inertia.frontend.x86_16.load_dos_mz import DOSMZ  # noqa: F401
 from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.compare.real16_call_evidence import group_functions
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import bind_real16_mz
 from tools.dosunit.recursive_proofs.loaded_byte_relation import propose_loaded_byte_relation
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import prove_loaded_byte_relation
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, _proposal
+from tools.dosunit.tests.recursive_proof_fixtures.real16_joint_system import build_real16_joint_system
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 # Physical geometry shared by both fixtures.  ``load_segment = 0xFF00`` maps
 # the relocated image at physical 0xFF000; the entry selector is 0xFFFF, so

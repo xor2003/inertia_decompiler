@@ -15,15 +15,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 from tools.dosunit.contracts.binary_initial_state import InitialImageReason
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.runtime.flat32_memory_permissions import DeclaredAccess
 from tools.dosunit.runtime.pe32_program_boot import PeProgramEnvironment, PeProgramMemory, pe_program_from_bytes
 from tools.dosunit.runtime.pe32_program_replay import replay_pe_program
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.runtime.real16_program_model import ProgramResult, ProgramStatus
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 ENTRY = 0x401000
 ORACLE = bytes.fromhex("e3088d5b018d49ffebf6c3")

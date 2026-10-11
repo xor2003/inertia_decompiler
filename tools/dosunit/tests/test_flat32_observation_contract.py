@@ -5,14 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from tools.dosunit.tests.flat32_replay_test_support import (
-    ELF_CODE,
-    ESP,
-    SCRATCH,
-    _elf_image,
-    _grant,
-    _vector,
-)
 
 from tools.dosunit.runtime.flat32_memory_permissions import (
     MAX_MAPPED_BYTES,
@@ -33,6 +25,14 @@ from tools.dosunit.runtime.flat32_replay import (
     replay,
 )
 from tools.dosunit.runtime.flat32_replay_memory import _check_ranges
+from tools.dosunit.tests.flat32_replay_test_support import (
+    ELF_CODE,
+    ESP,
+    SCRATCH,
+    _elf_image,
+    _grant,
+    _vector,
+)
 
 
 def test_observation_of_unmapped_target_is_typed_missing_evidence() -> None:

@@ -4,6 +4,8 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+import inertia.semantics.terminal_pointer_outputs as terminal_pointer_outputs
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -14,8 +16,6 @@ from inertia.ir import (
 )
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.semantics.terminal_pointer_outputs as terminal_pointer_outputs
-
 from inertia.semantics.terminal_pointer_output_contracts import (
     TerminalPointerOutputDisposition8616,
     TerminalPointerOutputFailure8616,

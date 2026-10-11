@@ -6,6 +6,7 @@ from typing import cast
 import networkx as nx
 import pytest
 from angr import ailment
+
 import inertia.ir.stack_pointer_provenance as provenance
 
 
@@ -92,6 +93,7 @@ def test_unrelated_register_write_is_not_a_stack_candidate():
 
 def test_native_stage_publishes_provenance_after_call_frame_consumption(monkeypatch):
     from angr.analyses.decompiler.clinic import Clinic
+
     import inertia.frontend.x86_16.call_frame_compat as adapter
 
     graph, block, write = _graph()

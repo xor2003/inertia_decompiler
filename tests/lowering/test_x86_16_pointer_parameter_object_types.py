@@ -39,7 +39,6 @@ from inertia.lowering.pointer_parameter_object_types import (
 from inertia.lowering.pointer_parameter_output_contracts import (
     PointerParameterOutputContract8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,
     GlobalObjectLayoutEvidence8616,

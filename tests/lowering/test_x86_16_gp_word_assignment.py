@@ -7,9 +7,20 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as c
 from angr.sim_type import SimTypeFloat, SimTypeLong, SimTypePointer, SimTypeShort
-from angr.sim_variable import SimTemporaryVariable
+from angr.sim_variable import SimStackVariable, SimTemporaryVariable
+
+from inertia.cli.cli_c_text_postprocess import (
+    _collect_declared_identifiers_8616,
+    _materialize_missing_synthetic_global_declarations_text,
+    _prune_unused_local_declarations_text,
+)
+from inertia.cli.cli_decompilation import _materialize_codegen_global_externs_text_8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.gp_register_state import runtime_gp_state_assignment_8616
+from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616, _iter_c_nodes_deep_8616
+from inertia.lowering.gp_register_state import (
+    lower_architectural_gp_register_state_8616,
+    runtime_gp_state_assignment_8616,
+)
 from inertia.lowering.gp_word_assignment import CGPWordAssignment8616
 from inertia.lowering.gp_word_runtime import (
     GPRegisterRuntimeABI8616 as ABI,
@@ -18,16 +29,9 @@ from inertia.lowering.gp_word_runtime import (
     coherent_gp_runtime_definitions_8616,
     select_gp_runtime_abi_8616,
 )
+from inertia.lowering.stack_value_projection import normalize_pointer_scalar_temporaries_8616
 from inertia.lowering.terminal_return_expressions import _safe_scalar_expression_8616
-
-from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616, _iter_c_nodes_deep_8616
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint, _location_fingerprint
-from inertia.cli.cli_c_text_postprocess import (
-    _collect_declared_identifiers_8616,
-    _materialize_missing_synthetic_global_declarations_text,
-    _prune_unused_local_declarations_text,
-)
-from inertia.cli.cli_decompilation import _materialize_codegen_global_externs_text_8616
 from tests.lowering.test_x86_16_gp_stack_restore import _Codegen
 
 
@@ -59,6 +63,56 @@ def test_word_statement_uses_shared_lvalue_without_mutating_full_effect(register
     assert assignment.rhs.rhs.lhs in tuple(_iter_c_nodes_deep_8616(assignment))
     clone = _clone_c_ast_tree_8616(assignment)
     assert _render(clone) == _render(assignment)
+
+
+def test_gp_lowering_reprojects_pointer_after_scalar_temporary_replacement():
+    """Later typed argument substitution must retain a scalar GP write."""
+    assignment = _assignment()
+    codegen = assignment.codegen
+    pointer = c.CVariable(
+        SimStackVariable(4, 2, base="bp", name="argument", region=0x1000),
+        variable_type=SimTypePointer(SimTypeShort(False)).with_arch(codegen.project.arch),
+        codegen=codegen,
+    )
+    assignment.rhs.rhs.lhs = pointer
+    codegen.cfunc = SimpleNamespace(
+        addr=0x1000, statements=c.CStatements([assignment], codegen=codegen), unified_local_vars={},
+    )
+
+    assert lower_architectural_gp_register_state_8616(codegen)
+
+    rewritten = codegen.cfunc.statements.statements[0]
+    scalar = rewritten.rhs.rhs.lhs
+    assert isinstance(scalar, c.CFunctionCall)
+    assert scalar.callee_target == "PTR_U16"
+    assert scalar.args == [pointer]
+    assert rewritten.rhs.lhs.rhs.value == 0xffff0000
+    assert rewritten.rhs.rhs.rhs.value == 0xffff
+    assert not lower_architectural_gp_register_state_8616(codegen)
+
+
+@pytest.mark.parametrize("width,expected", [(1, False), (2, True), (4, True), (8, False)])
+def test_pointer_argument_materialized_into_exact_scalar_temporary(width, expected):
+    """Retain storage width when argument recovery supplies a pointer view."""
+    codegen = _assignment().codegen
+    scalar_type = (SimTypeShort(False) if width == 2 else SimTypeLong(False)).with_arch(codegen.project.arch)
+    temporary = c.CVariable(SimTemporaryVariable(0, width), variable_type=scalar_type, codegen=codegen)
+    pointer = c.CVariable(
+        SimStackVariable(4, 2, base="bp", name="argument", region=0x1000),
+        variable_type=SimTypePointer(SimTypeShort(False)).with_arch(codegen.project.arch), codegen=codegen,
+    )
+    assignment = c.CAssignment(temporary, pointer, codegen=codegen)
+    codegen.cfunc = SimpleNamespace(statements=c.CStatements([assignment], codegen=codegen))
+
+    assert normalize_pointer_scalar_temporaries_8616(codegen) is expected
+
+    if expected:
+        assert assignment.rhs.callee_target == f"PTR_U{width * 8}"
+        assert assignment.rhs.args == [pointer]
+        assert codegen._inertia_pointer_scalar_temporary_stats_8616.materialized_count == 1
+        assert not normalize_pointer_scalar_temporaries_8616(codegen)
+    else:
+        assert assignment.rhs is pointer
 
 
 @pytest.mark.parametrize("mutation", ["mask", "parent", "call", "narrow_parent"])

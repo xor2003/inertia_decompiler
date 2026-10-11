@@ -4,9 +4,6 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from inertia.ir import AddressStatus, IRInstr, IRValue, MemSpace
-from inertia.ir.ssa_function import build_x86_16_function_ssa
-from inertia.lowering.stack_storage_evidence import alias_proves_private_stack_write_8616
 
 from inertia.alias.private_stack_writes import (
     PrivateStackWriteVerdict8616,
@@ -14,6 +11,9 @@ from inertia.alias.private_stack_writes import (
 )
 from inertia.alias.stack_address_escape import StackAddressEscape8616
 from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
+from inertia.ir import AddressStatus, IRInstr, IRValue, MemSpace
+from inertia.ir.ssa_function import build_x86_16_function_ssa
+from inertia.lowering.stack_storage_evidence import alias_proves_private_stack_write_8616
 from tests.fixtures.x86_16_logical_memory_fixtures import FUNCTION_ADDR, lift_ir_artifact
 
 

@@ -19,6 +19,12 @@ from typing import Any, Protocol, cast
 import angr
 
 from inertia.cli.mz_static_intake import MzStaticIntakeRequest8616
+from inertia.cli.real16_declared_project import (
+    build_declared_project_8616,
+)
+from inertia.cli.real16_declared_project import (
+    declared_input_path_8616 as declared_input_path_8616,
+)
 from inertia.cli.telemetry import trace_function
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.exepack import unpack_exepack
@@ -254,7 +260,17 @@ def _defer_mz_static_invocation_8616(
     return project
 
 
-def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point: int) -> angr.Project:
+def _build_project(
+    path: Path, *, force_blob: bool, base_addr: int, entry_point: int,
+    real16_declared_input: Path | None = None,
+) -> angr.Project:
+    """Build the selected project, authenticating explicit declarations first."""
+    if real16_declared_input is not None:
+        return _finalize_x86_16_project(build_declared_project_8616(
+            path, real16_declared_input, force_blob=force_blob,
+            base_addr=base_addr, entry_point=entry_point,
+        ))
+
     def _impl() -> angr.Project:
         suffix = path.suffix.lower()
 
@@ -362,8 +378,23 @@ def _build_project_cached_impl(
         entry_point=entry_point,
     )
 
+def _build_project_cached(
+    path: str, *, force_blob: bool, base_addr: int, entry_point: int,
+    real16_declared_input: Path | None = None,
+) -> angr.Project:
+    """Reuse static projects only; live declarations reauthenticate every load."""
+    if real16_declared_input is not None:
+        return _build_project(
+            Path(path), force_blob=force_blob, base_addr=base_addr,
+            entry_point=entry_point, real16_declared_input=real16_declared_input,
+        )
+    return _build_project_cached_impl(
+        path, force_blob=force_blob, base_addr=base_addr, entry_point=entry_point,
+    )
+
+
 _build_project_cached = cast(
-    Callable[..., angr.Project], _TRACE_FUNCTION(name="project.build_cached")(_build_project_cached_impl)
+    Callable[..., angr.Project], _TRACE_FUNCTION(name="project.build_cached")(_build_project_cached)
 )
 
 def _build_project_from_bytes(code: bytes, *, base_addr: int, entry_point: int) -> angr.Project:

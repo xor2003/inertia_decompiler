@@ -237,6 +237,21 @@ def store_atom_clean_8616(
     return True
 
 
+def _path_byte_8616(
+    address: int,
+    memory: PathMemory8616,
+    initial: InvocationInitialMemory8616,
+) -> int | None:
+    """Read proven writes under address authority or explicit initial contents."""
+    if address in memory.unknown:
+        return None
+    if address in memory.known:
+        if not initial.permits_write_read(address):
+            return None
+        return memory.known[address]
+    return initial.byte_at(address)
+
+
 def path_load_value_8616(
     instruction: IRInstr,
     span: tuple[int, int] | None,
@@ -247,7 +262,8 @@ def path_load_value_8616(
 
     Caller binds the row to native bytes and proves its segmented effective
     address. Unknown writes, taint, unsupported widths and undeclared bytes
-    refuse. Even a known overlay cannot authorize an undeclared memory region.
+    refuse. Known writes require authenticated address ranges; ranges alone
+    supply no original contents. An overlay cannot authorize arbitrary memory.
     """
     dst = instruction.dst
     if (
@@ -279,10 +295,7 @@ def path_load_value_8616(
     value = 0
     for offset in range(size):
         byte_addr = base + offset
-        original = initial.byte_at(byte_addr)
-        if original is None or byte_addr in memory.unknown:
-            return None
-        byte = memory.known.get(byte_addr, original)
+        byte = _path_byte_8616(byte_addr, memory, initial)
         if type(byte) is not int or not 0 <= byte <= 255:
             return None
         value |= byte << (offset * 8)

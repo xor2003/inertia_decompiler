@@ -10,9 +10,9 @@ from angr import ailment
 from angr.ailment.expression import BinaryOp, Const, Expression, Register
 from angr.ailment.manager import Manager
 from angr.analyses.decompiler.clinic import Clinic
-from inertia.ir.ail_register_displacement import normalize_register_displacements_8616
 
 from inertia.frontend.x86_16.ail_displacement_compat import apply_register_displacement_compatibility_8616
+from inertia.ir.ail_register_displacement import normalize_register_displacements_8616
 
 
 def _evaluate(expression: Expression, symbol: claripy.ast.BV) -> claripy.ast.BV:

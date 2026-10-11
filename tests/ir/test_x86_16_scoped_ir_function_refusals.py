@@ -10,6 +10,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
 import tests.ir.test_x86_16_scoped_ir_coverage as fixture
 from inertia.ir.core import IRRefusal
 from tests.ir.test_x86_16_scoped_ir_coverage import world  # noqa: F401

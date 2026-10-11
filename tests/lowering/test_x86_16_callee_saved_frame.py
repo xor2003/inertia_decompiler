@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from inertia.lowering.callee_saved_frame import callee_saved_frame_pairs_8616
 from capstone.x86_const import (
     X86_INS_CALL,
     X86_INS_POP,
@@ -12,6 +11,8 @@ from capstone.x86_const import (
     X86_REG_DI,
     X86_REG_SI,
 )
+
+from inertia.lowering.callee_saved_frame import callee_saved_frame_pairs_8616
 
 
 def _instruction(address: int, instruction_id: int, register_id: int | None = None) -> SimpleNamespace:

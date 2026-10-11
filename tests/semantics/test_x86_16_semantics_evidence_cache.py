@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
-
 from inertia.semantics.evidence_cache import (
     AccessRecord8616,
     collect_accesses_for_function,

@@ -18,7 +18,6 @@ from inertia.semantics.callsite_summary import (
     CallsitePushSourceKind8616,
     CallsiteSummary8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,
     GlobalObjectLayoutEvidence8616,

@@ -16,10 +16,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
-from inertia.semantics.function_evidence_inventory import (
-    FunctionEvidenceKind8616,
-    collect_function_binary_evidence_8616,
-)
 from capstone import CS_AC_WRITE
 from capstone.x86_const import (
     X86_INS_ADC,
@@ -40,6 +36,11 @@ from capstone.x86_const import (
     X86_OP_REG,
     X86_REG_BP,
     X86_REG_INVALID,
+)
+
+from inertia.semantics.function_evidence_inventory import (
+    FunctionEvidenceKind8616,
+    collect_function_binary_evidence_8616,
 )
 
 from .real_mode_linear import (

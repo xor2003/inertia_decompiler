@@ -13,6 +13,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.segment_contract import (
     SegmentAccessFact,
@@ -30,7 +32,6 @@ from inertia.lowering.segmented_global_loads import (
     _match_byte_store_lvalue_8616,
     _runtime_indexed_global_load_site_8616,
 )
-from archinfo import ArchX86
 
 
 class _Codegen:

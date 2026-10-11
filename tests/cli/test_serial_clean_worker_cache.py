@@ -9,14 +9,15 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from inertia.semantics.segment_program_layout_codec import (
-    segment_program_function_evidence_from_record_8616,
-)
+import pytest
 
 import inertia.cli.cache as cache_module
 import inertia.cli.cli_core as cli_core
 import inertia.cli.serial_worker_cache as worker_cache
 from inertia.cli.direct_addr_failure_family import build_failure_family_snapshot
+from inertia.semantics.segment_program_layout_codec import (
+    segment_program_function_evidence_from_record_8616,
+)
 
 
 def _stable_tail_validation() -> dict[str, object]:
@@ -221,6 +222,7 @@ def test_clean_worker_parent_reuses_validated_result_without_second_process(monk
         signature_catalog=None,
         trace_c_stages=False,
         declared_call_effects=(),
+        real16_declared_input=None,
         dump_layers=False,
         dump_layer_dir=tmp_path / "layers",
         dump_layer_filter="",
@@ -344,3 +346,139 @@ def test_serial_clean_worker_bypasses_parent_owned_direct_lock(monkeypatch):
     monkeypatch.setenv(cli_core._SERIAL_CLEAN_WORKER_RESULT_ENV_8616, "/tmp/worker-result.json")
 
     assert not cli_core._direct_addr_work_requires_parent_lock_8616(lock_key)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "diagnostics", "status", "stage", "skip"),
+    [
+        (1, '[inertia-terminal] {"schema": 1, "status": "timeout"}\n', "timeout", "clean_process_decompilation", True),
+        (0, '[inertia-terminal] {"schema": 1, "status": "timeout"}\n', "timeout", "clean_process_decompilation", True),
+        (1, "worker timed out (unstructured prose)\n", "error", "clean_process_decompilation", False),
+        (1, '[inertia-terminal] {"schema": 2, "status": "timeout"}\n', "error", "clean_process_protocol", False),
+        (1, '[inertia-terminal] not-json\n', "error", "clean_process_protocol", False),
+    ],
+)
+def test_clean_worker_terminal_failure_transport(
+    monkeypatch, tmp_path, returncode, diagnostics, status, stage, skip
+):
+    """Child terminal records survive failed process transport without prose guessing."""
+    _redirect_cache(monkeypatch, tmp_path / "cache")
+    binary = tmp_path / "sample.exe"
+    binary.write_bytes(b"MZ\x00\x01")
+    args = SimpleNamespace(
+        binary=binary, window=0x200, base_addr=0x1000, entry_point=0x1000,
+        c_target="portable-flat", api_style="modern", pat_backend="hyperscan",
+        blob=False, signature_catalog=None, trace_c_stages=False,
+        declared_call_effects=(), dump_layers=False, dump_layer_dir=tmp_path / "layers",
+        real16_declared_input=None,
+        dump_layer_filter="",
+    )
+    context = SimpleNamespace(args=args, project=SimpleNamespace(), lst_metadata=None)
+    item = cli_core.FunctionWorkItem(
+        index=1, function_cfg=SimpleNamespace(), function=SimpleNamespace(addr=0x1000),
+        recovery_addr=0x1000,
+    )
+    monkeypatch.setattr(cli_core, "_canonicalize_direct_addr_from_sidecar_padding_8616", lambda *_: None)
+    monkeypatch.setattr(
+        cli_core, "run_captured_subprocess_tree",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, stdout="", stderr=diagnostics),
+    )
+    result = cli_core._run_serial_clean_process_work_item_8616(context, item, timeout=60)
+    assert result is not None
+    assert result.status == status
+    assert result.failure_stage == stage
+    assert result.skip_heavy_fallbacks is skip
+    assert result.debug_output == diagnostics
+    assert result.execution_origin is cli_core.FunctionWorkExecutionOrigin8616.CLEAN_PROCESS
+    assert not list((tmp_path / "cache").rglob("*.json"))
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_known_nonoptimized_fallback_respects_terminal_skip(monkeypatch, skip):
+    """A terminal work-item skip stops the early known-function recovery lane."""
+    function = SimpleNamespace(addr=0x1000)
+    item = cli_core.FunctionWorkItem(index=1, function=function, function_cfg=object())
+    result = cli_core.FunctionWorkResult(
+        index=1, status="timeout", payload="terminal child timeout", debug_output="",
+        function=function, function_cfg=item.function_cfg, skip_heavy_fallbacks=skip,
+    )
+    calls = []
+
+    def recover(*args, **kwargs):
+        if skip:
+            pytest.fail("terminal skip retried heavy known-function decompilation")
+        calls.append((args, kwargs))
+        return None
+
+    monkeypatch.setattr(cli_core, "_try_decompile_non_optimized_known_function", recover)
+    monkeypatch.setattr(cli_core, "_copy_function_project_tv_attrs_8616", lambda *_: None)
+    outcome = cli_core._known_nonopt_fallback_8616(
+        item=item, result=result, function=function, function_project=object(),
+        function_lst_metadata=None,
+        args=SimpleNamespace(timeout=60, api_style="modern", binary=Path("sample.exe")),
+        project=object(), cod_metadata=None, fallback_tail_validation_by_index={},
+        emitted_problem=False, emit_timeout_delay_line=lambda: None,
+        decompiled_local=0, failed_local=0,
+    )
+    assert outcome == (None, None)
+    assert len(calls) == (0 if skip else 1)
+
+
+@pytest.mark.parametrize("skip", [False, True])
+@pytest.mark.parametrize("sidecar", ["lst", "cod"])
+@pytest.mark.parametrize("partial", [None, "int partial(void) { return 1; }"])
+def test_emission_terminal_skip_blocks_preemission_retry(monkeypatch, skip, sidecar, partial):
+    """Terminal skip survives the complete emission entry point even with sidecars."""
+    project = SimpleNamespace(arch=SimpleNamespace(name="86_16"))
+    function = SimpleNamespace(addr=0x1000, name="sub_1000", project=project)
+    item = cli_core.FunctionWorkItem(index=1, function=function, function_cfg=object())
+    result = cli_core.FunctionWorkResult(
+        index=1, status="timeout", payload="terminal child timeout", debug_output="",
+        function=function, function_cfg=item.function_cfg,
+        skip_heavy_fallbacks=skip, partial_payload=partial,
+        execution_origin=cli_core.FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
+    )
+    calls = []
+
+    def retry(**kwargs):
+        if skip:
+            pytest.fail("terminal skip retried before emission fallback guards")
+        calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(cli_core, "_try_emit_retry_recovered_candidate_8616", retry)
+    def fallback(**kwargs):
+        assert kwargs["result"].partial_payload == partial
+        assert kwargs["result"].skip_heavy_fallbacks is skip
+        return (0, 1)
+
+    monkeypatch.setattr(cli_core, "_emit_function_result_fallback_lanes_8616", fallback)
+    partial_emissions = []
+    monkeypatch.setattr(cli_core, "_emit_partial_payload_block_8616", lambda *args: partial_emissions.append(args))
+    metadata = object()
+    outcome = cli_core._emit_function_result(
+        item, result, project=project,
+        args=SimpleNamespace(addr=None, show_asm=False, timeout=60),
+        lst_metadata=metadata if sidecar == "lst" else None,
+        cod_metadata=metadata if sidecar == "cod" else None,
+        synthetic_globals=None, precise_sidecar_regions=False,
+        allow_heavy_fallbacks=False, interactive_stdout=False,
+        use_serial_fork_per_function=False, fallback_tail_validation_by_index={},
+    )
+    assert outcome == ((0, 1) if skip else (1, 0))
+    assert len(calls) == (0 if skip else 1)
+    assert len(partial_emissions) == (1 if skip and partial is not None else 0)
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_validation_failed_retry_gate_respects_terminal_skip(skip):
+    """Post-validation recovery shares the work item's explicit retry exclusion."""
+    result = cli_core.FunctionWorkResult(
+        index=1, status="ok", payload="int candidate(void) { return 0; }", debug_output="",
+        function=None, function_cfg=None, skip_heavy_fallbacks=skip,
+        execution_origin=cli_core.FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
+    )
+    assert cli_core._validation_failed_retry_gate_8616(
+        SimpleNamespace(addr=None), SimpleNamespace(arch=SimpleNamespace(name="86_16")),
+        result, object(), None,
+    ) is (not skip)

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from angr.ailment.expression import BinaryOp, Const
+from angr.ailment.expression import BinaryOp, Const, Register, VirtualVariable, VirtualVariableCategory
 from angr.analyses.decompiler.structured_codegen.c import (
     CConstant,
     CExpression,
@@ -26,6 +26,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.sim_type import SimType, SimTypeChar, SimTypeInt, SimTypeNum
 
 from .native_integer_operations import lower_native_integer_operation_8616
+from .semantic_cast import CSemanticCast8616
 
 _INTEGER_TYPES = (SimTypeChar, SimTypeInt, SimTypeNum)
 _INTEGER_OPERATIONS: dict[str, Callable[[int, int], int]] = {
@@ -34,19 +35,40 @@ _INTEGER_OPERATIONS: dict[str, Callable[[int, int], int]] = {
 }
 
 
+def _same_pure_native_register_value_8616(left: object, right: object) -> bool:
+    """Recognize identical register reads or immutable SSA register values."""
+    if isinstance(left, Register) and isinstance(right, Register):
+        return bool(left.reg_offset == right.reg_offset)
+    if isinstance(left, VirtualVariable) and isinstance(right, VirtualVariable):
+        return bool(
+            left.category is VirtualVariableCategory.REGISTER
+            and right.category is VirtualVariableCategory.REGISTER
+            and left.varid == right.varid
+            and left.oident == right.oident
+        )
+    return False
+
+
 def native_integer_constant_value_8616(expression: BinaryOp) -> int | None:
-    """Evaluate same-width literal AIL arithmetic with its exact modular width."""
+    """Evaluate literals or a pure register XOR cancellation at native width.
+
+    Register reads in one expression share a machine state; equal SSA register
+    identifiers denote one immutable value. Loads, calls, dirty expressions and
+    composite operands have no such proof here and remain unevaluated.
+    """
     operation = _INTEGER_OPERATIONS.get(expression.op)
     bits = expression.bits
     non_scalar = expression.floating_point or expression.vector_count is not None or expression.vector_size is not None
     if operation is None or non_scalar or not isinstance(bits, int) or bits <= 0:
         return None
     left, right = expression.operands
+    if left.bits != bits or right.bits != bits:
+        return None
+    if expression.op == "Xor" and _same_pure_native_register_value_8616(left, right):
+        return 0
     if not isinstance(left, Const) or not isinstance(right, Const):
         return None
     if not isinstance(left.value, int) or not isinstance(right.value, int):
-        return None
-    if left.bits != bits or right.bits != bits:
         return None
     modulus = 1 << bits
     value = operation(left.value, right.value) & (modulus - 1)
@@ -109,7 +131,7 @@ def fold_unsigned_narrowing_constant_8616(destination: SimType, expression: CTyp
 
 
 def apply_native_unsigned_constant_casts_8616() -> None:
-    """Preserve exact constant values at native implicit-cast simplification."""
+    """Preserve required conversions and exact constants during cast cleanup."""
     original = cast(Callable[[SimType, CExpression], CExpression], MakeTypecastsImplicit.collapse)
     if original.__name__ == "_collapse_unsigned_constants_8616":
         return
@@ -117,7 +139,12 @@ def apply_native_unsigned_constant_casts_8616() -> None:
     def _collapse_unsigned_constants_8616(
         _cls: type[MakeTypecastsImplicit], destination: SimType, expression: CExpression,
     ) -> CExpression:
-        """Keep native simplification unless an elided literal conversion is proven."""
+        """Retain machine conversions and fold only proven literal conversions."""
+        # A machine conversion is not a cosmetic contextual promotion. In
+        # particular, removing an unsigned-word conversion before a shift
+        # reintroduces signed DOS-int promotion of an unsigned byte.
+        if isinstance(expression, CSemanticCast8616):
+            return expression
         result = original(destination, expression)
         if type(expression) is not CTypeCast or result is not expression.expr:
             return result
@@ -138,7 +165,7 @@ def apply_native_unsigned_constant_casts_8616() -> None:
 
 
 def apply_native_integer_constant_values_8616() -> None:
-    """Evaluate proven literal operations before lowering loses AIL bit widths."""
+    """Evaluate proven constant results before lowering loses AIL bit widths."""
     apply_native_unsigned_constant_casts_8616()
     original = CStructuredCodeGenerator._handle_Expr_BinaryOp
     if original.__name__ == "_handle_integer_constant_8616":

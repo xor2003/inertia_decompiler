@@ -5,6 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CStatements
+from test_x86_16_stack_subview_projection import (
+    FUNCTION_ADDR,
+    _attach_word_proof,
+    _constant,
+    _DummyCodegen,
+    _stack_var,
+)
+
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
@@ -14,14 +22,6 @@ from inertia.ir.analysis.stack_frame_ir import (
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
-from test_x86_16_stack_subview_projection import (
-    FUNCTION_ADDR,
-    _attach_word_proof,
-    _constant,
-    _DummyCodegen,
-    _stack_var,
-)
-
 from inertia.widening.stack_subview_projection import (
     materialize_contained_stack_subviews_8616,
 )

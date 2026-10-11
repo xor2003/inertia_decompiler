@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_insertionsort_behavior import assert_insertionsort_behavior
 
 _CORRECT = r'''

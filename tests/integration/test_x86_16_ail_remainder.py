@@ -8,8 +8,17 @@ from angr.ailment.expression import BinaryOp, Const, Convert
 from angr.analyses.decompiler.peephole_optimizations.modulo_simplifier import ModuloSimplifier
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant
 from angr.sim_type import SimTypeNum
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.native_integer_operations import lower_native_integer_operation_8616
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _install_frontend_bootstrap():
+    """Exercise the remainder adapter installed by canonical frontend startup."""
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
 
 
 def _remainder(signed, divisor=80, bits=32):

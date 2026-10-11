@@ -4,14 +4,19 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CFunctionCall, CVariable
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.segment_stack_restore import (
+    SegmentStackRestoreArtifact8616,
+    SegmentStackRestoreFact8616,
+    SegmentStackRestoreVerdict8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
     FrameCoordinateStats8616,
     FrameCoordinateStatus8616,
 )
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.lowering.far_pointer_type import (
     SimTypeFarPointer16_8616,
     far_pointer_type_8616,
@@ -22,12 +27,7 @@ from inertia.lowering.function_pointer_parameters import (
     materialize_function_pointer_parameters_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.alias.segment_stack_restore import (
-    SegmentStackRestoreArtifact8616,
-    SegmentStackRestoreFact8616,
-    SegmentStackRestoreVerdict8616,
-)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class _VariableManager:

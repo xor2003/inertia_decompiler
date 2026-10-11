@@ -3,12 +3,12 @@
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CConstant
 from angr.sim_type import SimTypeShort
-from inertia.ir.condition_ir import ConditionIR
-from tests.lowering.test_x86_16_stack_update_scope_guard import _surface
 
+from inertia.ir.condition_ir import ConditionIR
 from inertia.structuring.instruction_fragment_placement import (
     restore_instruction_fragment_placement_8616,
 )
+from tests.lowering.test_x86_16_stack_update_scope_guard import _surface
 
 
 def _fixture():

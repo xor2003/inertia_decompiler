@@ -13,12 +13,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeInt, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+
 import inertia.validation.validation_branch_conditions as validation_branch_conditions
-from inertia.semantics.callsite_summary import (
-    CallsiteReturnUseKind8616,
-    CallsiteSummary8616,
-    bind_structured_callsite_identity_8616,
-)
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import (
     AddressStatus,
@@ -38,8 +35,11 @@ from inertia.ir.logical_memory_register_transfer_contracts import (
 )
 from inertia.ir.ssa import SSABlock
 from inertia.lowering.semantic_cast import CSemanticCast8616
-from archinfo import ArchX86
-
+from inertia.semantics.callsite_summary import (
+    CallsiteReturnUseKind8616,
+    CallsiteSummary8616,
+    bind_structured_callsite_identity_8616,
+)
 from inertia.validation.tail_validation import (
     _canonicalize_final_branch_condition_fingerprint_8616,
 )

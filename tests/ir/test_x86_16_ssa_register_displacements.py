@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import IRBlock, IRInstr, IRValue, MemSpace
 from inertia.ir.ssa import build_x86_16_block_local_ssa
 from inertia.ir.ssa_function import _value_key

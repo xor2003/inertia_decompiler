@@ -1,13 +1,13 @@
 """Native path joins and call transport must preserve resize memory evidence."""
 
 import pytest
+
+import tests.ir.test_x86_16_declared_resize_boundary as f
+from inertia.frontend.x86_16.frontend_direct_callsite_index import build_decoded_direct_callsite_index_8616
 from inertia.ir.real16_invocation_domain import (
     Real16CallChainLink8616,
     prove_real16_chained_invocation_domain_8616,
 )
-
-import tests.ir.test_x86_16_declared_resize_boundary as f
-from inertia.frontend.x86_16.frontend_direct_callsite_index import build_decoded_direct_callsite_index_8616
 
 
 def test_branch_join_does_not_invent_good_metadata() -> None:

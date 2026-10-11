@@ -13,7 +13,14 @@ it the whole compiler-coverage plan or let two workers edit the same files.
 Before launch, record the current baseline and write a task-specific prompt
 under ignored `.cache/devin-prompts/`. Start each CLI process with
 `ulimit -v 4194304` (KiB: 4 GiB), use a separate batch invocation per task,
-and retain its output/session ID.
+and retain its output/session ID. Use a PTY for the supervising tool session
+when available, so its interrupt reaches the owned process group even when
+later shell commands have separate PID namespaces. Wrap unattended launches
+with `timeout --signal=INT --kill-after=15s 20m`; retain logs and classify that
+exit as interrupted work, never acceptance. A host PID observed in one tool
+namespace is not a safe signal target in another. Continue a completed bounded
+job with its explicit Devin session ID to reuse context; do not rely on “latest”
+when several jobs share the state directory.
 
 Writable staging/type-check overlays must use private regular-file copies.
 Never copy or write staged replacements through symlinks or hardlinks to shared
@@ -24,6 +31,10 @@ Do not stash, reset, or check out shared source to obtain a baseline. Compare
 the saved pre-run sources in an isolated process; clean HEAD is not the dirty
 pre-run baseline. If a failure cannot be classified within one bounded baseline
 attempt, report it as unresolved and hand it back instead of expanding the task.
+Do not temporarily replace live source with preimages for baseline tests: other
+workers may already be running provenance-sensitive probes. Use a private
+regular-file overlay or a process-local test mutation; keep production frozen
+after the handoff's focused checks finish.
 
 In this workspace, after verifying the outer sandbox described below, the
 current CLI pattern is:

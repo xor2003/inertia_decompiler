@@ -5,9 +5,9 @@ from dataclasses import replace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CMultiStatementExpression, CStatements
 from angr.sim_type import SimTypeShort
-from inertia.ir.condition_ir import ConditionIR
-import inertia.structuring.condition_ownership as ownership
 
+import inertia.structuring.condition_ownership as ownership
+from inertia.ir.condition_ir import ConditionIR
 from inertia.structuring.condition_ownership import (
     structured_node_owns_condition_fact_8616,
 )

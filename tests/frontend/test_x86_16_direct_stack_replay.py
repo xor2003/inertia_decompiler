@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.lowering.direct_stack_replay as direct_stack_replay
 from inertia.lowering.direct_stack_replay import (
     DirectStackMaterializationResult8616,

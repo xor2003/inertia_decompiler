@@ -6,10 +6,10 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.segment_register_state import runtime_segment_state_cvar_8616
 
 from inertia.cli.cli_decompilation import _typed_switch_seqnode_case_segment_quality_8616
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.segment_register_state import runtime_segment_state_cvar_8616
 
 
 @pytest.mark.parametrize("carrier", ["physical", "lowered", "unknown", "misleading_name"])

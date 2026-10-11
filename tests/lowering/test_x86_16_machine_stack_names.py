@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from angr.sim_variable import SimStackVariable
+
 from inertia.lowering.machine_stack_names import machine_bp_stack_object_name_8616
 from inertia.lowering.real_mode_linear import _preferred_stack_object_name_8616
 from inertia.lowering.stack_variable_coordinates import (

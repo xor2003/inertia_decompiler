@@ -1,8 +1,8 @@
 """Keep DrawTime's value contract independent of harmless identity casts."""
 
 import pytest
-from tests.cli.test_check_sortd_sidecar_free import _passing_transcript
 
+from tests.cli.test_check_sortd_sidecar_free import _passing_transcript
 from tools.dev.check_sortd_sidecar_free import evaluate_sortd_transcript
 
 

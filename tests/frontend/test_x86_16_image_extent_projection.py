@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.load_dos_mz import DOSMZ
 
 import inertia.cli.cli_function_discovery as discovery
+from inertia.frontend.x86_16.load_dos_mz import DOSMZ
 
 _IMAGE_LEN = 0x140
 # Nonzero bases are required: a zero base makes ``linked_base + max_addr + 1``

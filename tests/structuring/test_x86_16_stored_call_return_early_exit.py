@@ -15,16 +15,16 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
+import inertia.structuring.stored_call_return_early_exit as stored_early_exit
+import inertia.structuring.stored_call_return_operands as stored_operands
+from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
+from inertia.ir.core import IRValue, MemSpace
 from inertia.semantics.callsite_summary import (
     CallsiteReturnUseKind8616,
     CallsiteSummary8616,
 )
-from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
-from inertia.ir.core import IRValue, MemSpace
-import inertia.structuring.stored_call_return_early_exit as stored_early_exit
-import inertia.structuring.stored_call_return_operands as stored_operands
-from archinfo import ArchX86
-
 from inertia.structuring.stored_call_return_early_exit import (
     StoredCallReturnEarlyExitStatus8616,
     materialize_stored_call_return_early_exit_8616,

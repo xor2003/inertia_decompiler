@@ -15,15 +15,15 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CWhileLoop,
 )
 from angr.sim_type import SimTypeShort
-from inertia.lowering.semantic_cast import CSemanticCast8616
-from tests.structuring.test_x86_16_canonical_for_loops import _Codegen as _BaseCodegen
-from tests.structuring.test_x86_16_canonical_for_loops import _local
 
+from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.structuring.canonical_for_loops import (
     _contains_current_loop_continue_8616,
     recover_canonical_for_loops_8616,
 )
 from inertia.structuring.induction_comparisons import ordered_comparison_uses_induction_8616
+from tests.structuring.test_x86_16_canonical_for_loops import _Codegen as _BaseCodegen
+from tests.structuring.test_x86_16_canonical_for_loops import _local
 
 
 class _Codegen(_BaseCodegen):

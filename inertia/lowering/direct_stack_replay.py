@@ -15,9 +15,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
 from inertia.pipeline.contracts import SemanticLaneState
 from inertia.pipeline.structured_ast_generation import structured_ast_generation_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
 
 from .consumed_call_push_evidence import (
     normalize_consumed_call_push_evidence_8616,

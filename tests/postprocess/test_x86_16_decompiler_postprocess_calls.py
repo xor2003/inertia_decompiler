@@ -21,18 +21,27 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.callsite_pointer_values import bind_near_pointer_argument_value_lowerer_8616
-from inertia.postprocess.callsite_stack_metadata import _prune_dead_stack_carrier_assignments_8616
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    CallsitePushExprOp8616,
-    CallsiteReturnUseKind8616,
-    CallsiteSummary8616,
-    bind_structured_callsite_identity_8616,
-    record_caller_return_use_evidence_8616,
+from inertia.lowering.call_argument_carrier_liveness import (
+    call_argument_setup_is_proven_dead_8616,
 )
+from inertia.lowering.call_argument_state import ProtectedCallArgumentStore8616
+from inertia.lowering.callsite_pointer_values import bind_near_pointer_argument_value_lowerer_8616
+from inertia.lowering.near_pointer_argument_values import materialize_near_pointer_argument_value_8616
+from inertia.lowering.return_type_evidence import proven_function_result_observation_8616
+from inertia.lowering.segmented_global_loads import DirectGlobalSymbolRef8616
+from inertia.lowering.segmented_memory_lowering import (
+    runtime_segment_push_source_cvar_8616,
+)
+from inertia.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
+)
+from inertia.pipeline.errors import PipelineHardError
+from inertia.postprocess.call_argument_transaction import (
+    accepted_call_argument_mutation_8616,
+)
+from inertia.postprocess.callsite_stack_metadata import _prune_dead_stack_carrier_assignments_8616
 from inertia.postprocess.decompiler_postprocess_calls import (
     CallsiteMaterializationStats,
     _accumulate_callsite_materialization_stats_8616,
@@ -65,23 +74,14 @@ from inertia.postprocess.decompiler_postprocess_utils import (
     _match_bp_stack_load_8616,
     _same_c_expression_8616,
 )
-from inertia.lowering.call_argument_carrier_liveness import (
-    call_argument_setup_is_proven_dead_8616,
-)
-from inertia.lowering.call_argument_state import ProtectedCallArgumentStore8616
-from inertia.lowering.near_pointer_argument_values import materialize_near_pointer_argument_value_8616
-from inertia.lowering.return_type_evidence import proven_function_result_observation_8616
-from inertia.lowering.segmented_global_loads import DirectGlobalSymbolRef8616
-from inertia.lowering.segmented_memory_lowering import (
-    runtime_segment_push_source_cvar_8616,
-)
-from inertia.lowering.stack_variable_coordinates import (
-    record_stack_variable_coordinate_projection_8616,
-)
-from inertia.pipeline.errors import PipelineHardError
-
-from inertia.postprocess.call_argument_transaction import (
-    accepted_call_argument_mutation_8616,
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    CallsitePushExprOp8616,
+    CallsiteReturnUseKind8616,
+    CallsiteSummary8616,
+    bind_structured_callsite_identity_8616,
+    record_caller_return_use_evidence_8616,
 )
 from inertia.validation.tail_validation import (
     collect_x86_16_tail_validation_summary,

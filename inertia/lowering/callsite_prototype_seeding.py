@@ -18,8 +18,9 @@ from types import SimpleNamespace
 from typing import Protocol, cast
 
 from angr.sim_type import SimType, SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
-from inertia.semantics.callsite_summary import CallsiteSummary8616, summarize_x86_16_callsite
 from archinfo import Arch
+
+from inertia.semantics.callsite_summary import CallsiteSummary8616, summarize_x86_16_callsite
 
 from .argument_frame_base import msc_calling_convention_for_function_8616
 

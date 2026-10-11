@@ -6,18 +6,6 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from inertia.semantics.caller_return_use_contracts import (
-    AxValueView8616,
-    ByteReturnExtensionKind8616,
-)
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-    caller_return_use_evidence_by_addr_8616,
-    record_caller_return_use_evidence_8616,
-)
 
 import inertia.cli.cache as recovery_cache
 import inertia.cli.cli_function_discovery as function_discovery
@@ -37,6 +25,18 @@ from inertia.cli.discovery_cache_contract import (
     display_catalog_cache_payload_from_record_8616,
     display_catalog_cache_record_8616,
     source_region_catalog_evidence_comment_8616,
+)
+from inertia.semantics.caller_return_use_contracts import (
+    AxValueView8616,
+    ByteReturnExtensionKind8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+    caller_return_use_evidence_by_addr_8616,
+    record_caller_return_use_evidence_8616,
 )
 
 

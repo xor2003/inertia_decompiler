@@ -17,10 +17,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.structuring.condition_materialization import (
     condition_key_from_tags_8616,
     invert_structured_condition_8616,

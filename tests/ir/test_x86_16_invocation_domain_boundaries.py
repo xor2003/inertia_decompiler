@@ -26,8 +26,10 @@ from types import SimpleNamespace
 from typing import cast
 
 import angr
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.ir.real16_invocation_domain as dom
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir.core import (
     IRBinaryValue,
     IRBlock,
@@ -46,8 +48,6 @@ from inertia.ir.real16_invocation_domain import (
     real16_invocation_discharges_8616,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from tools.dosunit.runtime.real16_program_boot import (
     ProgramBoot,
     ProgramEnvironment,

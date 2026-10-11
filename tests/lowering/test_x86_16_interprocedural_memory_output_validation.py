@@ -4,6 +4,17 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.alias.alias_model_impl import (
+    AliasStorageFacts,
+    alias_facts_for_ir_address_8616,
+)
+from inertia.alias.storage_fact_join import (
+    build_segmented_alias_range_8616,
+)
+from inertia.alias.terminal_memory_outputs import (
+    classify_terminal_memory_output_aliases_8616,
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -41,17 +52,6 @@ from inertia.lowering.interprocedural_storage_transaction import (
     apply_program_storage_resolution_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.alias.alias_model_impl import (
-    AliasStorageFacts,
-    alias_facts_for_ir_address_8616,
-)
-from inertia.alias.storage_fact_join import (
-    build_segmented_alias_range_8616,
-)
-from inertia.alias.terminal_memory_outputs import (
-    classify_terminal_memory_output_aliases_8616,
-)
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,
     TerminalMemoryOutputEvidence8616,

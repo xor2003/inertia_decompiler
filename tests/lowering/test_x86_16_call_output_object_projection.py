@@ -6,6 +6,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CFunction, CVariable, CVariableField
 from angr.sim_type import SimStruct, SimTypeBottom, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.lowering.call_output_object_projection import publish_call_output_object_projection_8616
 from inertia.lowering.call_output_stack_object_replay import reapply_call_output_stack_object_types_8616
 from inertia.lowering.call_output_stack_objects import (
@@ -20,7 +21,6 @@ from inertia.lowering.stack_variable_coordinates import (
     stack_variable_coordinate_registry_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
 from tests.lowering.test_x86_16_call_output_stack_objects import _condition, _fixture, _VariableManager
 
 _OBJECT_BP = -112

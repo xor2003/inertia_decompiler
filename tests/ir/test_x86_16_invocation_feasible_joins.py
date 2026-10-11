@@ -3,8 +3,9 @@ import time
 from types import SimpleNamespace
 
 import pytest
-import tests.ir.test_x86_16_declared_resize_boundary as native
+
 import inertia.ir.real16_invocation_domain as domain
+import tests.ir.test_x86_16_declared_resize_boundary as native
 from inertia.ir.core import IRBlock, IRFunctionArtifact
 from inertia.ir.real16_path_memory8616 import PathMemory8616
 

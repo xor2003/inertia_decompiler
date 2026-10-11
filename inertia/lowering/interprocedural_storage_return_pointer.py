@@ -11,18 +11,17 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
-
 from inertia.alias.domains import AX, FULL16, register_domain_for_name, register_view_for_name
 from inertia.ir.logical_memory_contracts import (
     IRMemoryAccessKind8616,
     logical_memory_execution_address_matches_8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 
 from .interprocedural_storage_contracts import (
     StorageDefinitionKind8616,

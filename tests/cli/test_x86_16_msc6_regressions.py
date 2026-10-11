@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 from pycparser import c_ast, c_parser
+
 from tests.fixtures.x86_16_timeout_support import scaled_decompile_timeout
 from tests.semantics.test_x86_16_scalar_byte_behavior import assert_scalar_byte_add_behavior
-
 from tools.compiler_toolchain.msc6_runtime_gate_artifacts import (
     MSC6RuntimeGateArtifacts,
     MSC6RuntimeGateInputs,

@@ -16,10 +16,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CWhileLoop,
 )
 from angr.sim_type import SimTypeShort
+
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.structuring.condition_chain_provenance import bind_condition_chain_provenance_8616
 from inertia.structuring.condition_ownership import requires_composite_condition_ownership_8616
 from inertia.structuring.loop_break_topology import LoopBreakTopology8616

@@ -11,7 +11,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import ObligationVerdict, ProofStatus
 from tools.dosunit.recursive_proofs import real16_image_bound_joint_proof as joint_owner
@@ -32,6 +31,7 @@ from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointSystem,
     Real16EnvironmentScope,
 )
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 def _closed_machine(system: JointSystem) -> Real16EnvironmentScope:

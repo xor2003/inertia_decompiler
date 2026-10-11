@@ -16,6 +16,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import (
     ConditionIR,
@@ -23,7 +24,6 @@ from inertia.ir.condition_ir import (
     ConditionRegisterUpdateIR,
 )
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
-
 from inertia.structuring.loop_condition_materialization import (
     materialize_typed_loop_continuation_conditions_8616,
 )

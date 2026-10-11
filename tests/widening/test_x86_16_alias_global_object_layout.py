@@ -6,14 +6,6 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.function_ssa_registry import (
-    FunctionSSAArtifactVerdict8616,
-    registered_function_ssa_artifact_8616,
-)
-from inertia.lowering.project_global_object_layout import (
-    collect_project_global_object_layout_evidence_8616,
-)
 
 import inertia.cli.cache as cache_module
 import inertia.cli.indexed_alias_program_recovery as indexed_recovery
@@ -22,6 +14,21 @@ from inertia.alias.indexed_address_program import (
     IndexedAliasProgramEvidence8616,
     IndexedAliasProgramFailureKind8616,
     build_indexed_alias_program_evidence_8616,
+)
+from inertia.cli.discovery_cache_contract import (
+    SourceRegionCatalogEvidence8616,
+)
+from inertia.cli.indexed_alias_program_context import (
+    IndexedAliasProgramContextStatus8616,
+    prepare_direct_indexed_alias_program_context_8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.function_ssa_registry import (
+    FunctionSSAArtifactVerdict8616,
+    registered_function_ssa_artifact_8616,
+)
+from inertia.lowering.project_global_object_layout import (
+    collect_project_global_object_layout_evidence_8616,
 )
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutFailureKind8616,
@@ -37,13 +44,6 @@ from inertia.widening.indexed_global_object_layout import (
 from inertia.widening.indexed_global_object_program_ranges import (
     ProjectBoundedGlobalObjectRangeSourceKind8616,
     recover_program_bounded_global_object_ranges_8616,
-)
-from inertia.cli.discovery_cache_contract import (
-    SourceRegionCatalogEvidence8616,
-)
-from inertia.cli.indexed_alias_program_context import (
-    IndexedAliasProgramContextStatus8616,
-    prepare_direct_indexed_alias_program_context_8616,
 )
 
 BYTE_FIELD_VIEWS = bytes.fromhex(

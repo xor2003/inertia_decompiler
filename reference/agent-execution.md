@@ -30,7 +30,12 @@ They do not relax its architecture or function-fix acceptance contract.
 - Add linters or enable additional checks when they reliably prevent observed
   defects. Keep configuration shared between direct invocations and Make, test
   enforcement, and report existing debt without hiding or weakening findings.
-- Use `PYTHON_JIT=1` and nice 10 for Python commands. Run pytest with up to six
+- Use `PYTHON_JIT=1` and nice 10 for Python commands. Set `PYTHONHASHSEED=0`
+  before launching direct pytest or compiler-coverage/decompiler integration
+  processes, as Make already does; an unset seed correctly prevents semantic
+  cache reuse. Changing the variable inside a running interpreter does not
+  establish a deterministic interpreter for integration acceptance.
+  Run pytest with up to six
   workers, short tracebacks, and duration reporting so the slowest tests are
   visible on every run. The user-authorized aggregate test limit is independent
   of linter and decompiler pools; concurrent pytest jobs share those six slots.
@@ -163,7 +168,9 @@ in logs; report scope, exit status, counts and actionable failures only.
   `INERTIA_DIRECT_ADDR_FORCE_THREAD=1`; these are diagnostic settings, not defaults.
 - For stack sampling, match the existing worker: use
   `INERTIA_FORK_STACK_DUMP_SEC` for fork children and
-  `INERTIA_THREAD_STACK_DUMP_SEC` for daemon threads. Verify actual samples;
+  `INERTIA_THREAD_STACK_DUMP_SEC` for daemon threads or the main-thread
+  process-alarm lane. Normal clean workers disable fork execution, so the
+  fork sampler cannot observe their recovery. Verify actual samples;
   an empty log from the wrong switch is not evidence of an idle worker.
   Prefer the matching sampler over changing worker mode for observation.
 - Also verify that a diagnostic run did not return a cached function. For a
@@ -173,12 +180,29 @@ in logs; report scope, exit status, counts and actionable failures only.
 - Worker stdout/stderr may be captured and discarded on timeout. Write bounded
   diagnostic events to a dedicated file and verify them there; missing console
   hook messages do not establish that a stage was not executed.
+- A timeout worker may exit without running Python `finally`. Collect its exit
+  status, elapsed time and before/after source hashes in the supervising process;
+  keep worker-local typed events separate. A missing terminal receipt is missing
+  evidence, not success. Do not invent elapsed time when the supervisor did not
+  measure it.
 - Remove or consolidate tests only after proving duplication, supersession or
   obsolete requirements. Do not reduce coverage, suppress diagnostics, shorten
   timeouts indiscriminately, or hide failures to improve timings.
 
 ### Selective Delegation
 
+- Check worker status before assigning follow-up work. Use `followup_task` to
+  restart a completed or idle collaboration agent; `send_message` only queues
+  a message and does not start its next turn. Do not count queued messages as
+  active work or wait for an agent that has not been restarted.
+- For a bounded task with a settled diagnosis and exact source anchors, start
+  with the reproducer and owned seams; do not repeat repository exploration.
+  Reuse guidance already read in the current context. At the task's declared
+  checkpoint, require a failing regression or reviewable implementation delta.
+  If a live delegated job is still only reading, verify its process identity,
+  stop it, preserve its evidence, and implement locally instead of launching
+  another investigation. Review known defects before counting a worker's green
+  tests; never change a refusal fixture merely to avoid the defect it exposed.
 - Keep agents off the critical path once a reviewable patch and focused results
   exist. Check long tasks at a 15–20 minute checkpoint; if only harness cleanup
   or reporting remains, preserve the patch and take over that bounded work.

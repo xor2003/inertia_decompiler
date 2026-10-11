@@ -3,16 +3,16 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.lowering.real_mode_linear import (
-    DirectStackMoveFact8616,
-    DirectStackMoveSourceKind8616,
-)
-import inertia.structuring.direct_stack_move_loop_tail_replay as loop_tail_replay_module
-import inertia.structuring.direct_stack_move_loops as loop_module
 from archinfo import ArchX86
 from capstone import CS_GRP_JUMP
 from capstone.x86_const import X86_OP_IMM
 
+import inertia.structuring.direct_stack_move_loop_tail_replay as loop_tail_replay_module
+import inertia.structuring.direct_stack_move_loops as loop_module
+from inertia.lowering.real_mode_linear import (
+    DirectStackMoveFact8616,
+    DirectStackMoveSourceKind8616,
+)
 from inertia.structuring.direct_stack_move_loop_tail_replay import (
     materialize_direct_stack_move_loop_tail_ownership_8616,
 )

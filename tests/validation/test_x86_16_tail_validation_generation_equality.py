@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
-import inertia.validation.tail_validation_generation_atoms as atoms
 
+import inertia.validation.tail_validation_generation_atoms as atoms
 from inertia.validation.tail_validation_generation import (
     TailValidationSummaryInputGeneration8616 as Generation,
 )

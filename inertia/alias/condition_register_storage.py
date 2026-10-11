@@ -10,9 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 
 from __future__ import annotations
 
-from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
-
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
+from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 from inertia.semantics.register_value_preservation import (
     register_value_family_8616,
     register_value_projection_8616,

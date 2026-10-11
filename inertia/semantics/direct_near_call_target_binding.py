@@ -22,7 +22,13 @@ fabricate an ABI summary to reach the same proof. An optional
 ``Real16InvocationDomain8616`` premise may discharge only the
 selector-window obligation for one exact callsite under its proven CS
 domain; the default all-fetch-windows bound is unchanged and always
-authoritative when the premise is absent or insufficient.
+authoritative when the premise is absent or insufficient. An optional
+``DeclaredSelectorCallsite8616`` projection may instead discharge the
+same window for its exact retained scope/block/instruction/coordinate
+identity, and only after the canonical producer authenticates the
+current certificate, root, native, and authority state; a provided
+projection is revalidated on every consumption and is never laundered
+into the universal bound.
 
 Owns instruction effects, flags, branch meaning, and expression
 interpretation. Do not perform alias-state ownership, widening,
@@ -32,9 +38,10 @@ CLI/reporting work here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import angr
 import pyvex
@@ -49,6 +56,10 @@ from inertia.ir.real16_invocation_domain import (
     Real16CallInvocation8616,
     Real16InvocationDomain8616,
 )
+from inertia.ir.source_graph_binding import (
+    SourceGraphSerializationError8616,
+    canonical_source_graph_8616,
+)
 from inertia.semantics.callsite_summary import (
     CallsiteMachineFrameKind8616,
     CallsiteSummary8616,
@@ -60,13 +71,18 @@ from .direct_ret_call_effect import (
     direct_near_call_target_is_bound_8616,
 )
 
+if TYPE_CHECKING:
+    from inertia.ir.declared_selector_invariant import DeclaredSelectorCallsite8616
+
 __all__ = [
     "DirectNearCallCoordinates8616",
     "DirectNearCallTargetBinding8616",
     "DirectNearCallTargetBindingFailure8616",
+    "DirectNearCallTargetBindingPending8616",
     "DirectNearCallTargetBindingStats8616",
     "DirectNearCallTargetBindingVerdict8616",
     "DirectNearCallTargetShape8616",
+    "prepare_declared_near_call_target_binding_pending_8616",
     "prove_declared_direct_near_call_target_binding_at_coordinates_8616",
     "prove_direct_near_call_target_binding_8616",
     "prove_direct_near_call_target_binding_at_coordinates_8616",
@@ -75,6 +91,14 @@ __all__ = [
 
 _MAX_ALIAS_DEPTH_8616 = 16
 _CS_SEGMENT_REGISTER_8616 = "cs"
+
+
+class _DirectNearInvocationConsumer8616(Protocol):
+    """Synchronous owner that authenticates one exact invocation after native gates."""
+
+    def __call__(self, invocation: Real16CallInvocation8616, /) -> bool:
+        """Return whether a freshly replayed premise discharges this exact use."""
+        ...
 
 
 class _TargetBindingKind8616(StrEnum):
@@ -87,6 +111,7 @@ class _TargetBindingKind8616(StrEnum):
 class DirectNearCallTargetBindingVerdict8616(StrEnum):
     """Evidence result for one symbolic direct near CALL target."""
 
+    PENDING = "pending"
     PROVEN = "proven"
     UNKNOWN_REFUSE = "unknown_refuse"
 
@@ -114,12 +139,14 @@ class DirectNearCallTargetBindingFailure8616(StrEnum):
     DISPLACEMENT_MISMATCH = "displacement_mismatch"
     TARGET_BYTES_MISMATCH = "target_bytes_mismatch"
     SELECTOR_WINDOW_UNPROVED = "selector_window_unproved"
+    SELECTOR_AUTHORIZATION_CONFLICT = "selector_authorization_conflict"
     CONTROL_DOMAIN_UNPROVED = "control_domain_unproved"
     TERMINAL_POSITION_MISMATCH = "terminal_position_mismatch"
     NATIVE_TERMINAL_MISMATCH = "native_terminal_mismatch"
     DECODED_INSTRUCTION_MISSING = "decoded_instruction_missing"
     DECODED_ENCODING_MISMATCH = "decoded_encoding_mismatch"
     DECODED_TARGET_MISMATCH = "decoded_target_mismatch"
+    PENDING_SOURCE_CHANGED = "pending_source_changed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +273,7 @@ class DirectNearCallTargetBinding8616:
     stats: DirectNearCallTargetBindingStats8616
     shape: DirectNearCallTargetShape8616 | None = None
     invocation: Real16CallInvocation8616 | None = None
+    selector_binding: DeclaredSelectorCallsite8616 | None = None
 
     @property
     def complete(self) -> bool:
@@ -255,7 +283,8 @@ class DirectNearCallTargetBinding8616:
             and self.failure is None
             and _retained_coordinate_facts_8616(self.callsite_addr, self.target_addr, self.shape)
             and _retained_selector_domain_8616(
-                self.callsite_addr, self.target_addr, self.invocation
+                self.callsite_addr, self.target_addr, self.invocation,
+                self.selector_binding,
             )
             and self.stats
             == DirectNearCallTargetBindingStats8616(1, 1, 1, 1, 0)
@@ -275,6 +304,17 @@ class DirectNearCallTargetBinding8616:
                 None
                 if self.invocation is None
                 else self.invocation.premise.to_dict()
+            ),
+            "selector_binding": (
+                None
+                if self.selector_binding is None
+                else {
+                    "declared_premise": type(self.selector_binding).__name__,
+                    "callsite_addr": self.selector_binding.callsite_addr,
+                    "target_addr": self.selector_binding.target_addr,
+                    "next_addr": self.selector_binding.next_addr,
+                    "incoming_cs": self.selector_binding.incoming_cs,
+                }
             ),
         }
 
@@ -331,20 +371,116 @@ def _retained_coordinate_facts_8616(
             and target == shape.next_linear_addr + _signed16_8616(shape.displacement))
 
 
+def _retained_binding_fields_equal_8616(
+    binding: DirectNearCallTargetBinding8616,
+    replayed: DirectNearCallTargetBinding8616,
+) -> bool:
+    """Reconcile owned primitive fields without running callbacks after replay."""
+    if not _binding_record_primitives_8616(binding) or not _binding_record_primitives_8616(replayed):
+        return False
+    offered, checked = binding.invocation, replayed.invocation
+    if offered is None or checked is None:
+        invocation_equal = offered is None and checked is None
+    else:
+        invocation_equal = (
+            type(offered) is Real16CallInvocation8616
+            and type(checked) is Real16CallInvocation8616
+            and offered.project is checked.project and offered.block is checked.block
+            and offered.premise is checked.premise
+            and all(type(value) is int for value in (
+                offered.callsite_addr, offered.target_addr, checked.callsite_addr, checked.target_addr,
+            ))
+            and offered.callsite_addr == checked.callsite_addr
+            and offered.target_addr == checked.target_addr
+        )
+    return (
+        invocation_equal
+        and binding.selector_binding is replayed.selector_binding
+        and binding.stats == replayed.stats
+        and binding.shape == replayed.shape
+        and binding.callsite_addr == replayed.callsite_addr
+        and binding.target_addr == replayed.target_addr
+    )
+
+
+def _binding_record_primitives_8616(binding: DirectNearCallTargetBinding8616) -> bool:
+    """Require exact owned records and scalar fields before pure reconciliation."""
+    if type(binding) is not DirectNearCallTargetBinding8616:
+        return False
+    shape = binding.shape
+    return (
+        type(binding.stats) is DirectNearCallTargetBindingStats8616
+        and binding.stats.closed
+        and type(shape) is DirectNearCallTargetShape8616
+        and type(shape.segment_register) is str
+        and _retained_coordinate_facts_8616(binding.callsite_addr, binding.target_addr, shape)
+        and binding.verdict is DirectNearCallTargetBindingVerdict8616.PROVEN
+        and binding.failure is None
+    )
+
+
+def _selector_projection_types_8616(
+) -> tuple[
+    type[DeclaredSelectorCallsite8616],
+    Callable[[object, DeclaredSelectorCallsite8616], bool],
+]:
+    """Lazily resolve the canonical declared-selector producer surface.
+
+    IR-side selector producers import this semantics module, so the callsite
+    contract is imported only when a projection is actually offered or
+    revalidated. The default and full-invocation paths never resolve it; a
+    missing producer fails loudly instead of fabricating a substitute.
+    """
+    from inertia.ir.declared_selector_invariant import (
+        DeclaredSelectorCallsite8616,
+        consume_declared_selector_callsite_8616,
+    )
+    return DeclaredSelectorCallsite8616, consume_declared_selector_callsite_8616
+
+
+def _retained_selector_projection_8616(
+    callsite: int,
+    target: int,
+    projection: DeclaredSelectorCallsite8616,
+) -> bool:
+    """Revalidate a retained declared-selector projection at consumption.
+
+    The producer alone authenticates the current certificate, root, native,
+    and authority state for the projection's retained scope project; the
+    same projection object must still name this exact callsite/target pair.
+    """
+    callsite_type, consume = _selector_projection_types_8616()
+    if type(projection) is not callsite_type:
+        return False
+    scope = projection.scope
+    if scope is None or scope.project is None:
+        return False
+    return bool(
+        projection.callsite_addr == callsite
+        and projection.target_addr == target
+        and consume(scope.project, projection)
+    )
+
+
 def _retained_selector_domain_8616(
     callsite: int | None,
     target: int | None,
     invocation: Real16CallInvocation8616 | None,
+    selector_binding: DeclaredSelectorCallsite8616 | None = None,
 ) -> bool:
     """Recheck the selector-window obligation when a result is consumed.
 
     The default all-fetch-windows bound is always authoritative. A bound
     ``Real16CallInvocation8616`` may additionally discharge the obligation
     for one exact callsite/target pair, and only after its premise and
-    consumption binding replay completely.
+    consumption binding replay completely. A retained declared-selector
+    projection is conditional authority: it is revalidated on every
+    consumption even when the target would also fit every fetch window.
     """
     if type(callsite) is not int or type(target) is not int:
         return False
+    if selector_binding is not None:
+        return _retained_selector_projection_8616(callsite, target, selector_binding)
     if _target_in_all_fetch_windows_8616(callsite, target):
         return True
     return bool(
@@ -971,9 +1107,19 @@ def _bound_selector_invocation_8616(
     block: IRBlock,
     coordinates: DirectNearCallCoordinates8616,
     invocation: Real16InvocationDomain8616 | None,
+    consumer: _DirectNearInvocationConsumer8616 | None = None,
+    factory: Callable[[], Real16CallInvocation8616 | None] | None = None,
 ) -> Real16CallInvocation8616 | None:
-    """Consume an invocation premise only when all-selector bounds fail."""
-    if _target_in_all_fetch_windows_8616(
+    """Consume the normal premise or an immediate owner after native gates."""
+    if factory is not None:
+        constructed = factory()
+        if (type(constructed) is Real16CallInvocation8616
+                and constructed.project is project and constructed.block is block
+                and constructed.callsite_addr == coordinates.callsite_addr
+                and constructed.target_addr == coordinates.target_addr):
+            return constructed
+        return None
+    if consumer is None and _target_in_all_fetch_windows_8616(
         coordinates.callsite_addr, coordinates.target_addr,
     ):
         return None
@@ -986,9 +1132,69 @@ def _bound_selector_invocation_8616(
         project=project,
         block=block,
     )
-    if candidate.complete:
+    if candidate.complete if consumer is None else consumer(candidate):
         return candidate
     return None
+
+
+def _selector_projection_coordinates_8616(
+    projection: DeclaredSelectorCallsite8616,
+    coordinates: DirectNearCallCoordinates8616,
+) -> bool:
+    """Require the offered projection to name this exact coordinate triple."""
+    return bool(
+        type(projection.callsite_addr) is int
+        and type(projection.target_addr) is int
+        and type(projection.next_addr) is int
+        and type(projection.incoming_cs) is int
+        and 0 <= projection.incoming_cs <= 0xFFFF
+        and projection.callsite_addr == coordinates.callsite_addr
+        and projection.target_addr == coordinates.target_addr
+        and projection.next_addr == coordinates.next_addr
+    )
+
+
+def _selector_projection_identity_8616(
+    project: object,
+    block: IRBlock,
+    instruction: IRInstr,
+    projection: DeclaredSelectorCallsite8616,
+) -> bool:
+    """Require exact retained scope, block, and instruction identities."""
+    return bool(
+        projection.scope is not None
+        and projection.scope.project is project
+        and projection.block is block
+        and projection.instruction is instruction
+    )
+
+
+def _bound_declared_selector_8616(
+    project: object,
+    block: IRBlock,
+    instruction: IRInstr,
+    coordinates: DirectNearCallCoordinates8616,
+    projection: DeclaredSelectorCallsite8616,
+) -> DeclaredSelectorCallsite8616 | None:
+    """Authenticate one offered declared-selector callsite projection.
+
+    A projection may discharge only the selector-window obligation, and only
+    for its exact retained scope ``project``, ``block``, ``instruction``,
+    and callsite/target/continuation coordinates; the producer alone
+    authenticates the current certificate, root, native, and authority
+    state. The same projection object is returned on success so retained
+    identity — never a copy — is what later reconciliation compares.
+    """
+    callsite_type, consume = _selector_projection_types_8616()
+    if type(projection) is not callsite_type:
+        return None
+    if (
+        not _selector_projection_identity_8616(project, block, instruction, projection)
+        or not _selector_projection_coordinates_8616(projection, coordinates)
+        or not consume(project, projection)
+    ):
+        return None
+    return projection
 
 
 def _target_bytes_bound_8616(
@@ -1010,34 +1216,95 @@ def _target_bytes_bound_8616(
     )
 
 
-def _prove_binding_core_8616(
+def _selector_window_outcome_8616(
     project: object,
     block: IRBlock,
     instruction: IRInstr,
     coordinates: DirectNearCallCoordinates8616,
+    shape: DirectNearCallTargetShape8616,
     *,
-    invocation: Real16InvocationDomain8616 | None = None,
-    target_kind: _TargetBindingKind8616 = _TargetBindingKind8616.REAL_BODY,
-) -> DirectNearCallTargetBinding8616:
-    """Bind the symbolic CALL operand to the proven coordinate triple.
+    invocation: Real16InvocationDomain8616 | None,
+    target_kind: _TargetBindingKind8616,
+    invocation_consumer: _DirectNearInvocationConsumer8616 | None,
+    invocation_factory: Callable[[], Real16CallInvocation8616 | None] | None,
+    selector_binding: DeclaredSelectorCallsite8616 | None,
+) -> tuple[
+    Real16CallInvocation8616 | None,
+    DeclaredSelectorCallsite8616 | None,
+] | DirectNearCallTargetBinding8616:
+    """Discharge the selector-window obligation or return the refusal.
 
-    Shared by every coordinate source: the operand DAG, retained origin
-    provenance, native re-lift, recovered shape constants, selector fetch
-    window, and mapped byte checks are identical regardless of who derived
-    the coordinates. ``invocation`` is an optional source-bound premise
-    that may discharge only the selector-window obligation for the exact
-    proven CS domain at this callsite; every other check is unchanged.
+    Conflicting full-invocation and declared-selector authorizations refuse
+    rather than silently choosing. The synchronous route checks mapped
+    target bytes before the consumer or producer authentication, matching
+    the existing invocation path; a refused projection leaves the window
+    unproved even when the target would fit every fetch window.
     """
     callsite_addr = coordinates.callsite_addr
     target_addr = coordinates.target_addr
-    operand = _control_operand_8616(callsite_addr, target_addr, instruction)
-    if isinstance(operand, DirectNearCallTargetBinding8616):
-        return operand
-    provenance = _origin_provenance_8616(
-        project, block, instruction, operand, coordinates,
+    if selector_binding is not None and (
+        invocation is not None
+        or invocation_consumer is not None
+        or invocation_factory is not None
+    ):
+        return _refuse_8616(
+            callsite_addr, target_addr,
+            DirectNearCallTargetBindingFailure8616.SELECTOR_AUTHORIZATION_CONFLICT,
+            normalized=True,
+            classified=True,
+            shape=shape,
+        )
+    # The synchronous consumer runs last: native-loader callbacks cannot
+    # invalidate the caller census whose exact capture it hands back to IR.
+    synchronous = (
+        invocation_consumer is not None or invocation_factory is not None
+        or selector_binding is not None
     )
-    if isinstance(provenance, DirectNearCallTargetBinding8616):
-        return provenance
+    if synchronous and not _target_bytes_bound_8616(project, coordinates, target_kind):
+        return _refuse_8616(
+            callsite_addr, target_addr,
+            DirectNearCallTargetBindingFailure8616.TARGET_BYTES_MISMATCH,
+            normalized=True,
+            classified=True,
+            shape=shape,
+        )
+    bound_invocation: Real16CallInvocation8616 | None = None
+    bound_selector: DeclaredSelectorCallsite8616 | None = None
+    if selector_binding is not None:
+        bound_selector = _bound_declared_selector_8616(
+            project, block, instruction, coordinates, selector_binding,
+        )
+    else:
+        bound_invocation = _bound_selector_invocation_8616(
+            project, block, coordinates, invocation, invocation_consumer, invocation_factory,
+        )
+    if bound_invocation is None and bound_selector is None and (
+        synchronous or not _target_in_all_fetch_windows_8616(callsite_addr, target_addr)
+    ):
+        return _refuse_8616(
+            callsite_addr, target_addr,
+            DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED,
+            normalized=True, classified=True, shape=shape,
+        )
+    if not synchronous and not _target_bytes_bound_8616(project, coordinates, target_kind):
+        return _refuse_8616(
+            callsite_addr, target_addr,
+            DirectNearCallTargetBindingFailure8616.TARGET_BYTES_MISMATCH,
+            normalized=True,
+            classified=True,
+            shape=shape,
+        )
+    return bound_invocation, bound_selector
+
+
+def _operand_shape_outcome_8616(
+    block: IRBlock,
+    operand: IRValue,
+    coordinates: DirectNearCallCoordinates8616,
+) -> DirectNearCallTargetShape8616 | DirectNearCallTargetBinding8616:
+    """Apply one shared, callback-free operand DAG and coordinate analysis."""
+    callsite_addr = coordinates.callsite_addr
+    target_addr = coordinates.target_addr
     producers = _tmp_producers_8616(block)
     if producers is None:
         return _refuse_8616(
@@ -1056,23 +1323,56 @@ def _prove_binding_core_8616(
     shape_failure = _shape_coordinate_failure_8616(coordinates, shape)
     if shape_failure is not None:
         return shape_failure
-    bound_invocation = _bound_selector_invocation_8616(
-        project, block, coordinates, invocation,
+    return shape
+
+
+def _prove_binding_core_8616(
+    project: object,
+    block: IRBlock,
+    instruction: IRInstr,
+    coordinates: DirectNearCallCoordinates8616,
+    *,
+    invocation: Real16InvocationDomain8616 | None = None,
+    target_kind: _TargetBindingKind8616 = _TargetBindingKind8616.REAL_BODY,
+    invocation_consumer: _DirectNearInvocationConsumer8616 | None = None,
+    invocation_factory: Callable[[], Real16CallInvocation8616 | None] | None = None,
+    selector_binding: DeclaredSelectorCallsite8616 | None = None,
+) -> DirectNearCallTargetBinding8616:
+    """Bind the symbolic CALL operand to the proven coordinate triple.
+
+    Shared by every coordinate source: the operand DAG, retained origin
+    provenance, native re-lift, recovered shape constants, selector fetch
+    window, and mapped byte checks are identical regardless of who derived
+    the coordinates. ``invocation`` is an optional source-bound premise
+    that may discharge only the selector-window obligation for the exact
+    proven CS domain at this callsite; ``selector_binding`` is an optional
+    producer-authenticated declared-selector projection for the same
+    obligation under its exact retained scope identity. The two
+    authorizations conflict and refuse rather than silently choosing;
+    every other check is unchanged.
+    """
+    callsite_addr = coordinates.callsite_addr
+    target_addr = coordinates.target_addr
+    operand = _control_operand_8616(callsite_addr, target_addr, instruction)
+    if isinstance(operand, DirectNearCallTargetBinding8616):
+        return operand
+    provenance = _origin_provenance_8616(
+        project, block, instruction, operand, coordinates,
     )
-    if not _target_in_all_fetch_windows_8616(callsite_addr, target_addr) and bound_invocation is None:
-        return _refuse_8616(
-            callsite_addr, target_addr,
-            DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED,
-            normalized=True, classified=True, shape=shape,
-        )
-    if not _target_bytes_bound_8616(project, coordinates, target_kind):
-        return _refuse_8616(
-            callsite_addr, target_addr,
-            DirectNearCallTargetBindingFailure8616.TARGET_BYTES_MISMATCH,
-            normalized=True,
-            classified=True,
-            shape=shape,
-        )
+    if isinstance(provenance, DirectNearCallTargetBinding8616):
+        return provenance
+    shape = _operand_shape_outcome_8616(block, operand, coordinates)
+    if isinstance(shape, DirectNearCallTargetBinding8616):
+        return shape
+    outcome = _selector_window_outcome_8616(
+        project, block, instruction, coordinates, shape,
+        invocation=invocation, target_kind=target_kind,
+        invocation_consumer=invocation_consumer, invocation_factory=invocation_factory,
+        selector_binding=selector_binding,
+    )
+    if isinstance(outcome, DirectNearCallTargetBinding8616):
+        return outcome
+    bound_invocation, bound_selector = outcome
     return DirectNearCallTargetBinding8616(
         callsite_addr=callsite_addr,
         target_addr=target_addr,
@@ -1081,7 +1381,215 @@ def _prove_binding_core_8616(
         stats=DirectNearCallTargetBindingStats8616(1, 1, 1, 1, 0),
         shape=shape,
         invocation=bound_invocation,
+        selector_binding=bound_selector,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class DirectNearCallTargetBindingPending8616:
+    """Non-proof analysis retained only until synchronous batch admission.
+
+    Native and mapped-byte gates have run, but the selector obligation is
+    deliberately unresolved. The detached canonical block surface includes
+    every owned field, including provenance excluded from dataclass equality.
+    A collector charges the preparation and final reconciliation traversals
+    to its ambient budget; this record never grants cached public authority.
+    """
+
+    project: object
+    block: IRBlock
+    instruction: IRInstr
+    operand: IRValue
+    origin: IRInstructionOrigin8616
+    coordinates: DirectNearCallCoordinates8616
+    selector_binding: DeclaredSelectorCallsite8616
+    selector_type: type[DeclaredSelectorCallsite8616]
+    selector_scope: object
+    incoming_cs: int
+    shape: DirectNearCallTargetShape8616
+    coordinate_facts: tuple[int, int, int]
+    shape_facts: tuple[str, int, int, int]
+    source_graph: str
+    instructions: tuple[IRInstr, ...]
+    instruction_index: int
+    verdict: DirectNearCallTargetBindingVerdict8616 = DirectNearCallTargetBindingVerdict8616.PENDING
+
+
+def _pending_source_graph_8616(block: IRBlock) -> str | None:
+    """Capture complete owned source facts without loader or proof callbacks."""
+    try:
+        return cast(str, canonical_source_graph_8616(block.addr, (block,)))
+    except SourceGraphSerializationError8616:
+        return None
+
+
+def _offered_pending_projection_8616(
+    project: object, block: IRBlock, instruction: IRInstr,
+    projection: DeclaredSelectorCallsite8616,
+    coordinates: DirectNearCallCoordinates8616,
+    *, instructions: tuple[IRInstr, ...] | None = None,
+    instruction_index: int | None = None,
+) -> bool:
+    """Check canonical projection and exact offer identity without consumption."""
+    if instructions is None:
+        instructions = block.instrs
+    if instruction_index is None:
+        instruction_index = next((index for index, row in enumerate(instructions)
+                                  if row is instruction), None)
+    if instruction_index is None:
+        return False
+    callsite_type, _consume = _selector_projection_types_8616()
+    return bool(
+        type(projection) is callsite_type
+        and _selector_projection_identity_8616(project, block, instruction, projection)
+        and _selector_projection_coordinates_8616(projection, coordinates)
+        and _pending_instruction_slot_current_8616(block, instruction, instructions, instruction_index)
+    )
+
+
+def _pending_instruction_slot_current_8616(
+    block: IRBlock, instruction: IRInstr, instructions: tuple[IRInstr, ...], index: int,
+) -> bool:
+    """Reconcile an exact stream and slot, without granting source-graph proof."""
+    return (block.instrs is instructions and type(index) is int
+            and 0 <= index < len(instructions) and instructions[index] is instruction)
+
+
+def prepare_declared_near_call_target_binding_pending_8616(
+    project: object,
+    *,
+    block: IRBlock,
+    instruction: IRInstr,
+    coordinates: DirectNearCallCoordinates8616,
+    selector_binding: DeclaredSelectorCallsite8616,
+) -> DirectNearCallTargetBindingPending8616 | DirectNearCallTargetBinding8616:
+    """Run shared native/operand gates, leaving selector admission pending.
+
+    Preparation authenticates neither the offered selector certificate nor
+    its current authority. The canonical IR batch owner must admit that exact
+    projection after all callbacks, then immediately run the pure finalizer.
+    """
+    callsite, target = coordinates.callsite_addr, coordinates.target_addr
+    instructions = block.instrs
+    instruction_index = next((index for index, row in enumerate(instructions)
+                              if row is instruction), None)
+    if not _offered_pending_projection_8616(
+        project, block, instruction, selector_binding, coordinates,
+        instructions=instructions, instruction_index=instruction_index,
+    ):
+        return _refuse_8616(
+            callsite, target, DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED)
+    assert instruction_index is not None
+    identity = _call_identity_8616(instruction, callsite, target, block)
+    if isinstance(identity, DirectNearCallTargetBinding8616):
+        return identity
+    selector_scope = selector_binding.scope
+    incoming_cs = selector_binding.incoming_cs
+    source_graph = _pending_source_graph_8616(block)
+    if source_graph is None:
+        return _refuse_8616(
+            callsite, target, DirectNearCallTargetBindingFailure8616.PENDING_SOURCE_CHANGED)
+    operand = _control_operand_8616(callsite, target, instruction)
+    if isinstance(operand, DirectNearCallTargetBinding8616):
+        return operand
+    provenance = _origin_provenance_8616(project, block, instruction, operand, coordinates)
+    if isinstance(provenance, DirectNearCallTargetBinding8616):
+        return provenance
+    shape = _operand_shape_outcome_8616(block, operand, coordinates)
+    if isinstance(shape, DirectNearCallTargetBinding8616):
+        return shape
+    if not _target_bytes_bound_8616(project, coordinates, _TargetBindingKind8616.REAL_BODY):
+        return _refuse_8616(
+            callsite, target, DirectNearCallTargetBindingFailure8616.TARGET_BYTES_MISMATCH,
+            normalized=True, classified=True, shape=shape)
+    if source_graph != _pending_source_graph_8616(block):
+        return _refuse_8616(
+            callsite, target, DirectNearCallTargetBindingFailure8616.PENDING_SOURCE_CHANGED,
+            normalized=True, classified=True, shape=shape)
+    if (not _offered_pending_projection_8616(
+            project, block, instruction, selector_binding, coordinates,
+            instructions=instructions, instruction_index=instruction_index)
+            or selector_binding.scope is not selector_scope
+            or selector_binding.incoming_cs != incoming_cs):
+        return _refuse_8616(
+            callsite, target, DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED)
+    return DirectNearCallTargetBindingPending8616(
+        project=project, block=block, instruction=instruction, operand=operand,
+        origin=provenance, coordinates=coordinates, selector_binding=selector_binding,
+        selector_type=type(selector_binding), selector_scope=selector_scope, incoming_cs=incoming_cs,
+        shape=shape, coordinate_facts=(callsite, coordinates.next_addr, target),
+        shape_facts=(shape.segment_register, shape.next_linear_addr,
+                     shape.displacement, shape.control_bits), source_graph=source_graph,
+        instructions=instructions, instruction_index=instruction_index)
+
+
+def _pending_projection_facts_8616(pending: DirectNearCallTargetBindingPending8616) -> bool:
+    """Reconcile retained scope and exact projection identity without imports."""
+    projection = pending.selector_binding
+    return bool(
+        type(projection) is pending.selector_type
+        and projection.scope is pending.selector_scope
+        and projection.incoming_cs == pending.incoming_cs
+        and _selector_projection_identity_8616(
+            pending.project, pending.block, pending.instruction, projection)
+        and _selector_projection_coordinates_8616(projection, pending.coordinates)
+    )
+
+
+def _pending_coordinate_facts_8616(pending: DirectNearCallTargetBindingPending8616) -> bool:
+    """Reconcile immutable coordinates and retained instruction membership."""
+    coordinates = pending.coordinates
+    return bool(
+        (coordinates.callsite_addr, coordinates.next_addr, coordinates.target_addr)
+        == pending.coordinate_facts
+        and _pending_instruction_slot_current_8616(
+            pending.block, pending.instruction, pending.instructions, pending.instruction_index)
+    )
+
+
+def _pending_semantic_identity_8616(pending: DirectNearCallTargetBindingPending8616) -> bool:
+    """Require exact retained operand/origin and immutable recovered shape facts."""
+    instruction, shape = pending.instruction, pending.shape
+    return bool(
+        pending.verdict is DirectNearCallTargetBindingVerdict8616.PENDING
+        and len(instruction.args) == 1
+        and instruction.args[0] is pending.operand
+        and instruction.origin is pending.origin
+        and (shape.segment_register, shape.next_linear_addr, shape.displacement, shape.control_bits)
+        == pending.shape_facts
+    )
+
+
+def _seal_declared_selector_binding_8616(
+    pending: DirectNearCallTargetBindingPending8616,
+    *,
+    admitted: bool,
+) -> DirectNearCallTargetBinding8616:
+    """Materialize immediate batch admission after a callback-free source seal.
+
+    This private seam consumes the batch verdict synchronously. Public binding
+    consumers continue to authenticate their mutable source on every use.
+    """
+    if type(pending) is not DirectNearCallTargetBindingPending8616:
+        return _refuse_8616(
+            None, None, DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED)
+    callsite, _next_addr, target = pending.coordinate_facts
+    refusal = DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED
+    if admitted is not True:
+        return _refuse_8616(callsite, target, refusal, normalized=True)
+    projection = pending.selector_binding
+    if (not _pending_projection_facts_8616(pending)
+            or not _pending_coordinate_facts_8616(pending)
+            or not _pending_semantic_identity_8616(pending)
+            or _pending_source_graph_8616(pending.block) != pending.source_graph):
+        return _refuse_8616(
+            callsite, target, DirectNearCallTargetBindingFailure8616.PENDING_SOURCE_CHANGED,
+            normalized=True, classified=True, shape=pending.shape)
+    return DirectNearCallTargetBinding8616(
+        callsite_addr=callsite, target_addr=target,
+        verdict=DirectNearCallTargetBindingVerdict8616.PROVEN, failure=None,
+        stats=DirectNearCallTargetBindingStats8616(1, 1, 1, 1, 0),
+        shape=pending.shape, selector_binding=projection)
 
 
 def prove_direct_near_call_target_binding_at_coordinates_8616(
@@ -1091,12 +1599,17 @@ def prove_direct_near_call_target_binding_at_coordinates_8616(
     instruction: IRInstr,
     coordinates: DirectNearCallCoordinates8616,
     invocation: Real16InvocationDomain8616 | None = None,
+    selector_binding: DeclaredSelectorCallsite8616 | None = None,
 ) -> DirectNearCallTargetBinding8616:
     """Shared owner: bind the symbolic CALL operand to typed coordinates.
 
     ``coordinates`` is the only authority for callsite, continuation, and
     full-width target; the IR instruction identity is still verified against
     them before the operand DAG, provenance, and native-byte stages run.
+    ``selector_binding`` is an optional declared-selector projection that
+    may discharge only the selector-window obligation after the producer
+    authenticates it for this exact project, block, instruction, and
+    coordinate triple; it conflicts with any full-invocation authorization.
     """
     identity = _call_identity_8616(
         instruction, coordinates.callsite_addr, coordinates.target_addr, block,
@@ -1104,7 +1617,8 @@ def prove_direct_near_call_target_binding_at_coordinates_8616(
     if isinstance(identity, DirectNearCallTargetBinding8616):
         return identity
     return _prove_binding_core_8616(
-        project, block, instruction, coordinates, invocation=invocation
+        project, block, instruction, coordinates, invocation=invocation,
+        selector_binding=selector_binding,
     )
 
 
@@ -1137,6 +1651,57 @@ def prove_declared_direct_near_call_target_binding_at_coordinates_8616(
     return _prove_binding_core_8616(
         project, block, instruction, coordinates, invocation=invocation,
         target_kind=_TargetBindingKind8616.DECLARED_STUB,
+    )
+
+
+def _consume_direct_near_call_target_binding_from_decoded_8616(
+    project: object,
+    *,
+    block: IRBlock,
+    instruction: IRInstr,
+    decoded: DecodedDirectCallsite8616,
+    invocation: Real16InvocationDomain8616,
+    consumer: _DirectNearInvocationConsumer8616,
+) -> DirectNearCallTargetBinding8616:
+    """Run native binding gates before one synchronous invocation consumption.
+
+    The owner consumes its fresh replay only after all native/provenance reads.
+    Returned binding fields are reconciled without another callback or replay.
+    This producer creates no retained authentication or proof cache.
+    """
+    coordinates = _decoded_call_coordinates_8616(decoded)
+    if isinstance(coordinates, DirectNearCallTargetBinding8616):
+        return coordinates
+    identity = _call_identity_8616(instruction, coordinates.callsite_addr, coordinates.target_addr, block)
+    if isinstance(identity, DirectNearCallTargetBinding8616):
+        return identity
+    return _prove_binding_core_8616(
+        project, block, instruction, coordinates, invocation=invocation,
+        invocation_consumer=consumer,
+    )
+
+
+
+def _construct_direct_near_call_target_binding_from_decoded_8616(
+    project: object,
+    *, block: IRBlock, instruction: IRInstr,
+    decoded: DecodedDirectCallsite8616,
+    factory: Callable[[], Real16CallInvocation8616 | None],
+) -> DirectNearCallTargetBinding8616:
+    """Run native gates before an IR-owned synchronous fresh construction.
+
+    This private seam retains no callback or provisional premise. Its canonical
+    factory authenticates the caller after the last native read; only owned
+    coordinate fields and the resulting binding are assembled afterward.
+    """
+    coordinates = _decoded_call_coordinates_8616(decoded)
+    if isinstance(coordinates, DirectNearCallTargetBinding8616):
+        return coordinates
+    identity = _call_identity_8616(instruction, coordinates.callsite_addr, coordinates.target_addr, block)
+    if isinstance(identity, DirectNearCallTargetBinding8616):
+        return identity
+    return _prove_binding_core_8616(
+        project, block, instruction, coordinates, invocation_factory=factory,
     )
 
 

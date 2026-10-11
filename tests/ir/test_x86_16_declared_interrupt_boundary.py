@@ -16,7 +16,15 @@ from pathlib import Path
 from typing import cast
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.mz_static_boot import (
+    mz_static_boot_8616,
+    recompute_mz_static_boot_8616,
+)
 from inertia.ir.function_ir_registry import (
     publish_function_ir_artifact_8616,
 )
@@ -35,14 +43,6 @@ from inertia.ir.real16_invocation_domain import (
     real16_invocation_discharges_8616,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    exact_function_range_boundary_8616,
-)
-from inertia.frontend.x86_16.mz_static_boot import (
-    mz_static_boot_8616,
-    recompute_mz_static_boot_8616,
-)
 from tools.dosunit.runtime.real16_declared_invocation8616 import (
     declared_int21_version_service_8616,
 )

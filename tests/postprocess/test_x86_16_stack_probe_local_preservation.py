@@ -14,14 +14,14 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
+from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+from inertia.lowering.call_argument_carrier_liveness import call_argument_setup_is_proven_dead_8616
 from inertia.postprocess.decompiler_postprocess_calls import (
     _bind_call_argument_setup_liveness_classifier_8616,
     _materialize_callsite_stack_arguments_8616,
 )
-from inertia.lowering.call_argument_carrier_liveness import call_argument_setup_is_proven_dead_8616
-
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from tests.lowering.test_x86_16_stack_probe_return_state_regression import _DummyCodegen, _project
 
 

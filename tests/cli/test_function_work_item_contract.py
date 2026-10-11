@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from inertia.cli.lst_extract import LSTMetadata
 import inertia.cli.cli_core as cli_core
+from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.work_items import (
     FunctionWorkExecutionOrigin8616,
     FunctionWorkItem,

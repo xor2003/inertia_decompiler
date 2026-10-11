@@ -3,15 +3,15 @@
 from dataclasses import replace
 
 import pytest
+
+from inertia.alias.condition_register_carriers import (
+    normalize_condition_register_carriers_8616,
+)
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 from inertia.lowering.condition_transfer import (
     _condition_matches_current_owner_8616,
     _ConditionBlockOwner8616,
-)
-
-from inertia.alias.condition_register_carriers import (
-    normalize_condition_register_carriers_8616,
 )
 
 

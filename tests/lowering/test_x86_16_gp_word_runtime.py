@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+import tools.compiler_toolchain.build_msc6_examples as build
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 from inertia.lowering.gp_register_state import (
@@ -18,8 +20,6 @@ from inertia.lowering.gp_word_runtime import (
     gp_runtime_abi_8616,
     select_gp_runtime_abi_8616,
 )
-
-import tools.compiler_toolchain.build_msc6_examples as build
 from tools.compiler_toolchain.msc6_runtime_support import msc6_runtime_state_declarations, msc6_runtime_support_source
 
 
@@ -52,8 +52,8 @@ def test_lowering_rejects_corrupt_existing_abi_before_processing_ast(invalid):
 def test_final_result_cache_tracks_gp_runtime_and_projection_owners():
     from pathlib import Path
 
-    from inertia.lowering import gp_word_assignment, gp_word_runtime
     from inertia.cli.cache import DECOMPILATION_CACHE_SOURCE_FILES
+    from inertia.lowering import gp_word_assignment, gp_word_runtime
 
     for owner_module, leaf in (
         (gp_word_runtime, "gp_word_runtime.py"),

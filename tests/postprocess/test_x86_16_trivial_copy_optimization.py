@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import inertia.postprocess.decompiler_postprocess_stage as postprocess_stage
 import archinfo
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.postprocess.decompiler_postprocess_stage import finalize_late_ast_cleanup_8616
 
+import inertia.postprocess.decompiler_postprocess_stage as postprocess_stage
+from inertia.postprocess.decompiler_postprocess_stage import finalize_late_ast_cleanup_8616
 from inertia.postprocess.optimization.trivial_copy import (
     prune_adjacent_temporary_copy_assignments_8616,
 )

@@ -3,10 +3,10 @@
 from types import SimpleNamespace
 
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeShort
+
 import inertia.frontend.x86_16.calling_convention_compat as calling_convention_compat
 import inertia.lowering.terminal_call_return_types as terminal_call_return_types
 import inertia.lowering.terminal_register_return_types as terminal_register_return_types
-
 from inertia.lowering.analysis_helpers import seed_calling_conventions
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616
 from tests.lowering.test_x86_16_terminal_call_return_types import _Insn, _project_and_function, _record_used_result

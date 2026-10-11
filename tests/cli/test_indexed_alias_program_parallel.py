@@ -4,6 +4,19 @@ import os
 from types import SimpleNamespace
 
 import pytest
+
+import inertia.cli.indexed_alias_program_parallel as indexed_alias_program_parallel
+from inertia.alias.indexed_address_program import (
+    IndexedAliasFunctionEvidence8616,
+    IndexedAliasFunctionRefusal8616,
+    IndexedAliasFunctionSelection8616,
+    IndexedAliasProgramFailureKind8616,
+    assemble_indexed_alias_program_evidence_8616,
+)
+from inertia.cli.indexed_alias_program_parallel import (
+    build_indexed_alias_program_evidence_bounded_8616,
+    indexed_alias_program_worker_count_8616,
+)
 from inertia.ir.core import IRFunctionArtifact
 from inertia.ir.function_ir_registry import (
     registered_function_ir_artifact_8616,
@@ -13,19 +26,6 @@ from inertia.ir.function_ssa_registry import (
     registered_function_ssa_artifact_8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
-
-from inertia.alias.indexed_address_program import (
-    IndexedAliasFunctionEvidence8616,
-    IndexedAliasFunctionRefusal8616,
-    IndexedAliasFunctionSelection8616,
-    IndexedAliasProgramFailureKind8616,
-    assemble_indexed_alias_program_evidence_8616,
-)
-import inertia.cli.indexed_alias_program_parallel as indexed_alias_program_parallel
-from inertia.cli.indexed_alias_program_parallel import (
-    build_indexed_alias_program_evidence_bounded_8616,
-    indexed_alias_program_worker_count_8616,
-)
 
 
 def _refusal(function_addr: int) -> IndexedAliasFunctionRefusal8616:

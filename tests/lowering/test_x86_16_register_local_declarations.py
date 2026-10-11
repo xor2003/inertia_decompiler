@@ -16,13 +16,14 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.rustylib.ailment import VirtualVariableCategory
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.postprocess.decompiler_postprocess_stage import (
-    _repair_missing_cnode_codegen_metadata_8616,
-)
 from inertia.lowering.register_local_declarations import (
     materialize_typed_register_locals_8616,
     register_typed_register_local_8616,
+)
+from inertia.postprocess.decompiler_postprocess_stage import (
+    _repair_missing_cnode_codegen_metadata_8616,
 )
 
 

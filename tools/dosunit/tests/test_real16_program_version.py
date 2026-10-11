@@ -3,10 +3,9 @@
 from dataclasses import replace
 
 import pytest
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
-from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment, program_from_mz_bytes
 from tools.dosunit.reporting.real16_program_manifest import parse_program_manifest
+from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment, program_from_mz_bytes
 from tools.dosunit.runtime.real16_program_model import (
     ProgramAgreement,
     ProgramEvent,
@@ -28,6 +27,7 @@ from tools.dosunit.runtime.real16_program_version import (
     version_policy_document,
 )
 from tools.dosunit.runtime.real16_replay_model import LinearRange
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 # mov eax,0x12345678; mov ebx,0x9ABCDEF0; mov ecx,0x01234567;
 # xor al,al; mov ah,0x30; stc; int 0x21; mov al,7; mov ah,0x4c; int 0x21
@@ -325,9 +325,9 @@ def test_public_version_report_declares_policy_and_validates_schema(tmp_path):
     from pathlib import Path
 
     from jsonschema import Draft202012Validator
-    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
+    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     args = arguments(tmp_path)
     image = mz(bytes.fromhex(QUERY_EXIT))

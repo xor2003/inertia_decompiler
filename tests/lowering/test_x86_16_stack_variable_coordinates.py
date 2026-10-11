@@ -5,12 +5,8 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeFixedSizeArray, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.postprocess.decompiler_postprocess_calls import (
-    _bind_call_argument_setup_liveness_classifier_8616,
-    _materialize_callsite_stack_arguments_8616,
-)
 from inertia.lowering.call_argument_carrier_liveness import (
     call_argument_setup_is_proven_dead_8616,
 )
@@ -40,6 +36,11 @@ from inertia.lowering.stack_variable_coordinates import (
 from inertia.lowering.stack_variable_display_names import (
     reapply_stack_variable_projection_names_8616,
 )
+from inertia.postprocess.decompiler_postprocess_calls import (
+    _bind_call_argument_setup_liveness_classifier_8616,
+    _materialize_callsite_stack_arguments_8616,
+)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def test_stack_variable_coordinate_registry_keeps_bp_and_entry_sp_distinct() -> None:

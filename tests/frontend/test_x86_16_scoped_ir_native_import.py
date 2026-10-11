@@ -12,9 +12,9 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.vex_import as importer
+import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
 from tools.dosunit.tests.test_x86_16_scoped_native_inputs import _view, world  # noqa: F401
 
 

@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .real16_invocation_domain import (
         Real16CallInvocation8616,
         Real16InvocationDomain8616,
+        _OwnedPrefixCensus8616,
     )
     from .segment_effect_closure import SegmentEffectClosureResult8616
 
@@ -82,20 +83,38 @@ _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616: int = 64
 _SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616: int = 256
 
 
+@dataclass(frozen=True, slots=True)
+class DeclaredInvocationConstructionKey8616:
+    """Active-only coordinates for one pending declared prefix construction.
+
+    Equivalent input wrappers cannot create another resource slot for the same
+    project/function/callsite. This key grants no proof or cached verdict.
+    """
+
+    project_identity: int
+    function_addr: int
+    callsite_addr: int
+
+
 @dataclass(slots=True)
 class SegmentCallDependencyTraversal8616:
     """Bounded one-shot traversal state for dependency-closure evaluation.
 
-    Keys are ``id()`` identities; every keyed object stays reachable from the
+    Completed-node keys are ``id()`` identities; every keyed object stays reachable from the
     root result for the whole traversal, so no identifier can be recycled
     while these maps live. ``active_*`` is the DFS stack used for cycle
-    detection; ``*_verdicts`` memoizes completed nodes so shared callees in a
+    detection. Pending declared constructions use active-only project/function/callsite
+    coordinates in the same domain stack; they never create cached verdicts.
+    ``*_verdicts`` memoizes completed nodes so shared callees in a
     DAG are revalidated once instead of exponentially.
     """
 
-    active_domains: set[int] = field(default_factory=set)
+    active_domains: set[int | DeclaredInvocationConstructionKey8616] = field(default_factory=set)
     domain_verdicts: dict[int, bool] = field(default_factory=dict)
     retained_domains: dict[int, Real16InvocationDomain8616] = field(default_factory=dict)
+    #: Data-only current construction/replay captures. The same retained domain
+    #: pins each key; no callback or semantic reuse is authorized by this map.
+    invocation_prefixes: dict[int, _OwnedPrefixCensus8616] = field(default_factory=dict)
     remaining_domains: int = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
     census_work_units: int = 0
     census_deadline: float | None = None

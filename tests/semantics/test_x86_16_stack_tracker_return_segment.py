@@ -7,16 +7,16 @@ import angr
 import pytest
 from angr.calling_conventions import SimCCStdcall
 from angr.sim_type import SimTypeFunction, SimTypeInt
+
 import inertia.frontend.x86_16.stack_tracker_return_segment as adapter
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import IRFunctionArtifact, IRValue, MemSpace
 from inertia.ir.vex_import import _block_to_ir
+from inertia.semantics.call_return_segment import collect_return_segment_frames_8616
+from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
 from tests.frontend.test_x86_16_packed_mz import _mz
 from tests.semantics.test_x86_16_call_return_segment import _project
 from tests.semantics.test_x86_16_call_stack_effects import _summary
-
-from inertia.semantics.call_return_segment import collect_return_segment_frames_8616
-from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
 
 
 def _track_machine_frame(call):

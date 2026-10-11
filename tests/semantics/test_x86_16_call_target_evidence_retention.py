@@ -6,20 +6,20 @@ from dataclasses import dataclass, replace
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
     FunctionSSAArtifactStage8616,
     FunctionSSAArtifactVerdict8616,
 )
+from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.lowering.call_target_ssa_binder import CallTargetBindStage8616, bind_ssa_call_target_8616
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
-from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.semantics.call_stack_effect_pipeline import (
     CallSemanticProjection8616,
     _CodegenBoundary8616,

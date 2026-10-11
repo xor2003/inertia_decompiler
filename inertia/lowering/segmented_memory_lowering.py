@@ -94,6 +94,7 @@ from .stack_prototype_materialization import (
     materialize_annotated_stack_prototype_8616,
     materialize_exact_trailing_stack_argument_8616,
 )
+from .stack_value_projection import normalize_pointer_scalar_temporaries_8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 
 type _CarrierKey8616 = tuple[str, int | str]
@@ -645,9 +646,11 @@ def _commit_near_pointer_argument_8616(
 def _near_pointer_type_8616(
     matched: SegmentedMemoryExpr, codegen: _AngrCodegenBoundary8616
 ) -> object | None:
-    """Return the near-pointer type for ``matched.width_bits``."""
+    """Represent the proven unsigned load width, including C byte signedness."""
     pointee_type = {
-        8: SimTypeChar(False),
+        # Angr renders an unlabeled SimTypeChar as plain char even when its
+        # signed flag is false. Preserve the byte-load range in emitted C.
+        8: SimTypeChar(False, label="unsigned char"),
         16: SimTypeShort(False),
         32: SimTypeLong(False),
     }.get(matched.width_bits)
@@ -2676,9 +2679,10 @@ def replay_final_codegen_projections_8616(codegen: object) -> bool:
     exists; do not infer new semantics at this orchestration boundary.
     """
     flags_changed = bool(lower_packed_flags_live_in_8616(codegen))
+    scalar_values_changed = normalize_pointer_scalar_temporaries_8616(codegen)
     gp_state_changed = bool(lower_architectural_gp_register_state_8616(codegen))
     gp_stack_changed = bool(materialize_gp_stack_restores_8616(codegen))
-    return flags_changed or gp_state_changed or gp_stack_changed
+    return flags_changed or scalar_values_changed or gp_state_changed or gp_stack_changed
 
 
 def _invalidate_segmented_address_caches_8616(project: object) -> None:
@@ -2779,6 +2783,9 @@ def _runtime_lowering_late_passes_b_8616(
         changed = True
     if lower_architectural_segment_register_state_8616(codegen):
         _invalidate_segmented_address_caches_8616(project)
+        changed = True
+        typed_codegen._inertia_assignment_maps = None
+    if normalize_pointer_scalar_temporaries_8616(codegen):
         changed = True
         typed_codegen._inertia_assignment_maps = None
     if lower_architectural_gp_register_state_8616(codegen):

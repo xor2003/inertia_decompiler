@@ -7,6 +7,7 @@ from angr.ailment.expression import VirtualVariable, VirtualVariableCategory
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.interrupt_contract import interrupt_core_addr_8616
 from inertia.ir.core import (
@@ -26,7 +27,6 @@ from inertia.lowering.software_interrupt_status_outputs import (
     materialize_software_interrupt_status_outputs_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.semantics.software_interrupt_inputs import (
     SoftwareInterruptInputArtifact8616,
     SoftwareInterruptInputFact8616,

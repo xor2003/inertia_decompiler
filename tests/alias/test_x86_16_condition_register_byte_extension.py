@@ -1,14 +1,14 @@
 """Prove zero-extended condition values from independently reaching bytes."""
 
 import pytest
-from inertia.ir.condition_ir import ConditionIR
-from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
 
 from inertia.alias.condition_register_bindings import (
     ConditionRegisterSourceBindingVerdict8616,
     bind_condition_register_sources_8616,
 )
 from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.ir.condition_ir import ConditionIR
+from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
 
 
 def _bind(prefix, register="ax", compare="83 f8 01", width_bits=16):

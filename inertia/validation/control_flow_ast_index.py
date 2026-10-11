@@ -25,6 +25,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
     CWhileLoop,
 )
+
 from inertia.pipeline.structured_ast_query_index import StructuredAstQueryIndex8616
 
 type StructuredLoop8616 = CForLoop | CWhileLoop | CDoWhileLoop

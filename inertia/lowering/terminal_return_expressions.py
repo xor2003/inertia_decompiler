@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import cast
+from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+from angr.sim_type import SimTypeInt, SimTypeNum, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable, SimTemporaryVariable
 
+from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
+from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616, _iter_c_nodes_deep_8616, _replace_c_children_8616
 from inertia.semantics.expression_analysis import (
     VirtualValueIdentity8616,
@@ -26,9 +29,12 @@ from inertia.semantics.expression_analysis import (
 
 from .physical_registers import physical_register_offset_8616, physical_register_view_8616
 from .runtime_memory_helpers import memory_pointer_helper_8616, segmented_memory_read_helper_8616
+from .stack_storage_evidence import alias_proves_stack_range_8616
+from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
 
 __all__ = [
     "contains_effectful_call_8616",
+    "resolve_current_stack_copy_return_8616",
     "resolve_linear_virtual_return_expression_8616",
     "return_expression_contains_dereference_8616",
     "return_expression_has_wide_word_composition_8616",
@@ -37,6 +43,8 @@ __all__ = [
 ]
 
 _LOGGER = logging.getLogger(__name__)
+_COPY_RETURN_NODE_LIMIT = 128
+_COPY_RETURN_DEPTH_LIMIT = 16
 
 
 def _call_is_effectful_8616(call: structured_c.CFunctionCall) -> bool:
@@ -316,3 +324,171 @@ def resolve_linear_virtual_return_expression_8616(
     if unresolved or unsafe_node is not None:
         return None
     return _uncollapse_materialized_expression_8616(resolved)
+
+
+class _CopyReturnFunction8616(Protocol):
+    """Current function identity and statement root at the codegen boundary."""
+
+    addr: int
+    statements: object
+
+
+class _CopyReturnCodegen8616(Protocol):
+    """Current function and Alias owners needed for a stack-copy query."""
+
+    cfunc: _CopyReturnFunction8616
+    _inertia_stack_memory_ssa_alias_artifact: StackMemorySSAAliasArtifact8616
+    _inertia_vex_ir_function_ssa: SSAFunctionArtifact
+
+
+def _grouped_linear_statements_8616(root: object) -> tuple[object, ...] | None:
+    """Flatten statement grouping without entering any control-flow body."""
+    pending: list[tuple[object, int]] = [(root, 0)]
+    seen: set[int] = set()
+    linear: list[object] = []
+    while pending:
+        node, depth = pending.pop()
+        if depth > _COPY_RETURN_DEPTH_LIMIT or len(seen) + len(linear) >= _COPY_RETURN_NODE_LIMIT:
+            return None
+        if isinstance(node, structured_c.CStatements):
+            if id(node) in seen:
+                return None
+            seen.add(id(node))
+            if len(node.statements) + len(pending) + len(linear) > _COPY_RETURN_NODE_LIMIT:
+                return None
+            pending.extend((child, depth + 1) for child in reversed(node.statements))
+        else:
+            linear.append(node)
+    return tuple(linear)
+
+
+def _exact_copy_carrier_8616(left: structured_c.CVariable, right: structured_c.CVariable) -> bool:
+    """Require one explicit SSA id and the same current variable owner."""
+    if type(left.vvar_id) is not int or left.vvar_id != right.vvar_id:
+        return False
+    return (
+        left.variable is right.variable
+        and left.unified_variable is right.unified_variable
+    )
+
+
+def _current_copy_definition_8616(
+    root: object, true_body: object, false_body: object, expression: structured_c.CVariable,
+) -> structured_c.CAssignment | None:
+    """Select a unique definition from the exact branch's straight-line prefix."""
+    linear = _grouped_linear_statements_8616(root)
+    if linear is None:
+        return None
+    controls = tuple(index for index, node in enumerate(linear)
+                     if isinstance(node, structured_c.CIfElse) and node.else_node is false_body
+                     and any(body is true_body for _condition, body in node.condition_and_nodes))
+    if len(controls) != 1:
+        return None
+    definitions = _bounded_copy_definitions_8616(root, expression.vvar_id)
+    if definitions is None:
+        return None
+    if len(definitions) != 1:
+        return None
+    definition = definitions[0]
+    if not _exact_copy_carrier_8616(definition.lhs, expression):
+        return None
+    prefix = linear[:controls[0]]
+    if any(not isinstance(statement, structured_c.CAssignment) for statement in prefix):
+        return None
+    positions = tuple(index for index, statement in enumerate(prefix) if statement is definition)
+    if len(positions) != 1 or not isinstance(definition.rhs, structured_c.CVariable):
+        return None
+    if not all(_safe_intervening_copy_assignment_8616(statement, expression) for statement in prefix[positions[0] + 1:]):
+        return None
+    return definition
+
+
+def _bounded_copy_definitions_8616(root: object, varid: int) -> tuple[structured_c.CAssignment, ...] | None:
+    """Inventory definitions only, refusing oversized current trees."""
+    definitions: list[structured_c.CAssignment] = []
+    for index, node in enumerate(_iter_c_nodes_deep_8616(root)):
+        if index >= _COPY_RETURN_NODE_LIMIT:
+            return None
+        if (isinstance(node, structured_c.CAssignment)
+                and isinstance(node.lhs, structured_c.CVariable) and node.lhs.vvar_id == varid):
+            definitions.append(node)
+    return tuple(definitions)
+
+
+def _safe_intervening_copy_assignment_8616(statement: object, carrier: structured_c.CVariable) -> bool:
+    """Reject observable writes and calls between a copy and its return branch."""
+    if not isinstance(statement, structured_c.CAssignment):
+        return False
+    if contains_effectful_call_8616(statement.lhs) or contains_effectful_call_8616(statement.rhs):
+        return False
+    lhs = statement.lhs
+    if not isinstance(lhs, structured_c.CVariable) or type(lhs.vvar_id) is not int:
+        return False
+    protected = (carrier.variable, carrier.unified_variable)
+    destinations = (lhs.variable, lhs.unified_variable)
+    if any(owner is not None and owner is destination for owner in protected for destination in destinations):
+        return False
+    return not isinstance(lhs.variable, (SimStackVariable, SimMemoryVariable)) and not isinstance(
+        lhs.unified_variable, (SimStackVariable, SimMemoryVariable)
+    )
+
+
+def _alias_owned_stack_copy_leaf_8616(codegen: object, leaf: structured_c.CVariable) -> bool:
+    """Require the exact current stack variable's Alias coordinate projection."""
+    if not isinstance(leaf.variable, SimStackVariable):
+        return False
+    projection = stack_variable_coordinate_registry_8616(codegen).for_variable(leaf.variable)
+    if (projection is None or projection.size != 2
+            or not isinstance(projection.cvar, structured_c.CVariable)
+            or projection.cvar.variable is not leaf.variable
+            or projection.cvar.unified_variable is not leaf.unified_variable):
+        return False
+    return alias_proves_stack_range_8616(codegen, projection.bp_offset, 2)
+
+
+def _coherent_word_copy_types_8616(
+    expression: structured_c.CVariable, definition: structured_c.CAssignment, leaf: structured_c.CVariable,
+) -> bool:
+    """Admit only same-signed explicit sixteen-bit scalar integer values."""
+    types = (expression.type, definition.lhs.type, leaf.type)
+    if any(type(type_) not in (SimTypeShort, SimTypeInt, SimTypeNum) for type_ in types):
+        return False
+    try:
+        if any(type_.size != 16 or type(type_.signed) is not bool
+               or type_.signed is not leaf.type.signed or type_.qualifier is not None for type_ in types):
+            return False
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_current_stack_copy_return_8616(
+    codegen: object, true_body: object, false_body: object, expression: structured_c.CExpression,
+) -> structured_c.CVariable | None:
+    """Resolve an exact Alias-owned word copy dominating the current branch.
+
+    Consume only live definitions: bypass controls, ambiguous identities,
+    intervening calls/storage writes and incoherent scalar types refuse.
+    """
+    if not isinstance(expression, structured_c.CVariable) or type(expression.vvar_id) is not int:
+        return None
+    boundary = cast(_CopyReturnCodegen8616, codegen)
+    # Optional producers attach these properties to third-party codegen.
+    try:
+        alias = boundary._inertia_stack_memory_ssa_alias_artifact
+        source = boundary._inertia_vex_ir_function_ssa
+        root = boundary.cfunc.statements
+        function_addr = boundary.cfunc.addr
+    except AttributeError:
+        return None
+    if not isinstance(alias, StackMemorySSAAliasArtifact8616) or not alias.complete:
+        return None
+    if alias.source_ssa is not source or alias.function_addr != function_addr:
+        return None
+    definition = _current_copy_definition_8616(root, true_body, false_body, expression)
+    if definition is None or not isinstance(definition.rhs, structured_c.CVariable):
+        return None
+    leaf = definition.rhs
+    if not _alias_owned_stack_copy_leaf_8616(codegen, leaf):
+        return None
+    return leaf if _coherent_word_copy_types_8616(expression, definition, leaf) else None

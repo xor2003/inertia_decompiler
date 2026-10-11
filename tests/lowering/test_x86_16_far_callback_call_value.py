@@ -6,12 +6,14 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.ir.core import IRFunctionArtifact
 from inertia.ir.logical_memory_write_value import trace_logical_word_write_values_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.ir.vex_terminal_jump import TerminalJumpRefusalReason8616
+from inertia.lowering.analysis_helpers import CallTargetKind8616
 from inertia.lowering.far_callback_call_value import (
     FarCallbackCallValueFailureKind8616,
     prove_far_callback_call_path_values_8616,
@@ -19,9 +21,7 @@ from inertia.lowering.far_callback_call_value import (
 from inertia.lowering.function_pointer_parameter_evidence import (
     FunctionPointerParameterFact8616,
 )
-
-from inertia.lowering.analysis_helpers import CallTargetKind8616
-from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _caller_source(base_addr: int) -> IRFunctionArtifact:

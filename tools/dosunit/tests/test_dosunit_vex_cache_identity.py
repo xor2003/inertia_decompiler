@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+import tools.dosunit.compare.straightline_ssa as ssa
+import tools.dosunit.reporting.ssa_provenance as ssa_provenance
+from tools.dosunit.ssa.vex_cache_identity import vex_cache_identity
 from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 from tools.dosunit.tests.test_real16_binary_compare import LEAF, _exe
-
-import tools.dosunit.reporting.ssa_provenance as ssa_provenance
-import tools.dosunit.compare.straightline_ssa as ssa
-from tools.dosunit.ssa.vex_cache_identity import vex_cache_identity
 
 
 def _lower(exe: Path, catalog: dict[str, Any], cache: Path, project: Any) -> dict[str, Any]:

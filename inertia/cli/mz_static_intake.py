@@ -24,6 +24,8 @@ from enum import StrEnum
 from functools import partial
 from typing import Protocol, cast
 
+from inertia.cli.declared_entry_index import build_declared_entry_index_8616, declared_entries_current_8616
+from inertia.frontend.x86_16.declared_function_entry import DeclaredFunctionEntryAdmission8616
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsiteIndex8616,
     DirectCallTargetResolver8616,
@@ -73,6 +75,8 @@ class MzStaticIntakeStatus8616(StrEnum):
     """Typed admission verdicts for one static-MZ intake attempt."""
 
     INSTALLED = "installed"
+    #: Conditional index over declared extents, never a whole-program inventory.
+    DECLARED_ENTRIES_INSTALLED = "declared_entries_installed"
     #: A nested demand must not restart the inventory currently being built.
     IN_PROGRESS_REFUSED = "in_progress_refused"
     #: ``source`` was not a nonempty ``bytes`` stream — the intake owns no
@@ -132,7 +136,7 @@ class MzStaticIntakeInstall8616:
     @property
     def installed(self) -> bool:
         """Return whether this receipt installed a source."""
-        return self.status is MzStaticIntakeStatus8616.INSTALLED
+        return self.status in {MzStaticIntakeStatus8616.INSTALLED, MzStaticIntakeStatus8616.DECLARED_ENTRIES_INSTALLED}
 
 
 class _MzLoaderMemory8616(Protocol):
@@ -295,6 +299,7 @@ class MzStaticIntakeRequest8616:
     declared_boot: object | None = None
     declared_boot_recompute: Callable[[object], object] | None = None
     declared_services: tuple[DeclaredInterruptService8616, ...] = ()
+    function_entries: tuple[DeclaredFunctionEntryAdmission8616, ...] = ()
     # Dependency-local scoped authority memoized per retained evidence
     # record. The memo key is the identical ``LocalCallFrameEvidence8616``
     # object the minted source was authenticated under, so a replaced or
@@ -353,6 +358,7 @@ class MzStaticIntakeRequest8616:
             declared_boot=self.declared_boot,
             declared_boot_recompute=self.declared_boot_recompute,
             declared_services=self.declared_services,
+            function_entries=self.function_entries,
         )
         cast(
             _MzIntakeReceiptMarker8616, project
@@ -461,6 +467,7 @@ class MzStaticIntakeRequest8616:
             boot == scoped.boot
             and recompute is scoped.boot_recompute
             and services == scoped.declared_services
+            and self.function_entries == scoped.function_entries
         )
 
     def _mint_scoped_source_8616(
@@ -510,6 +517,7 @@ class MzStaticIntakeRequest8616:
             callsite_index=local.callsite_index,
             pending_targets=local.pending_targets,
             declared_services=services,
+            function_entries=self.function_entries,
         )
 
     def _declared_scope_binding_8616(
@@ -522,7 +530,7 @@ class MzStaticIntakeRequest8616:
         declared fields and the evidence's authenticated loader context;
         ``None`` refuses identically to the installed path.
         """
-        return _declared_boot_binding_8616(
+        binding = _declared_boot_binding_8616(
             self.source,
             local.load_segment,
             local.entry_linear,
@@ -530,6 +538,48 @@ class MzStaticIntakeRequest8616:
             self.declared_boot_recompute,
             self.declared_services,
         )
+        if binding is None:
+            return None
+        projection = mz_invocation_source_8616(self.source, local.load_segment)
+        if not declared_entries_current_8616(
+            self.function_entries, projection, self._entry_environment_digest_8616(),
+        ):
+            return None
+        return binding
+
+    def _entry_environment_digest_8616(self) -> str | None:
+        """Read environment authority only from the explicitly declared boot."""
+        if self.declared_boot is None:
+            return None
+        digest = declared_environment_digest_8616(cast(_DeclaredBootSurface8616, self.declared_boot).environment)
+        return digest if isinstance(digest, str) else None
+
+    def validate_installed_source_8616(
+        self, project: object, source: Real16InvocationSource8616,
+    ) -> bool:
+        """Revalidate an installed declaration without rebuilding any inventory."""
+        # Dynamic third-party project boundary: the loader owns this request slot.
+        if getattr(project, "_inertia_mz_static_invocation_request_8616", None) is not self:
+            install_real16_invocation_source_8616(project, None)
+            return False
+        authenticated = _authenticated_mz_surface_or_refusal_8616(project, self.source)
+        valid = False
+        if not isinstance(authenticated, MzStaticIntakeInstall8616):
+            load_segment, projection = authenticated
+            binding = _declared_boot_binding_8616(
+                self.source, load_segment, projection.entry_linear,
+                self.declared_boot, self.declared_boot_recompute, self.declared_services,
+            )
+            if binding is not None:
+                boot, recompute, services = binding
+                valid = (boot == source.boot and recompute is source.boot_recompute
+                         and services == source.declared_services
+                         and self.function_entries == source.function_entries
+                         and declared_entries_current_8616(
+                             self.function_entries, projection, self._entry_environment_digest_8616()))
+        if not valid:
+            install_real16_invocation_source_8616(project, None)
+        return valid
 
 
 def _declared_boot_binding_8616(
@@ -719,6 +769,7 @@ def install_mz_static_invocation_source_8616(
     declared_boot: object | None = None,
     declared_boot_recompute: Callable[[object], object] | None = None,
     declared_services: tuple[DeclaredInterruptService8616, ...] = (),
+    function_entries: tuple[DeclaredFunctionEntryAdmission8616, ...] = (),
 ) -> MzStaticIntakeInstall8616:
     """Install the static-header invocation source when bytes authenticate.
 
@@ -787,6 +838,23 @@ def install_mz_static_invocation_source_8616(
         if direct_target_resolver is None
         else direct_target_resolver
     )
+    environment_digest = (
+        declared_environment_digest_8616(cast(_DeclaredBootSurface8616, declared_boot).environment)
+        if declared_boot is not None else None
+    )
+    if not declared_entries_current_8616(function_entries, projection, environment_digest):
+        return _refusal_8616(project, MzStaticIntakeStatus8616.DECLARED_REFUSED)
+    if function_entries:
+        index, pending = build_declared_entry_index_8616(project, function_entries, resolver, budget)
+        install_real16_invocation_source_8616(project, Real16InvocationSource8616(
+            boot=boot, boot_recompute=boot_recompute, callsite_index=index,
+            pending_targets=pending, declared_services=services, function_entries=function_entries,
+        ))
+        return MzStaticIntakeInstall8616(
+            status=MzStaticIntakeStatus8616.DECLARED_ENTRIES_INSTALLED,
+            inventory=None, entry_linear=projection.entry_linear,
+            boot_sha256=boot.boot_sha256, refusal_addr=None, pending_targets=pending,
+        )
     inventory = build_invocation_inventory_8616(
         project,
         projection.entry_linear,

@@ -37,8 +37,8 @@ def test_unbound_conditional_is_rejected(component):
 
 def conditional_component():
     """Use the real serializer rather than inventing a parallel schema shape."""
-    from tools.dosunit.contracts.proof_contracts import ProofStatus
     from tools.dosunit.compare.real16_recursive_compare import RecursiveCompareOutcome, RecursiveDomainScope
+    from tools.dosunit.contracts.proof_contracts import ProofStatus
     from tools.dosunit.recursive_proofs.real16_entry_domain import Real16ScalarDomain
     from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason
 

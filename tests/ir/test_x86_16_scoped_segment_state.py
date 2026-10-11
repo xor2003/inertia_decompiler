@@ -16,6 +16,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.entry_jump_domain as ejd
 import inertia.ir.real16_invocation_domain as domain
@@ -24,6 +25,18 @@ import inertia.ir.segment_call_preservation as scp
 import inertia.ir.segment_effect_closure as sce
 import inertia.ir.segment_state as state_mod
 import inertia.ir.segment_state_solver as solver_mod
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsite8616,
+    DecodedDirectCallsiteIndex8616,
+    DecodedDirectCallsiteIndexStats8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+)
+from inertia.frontend.x86_16.relative_control_edge import (
+    DecodedRelativeEdge,
+    decode_relative_edge,
+)
 from inertia.ir.core import (
     IRBlock,
     IRFunctionArtifact,
@@ -42,19 +55,6 @@ from inertia.ir.ir_boundary_cfg import (
 )
 from inertia.ir.ssa_function import (
     SSAFunctionArtifact,
-)
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsite8616,
-    DecodedDirectCallsiteIndex8616,
-    DecodedDirectCallsiteIndexStats8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-)
-from inertia.frontend.x86_16.relative_control_edge import (
-    DecodedRelativeEdge,
-    decode_relative_edge,
 )
 
 FUNC = 0x10000

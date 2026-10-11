@@ -5,6 +5,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+
 from tests.cli.x86_16_telemetry_support import diagnostic_payloads, telemetry_integer
 
 

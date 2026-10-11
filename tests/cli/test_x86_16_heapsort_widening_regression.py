@@ -7,14 +7,14 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_heapsort_behavior import assert_heapsort_behavior
 from tests.fixtures.x86_16_timeout_support import scaled_decompile_timeout as _scaled_timeout
-
-from tools.dev.check_sortd_sidecar_free import mz_executable_image
 from tools.compiler_toolchain.generated_c_contracts import (
     BranchBodyEffectsRequirement,
     GeneratedCContract,
 )
+from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO_ROOT / "decompile.py"

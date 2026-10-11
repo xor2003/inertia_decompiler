@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 import z3
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.recursive_proofs import real16_entry_frame as owner
@@ -27,6 +26,7 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_clauses import (
     StackClauseKind,
     StackClauseReason,
 )
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 @pytest.mark.parametrize("boundary", ["before", "clause", "after"])

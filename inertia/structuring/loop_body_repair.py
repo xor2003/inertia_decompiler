@@ -46,6 +46,7 @@ from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from inertia.ir.condition_ir import inverted_comparison_op_8616
+from inertia.ir.vex_import import codegen_function_8616
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
 from inertia.semantics.alias_query import describe_alias_storage
 
@@ -1560,23 +1561,9 @@ def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen:
 
 
 def _active_function_8616(project: object, codegen: object) -> object | None:
-    cfunc = _codegen_cfunc_8616(codegen)
-    addr = getattr(cfunc, "addr", None)
-    if not isinstance(addr, int):
-        return None
-    prepared = getattr(project, "_inertia_current_decompile_function_8616", None)
-    if prepared is not None and getattr(prepared, "addr", None) == addr:
-        return cast(object, prepared)
-    functions = getattr(getattr(project, "kb", None), "functions", None)
-    if functions is None:
-        return SimpleNamespace(addr=addr, size=getattr(cfunc, "size", None), name=getattr(cfunc, "name", None))
-    try:
-        function = functions.function(addr=addr, create=False)
-    except Exception:
-        function = None
-    if function is not None:
-        return cast(object, function)
-    return SimpleNamespace(addr=addr, size=getattr(cfunc, "size", None), name=getattr(cfunc, "name", None))
+    """Use the same retained function owner as the IR supplying repair evidence."""
+    resolved = codegen_function_8616(project, codegen)
+    return resolved[0] if resolved is not None else None
 
 
 def _function_callsite_targets_8616(function: object | None) -> frozenset[int] | None:

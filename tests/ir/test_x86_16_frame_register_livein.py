@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir import IRBlock, IRCallStackEffect8616, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.ir.scalar_affine_contracts import ScalarAffineTrace8616
 from inertia.ir.scalar_affine_trace import trace_scalar_affine_expression_8616

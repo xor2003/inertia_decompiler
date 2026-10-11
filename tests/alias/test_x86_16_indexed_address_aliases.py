@@ -6,24 +6,6 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.structuring.decompiler_structuring_stage import (
-    DECOMPILER_STRUCTURING_PASSES,
-)
-from inertia.ir import (
-    IndexedAddressAccessKind8616,
-    IndexedAddressEvidence8616,
-    IndexedAddressStats8616,
-    MemSpace,
-    SSAFunctionArtifact,
-    build_x86_16_function_ssa,
-    build_x86_16_ir_function_artifact,
-    collect_indexed_address_evidence_8616,
-)
-from inertia.ir.indexed_address_pipeline import (
-    apply_x86_16_indexed_address_evidence_8616,
-)
-from inertia.pipeline.errors import PipelineHardError
 
 from inertia.alias.alias_model_impl import (
     AliasFailure,
@@ -44,6 +26,24 @@ from inertia.alias.indexed_address_contracts import (
 from inertia.alias.indexed_address_projection import (
     apply_x86_16_indexed_address_aliases_8616,
     project_indexed_address_aliases_8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir import (
+    IndexedAddressAccessKind8616,
+    IndexedAddressEvidence8616,
+    IndexedAddressStats8616,
+    MemSpace,
+    SSAFunctionArtifact,
+    build_x86_16_function_ssa,
+    build_x86_16_ir_function_artifact,
+    collect_indexed_address_evidence_8616,
+)
+from inertia.ir.indexed_address_pipeline import (
+    apply_x86_16_indexed_address_evidence_8616,
+)
+from inertia.pipeline.errors import PipelineHardError
+from inertia.structuring.decompiler_structuring_stage import (
+    DECOMPILER_STRUCTURING_PASSES,
 )
 
 INDEXED_LOAD = bytes.fromhex(

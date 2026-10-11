@@ -18,13 +18,13 @@ from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_variable import SimStackVariable
-from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact
 
 from inertia.alias.stack_coordinate_projection import (
     StackCoordinateProjectionStatus8616,
     project_stack_offset_to_machine_bp_8616,
 )
 from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
+from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact
 
 from .stack_function_coordinates import projected_c_function_machine_bp_offset_8616
 from .stack_storage_evidence import (

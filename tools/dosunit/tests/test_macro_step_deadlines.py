@@ -5,12 +5,12 @@ import time
 from typing import NoReturn
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 import tools.dosunit.compare.flat32_macro_terms as proof
 from tools.dosunit.compare.flat32_macro_proof import compare_macro_cfg
 from tools.dosunit.compare.macro_step_contracts import MacroStepReason
 from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 
 class _Adapter:

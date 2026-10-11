@@ -7,8 +7,14 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.ir import AddressStatus, IRAddress, IRValue, MemSpace, SegmentOrigin
 from inertia.ir.scalar_affine_contracts import (
     ScalarAffineExpression8616,
@@ -30,16 +36,10 @@ from inertia.ir.stack_argument_scaled_return import (
     prove_stack_argument_far_scaled_return_8616,
     prove_stack_argument_scaled_return_8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.semantics.call_stack_effect_pipeline import (
     build_semantic_function_ssa_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
 from inertia.semantics.compiler_helpers import hook_x86_16_known_compiler_helpers_8616
 from inertia.semantics.direct_ret_call_effect import (
     DirectRetCallEffectVerdict8616,

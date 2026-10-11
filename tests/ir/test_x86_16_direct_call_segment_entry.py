@@ -15,7 +15,23 @@ from typing import cast
 
 import angr
 import pytest
+
+from inertia.alias.segment_stack_restore import (
+    build_x86_16_segment_stack_restore_artifact,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_capstone_block import DirectCapstoneInstruction8616
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    DecodedFarCallTarget8616,
+    build_boundary_direct_callsite_index_8616,
+    build_decoded_direct_callsite_index_8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import (
     IRBlock,
     IRFunctionArtifact,
@@ -39,22 +55,6 @@ from inertia.ir.function_ir_registry import (
 )
 from inertia.ir.segment_state_transfer import SegmentRestoreSource
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
-from inertia.alias.segment_stack_restore import (
-    build_x86_16_segment_stack_restore_artifact,
-)
-from inertia.frontend.x86_16.frontend_capstone_block import DirectCapstoneInstruction8616
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsiteIndex8616,
-    DecodedFarCallTarget8616,
-    build_boundary_direct_callsite_index_8616,
-    build_decoded_direct_callsite_index_8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )

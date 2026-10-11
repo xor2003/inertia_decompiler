@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+
 import tools.dosunit.tests.test_flat32_indirect_callbacks as fixture
 
 

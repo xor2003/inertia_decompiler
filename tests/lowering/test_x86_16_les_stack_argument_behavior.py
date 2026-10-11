@@ -15,6 +15,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasFactKind8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import AddressStatus, MemSpace
 from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
@@ -39,11 +41,9 @@ from inertia.lowering.wide_stack_argument_views import (
     WideStackArgumentOwner8616,
     materialize_wide_stack_argument_subviews_8616,
 )
+from inertia.validation.tail_validation import refresh_x86_16_final_semantic_validation_8616
 from tests.cli.test_x86_16_cod_samples import _decompile_blob, _project_from_bytes
 from tests.lowering.test_x86_16_positive_bp_argument_plan import _closed_three_word_evidence
-
-from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasFactKind8616
-from inertia.validation.tail_validation import refresh_x86_16_final_semantic_validation_8616
 
 
 @pytest.mark.parametrize(

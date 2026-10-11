@@ -1,8 +1,8 @@
 """Real-i386 affine register controls use the EBX base addressing encoding."""
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _compare_loops, _driver_lane
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.tests.test_flat32_comparator_lane import _compare_loops, _driver_lane
 
 ORIGINAL='e3058d5b01e2fbc3'
 CANDIDATE='8d5b07e3058d5b01e2fb8d5bf9c3'

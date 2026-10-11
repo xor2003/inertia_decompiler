@@ -15,20 +15,14 @@ from pathlib import Path
 
 import angr
 import pytest
+
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.vex_import as vi
-from inertia.ir.function_ir_registry import (
-    publish_function_ir_artifact_8616,
+from inertia.cli.mz_static_intake import (
+    MzStaticIntakeStatus8616,
+    install_mz_static_invocation_source_8616,
 )
-from inertia.ir.ir_boundary_cfg import (
-    prove_ir_boundary_coverage_8616,
-)
-from inertia.ir.real16_invocation_domain import (
-    Real16InvocationAssumption8616,
-    Real16InvocationFailure8616,
-    prove_real16_invocation_domain_8616,
-)
-
+from inertia.cli.project_loading import _build_project
 from inertia.frontend.x86_16.frontend_function_boundary import (
     exact_function_range_boundary_8616,
     mapped_entry_function_boundary_8616,
@@ -43,14 +37,20 @@ from inertia.frontend.x86_16.mz_static_boot import (
     mz_static_boot_8616,
     recompute_mz_static_boot_8616,
 )
+from inertia.ir.function_ir_registry import (
+    publish_function_ir_artifact_8616,
+)
+from inertia.ir.ir_boundary_cfg import (
+    prove_ir_boundary_coverage_8616,
+)
+from inertia.ir.real16_invocation_domain import (
+    Real16InvocationAssumption8616,
+    Real16InvocationFailure8616,
+    prove_real16_invocation_domain_8616,
+)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.mz_static_intake import (
-    MzStaticIntakeStatus8616,
-    install_mz_static_invocation_source_8616,
-)
-from inertia.cli.project_loading import _build_project
 from tools.dosunit.catalog.real16_scoped_invocation import (
     DeclaredInvocationStatus8616,
     install_declared_invocation_source_8616,

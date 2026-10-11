@@ -19,10 +19,6 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.public_api import VEX_BACKEND
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lifter_backend import LifterBackend
 from unicorn import UC_ARCH_X86, UC_MODE_16, Uc
 from unicorn.x86_const import (
     UC_X86_REG_BX,
@@ -35,6 +31,10 @@ from unicorn.x86_const import (
     UC_X86_REG_SS,
 )
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lifter_backend import LifterBackend
+from inertia.frontend.x86_16.public_api import VEX_BACKEND
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.semantics.compiler_helpers import (
     CompilerHelperEvidenceKind8616,
     hook_x86_16_known_compiler_helpers_8616,

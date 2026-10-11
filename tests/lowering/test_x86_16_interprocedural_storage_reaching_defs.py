@@ -6,11 +6,15 @@ import io
 from dataclasses import replace
 
 import angr
+from archinfo import ArchX86
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallsitePushSourceKind8616,
-    CallsiteSummary8616,
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    build_boundary_direct_callsite_index_8616,
 )
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import MemSpace
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.logical_memory_write_value import (
@@ -24,7 +28,7 @@ from inertia.ir.ssa_function import (
 from inertia.ir.vex_import import (
     build_x86_16_ir_function_artifact,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.lowering.analysis_helpers import CallTargetKind8616, resolve_direct_call_target_from_instruction_8616
 from inertia.lowering.interprocedural_storage_contracts import (
     StorageIdentityKind8616,
 )
@@ -33,14 +37,10 @@ from inertia.lowering.interprocedural_storage_reaching_defs import (
     CallArgumentDefinitionVerdict8616,
     resolve_call_argument_reaching_definition_8616,
 )
-from archinfo import ArchX86
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsiteIndex8616,
-    build_boundary_direct_callsite_index_8616,
+from inertia.semantics.callsite_summary import (
+    CallsitePushSourceKind8616,
+    CallsiteSummary8616,
 )
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from inertia.lowering.analysis_helpers import CallTargetKind8616, resolve_direct_call_target_from_instruction_8616
 
 
 def _lift_ssa(code: bytes) -> tuple[SSAFunctionArtifact, angr.Project, DecodedDirectCallsiteIndex8616]:

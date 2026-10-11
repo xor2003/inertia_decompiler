@@ -21,23 +21,12 @@ from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.entry_jump_domain as ejd
 import inertia.ir.ir_boundary_cfg as cov_mod
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.scoped_function_ir_view as view_mod
-from inertia.ir.core import (
-    IRBlock,
-    IRFunctionArtifact,
-    IRInstr,
-    IRRefusal,
-    IRValue,
-    MemSpace,
-)
-from inertia.ir.function_ir_registry import (
-    publish_function_ir_artifact_8616,
-)
-
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
@@ -49,6 +38,17 @@ from inertia.frontend.x86_16.frontend_function_boundary import (
 from inertia.frontend.x86_16.relative_control_edge import (
     DecodedRelativeEdge,
     decode_relative_edge,
+)
+from inertia.ir.core import (
+    IRBlock,
+    IRFunctionArtifact,
+    IRInstr,
+    IRRefusal,
+    IRValue,
+    MemSpace,
+)
+from inertia.ir.function_ir_registry import (
+    publish_function_ir_artifact_8616,
 )
 
 FUNC = 0x10000
@@ -815,3 +815,48 @@ def test_recorded_failure_is_terminal(world: SimpleNamespace) -> None:
     failed = replace(result, failure=F.SCOPED_CFG_MISMATCH)
     assert not failed.complete_for(world.scope)
     assert not failed.complete
+
+
+def _callee_coverage_route(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+           scope: domain.Real16InvocationDomain8616 | None = None) -> cov_mod.IRBoundaryCoverageResult8616 | None:
+    from inertia.ir import vex_import
+
+    monkeypatch.setattr(vex_import, "raw_x86_16_import_bundle_for_artifact_8616",
+                        lambda *args: SimpleNamespace(artifact=world.source))
+    monkeypatch.setattr(vex_import, "prove_scoped_x86_16_ir_function_view_8616",
+                        lambda *args, **kwargs: world.view)
+    return edcp._scoped_callee_coverage_8616(
+        world.project, world.source, world.boundary, world.scope if scope is None else scope,
+    )
+
+
+def test_single_producer_and_later_retained_replay(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Count one synchronous authentication; later retention remains fresh."""
+    operations = []
+    original = cov_mod._scoped_evidence_projection_8616
+    def counted(*args: object, **kwargs: object) -> object:
+        operations.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(cov_mod, "_scoped_evidence_projection_8616", counted)
+    result = _callee_coverage_route(world, monkeypatch)
+    assert result is not None
+    assert len(operations) == 1
+    assert result.complete_for(world.scope)
+    assert len(operations) == 2
+    assert not result.complete_for(replace(world.scope, boot=object()))
+    assert len(operations) == 3
+
+
+def test_foreign_consuming_scope_refuses(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An offered foreign entry must not consume the view."""
+    assert _callee_coverage_route(world, monkeypatch, replace(world.scope, boot=object())) is None
+
+
+def test_changed_native_surface_refuses(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Independent native rederivation still rejects altered code."""
+    from inertia.ir import vex_import
+
+    monkeypatch.setattr(vex_import, "build_x86_16_ir_function_artifact", lambda *args: replace(
+        world.source, function_addr=world.source.function_addr+1,
+    ))
+    assert _callee_coverage_route(world, monkeypatch) is None

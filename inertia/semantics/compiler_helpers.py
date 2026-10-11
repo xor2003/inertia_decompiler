@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, cast
 
-import claripy
 from angr import SimProcedure
 
 from .callee_name_normalization import normalize_callee_name_8616
@@ -59,53 +58,29 @@ class CompilerHelperEvidence8616:
 
 
 class X86_16MscStackProbeSimProcedure8616(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic angr SimProcedure base
-    """Microsoft C 16-bit stack probe: pop return, allocate AX bytes, jump back."""
+    """Retain probe identity while delegating every effect to its native bytes.
 
-    NO_RET = False
-
-    def run(self) -> None:  # pylint:disable=arguments-differ
-        """Model the stack probe effect without inventing call signatures."""
-        sp = cast(claripy.ast.BV, self.state.regs.sp)
-        ax = cast(claripy.ast.BV, self.state.regs.ax)
-        ss = cast(claripy.ast.BV, self.state.regs.ss)
-        sp32 = claripy.ZeroExt(16, sp)
-        ss32 = claripy.ZeroExt(16, ss)
-        stack_addr = (ss32 << claripy.BVV(4, 32)) + sp32
-        ret_addr = self.state.memory.load(stack_addr, 2, endness=self.state.arch.memory_endness)
-        next_sp = sp + claripy.BVV(2, 16) - ax
-        self.state.regs.cx = ret_addr
-        self.state.regs.bx = next_sp
-        self.state.regs.sp = next_sp
-        self.jump(ret_addr, jumpkind="Ijk_Ret")
-
-
-class X86_16MscStackProbeFarSimProcedure8616(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic angr SimProcedure base
-    """Microsoft C 16-bit far stack probe: pop far return, allocate AX bytes, far-return.
-
-    The binary helper pops the far return CS:IP pair, subtracts AX from SP,
-    pushes the pair back, and executes RETF, so the net stack effect is the
-    four-byte far return frame plus the AX-byte allocation.
+    Pattern recognition is not an ABI or complete-effect proof. In particular,
+    native execution owns the DS limit checks, flags, wrapped SS frame loads,
+    and CS-relative return. The one-step NoHook edge avoids recursive hook
+    dispatch without replacing these effects with an unconditional return.
     """
 
     NO_RET = False
 
     def run(self) -> None:  # pylint:disable=arguments-differ
-        """Model the far stack probe effect without inventing call signatures."""
-        sp = cast(claripy.ast.BV, self.state.regs.sp)
-        ax = cast(claripy.ast.BV, self.state.regs.ax)
-        ss = cast(claripy.ast.BV, self.state.regs.ss)
-        sp32 = claripy.ZeroExt(16, sp)
-        ss32 = claripy.ZeroExt(16, ss)
-        stack_addr = (ss32 << claripy.BVV(4, 32)) + sp32
-        ret_ip = self.state.memory.load(stack_addr, 2, endness=self.state.arch.memory_endness)
-        ret_cs = self.state.memory.load(stack_addr + claripy.BVV(2, 32), 2, endness=self.state.arch.memory_endness)
-        next_sp = sp + claripy.BVV(4, 16) - ax
-        self.state.regs.cx = ret_ip
-        self.state.regs.dx = ret_cs
-        self.state.regs.bx = next_sp
-        self.state.regs.sp = next_sp
-        ret_linear = (claripy.ZeroExt(16, ret_cs) << claripy.BVV(4, 32)) + claripy.ZeroExt(16, ret_ip)
-        self.jump(ret_linear, jumpkind="Ijk_Ret")
+        """Resume the unchanged entry through angr's native hook-bypass edge."""
+        self.jump(self.addr, jumpkind="Ijk_NoHook")
+
+
+class X86_16MscStackProbeFarSimProcedure8616(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic angr SimProcedure base
+    """Retain far-probe identity without replacing its native guarded effects."""
+
+    NO_RET = False
+
+    def run(self) -> None:  # pylint:disable=arguments-differ
+        """Execute native far-return, memory and failure paths after one bypass."""
+        self.jump(self.addr, jumpkind="Ijk_NoHook")
 
 
 _STACK_PROBE_NORMALIZED_NAMES_8616 = frozenset(

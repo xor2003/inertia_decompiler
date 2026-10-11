@@ -14,7 +14,10 @@ from types import SimpleNamespace
 from typing import cast
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir.core import (
     IRAddress,
     IRBinaryValue,
@@ -42,9 +45,6 @@ from inertia.ir.segment_call_preservation import prove_segment_call_preservation
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
 from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from tools.dosunit.runtime.real16_program_boot import (
     ProgramBoot,

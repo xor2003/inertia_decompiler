@@ -20,6 +20,8 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.tests.test_flat32_comparator_lane import (
     CANDIDATE_BASE,
     ORACLE_BASE,
@@ -28,8 +30,6 @@ from tools.dosunit.tests.test_flat32_comparator_lane import (
     _driver_lane,
     _project,
 )
-
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 
 TIMEOUT_MS = 10000
 

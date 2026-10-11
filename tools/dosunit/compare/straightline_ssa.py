@@ -75,6 +75,7 @@ from tools.dosunit.ssa.composition import (
 from tools.dosunit.ssa.composition import (
     merge_states as _merge_abi_states,
 )
+from tools.dosunit.ssa.flag_scan import FlagScanOutcome, scan_flag_evidence
 from tools.dosunit.ssa.identity import quick_compare as _quick_compare_functions
 from tools.dosunit.ssa.identity import semantic_payload as _semantic_ssa_payload
 from tools.dosunit.ssa.materialization import (
@@ -3312,12 +3313,16 @@ def _vex_live_put_step(
     needed_regs: set[str],
     need_memory: bool,
 ) -> bool:
-    """Backward liveness for Ist_Put; return updated memory liveness."""
+    """Retain the previous register version when a Put writes only one lane."""
     target = _vex_put_target(statement, tyenv)
     if target is None or target[0] not in needed_regs:
         return need_memory
     live.add(index)
-    needed_regs.discard(target[0])
+    # The register writer preserves untouched bits of AL/AH (and a low word
+    # in a wider register). Those bits still depend on the preceding version.
+    # Unknown widths cannot establish a complete overwrite either.
+    if _vex_expr_width(statement.data, tyenv) == target[1]:
+        needed_regs.discard(target[0])
     deps = _vex_expr_deps(getattr(statement, "data", None), tyenv)
     needed_tmps.update(deps.temps)
     needed_regs.update(deps.regs)
@@ -9202,20 +9207,33 @@ def _compare_functions(
     if mismatches and all(
         mismatch.get("kind") == "output_expr_changed"
         and isinstance(mismatch.get("reg"), str)
-        and (
-            _output_uses_x86_lazy_flags(oracle, mismatch["reg"])
-            or _output_uses_x86_lazy_flags(candidate, mismatch["reg"])
-        )
         for mismatch in mismatches
     ):
-        return {
-            "status": "refused",
-            "reason": "uninterpreted_x86_flags",
-            "mismatches": mismatches,
-            "solver_time_ms": elapsed,
-            "skipped_layout_outputs": skipped_layout_outputs,
-            "output_lemmas": lemma_evidence,
-        }
+        scans = [
+            (
+                _output_uses_x86_lazy_flags(oracle, mismatch["reg"]),
+                _output_uses_x86_lazy_flags(candidate, mismatch["reg"]),
+            )
+            for mismatch in mismatches
+        ]
+        if all(FlagScanOutcome.UNINTERPRETED_HELPER in pair for pair in scans):
+            return {
+                "status": "refused",
+                "reason": "uninterpreted_x86_flags",
+                "mismatches": mismatches,
+                "solver_time_ms": elapsed,
+                "skipped_layout_outputs": skipped_layout_outputs,
+                "output_lemmas": lemma_evidence,
+            }
+        if not any(pair == (FlagScanOutcome.CLEAN, FlagScanOutcome.CLEAN) for pair in scans):
+            return {
+                "status": "refused",
+                "reason": "x86_flag_scan_incomplete",
+                "mismatches": mismatches,
+                "solver_time_ms": elapsed,
+                "skipped_layout_outputs": skipped_layout_outputs,
+                "output_lemmas": lemma_evidence,
+            }
     return {
         "status": "failed",
         "reason": "observable_mismatch",
@@ -9227,29 +9245,25 @@ def _compare_functions(
 
 
 
-def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> bool:
-    """Find a modeled x86 flag helper in one output's bounded SSA expression."""
+def _output_uses_x86_lazy_flags(function: dict[str, Any], reg: str) -> FlagScanOutcome:
+    """Classify bounded x86 flag-helper evidence in one output's SSA DAG.
+
+    UNINTERPRETED_HELPER means a reachable abstract lazy-flag term may have
+    shaped the counterexample. CLEAN is reported only after every reachable
+    term was examined; an exhausted budget or a dangling/cyclic reference is
+    INCOMPLETE, which the caller must not treat as helper evidence.
+    """
     outputs = function.get("outputs") if isinstance(function.get("outputs"), dict) else {}
     assignments = {
         item["id"]: item for item in function.get("assignments", ()) or ()
         if isinstance(item, dict) and isinstance(item.get("id"), str)
     }
-    stack = [outputs.get(reg)]
-    visited: set[str] = set()
-    steps = 0
-    while stack and steps < 1024:
-        term = stack.pop()
-        steps += 1
-        if not isinstance(term, dict):
-            continue
-        if term.get("op") in X86_LAZY_FLAG_SUMMARY_OPS and _x86_lazy_flag_summary_is_uninterpreted(term, assignments):
-            return True
-        ref = term.get("ref")
-        if isinstance(ref, str) and ref not in visited:
-            visited.add(ref)
-            stack.append(assignments.get(ref))
-        stack.extend(term.get("args", ()) or ())
-    return bool(stack)
+    return scan_flag_evidence(
+        outputs.get(reg),
+        assignments,
+        summary_ops=X86_LAZY_FLAG_SUMMARY_OPS,
+        summary_is_uninterpreted=_x86_lazy_flag_summary_is_uninterpreted,
+    )
 
 
 def _x86_exact_condition_kind(condition: int | None, cc_op: int | None) -> X86ConditionContract | None:

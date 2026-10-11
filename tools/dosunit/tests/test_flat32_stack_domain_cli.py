@@ -17,9 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import DRIVER_DIRS, DriverLane, _driver_lane
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
+from tools.dosunit.compare.flat32_proof_retry import checked_environment_verdict, retry_function_proof
 from tools.dosunit.contracts.binary_environment import EnvironmentScan
 from tools.dosunit.contracts.flat32_proof_domain import Flat32ProofDomain
 from tools.dosunit.reporting.flat32_proof_domain_cli import (
@@ -27,7 +26,8 @@ from tools.dosunit.reporting.flat32_proof_domain_cli import (
     parse_entry_esp_range,
     require_pe32_pair,
 )
-from tools.dosunit.compare.flat32_proof_retry import checked_environment_verdict, retry_function_proof
+from tools.dosunit.tests.test_flat32_comparator_lane import DRIVER_DIRS, DriverLane, _driver_lane
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 STACK_LO = 0x0007F000
 STACK_HI = 0x00080000

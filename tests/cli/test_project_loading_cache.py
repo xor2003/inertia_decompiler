@@ -166,6 +166,9 @@ def checkpoint(project, addr, **kwargs):
         data_references=False, extend_far_calls=False)
     assert function.addr == addr
     assert addr in cfg.functions
+    # Existing analysis consumers require the frontend's provenance adapter.
+    function.is_prototype_guessed = False
+    assert not function.is_prototype_guessed
     print('COLD_WORKER_RECOVERY_REACHED')
     raise SystemExit(0)
 

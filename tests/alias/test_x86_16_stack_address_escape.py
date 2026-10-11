@@ -3,9 +3,6 @@
 from dataclasses import replace
 
 import pytest
-from inertia.ir import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
-from inertia.ir.ssa_function import build_x86_16_function_ssa
-from inertia.ir.stack_extent_evidence import build_stack_extent_evidence_8616
 
 from inertia.alias.stack_address_escape import (
     StackAddressEscape8616,
@@ -13,6 +10,9 @@ from inertia.alias.stack_address_escape import (
     classify_stack_address_escape_8616,
 )
 from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
+from inertia.ir import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
+from inertia.ir.ssa_function import build_x86_16_function_ssa
+from inertia.ir.stack_extent_evidence import build_stack_extent_evidence_8616
 from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact
 from tests.ir.test_x86_16_stack_extent_evidence import _block, _move
 

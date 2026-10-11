@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.recursive_proofs import real16_image_bound_domain_consumer as owner
@@ -13,6 +12,7 @@ from tools.dosunit.recursive_proofs.real16_image_bound_domain import BoundDomain
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import NativeBindingReason, _NativeRefusal
 from tools.dosunit.recursive_proofs.recursive_joint_admission import JointRefusal
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 @pytest.mark.parametrize("child", ["transition", "native", "joint"])

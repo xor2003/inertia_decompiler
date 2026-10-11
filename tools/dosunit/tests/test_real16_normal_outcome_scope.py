@@ -16,12 +16,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, make_inputs
-from tools.dosunit.tests.test_dosunit_tool import _mz_exe
 
+from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import bind_real16_mz
 from tools.dosunit.recursive_proofs.loaded_byte_relation import LoadedRelationLimits
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import (
@@ -54,6 +52,8 @@ from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     Real16EnvironmentScope,
 )
 from tools.dosunit.recursive_proofs.recursive_joint_identity import joint_proposal_hash
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, make_inputs
+from tools.dosunit.tests.test_dosunit_tool import _mz_exe
 
 
 def _premise(system: JointSystem, original_hash: str | None = None,

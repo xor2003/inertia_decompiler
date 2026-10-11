@@ -8,9 +8,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-import inertia.frontend.x86_16.frontend_instruction_reachability as frontend_instruction_reachability
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 
+import inertia.frontend.x86_16.frontend_instruction_reachability as frontend_instruction_reachability
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.frontend_block_partition import (
     FrontendBlockPartitionFailure8616,
     partition_decoded_blocks_8616,
@@ -23,7 +23,7 @@ from inertia.frontend.x86_16.frontend_instruction_reachability import (
     collect_decoded_block_evidence_8616,
     collect_instruction_reachability_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 
 
 @pytest.mark.parametrize("code, split_source, split_target", [

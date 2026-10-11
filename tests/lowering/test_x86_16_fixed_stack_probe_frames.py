@@ -13,11 +13,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
 import inertia.lowering.fixed_stack_probe_frames as fixed_stack_probe_frames
 import inertia.lowering.stack_probe_callsite_lowering as stack_probe_callsite_lowering
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.fixed_stack_probe_frames import lower_fixed_stack_probe_frames_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def test_stack_probe_replay_uses_supplied_codegen_current_project(monkeypatch) -> None:

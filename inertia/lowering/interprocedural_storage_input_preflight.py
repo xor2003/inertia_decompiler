@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-
 from inertia.ir.core import IRAddress
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .callee_callsite_census import CalleeCallsiteFact8616
 from .callee_pointer_evidence import CalleePointerArgumentEvidence8616

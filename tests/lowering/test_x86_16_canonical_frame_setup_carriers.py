@@ -15,14 +15,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.gp_register_state import (
-    runtime_gp_state_assignment_8616,
-    runtime_gp_state_expr_8616,
-)
-from inertia.lowering.real_mode_linear import (
-    prune_frame_prologue_stack_assignments_8616,
-)
 from capstone.x86_const import (
     X86_INS_MOV,
     X86_INS_POP,
@@ -32,6 +24,15 @@ from capstone.x86_const import (
     X86_REG_AX,
     X86_REG_BP,
     X86_REG_SP,
+)
+
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.gp_register_state import (
+    runtime_gp_state_assignment_8616,
+    runtime_gp_state_expr_8616,
+)
+from inertia.lowering.real_mode_linear import (
+    prune_frame_prologue_stack_assignments_8616,
 )
 
 

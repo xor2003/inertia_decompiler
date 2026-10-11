@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.compare.real16_recursive_compare import Real16RecursiveRequest
@@ -24,6 +23,7 @@ from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     EnvironmentScopeMember,
     Real16EnvironmentScope,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 BOOTSTRAP = bytes.fromhex("e8fd01c3")  # call 0x200; ret
 # jcxz +7; lea di,[bx+1]; dec cx; call -9 (recursive); ret

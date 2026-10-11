@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from pytest import MonkeyPatch
+
+from inertia.cli.project_loading import _build_project
 from inertia.ir.condition_cache_relift import (
     ConditionCacheReliftFailureReason8616,
     ConditionReliftBlock8616,
@@ -15,9 +18,6 @@ from inertia.ir.condition_cache_relift_cache import (
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 from inertia.lowering.condition_transfer import transfer_typed_conditions_to_codegen_8616
-from pytest import MonkeyPatch
-
-from inertia.cli.project_loading import _build_project
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -40,8 +40,8 @@ SLEEP_CONDITION_BLOCKS = frozenset({0x10F55, 0x10F5D, 0x10F62})
 
 
 def test_exact_relift_cache_requires_same_bytes_and_architecture(monkeypatch: MonkeyPatch) -> None:
-    from inertia.ir import condition_cache_relift as relift
     from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
+    from inertia.ir import condition_cache_relift as relift
 
     block_addr = 0x2200
     payload = bytearray(b"\x90\x90")
@@ -146,8 +146,8 @@ def test_exact_relift_cache_evicts_oldest_entry() -> None:
 
 
 def test_exact_relift_refuses_missing_expected_condition_and_restores_lifter_state(monkeypatch) -> None:
-    from inertia.ir import condition_cache_relift as relift
     from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
+    from inertia.ir import condition_cache_relift as relift
 
     condition_cache: dict[int, list[ConditionIR]] = {0x2000: []}
     pending_sources: dict[int, object] = {}
@@ -277,8 +277,8 @@ def test_transfer_refreshes_empty_condition_owner_cache_without_pending_evidence
 
 
 def test_transfer_rejects_complete_ambient_cache_from_rebased_sibling(monkeypatch: MonkeyPatch) -> None:
-    from inertia.ir import condition_cache_relift as relift
     from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
+    from inertia.ir import condition_cache_relift as relift
 
     def condition(lhs: str) -> ConditionIR:
         return ConditionIR(

@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
+from inertia.cli.cod_module_caller_evidence import record_cod_module_caller_return_use_evidence_8616
+from inertia.frontend.x86_16.cod_extract import extract_cod_proc_metadata
 from inertia.lowering.callee_argument_count_evidence import (
     CalleeArgumentCountVerdict8616,
     collect_callee_argument_count_evidence_8616,
@@ -12,9 +13,7 @@ from inertia.lowering.callee_argument_width_evidence import (
     CalleeArgumentWidthVerdict8616,
     collect_callee_argument_width_evidence_8616,
 )
-
-from inertia.frontend.x86_16.cod_extract import extract_cod_proc_metadata
-from inertia.cli.cod_module_caller_evidence import record_cod_module_caller_return_use_evidence_8616
+from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

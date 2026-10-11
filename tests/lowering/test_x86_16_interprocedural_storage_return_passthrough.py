@@ -6,15 +6,13 @@ import io
 from types import SimpleNamespace
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
-from inertia.ir import IRValue, MemSpace
+from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.ir import IRValue, MemSpace
+from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.lowering.interprocedural_storage_collection_contracts import (
     FunctionInputStorageTrialCollection8616,
     StorageTrialCollectionVerdict8616,
@@ -47,10 +45,12 @@ from inertia.lowering.interprocedural_storage_return_trial_collection import (
 from inertia.lowering.interprocedural_storage_solver import (
     resolve_program_storage_trials_8616,
 )
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 
 FUNCTION_ADDR = 0x1000
 CALLSITE_ADDR = 0x1000

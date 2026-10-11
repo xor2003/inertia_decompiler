@@ -9,12 +9,57 @@ from angr.ailment import Block
 from angr.ailment.expression import Const, Register
 from angr.ailment.statement import Return
 from angr.analyses.decompiler.clinic import Clinic
-from angr.sim_type import SimTypeBottom, SimTypeFunction
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.native_terminal_return_values as binding
-from inertia.lowering.native_terminal_return_values import bind_terminal_return_register_8616
+from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeShort
 
+import inertia.lowering.native_terminal_return_values as binding
+import inertia.lowering.terminal_register_return_types as return_types
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.annotations import ANNOTATION_KEY
+from inertia.lowering.native_terminal_return_values import bind_terminal_return_register_8616
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616
+
+
+@pytest.mark.parametrize("guessed,storage,annotated", [
+    (False, TerminalReturnStorage8616.AX, False),
+    (True, TerminalReturnStorage8616.AX, False),
+    (True, TerminalReturnStorage8616.AL, False),
+    (True, None, False),
+    (True, TerminalReturnStorage8616.AX, True),
+])
+def test_native_return_construction_receives_proven_word_before_selecting_lane(
+    monkeypatch, guessed, storage, annotated,
+):
+    """A guessed byte must not truncate proven AX before SSA construction."""
+    arch = Arch86_16()
+    function = SimpleNamespace(
+        addr=0x1000, info={}, is_prototype_guessed=guessed,
+        prototype=SimTypeFunction([], SimTypeChar()).with_arch(arch),
+        calling_convention=object(),
+    )
+    if annotated:
+        function.info[ANNOTATION_KEY] = {"prototype": function.prototype}
+    clinic = SimpleNamespace(project=SimpleNamespace(arch=arch), function=function)
+    graph = nx.DiGraph()
+    observed = []
+
+    def native_make_returns(owner, input_graph):
+        observed.append(owner.function.prototype.returnty)
+        return input_graph
+
+    monkeypatch.setattr(Clinic, "_make_returns", native_make_returns)
+    monkeypatch.setattr(return_types, "terminal_return_storage_8616", lambda *_: storage)
+    binding.apply_native_terminal_return_values_8616()
+
+    assert Clinic._make_returns(clinic, graph) is graph
+    assert len(observed) == 1
+    widened = guessed and storage is TerminalReturnStorage8616.AX and not annotated
+    assert isinstance(observed[0], SimTypeShort if widened else SimTypeChar)
+    assert function.is_prototype_guessed is guessed
+    evidence = clinic._inertia_terminal_return_type_result_8616
+    if widened:
+        assert evidence.stats == return_types.TerminalRegisterReturnTypeStats8616(1, 1, 1, 1, 0)
+    elif evidence is not None:
+        assert evidence.stats.materialized_count == 0
 
 
 @pytest.mark.parametrize("storage", [TerminalReturnStorage8616.AL, TerminalReturnStorage8616.AH,
@@ -48,6 +93,7 @@ def test_existing_return_value_is_not_replaced() -> None:
 
 @pytest.mark.parametrize("explicit_void", [False, True])
 def test_native_clinic_binds_partial_return_contract_without_inventing_abi(monkeypatch, explicit_void) -> None:
+    binding.apply_native_terminal_return_values_8616()
     block = Block(0x1000, 1, statements=[Return(0, [], ins_addr=0x1000)])
     graph = nx.DiGraph()
     graph.add_node(block)

@@ -25,6 +25,10 @@ from tools.dosunit.compare.macro_step_contracts import (
     MacroStepProof,
     MacroStepReason,
 )
+from tools.dosunit.compare.real16_call_contracts import Real16CallLimits
+from tools.dosunit.compare.real16_call_retry import FunctionRetryEvidence
+from tools.dosunit.compare.real16_loop_calls import LoopCallProof, LoopCallReason
+from tools.dosunit.compare.real16_region_proof import RegionProof, RegionProofReason
 from tools.dosunit.contracts.proof_contracts import (
     Architecture,
     ContractIdentity,
@@ -35,10 +39,6 @@ from tools.dosunit.contracts.proof_contracts import (
     ProofStatus,
 )
 from tools.dosunit.contracts.proof_scope import ProofScope
-from tools.dosunit.compare.real16_call_contracts import Real16CallLimits
-from tools.dosunit.compare.real16_call_retry import FunctionRetryEvidence
-from tools.dosunit.compare.real16_loop_calls import LoopCallProof, LoopCallReason
-from tools.dosunit.compare.real16_region_proof import RegionProof, RegionProofReason
 
 FUNCTION_ID = "demo.exe:f"
 CANDIDATE_ID = "demo.exe:cf"
@@ -64,12 +64,22 @@ class _Clock:
         return self.now
 
 
-def _docs(*, calls: bool = True, mapped: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:
+def _docs(
+    *, calls: bool = True, candidate_calls: bool = False, mapped: bool = True,
+    ambiguous: bool = False, unrelated_calls: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (oracle, candidate) SSA document fixtures."""
     jumpkind = "Ijk_Call" if calls else "Ijk_Boring"
     oracle = {"functions": [{"function": {"id": FUNCTION_ID}, "source": {"jumpkind": jumpkind}}]}
-    part = {"function": {"id": CANDIDATE_ID, "name": FUNCTION_ID}}
-    return oracle, {"functions": [part] if mapped else []}
+    part: dict[str, Any] = {"function": {"id": CANDIDATE_ID, "name": FUNCTION_ID}}
+    if candidate_calls:
+        part["source"] = {"jumpkind": "Ijk_Call"}
+    parts = [part] if mapped else []
+    if ambiguous:
+        parts.append({"function": {"id": "demo.exe:cf2"}})
+    if unrelated_calls:
+        parts.append({"function": {"id": "demo.exe:other"}, "source": {"jumpkind": "Ijk_Call"}})
+    return oracle, {"functions": parts}
 
 
 def _remaining(now: float) -> int:
@@ -101,6 +111,7 @@ def _call_run(
     monkeypatch: pytest.MonkeyPatch, *, has_calls: bool = True, mapped: bool = True,
     call_result: dict[str, Any] | None = None, loop: LoopCallProof | None = None,
     region: RegionProof | None = None, jumps: dict[str, float] | None = None,
+    mapping: dict[str, Any] | None = None, **doc_kwargs: bool,
 ) -> tuple[FunctionRetryEvidence | None, _Clock, _StageLog]:
     """Invoke production ``retry_whole_function`` with mocked stages."""
     clock, log, steps = _Clock(), [], dict(jumps or {})
@@ -112,9 +123,9 @@ def _call_run(
     ):
         monkeypatch.setattr(real16_call_retry, attr,
                             _stage_fake(log, clock, steps, name, value))
-    oracle, candidate = _docs(calls=has_calls, mapped=mapped)
+    oracle, candidate = _docs(calls=has_calls, mapped=mapped, **doc_kwargs)
     result = real16_call_retry.retry_whole_function(
-        OBLIGATION, {"id": FUNCTION_ID}, CONTRACT, oracle, candidate, None,
+        OBLIGATION, {"id": FUNCTION_ID}, CONTRACT, oracle, candidate, mapping,
         timeout_ms=TIMEOUT, limits=Real16CallLimits(),
     )
     return result, clock, log
@@ -222,11 +233,12 @@ def test_loop_attempted_then_region_budget_closed(monkeypatch: pytest.MonkeyPatc
     _check(budget["paired_regions"], attempted=False, required=True, remaining_ms=_remaining(0.15))
 
 
+@pytest.mark.parametrize("candidate_calls", [False, True])
 def test_composition_proved_marks_both_stages_not_required(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, candidate_calls: bool,
 ) -> None:
     """A proved composition closes both gates non-budget; row keeps its method."""
-    result, clock, log = _call_run(monkeypatch)
+    result, clock, log = _call_run(monkeypatch, candidate_calls=candidate_calls)
     assert result is not None and clock.calls == 3 and _names(log) == ["with_calls"]
     assert result.evidence.status is ProofStatus.PROVED
     assert result.evidence.method == "ssa_z3_complete_call_inlining"
@@ -240,6 +252,79 @@ def test_unmapped_candidate_returns_none_before_deadline(
     """Candidate resolution precedes the deadline: no clock reads, no record."""
     result, clock, log = _call_run(monkeypatch, mapped=False)
     assert result is None and clock.calls == 0 and log == []
+
+
+def test_ambiguous_candidate_returns_none_before_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two resolved candidate identities refuse before any deadline read."""
+    mapping = {"functions": [{"oracle_id": FUNCTION_ID, "candidate_id": CANDIDATE_ID,
+                              "candidate_name": "demo.exe:cf2"}]}
+    result, clock, log = _call_run(
+        monkeypatch, has_calls=False, candidate_calls=True, ambiguous=True, mapping=mapping,
+    )
+    assert result is None and clock.calls == 0 and log == []
+
+
+def test_candidate_only_calls_invoke_composition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Calls present only in the selected candidate root still compose."""
+    region = RegionProof(ProofStatus.UNKNOWN, RegionProofReason.ADMISSION, (), COUNTERS)
+    result, clock, log = _call_run(
+        monkeypatch, has_calls=False, candidate_calls=True, region=region,
+    )
+    assert result is not None and clock.calls == 3 and _names(log) == ["with_calls"]
+    assert result.evidence.status is ProofStatus.PROVED
+    assert result.evidence.method == "ssa_z3_complete_call_inlining"
+    for doc in result.backend["retry_budget"].values():
+        _check(doc, attempted=False, required=False, remaining_ms=_remaining(0.0))
+
+
+def test_candidate_only_calls_refusal_keeps_budget_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unresolved candidate-only composition refuses honestly under budget."""
+    region = RegionProof(ProofStatus.UNKNOWN, RegionProofReason.ADMISSION, (), COUNTERS)
+    result, clock, log = _call_run(
+        monkeypatch, has_calls=False, candidate_calls=True, region=region,
+        call_result={"status": "refused", "assumptions": ["io_premise"]},
+        jumps={"with_calls": 0.15},
+    )
+    assert result is not None and clock.calls == 3 and _names(log) == ["with_calls"]
+    assert result.evidence.status is ProofStatus.UNKNOWN
+    assert result.evidence.assumptions == ("io_premise",)
+    for doc in result.backend["retry_budget"].values():
+        _check(doc, attempted=False, required=True, remaining_ms=_remaining(0.15))
+
+
+def test_candidate_only_calls_keep_conditional_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Candidate-side call admission cannot promote a conditional composition."""
+    result, _clock, log = _call_run(
+        monkeypatch, has_calls=False, candidate_calls=True,
+        call_result={"status": "conditional", "assumptions": ["io_premise"]},
+    )
+    assert result is not None and _names(log) == ["with_calls"]
+    assert result.evidence.status is ProofStatus.CONDITIONAL
+    assert result.evidence.assumptions == ("io_premise",)
+    assert result.evidence.counters.failure_count == 1
+    for doc in result.backend["retry_budget"].values():
+        _check(doc, attempted=False, required=False, remaining_ms=_remaining(0.0))
+
+
+def test_unrelated_candidate_calls_do_not_invoke_composition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Calls on unselected candidate functions never admit composition."""
+    region = RegionProof(ProofStatus.UNKNOWN, RegionProofReason.ADMISSION, (), COUNTERS)
+    result, clock, log = _call_run(
+        monkeypatch, has_calls=False, unrelated_calls=True, region=region,
+    )
+    assert result is not None and clock.calls == 3 and _names(log) == ["regions"]
+    _check(result.backend["retry_budget"]["loop_induction"],
+           attempted=False, required=False, remaining_ms=_remaining(0.0))
 
 
 def test_nonpositive_timeout_refused_without_clock(monkeypatch: pytest.MonkeyPatch) -> None:

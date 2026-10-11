@@ -12,12 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
-
 from inertia.alias.domains import (
     AX,
     DX,
@@ -29,6 +23,11 @@ from inertia.alias.domains import (
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 
 from .interprocedural_storage_contracts import (
     StorageIdentity8616,

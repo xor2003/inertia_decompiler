@@ -2,8 +2,9 @@
 from dataclasses import replace
 
 import pytest
-import tests.ir.test_x86_16_declared_resize_boundary as native
+
 import inertia.ir.real16_invocation_domain as census
+import tests.ir.test_x86_16_declared_resize_boundary as native
 from inertia.ir.real16_invocation_domain import Real16InvocationFailure8616
 from inertia.ir.real16_path_memory8616 import path_memory_initial_8616
 from inertia.ir.real16_repeated_store8616 import (

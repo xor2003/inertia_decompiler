@@ -41,6 +41,7 @@ class DirectRequestCacheInputs8616:
     proc_kind: str
     signature_catalog: Path | None
     declared_call_effects: tuple[Path, ...] = ()
+    real16_declared_input: Path | None = None
 
     @classmethod
     def from_cli(
@@ -71,6 +72,7 @@ class DirectRequestCacheInputs8616:
             proc_kind=args.proc_kind,
             signature_catalog=signature_catalog,
             declared_call_effects=tuple(args.declared_call_effects),
+            real16_declared_input=args.real16_declared_input,
         )
 
 
@@ -95,7 +97,8 @@ def direct_request_cache_enabled_8616(args: CliArguments) -> bool:
     ) or any(name.startswith("INERTIA_OTEL_") for name in os.environ)
     clean_worker_transport = bool(os.environ.get("INERTIA_SERIAL_CLEAN_WORKER_RESULT"))
     return (
-        not args.show_asm
+        args.real16_declared_input is None
+        and not args.show_asm
         and not args.trace_c_stages
         and not args.dump_layers
         and not telemetry_requested
@@ -133,6 +136,7 @@ def build_direct_request_cache_key_8616(
             "proc_name": inputs.proc_name,
             "proc_kind": inputs.proc_kind,
             "signature_catalog": _cache_file_fingerprint(inputs.signature_catalog),
+            "real16_declared_input": _cache_file_fingerprint(inputs.real16_declared_input),
             "declared_call_effects": [
                 _cache_file_fingerprint(path) for path in inputs.declared_call_effects
             ],

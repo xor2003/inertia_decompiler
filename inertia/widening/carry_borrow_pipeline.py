@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.alias.carry_borrow_destinations import (
     CarryBorrowDestinationAliasEvidence8616,
     project_carry_borrow_destination_aliases_8616,
@@ -26,6 +24,7 @@ from inertia.alias.carry_borrow_projection import (
 )
 from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.carry_borrow_contracts import CarryBorrowEvidence8616
 from inertia.semantics.carry_borrow_links import analyze_carry_borrow_links_8616
 

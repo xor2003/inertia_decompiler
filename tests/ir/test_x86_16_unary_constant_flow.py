@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.ir.vex_import as vex_import
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.constant_flow import IRConstantFlow8616
 from inertia.ir.vex_condition_demand import (
     VexConditionDemand8616,

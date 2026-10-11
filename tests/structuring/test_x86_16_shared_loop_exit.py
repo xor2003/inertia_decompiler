@@ -5,17 +5,17 @@ from dataclasses import replace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CReturn, CStatements
 from angr.sim_type import SimTypeShort
+
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-from inertia.validation.validation_control_flow_obligations import validate_switch_exit_obligations_8616
-
 from inertia.structuring.loop_body_repair import SwitchLoopExitReturnEvidence8616
 from inertia.structuring.shared_loop_exit import (
     matching_shared_loop_exits_8616,
     prove_shared_loop_exits_8616,
     shared_exit_fingerprint_8616,
 )
+from inertia.validation.validation_control_flow_obligations import validate_switch_exit_obligations_8616
 from tests.structuring.test_x86_16_existing_loop_exit_conditions import _fixture, _run
 
 

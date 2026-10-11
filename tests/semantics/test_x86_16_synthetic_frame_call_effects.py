@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.semantics.call_register_effects import (
     SyntheticCallRegisterEffectVerdict8616 as Verdict,
@@ -12,7 +13,6 @@ from inertia.semantics.call_register_effects import (
     classify_synthetic_call_register_effect_8616,
 )
 from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
-from inertia.cli.project_loading import _build_project_from_bytes
 from tests.semantics.test_x86_16_call_stack_effects import _artifact, _summary
 
 

@@ -7,15 +7,15 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeChar, SimTypeFixedSizeArray, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.lowering.consumed_stack_address_setup import prune_consumed_stack_address_setup_8616
 from inertia.lowering.stack_variable_coordinates import (
     StackVariableCoordinateProjection8616,
     StackVariableCoordinateRegistry8616,
 )
-
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
-from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class Codegen:

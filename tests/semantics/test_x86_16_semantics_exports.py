@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from inertia.ir.condition_ir import build_condition_ir_8616
 import inertia.semantics.flag_semantics as flag_semantics
 import inertia.semantics.memory_semantics as memory_semantics
+from inertia.ir.condition_ir import build_condition_ir_8616
 
 
 def test_x86_16_flag_semantics_exports_typed_condition_helpers() -> None:

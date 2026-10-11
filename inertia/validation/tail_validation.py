@@ -21,7 +21,7 @@ import os
 import re
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, MutableMapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, cast
 
 from angr.ailment.expression import VirtualVariableCategory
@@ -101,6 +101,13 @@ from inertia.structuring.return_chains import (
 )
 from inertia.structuring.shared_loop_exit import shared_exit_fingerprint_8616
 from inertia.structuring.shared_loop_exit_publication import shared_loop_exit_report_8616
+from inertia.validation.declared_entry_premise import (
+    EntryPremiseReceipt8616,
+    EntryPremiseStatus8616,
+    collect_entry_premise_8616,
+    entry_premise_cache_identity_8616,
+    valid_entry_premise_projection_8616,
+)
 
 from .entry_stack_ranges import entry_stack_ranges_from_codegen_8616
 from .status_flag_preservation import packed_status_flag_preservation_evidence_8616
@@ -1358,9 +1365,13 @@ class X86_16TailValidationSummary:
     exposed_stack_values: tuple[str, ...] = ()
     unproven_goto_target_identities: tuple[str, ...] = ()
 
-    def as_dict(self) -> dict[str, tuple[str, ...]]:
-        """Return a serializable mapping of summary fields to fingerprints."""
-        return asdict(self)
+    entry_premise: EntryPremiseReceipt8616 | None = None
+
+    def as_dict(self) -> dict[str, TailValidationValue]:
+        """Return observable fingerprints and a detached conditional receipt."""
+        result = asdict(self)
+        result["entry_premise"] = self.entry_premise.to_dict() if self.entry_premise else None
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -3366,20 +3377,40 @@ def _tail_validation_function_sort_key(item: Mapping[str, TailValidationValue]) 
 
 
 def _tail_validation_stage_status(entry: TailValidationValue) -> str:
+    """Normalize one stage entry into its honest per-stage status string.
+
+    Conditional and refused entry-premise evidence keep their explicit
+    statuses — they are never unconditional ``passed`` and never collapse to
+    ``uncollected``. A retained premise receipt cannot certify unconditional
+    stability even beside a forged ``stable``/``passed`` status.
+    """
     if not isinstance(entry, Mapping):
         return "uncollected"
     status = entry.get("status")
+    premise = entry.get("entry_premise")
+    if status == EntryPremiseStatus8616.REFUSED:
+        return EntryPremiseStatus8616.REFUSED.value
+    if bool(entry.get("changed", False)):
+        return "changed"
     if isinstance(status, str) and status:
-        normalized = status.lower()
-        if normalized in {"stable", "passed"}:
-            return "passed"
-        if normalized in {"changed", "uncollected"}:
+        normalized: str = status.lower()
+        if normalized in {
+            EntryPremiseStatus8616.CONDITIONAL,
+            EntryPremiseStatus8616.REFUSED,
+        }:
             return normalized
-        if normalized == "failed":
-            return "changed"
-        if normalized == "unknown":
-            return "unknown"
-        return "uncollected"
+        if normalized in {"stable", "passed"}:
+            return (
+                EntryPremiseStatus8616.CONDITIONAL.value
+                if premise is not None
+                else "passed"
+            )
+        return {
+            "changed": "changed", "failed": "changed",
+            "unknown": "unknown", "uncollected": "uncollected",
+        }.get(normalized, "uncollected")
+    if premise is not None:
+        return EntryPremiseStatus8616.CONDITIONAL.value
     if "changed" not in entry:
         return "unknown"
     return "changed" if bool(entry.get("changed", False)) else "passed"
@@ -3395,6 +3426,8 @@ def _tail_validation_record_proc_name(record: Mapping[str, TailValidationValue])
 def _tail_validation_function_accounting(
     records: Sequence[Mapping[str, TailValidationValue]],
 ) -> dict[str, TailValidationValue]:
+    """Aggregate per-function status; refused and conditional never pass."""
+
     def _impl() -> dict[str, TailValidationValue]:
         rows: list[dict[str, TailValidationValue]] = []
         status_counts: Counter[str] = Counter()
@@ -3405,10 +3438,14 @@ def _tail_validation_function_accounting(
             }
             if "changed" in stage_statuses.values():
                 status = "changed"
+            elif EntryPremiseStatus8616.REFUSED in stage_statuses.values():
+                status = EntryPremiseStatus8616.REFUSED.value
             elif "unknown" in stage_statuses.values():
                 status = "unknown"
             elif "uncollected" in stage_statuses.values():
                 status = "uncollected"
+            elif EntryPremiseStatus8616.CONDITIONAL in stage_statuses.values():
+                status = EntryPremiseStatus8616.CONDITIONAL.value
             else:
                 status = "passed"
             status_counts[status] += 1
@@ -3430,6 +3467,12 @@ def _tail_validation_function_accounting(
             "function_statuses": rows,
             "passed_functions": [row for row in rows if row["status"] == "passed"],
             "changed_functions": [row for row in rows if row["status"] == "changed"],
+            "conditional_functions": [
+                row for row in rows if row["status"] == EntryPremiseStatus8616.CONDITIONAL
+            ],
+            "refused_functions": [
+                row for row in rows if row["status"] == EntryPremiseStatus8616.REFUSED
+            ],
             "unknown_functions": [row for row in rows if row["status"] == "unknown"],
             "uncollected_functions": [row for row in rows if row["status"] == "uncollected"],
         }
@@ -3437,12 +3480,37 @@ def _tail_validation_function_accounting(
     return _impl()
 
 
+def _tail_validation_stage_bucket_8616(entry: TailValidationValue) -> str:
+    """Classify one stage entry into its honest summary counter bucket.
+
+    Conditional and refused premise evidence keep explicit buckets even when a
+    forged projection dropped the ``changed`` flag; only premise-free stable
+    entries count as stable coverage.
+    """
+    if not isinstance(entry, Mapping):
+        return "missing"
+    stage_status = _tail_validation_stage_status(entry)
+    if "changed" not in entry:
+        if stage_status in (EntryPremiseStatus8616.REFUSED, EntryPremiseStatus8616.CONDITIONAL):
+            return stage_status
+        return "unknown"
+    if stage_status in (EntryPremiseStatus8616.REFUSED, EntryPremiseStatus8616.CONDITIONAL):
+        return stage_status
+    if stage_status == "passed":
+        return "stable"
+    return "changed" if stage_status == "changed" else "unknown"
+
+
 def _tail_validation_stage_summary(
     records: Sequence[Mapping[str, TailValidationValue]], stage: str
 ) -> dict[str, TailValidationValue]:
+    """Summarize one stage; conditional/refused evidence never counts stable."""
+
     def _impl() -> dict[str, TailValidationValue]:
         stable_count = 0
         changed_count = 0
+        conditional_count = 0
+        refused_count = 0
         unknown_count = 0
         missing_count = 0
         mode_counter: Counter[str] = Counter()
@@ -3454,10 +3522,17 @@ def _tail_validation_stage_summary(
             if not isinstance(entry, Mapping):
                 missing_count += 1
                 continue
-            if "changed" not in entry:
+            bucket = _tail_validation_stage_bucket_8616(entry)
+            if bucket == "unknown":
                 unknown_count += 1
                 continue
-            changed = bool(entry.get("changed", False))
+            if bucket == EntryPremiseStatus8616.CONDITIONAL:
+                conditional_count += 1
+                continue
+            if bucket == EntryPremiseStatus8616.REFUSED:
+                refused_count += 1
+                continue
+            changed = bucket == "changed"
             mode = entry.get("mode")
             verdict = entry.get("verdict")
             if isinstance(mode, str) and mode:
@@ -3495,6 +3570,8 @@ def _tail_validation_stage_summary(
         return {
             "stable_count": stable_count,
             "changed_count": changed_count,
+            "conditional_count": conditional_count,
+            "refused_count": refused_count,
             "unknown_count": unknown_count,
             "missing_count": missing_count,
             "coverage_count": stable_count + changed_count + unknown_count,
@@ -3590,6 +3667,7 @@ def fingerprint_x86_16_tail_validation_boundary(
             "mode": mode,
             "fingerprint_version": TAIL_VALIDATION_FINGERPRINT_VERSION,
             "root": root_fingerprint,
+            "entry_premise": entry_premise_cache_identity_8616(codegen),
         }
         descriptor = build_x86_16_validation_cache_descriptor("tail_validation.boundary", payload)
         codegen._inertia_tail_validation_boundary_context_8616 = _TailValidationBoundaryContext8616(
@@ -3629,6 +3707,23 @@ def fingerprint_x86_16_tail_validation_boundary(
         return descriptor.fingerprint
 
 
+def _transport_entry_premise_8616(
+    source: Mapping[str, TailValidationValue], target: dict[str, TailValidationValue],
+) -> None:
+    """Retain conditional identity; damaged or dropped receipts cannot become stable."""
+    premise = source.get("entry_premise")
+    if premise is None and source.get("status") != EntryPremiseStatus8616.CONDITIONAL:
+        return
+    if not valid_entry_premise_projection_8616(premise):
+        target["status"] = EntryPremiseStatus8616.REFUSED.value
+        target["changed"] = True
+        target["premise_failure"] = "entry_premise_missing_or_invalid"
+        return
+    target["entry_premise"] = json.loads(json.dumps(premise))
+    if target["status"] in {"stable", "passed"}:
+        target["status"] = EntryPremiseStatus8616.CONDITIONAL.value
+
+
 def _tail_validation_stage_snapshot_entry_8616(
     stage: str,
     entry: Mapping[str, TailValidationValue],
@@ -3654,6 +3749,7 @@ def _tail_validation_stage_snapshot_entry_8616(
         "verdict": entry.get("verdict"),
         "summary_text": entry.get("summary_text"),
     }
+    _transport_entry_premise_8616(entry, stage_entry)
     delta = entry.get("delta")
     if isinstance(delta, Mapping):
         stage_entry["delta"] = dict(delta)
@@ -3689,7 +3785,7 @@ def x86_16_tail_validation_result_passed(validation: Mapping[str, TailValidation
     """Accept a stable stage only when no semantic failure evidence remains."""
     if not isinstance(validation, Mapping):
         return False
-    if validation.get("semantic_failures"):
+    if validation.get("semantic_failures") or validation.get("entry_premise") is not None:
         return False
     status = validation.get("status")
     if isinstance(status, str) and status:
@@ -3697,6 +3793,30 @@ def x86_16_tail_validation_result_passed(validation: Mapping[str, TailValidation
     if "changed" in validation:
         return not bool(validation.get("changed", False))
     return False
+
+
+def x86_16_tail_validation_result_preserves_behavior(
+    validation: Mapping[str, TailValidationValue] | None,
+) -> bool:
+    """Accept local equality under retained premises, without final acceptance.
+
+    The tail collector authenticates the live scope before comparison. This
+    consumer only checks its result and receipt integrity; serialized receipts
+    cannot create proof authority. Final acceptance still uses result_passed.
+    """
+    if not isinstance(validation, Mapping):
+        return False
+    if validation.get("semantic_failures") or validation.get("premise_failure"):
+        return False
+    if validation.get("changed") is True:
+        return False
+    if x86_16_tail_validation_result_passed(validation):
+        return True
+    return (
+        validation.get("status") == EntryPremiseStatus8616.CONDITIONAL
+        and validation.get("changed") is False
+        and valid_entry_premise_projection_8616(validation.get("entry_premise"))
+    )
 
 
 def x86_16_tail_validation_snapshot_passed(
@@ -3716,7 +3836,7 @@ def x86_16_tail_validation_snapshot_passed(
             entry = snapshot.get(stage)
             if not isinstance(entry, Mapping):
                 return False
-            if entry.get("semantic_failures"):
+            if entry.get("semantic_failures") or entry.get("entry_premise") is not None:
                 return False
             status = entry.get("status")
             if isinstance(status, str) and status:
@@ -3748,6 +3868,7 @@ def persist_x86_16_tail_validation_snapshot(
         "verdict": validation.get("verdict"),
         "summary_text": validation.get("summary_text"),
     }
+    _transport_entry_premise_8616(validation, snapshot_entry)
     delta = validation.get("delta")
     if isinstance(delta, Mapping):
         snapshot_entry["delta"] = dict(delta)
@@ -3802,11 +3923,15 @@ def _surface_scalar_checks_8616(
 
     return (
         ("changed_stage_total", _surface_summary_total_8616(stage_summaries, "changed_count")),
+        ("conditional_stage_total", _surface_summary_total_8616(stage_summaries, "conditional_count")),
+        ("refused_stage_total", _surface_summary_total_8616(stage_summaries, "refused_count")),
         ("missing_stage_total", _surface_summary_total_8616(stage_summaries, "missing_count")),
         ("unknown_stage_total", _surface_summary_total_8616(stage_summaries, "unknown_count")),
         ("coverage_count", _surface_summary_total_8616(stage_summaries, "coverage_count")),
         ("changed_function_count", int(summary.get("changed_function_count", 0) or 0)),
         ("passed_function_count", int(summary.get("passed_function_count", 0) or 0)),
+        ("conditional_function_count", int(summary.get("conditional_function_count", 0) or 0)),
+        ("refused_function_count", int(summary.get("refused_function_count", 0) or 0)),
         ("unknown_function_count", int(summary.get("unknown_function_count", 0) or 0)),
         ("uncollected_function_count", int(summary.get("uncollected_function_count", 0) or 0)),
     )
@@ -3837,7 +3962,7 @@ def _record_surface_stage_row_issues_8616(
         if not isinstance(row, Mapping):
             issues.append(f"{stage_name}: missing stage row")
             continue
-        for key in ("changed_count", "stable_count", "unknown_count", "missing_count", "coverage_count"):
+        for key in ("changed_count", "stable_count", "conditional_count", "refused_count", "unknown_count", "missing_count", "coverage_count"):
             actual = int(row.get(key, 0) or 0)
             expected = int(stage_summary.get(key, 0) or 0)
             if actual != expected:
@@ -3882,6 +4007,8 @@ def build_x86_16_tail_validation_surface(
         function_statuses = _boundary_list_8616(summary.get("function_statuses", []) or [])
         uncollected_functions = _boundary_list_8616(summary.get("uncollected_functions", []) or [])
         unknown_functions = _boundary_list_8616(summary.get("unknown_functions", []) or [])
+        conditional_functions = _boundary_list_8616(summary.get("conditional_functions", []) or [])
+        refused_functions = _boundary_list_8616(summary.get("refused_functions", []) or [])
         stage_rows, total_changed, total_missing, total_unknown, total_coverage = (
             _build_tail_validation_stage_rows_8616(
                 scanned_count=scanned_count,
@@ -3967,6 +4094,14 @@ def build_x86_16_tail_validation_surface(
             (dict(item) for item in unknown_functions if isinstance(item, Mapping)),
             key=_tail_validation_function_sort_key,
         )
+        top_conditional_functions = sorted(
+            (dict(item) for item in conditional_functions if isinstance(item, Mapping)),
+            key=_tail_validation_function_sort_key,
+        )
+        top_refused_functions = sorted(
+            (dict(item) for item in refused_functions if isinstance(item, Mapping)),
+            key=_tail_validation_function_sort_key,
+        )
 
         merge_gate = severity == "clean"
         headline = _tail_validation_headline_8616(severity, scanned_count, changed_function_count)
@@ -3977,14 +4112,20 @@ def build_x86_16_tail_validation_surface(
             "merge_gate": merge_gate,
             "changed_function_count": changed_function_count,
             "changed_stage_total": total_changed,
+            "conditional_stage_total": int(summary.get("conditional_count", 0) or 0),
+            "refused_stage_total": int(summary.get("refused_count", 0) or 0),
             "coverage_count": total_coverage,
             "missing_stage_total": total_missing,
             "unknown_stage_total": total_unknown,
             "function_status_counts": function_status_counts,
             "function_statuses": function_statuses,
             "passed_function_count": int(summary.get("passed_function_count", 0) or 0),
+            "conditional_function_count": int(summary.get("conditional_function_count", 0) or 0),
+            "refused_function_count": int(summary.get("refused_function_count", 0) or 0),
             "unknown_function_count": int(summary.get("unknown_function_count", 0) or 0),
             "uncollected_function_count": int(summary.get("uncollected_function_count", 0) or 0),
+            "top_conditional_functions": top_conditional_functions,
+            "top_refused_functions": top_refused_functions,
             "top_unknown_functions": top_unknown_functions,
             "top_uncollected_functions": top_uncollected_functions,
             "stage_rows": stage_rows,
@@ -4202,18 +4343,26 @@ def summarize_x86_16_tail_validation_records(
     coverage_count = int(structuring["coverage_count"]) + int(postprocess["coverage_count"])
     missing_count = int(structuring["missing_count"]) + int(postprocess["missing_count"])
     unknown_count = int(structuring["unknown_count"]) + int(postprocess["unknown_count"])
+    conditional_count = int(structuring["conditional_count"]) + int(postprocess["conditional_count"])
+    refused_count = int(structuring["refused_count"]) + int(postprocess["refused_count"])
     severity = "clean"
     if changed_function_count > 0:
         severity = "changed"
+    elif refused_count > 0:
+        severity = EntryPremiseStatus8616.REFUSED.value
     elif unknown_count > 0:
         severity = "unknown"
-    elif coverage_count == 0 and missing_count > 0:
+    elif coverage_count == 0 and conditional_count == 0 and missing_count > 0:
         severity = "uncollected"
     elif missing_count > 0:
         severity = "partial"
+    elif conditional_count > 0:
+        severity = EntryPremiseStatus8616.CONDITIONAL.value
     return {
         "severity": severity,
         "changed_function_count": changed_function_count,
+        "conditional_count": conditional_count,
+        "refused_count": refused_count,
         "coverage_count": coverage_count,
         "missing_count": missing_count,
         "unknown_count": unknown_count,
@@ -4224,9 +4373,13 @@ def summarize_x86_16_tail_validation_records(
         "function_status_counts": function_accounting["function_status_counts"],
         "function_statuses": function_accounting["function_statuses"],
         "passed_functions": function_accounting["passed_functions"],
+        "conditional_functions": function_accounting["conditional_functions"],
+        "refused_functions": function_accounting["refused_functions"],
         "unknown_functions": function_accounting["unknown_functions"],
         "uncollected_functions": function_accounting["uncollected_functions"],
         "passed_function_count": len(function_accounting["passed_functions"]),
+        "conditional_function_count": len(function_accounting["conditional_functions"]),
+        "refused_function_count": len(function_accounting["refused_functions"]),
         "unknown_function_count": len(function_accounting["unknown_functions"]),
         "uncollected_function_count": len(function_accounting["uncollected_functions"]),
     }
@@ -5584,6 +5737,8 @@ def _build_tail_validation_stage_rows_8616(
         for stage_name, stage_summary in (("structuring", structuring), ("postprocess", postprocess)):
             changed_count = int(stage_summary.get("changed_count", 0) or 0)
             stable_count = int(stage_summary.get("stable_count", 0) or 0)
+            conditional_count = int(stage_summary.get("conditional_count", 0) or 0)
+            refused_count = int(stage_summary.get("refused_count", 0) or 0)
             unknown_count = int(stage_summary.get("unknown_count", 0) or 0)
             missing_count = int(stage_summary.get("missing_count", 0) or 0)
             coverage_count = int(stage_summary.get("coverage_count", stable_count + changed_count + unknown_count) or 0)
@@ -5596,6 +5751,8 @@ def _build_tail_validation_stage_rows_8616(
                     "stage": stage_name,
                     "changed_count": changed_count,
                     "stable_count": stable_count,
+                    "conditional_count": conditional_count,
+                    "refused_count": refused_count,
                     "unknown_count": unknown_count,
                     "missing_count": missing_count,
                     "coverage_count": coverage_count,
@@ -5621,6 +5778,10 @@ def _tail_validation_headline_8616(severity: str, scanned_count: int, changed_fu
         return f"whole-tail validation failed across {scanned_count} functions"
     if severity == "unknown":
         return f"whole-tail validation incomplete across {scanned_count} functions"
+    if severity == EntryPremiseStatus8616.CONDITIONAL.value:
+        return f"whole-tail validation conditional across {scanned_count} functions"
+    if severity == EntryPremiseStatus8616.REFUSED.value:
+        return f"whole-tail validation refused across {scanned_count} functions"
     return f"whole-tail validation failed across {changed_function_count} functions"
 
 
@@ -6469,9 +6630,10 @@ def collect_x86_16_tail_validation_summary(
     summary_boundary_fingerprint = boundary_fingerprint
     if summary_boundary_fingerprint is None:
         summary_boundary_fingerprint = fingerprint_x86_16_tail_validation_boundary(project, codegen, mode=mode)
+    premise = collect_entry_premise_8616(project, codegen)
     root = _codegen_root(codegen)
     if root is None:
-        return X86_16TailValidationSummary((), (), (), (), (), (), (), ())
+        return X86_16TailValidationSummary((), (), (), (), (), (), (), (), entry_premise=premise)
 
     boundary_context = _consume_tail_validation_boundary_context_8616(
         codegen,
@@ -6484,6 +6646,7 @@ def collect_x86_16_tail_validation_summary(
         mode,
         summary_boundary_fingerprint,
         boundary_context.summary_input_generation,
+        premise,
     ) if boundary_context is not None else None
     if isinstance(boundary_entries, dict) and boundary_cache_key is not None:
         boundary_cached_summary = boundary_entries.get(boundary_cache_key)
@@ -6513,6 +6676,7 @@ def collect_x86_16_tail_validation_summary(
         {
             "mode": mode,
             "boundary_fingerprint": summary_boundary_fingerprint,
+            "entry_premise": premise.to_dict() if premise else None,
             "def_use_issues": reports.def_use_report.semantic_issue_tokens(),
             "missing_required_calls": reports.required_call_report.missing_calls,
             "callsite_multiplicity_issues": reports.callsite_multiplicity_report.issue_tokens(),
@@ -6527,14 +6691,14 @@ def collect_x86_16_tail_validation_summary(
     entries = cache.get("entries", {})
 
     def _build_summary() -> X86_16TailValidationSummary:
-        return _TailSummaryBuildRun8616(
+        return replace(_TailSummaryBuildRun8616(
             project=project,
             codegen=codegen,
             root=root,
             mode=mode,
             boundary_context=boundary_context,
             reports=reports,
-        ).build()
+        ).build(), entry_premise=premise)
 
     cached = resolve_x86_16_validation_cached_artifact(
         cache=entries if isinstance(entries, dict) else None,
@@ -6804,7 +6968,28 @@ def compare_x86_16_tail_validation_summaries(
         changed = True
     diff["changed"] = changed
     diff["status"] = "failed" if semantic_failures else ("changed" if changed else "stable")
+    _compare_entry_premises_8616(before, after, diff)
     return diff
+
+
+def _compare_entry_premises_8616(
+    before: X86_16TailValidationSummary,
+    after: X86_16TailValidationSummary,
+    diff: dict[str, TailValidationValue],
+) -> None:
+    """Require identical explicit conditions and prevent unconditional promotion."""
+    before_premise, after_premise = before.entry_premise, after.entry_premise
+    if before_premise is not None or after_premise is not None:
+        if (before_premise != after_premise or after_premise is None
+                or after_premise.status is not EntryPremiseStatus8616.CONDITIONAL
+                or not valid_entry_premise_projection_8616(after_premise.to_dict())):
+            diff["status"] = EntryPremiseStatus8616.REFUSED.value
+            diff["changed"] = True
+            diff["premise_failure"] = "entry_premise_missing_invalid_or_changed"
+        else:
+            diff["entry_premise"] = after_premise.to_dict()
+            if not diff["changed"]:
+                diff["status"] = EntryPremiseStatus8616.CONDITIONAL.value
 
 
 def _typed_stack_condition_pair_8616(

@@ -2,6 +2,8 @@
 from dataclasses import replace
 
 import pytest
+
+from inertia.alias.stack_address_escape import StackAddressEscape8616
 from inertia.ir.core import (
     AddressStatus,
     IRActiveUnary8616,
@@ -11,8 +13,6 @@ from inertia.ir.core import (
     MemSpace,
     SegmentOrigin,
 )
-
-from inertia.alias.stack_address_escape import StackAddressEscape8616
 from tests.alias.test_x86_16_stack_address_escape import _classify, _restored_frame
 
 

@@ -22,6 +22,7 @@ class CliTerminalStatus(StrEnum):
     """Terminal reasons supported by this version of the CLI transport."""
 
     TIMEOUT = "timeout"
+    CONDITIONAL = "conditional"
 
 
 def emit_terminal_status(status: CliTerminalStatus) -> None:

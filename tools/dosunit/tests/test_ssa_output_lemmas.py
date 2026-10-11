@@ -7,10 +7,10 @@ from typing import Any
 import pytest
 import z3
 
-import tools.dosunit.ssa.ssa_output_lemmas as L
 import tools.dosunit.compare.straightline_ssa as S
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+import tools.dosunit.ssa.ssa_output_lemmas as L
 from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 
 
 def _pairs() -> list[L.OutputPair]:

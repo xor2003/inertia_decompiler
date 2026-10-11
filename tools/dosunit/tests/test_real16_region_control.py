@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function
-from tools.dosunit.tests.test_real16_call_composition import _lower
 from unicorn import UC_ARCH_X86, UC_MODE_16
 from unicorn.unicorn import Uc
 from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_IP
@@ -28,6 +26,8 @@ from tools.dosunit.compare.real16_region_control import (
     resolve_region_control,
     resolve_region_poststate,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_function
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 CODE = b"\x90" * 17 + bytes.fromhex("ebed")
 FUNCTION_ID = "demo.exe:jump"

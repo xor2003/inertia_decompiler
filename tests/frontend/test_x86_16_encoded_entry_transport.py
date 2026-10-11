@@ -13,19 +13,19 @@ from pathlib import Path
 
 import angr
 import pytest
-from inertia.ir import IRFunctionArtifact
+
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.vex_import as vi
-from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
-
+from inertia.cli.project_loading import _build_project
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsiteIndex8616,
     build_decoded_direct_callsite_index_8616,
 )
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
+from inertia.ir import IRFunctionArtifact
+from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
-from inertia.cli.project_loading import _build_project
 from tools.dosunit.runtime.real16_program_boot import ProgramBoot, program_from_mz_bytes
 from tools.dosunit.runtime.real16_replay_model import LinearRange
 from tools.dosunit.tests.test_x86_16_scoped_native_inputs import (

@@ -22,9 +22,13 @@ from angr.analyses.decompiler.ailgraph_walker import AILGraphWalker
 from angr.analyses.decompiler.clinic import Clinic
 from angr.knowledge_plugins.functions.function import Function
 from angr.project import Project
-from angr.sim_type import SimTypeBottom, SimTypeFunction
+from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction
 from archinfo import Arch
 
+from inertia.lowering.terminal_register_return_types import (
+    TerminalRegisterReturnTypeResult8616,
+    apply_terminal_register_return_type_evidence_8616,
+)
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616, terminal_return_storage_8616
 
 _REGISTER_CARRIERS = frozenset({
@@ -80,6 +84,7 @@ class _ClinicBoundary8616(Protocol):
     function: Function
     _ail_manager: _AtomManager8616
     _inertia_terminal_return_binding_report_8616: NativeTerminalReturnBindingReport8616
+    _inertia_terminal_return_type_result_8616: TerminalRegisterReturnTypeResult8616 | None
 
 
 def apply_native_terminal_return_values_8616() -> None:
@@ -91,8 +96,21 @@ def apply_native_terminal_return_values_8616() -> None:
     def _make_returns_with_terminal_storage_8616(self: object, graph: object) -> object:
         """Leave native ABI recovery intact; consume independent storage proof."""
         clinic = cast(_ClinicBoundary8616, self)
-        result = cast(Any, original)(self, graph)
         function = clinic.function
+        prototype = function.prototype
+        clinic._inertia_terminal_return_type_result_8616 = None
+        if (
+            clinic.project.arch.name == "86_16"
+            and isinstance(prototype, SimTypeFunction)
+            and isinstance(prototype.returnty, SimTypeChar)
+            and function.is_prototype_guessed
+        ):
+            # Native ReturnMaker selects AL or AX from this type. Refinement
+            # after SSA is too late: a byte read has already discarded AH.
+            clinic._inertia_terminal_return_type_result_8616 = apply_terminal_register_return_type_evidence_8616(
+                clinic.project, function,
+            )
+        result = cast(Any, original)(self, graph)
         if clinic.project.arch.name != "86_16" or function.calling_convention is not None:
             return result
         prototype = function.prototype

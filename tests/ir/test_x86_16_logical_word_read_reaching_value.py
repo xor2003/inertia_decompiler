@@ -7,7 +7,9 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir.logical_memory_contracts import (
     IRLogicalMemoryAccess8616,
     IRMemoryAccessKind8616,
@@ -23,7 +25,6 @@ from inertia.ir.logical_word_read_reaching_value import (
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 
 def _branching_far_callback_ssa() -> SSAFunctionArtifact:

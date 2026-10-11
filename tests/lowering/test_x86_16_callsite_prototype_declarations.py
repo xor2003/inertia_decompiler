@@ -20,16 +20,10 @@ from angr.sim_type import (
     TypeRef,
 )
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    CallsiteArgumentClass8616,
-    CallsiteSummary8616,
-    record_caller_return_use_evidence_8616,
-)
+
 import inertia.lowering.callsite_prototype_declarations as declaration_lowering
 import inertia.lowering.stack_prototype_materialization as prototype_lowering
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.call_argument_shape import (
     CallerStackObject8616,
     CallsiteArgumentShapeDecision8616,
@@ -50,6 +44,13 @@ from inertia.lowering.callee_argument_count_evidence import (
 from inertia.lowering.callsite_prototype_declarations import (
     canonicalize_callsite_target_identities_8616,
     materialize_callsite_prototype_declarations_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    CallsiteArgumentClass8616,
+    CallsiteSummary8616,
+    record_caller_return_use_evidence_8616,
 )
 
 

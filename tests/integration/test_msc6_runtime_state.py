@@ -3,9 +3,9 @@
 import subprocess
 
 import pytest
-from inertia.lowering.gp_word_runtime import GPRegisterRuntimeABI8616
 
 import tools.compiler_toolchain.build_msc6_examples as build
+from inertia.lowering.gp_word_runtime import GPRegisterRuntimeABI8616
 from tools.compiler_toolchain.msc6_runtime_support import msc6_runtime_state_declarations, msc6_runtime_support_source
 
 GP_REGISTERS = ("eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp")

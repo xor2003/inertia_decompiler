@@ -13,10 +13,10 @@ from collections.abc import Callable
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from pyvex.stmt import Put
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.semantics.alu_semantics import (
     binary_operation,
     binary_operation_with_carry,

@@ -7,8 +7,10 @@ side-exit fallthrough-only data effects or missing CFG edges as closed proof.
 
 from __future__ import annotations
 
-from inertia.ir.core import IRBlock, IRFunctionArtifact
 import inertia.widening.entry_word_transport as _TRANSPORT
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
+from inertia.ir.core import IRBlock, IRFunctionArtifact
+from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
 from tests.widening.test_x86_16_entry_word_transport import (
     ENTRY_8616,
     EXTERNAL,
@@ -23,9 +25,6 @@ from tests.widening.test_x86_16_entry_word_transport import (
     _reg,
     _seed_instrs,
 )
-
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
-from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
 
 
 def _prove(blocks: list[IRBlock], source_register: str = "cx") -> object:

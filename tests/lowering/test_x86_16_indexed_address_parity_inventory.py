@@ -4,6 +4,10 @@ import io
 from types import SimpleNamespace
 
 import angr
+
+from inertia.alias.indexed_address_projection import (
+    project_indexed_address_aliases_8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import (
     AddressStatus,
@@ -33,10 +37,6 @@ from inertia.lowering.indexed_address_parity_inventory_contracts import (
 )
 from inertia.lowering.segmented_global_loads import (
     IndexedSegmentedGlobalLoadSiteEvidence8616,
-)
-
-from inertia.alias.indexed_address_projection import (
-    project_indexed_address_aliases_8616,
 )
 
 INDEXED_LOAD = bytes.fromhex(

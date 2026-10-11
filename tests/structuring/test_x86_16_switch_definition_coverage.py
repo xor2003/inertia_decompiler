@@ -3,10 +3,10 @@
 import pytest
 from angr import ailment
 from angr.analyses.decompiler.structurer_nodes import ConditionNode, SequenceNode
-from tests.structuring.test_x86_16_typed_switch_seqnode import _switch_tree
 
 from inertia.structuring.switch_definition_coverage import missing_switch_definition_ids_8616
 from inertia.structuring.typed_switch_seqnode import _children_8616
+from tests.structuring.test_x86_16_typed_switch_seqnode import _switch_tree
 
 
 def _variable(varid):

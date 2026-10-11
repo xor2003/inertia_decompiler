@@ -5,12 +5,12 @@ from dataclasses import replace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616, CallsiteSummary8616
-from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.semantics.bp_call_preservation import prove_direct_bp_call_preservation_8616
 from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
+from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616, CallsiteSummary8616
 
 
 def _project(body: bytes):

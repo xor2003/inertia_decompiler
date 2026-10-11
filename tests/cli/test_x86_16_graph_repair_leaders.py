@@ -19,7 +19,6 @@ import networkx
 import pytest
 from angr.codenode import BlockNode
 from angr.knowledge_plugins.functions.function import Function
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 import inertia.cli.cli_function_discovery as discovery_owner
 from inertia.cli.function_graph_extent_repair import (
@@ -27,6 +26,8 @@ from inertia.cli.function_graph_extent_repair import (
     _out_of_block_ins_addrs_8616,
     repair_undercovered_transition_sources_8616,
 )
+from inertia.frontend.x86_16 import lift_86_16  # noqa: F401 -- register the native lifter for blob projects
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 
 def _load_module_under_test() -> ModuleType:
@@ -274,3 +275,39 @@ def test_aligned_leader_cannot_hide_earlier_mid_instruction_leader() -> None:
     discovery_owner._clip_repair_blocks_at_leaders_8616(function, discovered)
     assert discovered.clip_ends == {}
     assert discovered.edges == {(0x1000, 0x1009)}
+
+
+@pytest.mark.parametrize("end_bound,scan_limit,visited_bytes,expected_size", [
+    (0x1008, 32, 0, 8),
+    (0x1020, 8, 5, 3),
+    (0x1020, 8, 8, 0),
+])
+def test_repair_lift_respects_remaining_extent_and_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    end_bound: int,
+    scan_limit: int,
+    visited_bytes: int,
+    expected_size: int,
+) -> None:
+    """Never lift beyond the repair window or an exhausted byte budget."""
+    requests: list[int | None] = []
+
+    def lift(addr: int, *, opt_level: int, max_size: int | None = None) -> object:
+        requests.append(max_size)
+        return SimpleNamespace(addr=addr, size=max_size or 32,
+                               capstone=SimpleNamespace(insns=(object(),)))
+
+    monkeypatch.setattr(discovery_owner, "_x86_16_block_successors_from_capstone_8616",
+                        lambda *args, **kwargs: ((0x1100,), True))
+    project = SimpleNamespace(factory=SimpleNamespace(block=lift))
+    bounds = discovery_owner._GraphRepairScanBounds8616(0x1000, end_bound, scan_limit)
+    blocks: dict[int, object] = {}
+    edges: set[tuple[int, int]] = set()
+    queue = [0x1000]
+    total = discovery_owner._scan_repair_block_8616(
+        project, queue, set(), visited_bytes, bounds, blocks, edges, set(),
+    )
+    assert requests == ([expected_size] if expected_size else [])
+    assert total == visited_bytes + expected_size
+    assert edges == ({(0x1000, 0x1100)} if expected_size else set())
+    assert queue == []

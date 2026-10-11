@@ -14,6 +14,7 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
 from inertia.postprocess.optimization.local_liveness import (
+    has_architectural_register_storage_8616,
     local_liveness_key_8616,
     stack_storage_liveness_key_8616,
 )
@@ -296,8 +297,15 @@ class _DeadLocalPruneRun:
         new_statements: list[object | None],
         pending_assignment_indices: dict[tuple[object, ...], int],
     ) -> bool:
-        """Drop a never-read assignment or record it as pending; True = consumed."""
+        """Drop proven local dead stores; retain unproved architectural effects."""
         self_referential_rhs = bool(lhs_keys) and not lhs_keys.isdisjoint(rhs_reads)
+        # AST reads omit architectural live-out uses published in native SSA.
+        # Register storage without dead-effect proof is unknown, even when its
+        # current C projection is a local. Unified identities also do not prove
+        # a complete overwrite: byte and word views may share them. Leave both
+        # unused-effect and overwrite elimination to native SSA's proof owner.
+        if has_architectural_register_storage_8616(stmt.lhs):
+            return False
         if lhs_keys.isdisjoint(self.reads) and not self_referential_rhs:
             return True
         self._mark_pending_assignment(lhs_keys, new_statements, pending_assignment_indices)

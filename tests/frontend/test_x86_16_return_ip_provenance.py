@@ -6,10 +6,11 @@ from types import SimpleNamespace
 from typing import cast
 
 import angr
+from pyvex.expr import Get
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
 from inertia.frontend.x86_16.stack_helpers import StackEmulator, near_return_ip16
-from pyvex.expr import Get
 
 
 class _ReturnIpEmulator:

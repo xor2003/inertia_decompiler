@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
 import tests.integration.test_x86_16_near_return_continuation as worker
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 

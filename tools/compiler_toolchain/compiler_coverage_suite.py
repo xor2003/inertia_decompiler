@@ -73,6 +73,7 @@ def _run_frozen_case(
     candidate: CoverageCase, artifacts: Path, *, timeout: float,
     stage_budget_seconds: int,
     evidence_path: Path | None,
+    real16_declared_input: Path | None = None,
 ) -> CoverageOutcome:
     """Verify every pin, then route one frozen row through the shared runner."""
     assert candidate.source is not None  # Guaranteed by schema-2 manifest load.
@@ -107,6 +108,7 @@ def _run_frozen_case(
         runtime_sources=runtime_sources,
         signature_catalogs=catalogs,
         compiler_profile=selection,
+        real16_declared_input=real16_declared_input,
     )
 
 
@@ -119,6 +121,7 @@ def _run_candidate(
     stage_budget_seconds: int | None,
     profile: CompilerProfileSelection | None,
     evidence_path: Path | None,
+    real16_declared_input: Path | None = None,
 ) -> CoverageOutcome:
     """Dispatch one selected row through the existing runner boundary."""
     if manifest_schema == 2:
@@ -128,6 +131,7 @@ def _run_candidate(
             candidate, artifacts, timeout=timeout,
             stage_budget_seconds=stage_budget_seconds,
             evidence_path=evidence_path,
+            real16_declared_input=real16_declared_input,
         )
     assert profile is not None  # Guaranteed for schema-1 manifests.
     return run_existing_case(
@@ -198,9 +202,12 @@ def run_suite(
     manifest_path: Path, output: Path, *, case: str | None = None,
     obligation: str | None = None, timeout: float = 600,
     rerun_failed: Path | None = None, profile_evidence: Path | None = None,
+    real16_declared_input: Path | None = None,
 ) -> bool:
     """Execute selected candidates serially to avoid nested decompiler pools."""
     manifest = load_manifest(manifest_path)
+    if real16_declared_input is not None and (manifest.schema != 2 or case is None):
+        raise ValueError("Binary-bound entry evidence requires one explicit schema-2 case")
     profile = (
         select_manifest_profile(manifest, evidence_path=profile_evidence)
         if manifest.schema == 1 else None
@@ -230,6 +237,7 @@ def run_suite(
                 manifest.schema, candidate, artifacts, timeout=timeout,
                 stage_budget_seconds=manifest.stage_budget_seconds,
                 profile=profile, evidence_path=profile_evidence,
+                real16_declared_input=real16_declared_input,
             )
         except (OSError, ValueError) as failure:
             outcome = CoverageOutcome.HARNESS_FAILED
@@ -272,12 +280,14 @@ def main() -> int:
     parser.add_argument("--obligation")
     parser.add_argument("--rerun-failed", type=Path)
     parser.add_argument("--profile-evidence", type=Path)
+    parser.add_argument("--real16-declared-input", type=Path)
     parser.add_argument("--timeout", type=float, default=600)
     args = parser.parse_args()
     try:
         passed = run_suite(args.manifest, args.out_dir, case=args.case,
                            obligation=args.obligation, timeout=args.timeout, rerun_failed=args.rerun_failed,
-                           profile_evidence=args.profile_evidence)
+                           profile_evidence=args.profile_evidence,
+                           real16_declared_input=args.real16_declared_input)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     return 0 if passed else 1

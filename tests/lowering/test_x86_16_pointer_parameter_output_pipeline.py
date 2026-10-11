@@ -11,6 +11,15 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.terminal_pointer_outputs import (
+    classify_terminal_pointer_output_aliases_8616,
+)
+from inertia.cli.cli_function_discovery import (
+    _recover_fast_exe_catalog,
+    attach_direct_target_argument_evidence_context_8616,
+)
+from inertia.cli.project_loading import _build_project
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -52,10 +61,6 @@ from inertia.lowering.pointer_parameter_outputs import (
     pointer_parameter_output_evidence_8616,
     publish_pointer_parameter_outputs_8616,
 )
-
-from inertia.alias.terminal_pointer_outputs import (
-    classify_terminal_pointer_output_aliases_8616,
-)
 from inertia.semantics.terminal_pointer_outputs import (
     collect_terminal_pointer_output_evidence_8616,
 )
@@ -69,11 +74,6 @@ from inertia.widening.global_object_layout import (
 from inertia.widening.terminal_pointer_output_views import (
     widen_terminal_pointer_output_views_8616,
 )
-from inertia.cli.cli_function_discovery import (
-    _recover_fast_exe_catalog,
-    attach_direct_target_argument_evidence_context_8616,
-)
-from inertia.cli.project_loading import _build_project
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

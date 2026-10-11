@@ -7,18 +7,23 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from tools.dosunit.tests.test_real16_program_input_integration import input_environment
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
-from tools.dosunit.tests.test_real16_program_video_state import execute as execute_video_state
-from tools.dosunit.tests.test_real16_program_video_state import state_environment
 
-from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
-from tools.dosunit.runtime.real16_program_model import ProgramAgreement, ProgramEventKind, ProgramStatus, compare_programs
+from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
+from tools.dosunit.runtime.real16_program_model import (
+    ProgramAgreement,
+    ProgramEventKind,
+    ProgramStatus,
+    compare_programs,
+)
 from tools.dosunit.runtime.real16_program_output import OutputPolicy
 from tools.dosunit.runtime.real16_program_replay import replay_program
 from tools.dosunit.runtime.real16_program_rom import ProgramRom, RomRegion, rom_document
 from tools.dosunit.runtime.real16_replay_model import SegOffset
+from tools.dosunit.tests.test_real16_program_input_integration import input_environment
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
+from tools.dosunit.tests.test_real16_program_video_state import execute as execute_video_state
+from tools.dosunit.tests.test_real16_program_video_state import state_environment
 
 
 def rom_environment(data=b"\x07", offset=0x20):

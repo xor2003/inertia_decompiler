@@ -50,10 +50,10 @@ int main(void)
     if (mul_l(-7L, -8L) != 56L) {
         return 3;
     }
-    if (mul_ul(65535UL, 65535UL) != 4294836225UL) {
+    if (mul_ul(65535UL, 65535UL) != 0xFFFE0001UL) {
         return 4;
     }
-    if (mul_ul(100000UL, 40000UL) != 4000000000UL) {
+    if (mul_ul(100000UL, 40000UL) != 0xEE6B2800UL) {
         return 5;
     }
     if (div_l(2100000000L, 7L) != 300000000L) {
@@ -62,10 +62,10 @@ int main(void)
     if (mod_l(123456789L, 1000L) != 789L) {
         return 7;
     }
-    if (div_ul(4000000000UL, 40000UL) != 100000UL) {
+    if (div_ul(0xEE6B2800UL, 40000UL) != 100000UL) {
         return 8;
     }
-    if (rem_ul(4294967295UL, 65536UL) != 65535UL) {
+    if (rem_ul(0xFFFFFFFFUL, 65536UL) != 65535UL) {
         return 9;
     }
     a = -123456789L;

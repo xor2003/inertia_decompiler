@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from inertia.frontend.x86_16.frontend_capstone_decode import DirectCapstoneBlock8616
 from inertia.cli.cli_function_discovery import _collect_stitched_blocks_and_edges_8616
 from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.frontend_capstone_decode import DirectCapstoneBlock8616
 
 
 def test_stitched_discovery_uses_direct_blocks_without_vex(monkeypatch) -> None:

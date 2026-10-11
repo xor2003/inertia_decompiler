@@ -12,16 +12,15 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
-from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordinateStatus8616
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.alias.alias_model_impl import AliasStorageFacts
 from inertia.alias.stack_memory_ssa_contracts import (
     StackMemoryAliasFactKind8616,
     StackMemorySSAAliasArtifact8616,
     StackMemorySSAAliasFact8616,
 )
+from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordinateStatus8616
 from inertia.ir.core import IRAddress
+from inertia.pipeline.errors import PipelineHardError
 from inertia.widening.carry_borrow_pipeline import CarryBorrowWideningPipeline8616
 from inertia.widening.stack_memory_objects_contracts import StackMemoryObjectWideningArtifact8616
 

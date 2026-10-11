@@ -7,14 +7,14 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
     _direct_stack_near_function_pointer_expr_8616,
 )
-
-from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _binary_project(*, indirect_callee: bool = True, far_callee: bool = False):

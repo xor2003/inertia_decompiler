@@ -12,8 +12,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from capstone.x86_const import X86_INS_INC, X86_OP_MEM, X86_REG_BP, X86_REG_INVALID
+
 import inertia.lowering.real_mode_linear as real_mode_linear
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.real_mode_linear import (
     DirectStackUpdateFact8616,
     _has_existing_stack_update_assignment_8616,
@@ -22,7 +24,6 @@ from inertia.lowering.real_mode_linear import (
 from inertia.pipeline.structured_ast_query_index import (
     StructuredAstQueryIndex8616,
 )
-from capstone.x86_const import X86_INS_INC, X86_OP_MEM, X86_REG_BP, X86_REG_INVALID
 
 
 class _DummyCodegen:

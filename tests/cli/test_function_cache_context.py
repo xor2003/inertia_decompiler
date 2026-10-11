@@ -3,18 +3,17 @@ from contextlib import contextmanager
 from threading import Event, Lock
 from types import SimpleNamespace
 
+import inertia.cli.cache as cache_module
+import inertia.cli.cli_core as cli_core
+from inertia.cli.function_cache_context import function_decompilation_cache_key_8616
+from inertia.cli.lst_extract import LSTMetadata
+from inertia.cli.work_items import FunctionWorkItem, FunctionWorkResult
+from inertia.frontend.x86_16.cod_extract import CODProcMetadata
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
     CallerReturnUseVerdict8616,
     record_caller_return_use_evidence_8616,
 )
-
-import inertia.cli.cache as cache_module
-import inertia.cli.cli_core as cli_core
-from inertia.cli.lst_extract import LSTMetadata
-from inertia.frontend.x86_16.cod_extract import CODProcMetadata
-from inertia.cli.function_cache_context import function_decompilation_cache_key_8616
-from inertia.cli.work_items import FunctionWorkItem, FunctionWorkResult
 
 
 class _Graph:

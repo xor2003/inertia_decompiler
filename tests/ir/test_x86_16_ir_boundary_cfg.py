@@ -4,6 +4,11 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
 from inertia.ir.core import IRBlock, IRFunctionArtifact, IRInstr
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.ir_boundary_cfg import (
@@ -13,11 +18,6 @@ from inertia.ir.ir_boundary_cfg import (
     prove_ir_boundary_coverage_8616 as _PROVE,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
 from tests.ir.test_segment_call_binding_regression import _project
 
 

@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 import tools.dosunit.compare.flat32_proof_retry as retry_owner
-from tools.dosunit.contracts.binary_environment import EnvironmentScan
 from tools.dosunit.compare.flat32_proof_retry import (
     ProofContext,
     checked_environment_verdict,
     retry_function_proof,
 )
+from tools.dosunit.contracts.binary_environment import EnvironmentScan
 
 if TYPE_CHECKING:
     import angr

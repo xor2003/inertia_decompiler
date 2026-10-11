@@ -1,13 +1,12 @@
 """Adversarial review controls; expected to fail unsafe carry proposal."""
 from dataclasses import replace
 
-from inertia.ir.core import IRActiveUnary8616, IRValue, MemSpace
-from tests.semantics.test_x86_16_carry_borrow_widening import _lift_ssa, _replace_instruction
-
 from inertia.alias.carry_borrow_projection import project_carry_borrow_aliases_8616
+from inertia.ir.core import IRActiveUnary8616, IRValue, MemSpace
 from inertia.semantics.carry_borrow_links import analyze_carry_borrow_links_8616
 from inertia.semantics.carry_borrow_ssa import definition_for_8616
 from inertia.widening.carry_borrow_values import widen_carry_borrow_values_8616
+from tests.semantics.test_x86_16_carry_borrow_widening import _lift_ssa, _replace_instruction
 
 
 def test_narrow_then_widen_high_output_is_not_original_arithmetic():

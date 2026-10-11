@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import tools.dev.benchmark_optimization_quality_guard as quality_guard
 from inertia.cli.acceptance_scorecard import (
     X86_16QualityMetrics,
     format_x86_16_quality_report_8616,
@@ -12,7 +13,6 @@ from inertia.cli.acceptance_scorecard import (
     measure_x86_16_function_quality_8616,
 )
 from inertia.cli.decompilation_quality import assess_decompiled_c_text, assess_final_generated_c_text
-import tools.dev.benchmark_optimization_quality_guard as quality_guard
 from tools.dev.benchmark_optimization_quality_guard import (
     DecompileMode,
     _disable_repo_extension_modules,

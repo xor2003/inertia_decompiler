@@ -56,7 +56,7 @@ from inertia.cli.cli_output import (
     _print_diagnostic_text,
     _timestamped_print,
 )
-from inertia.cli.cli_terminal_status import CliTerminalStatus, emit_terminal_status
+from inertia.cli.cli_terminal_status import CliTerminalStatus, emit_terminal_status, read_terminal_status
 from inertia.cli.cli_timeout import (
     PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
     _AdaptivePerByteTimeoutModel,
@@ -107,6 +107,8 @@ from inertia.cli.function_worker_policy import (
     select_function_worker_policy_8616,
 )
 from inertia.cli.generated_c_artifacts import (
+    conditional_tail_snapshot_8616,
+    write_conditional_function_c_8616,
     write_generated_function_c,
     write_generated_translation_unit_c,
 )
@@ -134,6 +136,7 @@ from inertia.cli.project_loading import (
     _build_project_cached,
     _build_project_from_bytes,
     _describe_exception,
+    declared_input_path_8616,
 )
 from inertia.cli.recompile_check import RecompileCheckResult, check_c_recompiles_8616
 from inertia.cli.rizin_discovery import (
@@ -1985,6 +1988,7 @@ def _isolated_project_lane_8616(
             force_blob=False,
             base_addr=linked_base,
             entry_point=getattr(item_function.project, "entry", linked_base),
+            real16_declared_input=declared_input_path_8616(item_function.project),
         )
         _transfer_caller_return_use_evidence_8616(decompile_project, isolated_project)
         attach_lst_metadata_to_project(isolated_project, ctx.lst_metadata)
@@ -2312,6 +2316,8 @@ def _serial_clean_worker_command_8616(
         "--no-alternate-source-c",
         "--ignore-local-sidecar-hints",
     ]
+    if args.real16_declared_input is not None:
+        command.extend(("--real16-declared-input", str(args.real16_declared_input)))
     if args.blob:
         command.append("--blob")
     if exact_region_end is not None:
@@ -2456,18 +2462,22 @@ def _run_serial_clean_process_work_item_8616(
             )
         debug_output = _serial_clean_worker_debug_output_8616(completed.stderr)
         if completed.returncode != 0 or not result_path.exists():
+            status, failure_stage, payload = _serial_clean_worker_failure_8616(
+                debug_output,
+                recovery_addr=recovery_addr,
+                returncode=completed.returncode,
+                result_present=result_path.exists(),
+            )
             return FunctionWorkResult(
                 index=item.index,
-                status=WorkItemStatus.ERROR.value,
-                payload=(
-                    f"Clean serial worker failed for {recovery_addr:#x} "
-                    f"(exit={completed.returncode}, result_present={result_path.exists()})."
-                ),
+                status=status.value,
+                payload=payload,
                 debug_output=debug_output,
                 function=item.function,
                 function_cfg=item.function_cfg,
                 elapsed=time.perf_counter() - started_at,
-                failure_stage="clean_process_decompilation",
+                skip_heavy_fallbacks=status is WorkItemStatus.TIMEOUT,
+                failure_stage=failure_stage,
                 execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
             )
         try:
@@ -2499,6 +2509,36 @@ def _run_serial_clean_process_work_item_8616(
                 failure_stage="clean_process_protocol",
                 execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
             )
+
+
+def _serial_clean_worker_failure_8616(
+    diagnostics: str,
+    *,
+    recovery_addr: int,
+    returncode: int,
+    result_present: bool,
+) -> tuple[WorkItemStatus, str, str]:
+    """Preserve child terminal reasons and reject malformed failure transport.
+
+    A child's own deadline can terminate before writing a result record. Its
+    typed timeout must stop heavy retries just like the parent's deadline.
+    """
+    try:
+        terminal_status = read_terminal_status(diagnostics)
+    except ValueError as ex:
+        return WorkItemStatus.ERROR, "clean_process_protocol", str(ex)
+    if terminal_status is CliTerminalStatus.TIMEOUT:
+        return (
+            WorkItemStatus.TIMEOUT,
+            "clean_process_decompilation",
+            f"Clean serial worker reported a terminal timeout for {recovery_addr:#x}.",
+        )
+    return (
+        WorkItemStatus.ERROR,
+        "clean_process_decompilation",
+        f"Clean serial worker failed for {recovery_addr:#x} "
+        f"(exit={returncode}, result_present={result_present}).",
+    )
 
 
 def _serial_clean_worker_window_8616(
@@ -2788,7 +2828,7 @@ def _tail_validation_stage_detail_8616(
     return "; ".join(stage_details) if stage_details else "no stage data"
 
 
-_RECOMPILE_RESULT_CACHE_8616: dict[tuple[str, str], RecompileCheckResult] = {}
+_RECOMPILE_RESULT_CACHE_8616: dict[tuple[str, str, str | None], RecompileCheckResult] = {}
 _RECOMPILE_RESULT_CACHE_LOCK_8616 = threading.Lock()
 
 
@@ -2798,13 +2838,17 @@ def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tu
         recompilation_targets = ("portable-flat", "msc-dos")
         checked_payloads: list[tuple[str, str]] = []
         payload_hash = hashlib.sha256(accepted_payload.encode("utf-8", errors="ignore")).hexdigest()
+        from inertia.cli.recompile_check import tail_compiler_cache_identity_8616
+
+        identity = tail_compiler_cache_identity_8616()
         for recomp_target in recompilation_targets:
-            cache_key = (recomp_target, payload_hash)
+            cache_key = (recomp_target, payload_hash, identity.context)
             with _RECOMPILE_RESULT_CACHE_LOCK_8616:
-                recompilation = _RECOMPILE_RESULT_CACHE_8616.get(cache_key)
+                recompilation = _RECOMPILE_RESULT_CACHE_8616.get(cache_key) if identity.reusable else None
             if recompilation is None:
                 recompilation = check_c_recompiles_8616(accepted_payload, target=recomp_target)
-                if not recompilation.toolchain_unavailable:
+                current_identity = tail_compiler_cache_identity_8616()
+                if not recompilation.toolchain_unavailable and current_identity.reusable and current_identity == identity:
                     with _RECOMPILE_RESULT_CACHE_LOCK_8616:
                         _RECOMPILE_RESULT_CACHE_8616[cache_key] = recompilation
             if recompilation.passed:
@@ -2826,13 +2870,17 @@ def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tu
                 if len(error_lines) > 1:
                     detail += "; " + "; ".join(error_lines[1:3])
             else:
-                detail = lines[0] if lines else "syntax check failed"
+                detail = lines[0] if lines else (
+                    f"command {recompilation.command!r}, exit {recompilation.exit_code}"
+                    if recompilation.toolchain_unavailable else "compiler check failed"
+                )
                 if len(lines) > 1:
                     detail += "; " + "; ".join(lines[1:3])
             source_path = recompilation.source_path
             if isinstance(source_path, str) and source_path:
                 detail = f"{detail} [source: {source_path}]"
-            toolchain = "gcc portable-flat" if recomp_target == "portable-flat" else "MS C 5.1 msc-dos"
+            toolchain = ("gcc portable-flat" if recomp_target == "portable-flat"
+                         else recompilation.compiler_profile or "MS C 5.1 msc-dos")
             failure_kind = "toolchain unavailable" if recompilation.toolchain_unavailable else "syntax check failed"
             return checked_payloads, f"{toolchain} {failure_kind}: {detail}"
         return checked_payloads, None
@@ -2939,6 +2987,23 @@ def _validated_generated_c_acceptance_8616(
     )
 
 
+def _acceptance_tail_snapshot_admitted_8616(
+    status: str, snapshot: dict[str, object] | None, stages: list[str] | tuple[str, ...],
+    enabled: bool, conditional: bool,
+) -> bool:
+    """Keep explicit conditional authority distinct from disabled validation."""
+    if conditional:
+        return True
+    if status == WorkItemStatus.CONDITIONAL.value:
+        return False
+    if isinstance(snapshot, dict) and any(
+        isinstance(entry, Mapping) and entry.get("entry_premise") is not None
+        for entry in snapshot.values()
+    ):
+        return False
+    return not enabled or _tail_validation_passes_lenient(snapshot, expected_stages=list(stages))
+
+
 def _acceptance_run_8616(
     status: str,
     payload: str,
@@ -2949,7 +3014,7 @@ def _acceptance_run_8616(
 ) -> CAcceptanceResult8616:
     """Run final validation, quality, and recompilation checks."""
     baseline_payload = payload if isinstance(payload, str) else ""
-    if status != WorkItemStatus.OK.value:
+    if status not in (WorkItemStatus.OK.value, WorkItemStatus.CONDITIONAL.value):
         return _acceptance_result_8616(status, None, baseline_payload)
     if not baseline_payload.strip():
         return _acceptance_result_8616(
@@ -2973,8 +3038,9 @@ def _acceptance_run_8616(
             accepted_payload,
             baseline_payload,
         )
-    if tail_validation_enabled and not _tail_validation_passes_lenient(
-        tail_validation_snapshot, expected_stages=list(expected_validation_stages)
+    conditional = conditional_tail_snapshot_8616(tail_validation_snapshot, expected_stages=expected_validation_stages)
+    if not _acceptance_tail_snapshot_admitted_8616(
+        status, tail_validation_snapshot, expected_validation_stages, tail_validation_enabled, conditional,
     ):
         display_status = _tail_validation_display_status(tail_validation_snapshot)
         detail = _tail_validation_stage_detail_8616(tail_validation_snapshot, expected_validation_stages)
@@ -3026,7 +3092,7 @@ def _acceptance_run_8616(
             baseline_payload,
         )
     return CAcceptanceResult8616(
-        status=WorkItemStatus.OK,
+        status=WorkItemStatus.CONDITIONAL if conditional else WorkItemStatus.OK,
         blocker=None,
         validated_payload=accepted_payload,
         validated_payload_hash=validation_hash,
@@ -3100,8 +3166,8 @@ def _retry_gate_allows_candidate_8616(
     lst_metadata: object,
     cod_metadata: object,
 ) -> bool:
-    """Check whether a failed result may retry with new sidecar evidence."""
-    if result.status == "ok" or args.addr is not None:
+    """Allow new sidecar evidence only when the work item permits a retry."""
+    if result.skip_heavy_fallbacks or result.status == "ok" or args.addr is not None:
         return False
     if getattr(project.arch, "name", "") != "86_16" or result.failure_stage == "sweep_budget":
         return False
@@ -3205,7 +3271,7 @@ def _accept_function_work_result_for_emission_8616(
     project: angr.Project,
 ) -> FunctionWorkResult:
     """Return a work result whose clean-success state has passed final acceptance."""
-    if result.status != WorkItemStatus.OK.value:
+    if result.status not in (WorkItemStatus.OK.value, WorkItemStatus.CONDITIONAL.value):
         return result
     tail_snapshot = _tail_validation_snapshot_from_result_8616(result.tail_validation)
     acceptance = _accept_generated_c_for_emission_8616(
@@ -3213,7 +3279,7 @@ def _accept_function_work_result_for_emission_8616(
         tail_validation_snapshot=tail_snapshot,
         project=project,
     )
-    if acceptance.status is WorkItemStatus.OK and acceptance.blocker is None:
+    if acceptance.status in (WorkItemStatus.OK, WorkItemStatus.CONDITIONAL) and acceptance.blocker is None:
         return replace(
             result,
             status=acceptance.status.value,
@@ -3764,6 +3830,7 @@ def _fresh_sidecar_retry_work_item_8616(
         force_blob=False,
         base_addr=linked_base,
         entry_point=getattr(project, "entry", linked_base),
+        real16_declared_input=declared_input_path_8616(project),
     )
     _transfer_caller_return_use_evidence_8616(project, fresh_project)
     attach_lst_metadata_to_project(fresh_project, lst_metadata)
@@ -3902,9 +3969,10 @@ def _validation_failed_retry_gate_8616(
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
 ) -> bool:
-    """Allow a post-validation retry only for evidence-mutating sweep lanes."""
+    """Allow evidence-mutating sweep retries unless the work item forbids them."""
     return (
-        args.addr is None
+        not result.skip_heavy_fallbacks
+        and args.addr is None
         and getattr(project.arch, "name", "") == "86_16"
         and result.failure_stage != "sweep_budget"
         and result.retry_may_change_evidence(
@@ -4038,6 +4106,34 @@ def _emit_partial_payload_block_8616(
     )
 
 
+def _emit_conditional_result_8616(result: FunctionWorkResult, *, args: CliArguments) -> int:
+    """Export conditional C separately, without fallback, success caching or pass."""
+    snapshot = _tail_validation_snapshot_from_result_8616(result.tail_validation)
+    integrity = verify_function_work_result_payload_integrity_8616(result)
+    if not integrity.passed or not conditional_tail_snapshot_8616(snapshot):
+        print("[tail-validation] conditional artifact refused: stale payload or premise", file=sys.stderr)
+        return 4
+    if args.output_c_dir is not None:
+        write_conditional_function_c_8616(
+            args.output_c_dir, address=function_original_addr(result.function), name=result.function.name,
+            payload=result.payload, snapshot=snapshot,
+            validated_payload_hash=result.validated_payload_hash,
+            gcc_checked_payload_hash=result.gcc_checked_payload_hash,
+        )
+    print("/* Conditional generated C: explicit entry premises; merge gate hold. */")
+    print(result.payload)
+    emit_terminal_status(CliTerminalStatus.CONDITIONAL)
+    return 5
+
+
+def _retain_emission_result_8616(
+    results: dict[int, FunctionWorkResult] | None, index: int, result: FunctionWorkResult,
+) -> None:
+    """Retain checked work status so aggregation cannot lose conditional evidence."""
+    if results is not None:
+        results[index] = result
+
+
 def _emit_function_result(
     item: FunctionWorkItem,
     result: FunctionWorkResult,
@@ -4058,9 +4154,11 @@ def _emit_function_result(
     def _impl() -> tuple[int, int]:
         nonlocal result
         result = _accept_function_work_result_for_emission_8616(result, project=project)
-        if result_state_by_index is not None:
-            result_state_by_index[item.index] = result
+        _retain_emission_result_8616(result_state_by_index, item.index, result)
         result_tail_validation = _tail_validation_snapshot_from_result_8616(result.tail_validation)
+        if result.status == WorkItemStatus.CONDITIONAL.value:
+            conditional_exit = _emit_conditional_result_8616(result, args=args)
+            return 0, int(conditional_exit != 5)
         decompiled_local = 0
         failed_local = 0
         attempt_status_printed = False
@@ -4555,8 +4653,8 @@ def _known_nonopt_fallback_8616(
     decompiled_local: int,
     failed_local: int,
 ) -> tuple[str | None, tuple[int, int] | None]:
-    """Try the non-optimized known-function fallback lane."""
-    if result.partial_payload is not None:
+    """Try known-function recovery only when the work item permits heavy retries."""
+    if result.skip_heavy_fallbacks or result.partial_payload is not None:
         return None, None
     known_nonopt_result = _try_decompile_non_optimized_known_function(
         function_project,
@@ -5238,6 +5336,7 @@ def _prepare_main_project_8616(
             force_blob=args.blob,
             base_addr=args.base_addr,
             entry_point=args.entry_point,
+            real16_declared_input=args.real16_declared_input,
         )
         typing.cast(typing.Any, project)._inertia_c_target = args.c_target
         typing.cast(typing.Any, project)._inertia_trace_c_stages = bool(args.trace_c_stages)
@@ -5315,6 +5414,7 @@ def _proc_linked_binary_lane_8616(
         force_blob=args.blob,
         base_addr=args.base_addr,
         entry_point=args.entry_point,
+        real16_declared_input=args.real16_declared_input,
     )
     typing.cast(typing.Any, project)._inertia_c_target = args.c_target
     typing.cast(typing.Any, project)._inertia_trace_c_stages = bool(args.trace_c_stages)
@@ -6983,6 +7083,10 @@ class _DirectAddrCliRun8616:
         return None
     def run_8616_part5_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        if self.direct_result.status == WorkItemStatus.CONDITIONAL.value:
+            if _complete_serial_clean_worker_result_8616(self.direct_result, project=self.direct_project):
+                return 0
+            return _emit_conditional_result_8616(self.direct_result, args=self.args)
         _rc = self.run_8616_part5_8616_b1_s0()
         if _rc is not None:
             return _rc
@@ -8705,6 +8809,7 @@ def _fresh_primary_function_work_item_8616(
         force_blob=args.blob,
         base_addr=args.base_addr,
         entry_point=args.entry_point,
+        real16_declared_input=args.real16_declared_input,
     )
     _transfer_caller_return_use_evidence_8616(context.project, fresh_project)
     typing.cast(typing.Any, fresh_project)._inertia_c_target = args.c_target
@@ -9368,6 +9473,12 @@ def _finish_batch_cli_8616(
         failed=failed,
         total_shown=total_shown,
     )
+    if (not failed and not batch_c_output.failed and attempted == total_shown
+            and all(result.status in (WorkItemStatus.OK.value, WorkItemStatus.CONDITIONAL.value)
+                    for result in result_map.values())
+            and any(result.status == WorkItemStatus.CONDITIONAL.value for result in result_map.values())):
+        emit_terminal_status(CliTerminalStatus.CONDITIONAL)
+        return 5
     return 2 if batch_c_output.failed else exit_code
 
 
@@ -11116,6 +11227,11 @@ def main(argv: list[str] | None = None) -> int:
         except DecompilerArchitectureGuardError as ex:
             print(str(ex), file=sys.stderr)
             return 3
+        # Clean workers enter this owner directly and cannot rely on facade
+        # import side effects to install the architecture's analysis adapters.
+        from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+        apply_x86_16_bootstrap()
         return _run_main_cli_8616(argv)
 
     with span("cli.main"):

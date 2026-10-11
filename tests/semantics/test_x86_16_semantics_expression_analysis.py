@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimTemporaryVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.semantics.expression_analysis import (
     VirtualValueIdentity8616,
     VirtualValueIdentityKind8616,

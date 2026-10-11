@@ -21,9 +21,10 @@ from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeFunction, SimTypeInt, SimTypeLong, SimTypePointer, SimTypeShort
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimStackVariable, SimTemporaryVariable
 from archinfo import Arch
 
+from .c_ast_utils import _iter_c_nodes_deep_8616
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import (
     StackVariableCoordinateProjection8616,
@@ -104,12 +105,14 @@ class _CodegenBoundary8616(Protocol):
     project: _ProjectBoundary8616
     cfunc: _CFunctionBoundary8616
     _inertia_stack_value_projection_stats_8616: StackValueProjectionStats8616
+    _inertia_pointer_scalar_temporary_stats_8616: StackValueProjectionStats8616
 
 
 class _CFunctionBoundary8616(Protocol):
     """Third-party function interface used to identify canonical arguments."""
 
     arg_list: list[object] | tuple[object, ...]
+    statements: object
 
 
 def stack_value_projection_stats_8616(
@@ -183,6 +186,48 @@ def project_pointer_storage_value_8616(
         [expression],
         codegen=codegen,
     )
+
+
+def normalize_pointer_scalar_temporaries_8616(codegen: object) -> bool:
+    """Keep machine scalar temporaries scalar after typed argument substitution.
+
+    A pointer view recovered for a stack argument cannot change the declared
+    width of a machine temporary receiving its stored offset. Consume the
+    existing pointer-storage bridge only for matching 16/32-bit integer storage;
+    pointer destinations and inconsistent or unknown widths stay untouched.
+    """
+    boundary = cast(_CodegenBoundary8616, codegen)
+    cfunc = boundary.cfunc
+    root = cfunc.statements if cfunc is not None else None
+    raw = materialized = 0
+    for node in _iter_c_nodes_deep_8616(root):
+        if not isinstance(node, structured_c.CAssignment):
+            continue
+        lhs, rhs = node.lhs, node.rhs
+        if not (
+            isinstance(lhs, structured_c.CVariable)
+            and isinstance(lhs.variable, SimTemporaryVariable)
+            and isinstance(rhs, structured_c.CExpression)
+            and isinstance(rhs.type, SimTypePointer)
+        ):
+            continue
+        raw += 1
+        width = lhs.variable.size
+        if (
+            width not in (2, 4)
+            or not isinstance(lhs.type, (SimTypeShort, SimTypeInt, SimTypeLong))
+            or lhs.type.size != width * 8
+        ):
+            continue
+        scalar = project_pointer_storage_value_8616(codegen, rhs, width)
+        if scalar is None:
+            continue
+        node.rhs = scalar
+        materialized += 1
+    boundary._inertia_pointer_scalar_temporary_stats_8616 = StackValueProjectionStats8616(
+        raw, raw, materialized, materialized, raw - materialized,
+    )
+    return materialized > 0
 
 
 def _range_owners_8616(

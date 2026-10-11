@@ -10,13 +10,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from inertia.ir.core import IRBlock, IRInstr, IRValue, MemSpace
+
 import inertia.widening.entry_word_transport as _TRANSPORT
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
+from inertia.ir.core import IRBlock, IRInstr, IRValue, MemSpace
+from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
 from tests.fixtures.entry_stack_byte_test_support import _artifact
 from tests.widening.test_x86_16_entry_stack_word_values import _word_instrs
-
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
-from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
 
 
 def _target() -> IRInstr:

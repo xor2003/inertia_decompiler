@@ -7,9 +7,9 @@ from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
 import inertia.lowering.positive_bp_arguments as positive_bp_arguments
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     CalleeArgumentCountVerdict8616,
@@ -17,6 +17,7 @@ from inertia.lowering.callee_argument_count_evidence import (
 from inertia.lowering.positive_bp_arguments import (
     materialize_positive_bp_arguments_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 @pytest.mark.parametrize("body_signed", [False, True])

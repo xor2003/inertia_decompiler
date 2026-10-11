@@ -8,6 +8,9 @@ whose descriptor a later read re-presents exactly earn a coordinate.
 
 from __future__ import annotations
 
+from inertia.alias.entry_stack_pointer_snapshots import (
+    EntryStackPointerSnapshots8616,
+)
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 from tests.fixtures.entry_stack_byte_test_support import (
     ENTRY_8616,
@@ -17,10 +20,6 @@ from tests.fixtures.entry_stack_byte_test_support import (
     _mov,
     _reg,
     _tmp,
-)
-
-from inertia.alias.entry_stack_pointer_snapshots import (
-    EntryStackPointerSnapshots8616,
 )
 
 

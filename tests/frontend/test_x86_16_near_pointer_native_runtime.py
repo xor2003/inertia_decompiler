@@ -6,9 +6,9 @@ adding a native DOS execution dependency to the fast unit lane.
 """
 
 import pytest
-from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 
 import tools.compiler_toolchain.build_msc6_examples as build
+from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 
 
 @pytest.mark.requires_kvm

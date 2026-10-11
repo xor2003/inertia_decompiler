@@ -1,16 +1,16 @@
 from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CStatements
+
 import inertia.postprocess.decompiler_postprocess_calls as decompiler_postprocess_calls
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.frontend.x86_16.frontend_block_inventory import (
+    decoded_function_callsite_addresses_8616,
+)
 from inertia.postprocess.decompiler_postprocess_calls import (
     _all_function_callsite_addrs_8616,
     _missing_calls_from_owned_inventory_8616,
 )
-
-from inertia.frontend.x86_16.frontend_block_inventory import (
-    decoded_function_callsite_addresses_8616,
-)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _instruction(address: int, mnemonic: str) -> SimpleNamespace:

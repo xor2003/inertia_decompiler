@@ -12,6 +12,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CWhileLoop,
 )
 from angr.sim_type import SimTypeShort
+
 from inertia.lowering.gp_register_state import runtime_gp_state_expr_8616
 from inertia.lowering.real_mode_linear import prune_consumed_call_push_stack_assignments_8616
 from inertia.lowering.runtime_push_carrier import (

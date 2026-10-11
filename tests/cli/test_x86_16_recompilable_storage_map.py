@@ -6,7 +6,6 @@ from inertia.alias.alias_model import (
     _StorageDomainSignature,
     _StorageView,
 )
-
 from inertia.cli.recompilable_storage_alias import (
     AliasBackedStorageSeed,
     export_recompilable_storage_map_from_alias_facts,

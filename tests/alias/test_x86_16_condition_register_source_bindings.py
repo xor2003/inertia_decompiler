@@ -3,12 +3,6 @@
 from dataclasses import replace
 
 import pytest
-from inertia.semantics.callsite_register_provenance import (
-    recover_register_source_before_instruction_8616,
-)
-from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
-from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
-from inertia.pipeline.errors import PipelineHardError
 
 from inertia.alias.condition_register_bindings import (
     ConditionRegisterSourceBindingVerdict8616,
@@ -21,6 +15,12 @@ from inertia.alias.register_reaching_source import (
     RegisterReachingSourceVerdict8616,
 )
 from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
+from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
+from inertia.pipeline.errors import PipelineHardError
+from inertia.semantics.callsite_register_provenance import (
+    recover_register_source_before_instruction_8616,
+)
 
 
 def _function_from_bytes(code: bytes):

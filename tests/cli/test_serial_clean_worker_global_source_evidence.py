@@ -4,7 +4,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
+from inertia.cli.project_evidence_transport import (
+    attach_project_global_object_layout_evidence_8616,
+)
+from inertia.cli.serial_clean_worker_evidence import (
+    _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616,
+    _hydrate_serial_clean_worker_evidence_8616,
+    _read_serial_clean_worker_evidence_8616,
+    _write_serial_clean_worker_evidence_8616,
+)
 from inertia.lowering.callee_callsite_contracts import (
     CalleeCallsiteCensus8616,
     CalleeCallsiteFact8616,
@@ -21,18 +30,9 @@ from inertia.lowering.callee_pointer_contracts import (
     callee_pointer_argument_evidence_by_addr_8616,
     record_callee_pointer_argument_evidence_8616,
 )
-
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
-)
-from inertia.cli.project_evidence_transport import (
-    attach_project_global_object_layout_evidence_8616,
-)
-from inertia.cli.serial_clean_worker_evidence import (
-    _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616,
-    _hydrate_serial_clean_worker_evidence_8616,
-    _read_serial_clean_worker_evidence_8616,
-    _write_serial_clean_worker_evidence_8616,
 )
 
 

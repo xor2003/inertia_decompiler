@@ -12,9 +12,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from inertia.frontend.x86_16.addressing_helpers import type_for_bits
 from pyvex.lifting.util.vex_helper import Type
 
+from inertia.frontend.x86_16.addressing_helpers import type_for_bits
 from inertia.ir.condition_ir import build_condition_ir_8616, harmonize_condition_args_8616
 from inertia.ir.core import IRCondition, IRValue, MemSpace
 from inertia.ir.regs import REG16_OFFSET_MAP, register_name_from_offset

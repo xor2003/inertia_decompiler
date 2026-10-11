@@ -22,12 +22,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.postprocess.flags_cleanup import (
     _prune_overwritten_flag_assignments_8616,
     _prune_unused_flag_assignments_8616,
 )
-
 from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 
 

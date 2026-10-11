@@ -5,12 +5,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import inertia.frontend.x86_16.pklite as pklite
 
+import inertia.cli.project_loading as project_loading
+import inertia.frontend.x86_16.pklite as pklite
+from inertia.cli.cache import _cache_runtime_environment
 from inertia.frontend.x86_16.mz_image import UnpackedMZImage
 from inertia.frontend.x86_16.packed_mz import PackedMZError, PackedMZErrorKind, detect_packer_in_bytes
-import inertia.cli.project_loading as project_loading
-from inertia.cli.cache import _cache_runtime_environment
 
 
 def _packed():

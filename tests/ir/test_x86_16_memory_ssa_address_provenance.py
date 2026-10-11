@@ -8,6 +8,7 @@ read snapshots needed by frame-origin and register-live-in consumers.
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,

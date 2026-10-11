@@ -6,6 +6,24 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
+from inertia.alias.indexed_address_access_classification import (
+    classify_indexed_alias_accesses_8616,
+)
+from inertia.alias.indexed_address_contracts import (
+    IndexedAddressAliasEvidence8616,
+)
+from inertia.alias.indexed_address_copy_contracts import (
+    IndexedAliasCopyEvidence8616,
+    IndexedAliasCopyFailureKind8616,
+)
+from inertia.alias.indexed_address_copy_projection import (
+    project_indexed_address_copies_8616,
+)
+from inertia.alias.indexed_address_projection import (
+    apply_x86_16_indexed_address_aliases_8616,
+    project_indexed_address_aliases_8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import (
     IndexedAddressAccessKind8616,
@@ -31,24 +49,6 @@ from inertia.ir.indexed_address_pipeline import (
 )
 from inertia.ir.indexed_address_range_contracts import (
     IndexedLoopRangeEvidence8616,
-)
-
-from inertia.alias.indexed_address_access_classification import (
-    classify_indexed_alias_accesses_8616,
-)
-from inertia.alias.indexed_address_contracts import (
-    IndexedAddressAliasEvidence8616,
-)
-from inertia.alias.indexed_address_copy_contracts import (
-    IndexedAliasCopyEvidence8616,
-    IndexedAliasCopyFailureKind8616,
-)
-from inertia.alias.indexed_address_copy_projection import (
-    project_indexed_address_copies_8616,
-)
-from inertia.alias.indexed_address_projection import (
-    apply_x86_16_indexed_address_aliases_8616,
-    project_indexed_address_aliases_8616,
 )
 
 GLOBAL_WORD_COPY = bytes.fromhex(

@@ -3,11 +3,11 @@
 from types import SimpleNamespace
 
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.regs import reg32_t
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.emulator import Emulator
 from inertia.frontend.x86_16.instr32 import Instr32
+from inertia.frontend.x86_16.regs import reg32_t
 
 
 @pytest.mark.parametrize("address_bits", [16, 32])

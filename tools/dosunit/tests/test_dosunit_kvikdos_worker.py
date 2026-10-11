@@ -21,10 +21,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.dosunit_kvikdos_test_support import mz_exe
 
 import tools.dosunit.runtime.kvikdos_backend as backend
 import tools.dosunit.runtime.kvikdos_vm_worker as vmw
+from tools.dosunit.tests.dosunit_kvikdos_test_support import mz_exe
 
 FAKE_WORKER = Path(__file__).with_name("dosunit_kvikdos_fake_worker.py")
 

@@ -16,19 +16,26 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_type import SimTypeFunction, SimTypeShort
-from angr.sim_variable import SimRegisterVariable
+from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
+
 import inertia.postprocess.decompiler_postprocess_jcc as decompiler_postprocess_jcc
+import inertia.structuring.condition_materialization as condition_materialization
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.condition_ir import ConditionIR
+from inertia.ir.core import IRValue, MemSpace
+from inertia.lowering.c_ast_utils import _same_c_expression_8616
+from inertia.postprocess.decompiler_postprocess_typed_conditions import (
+    _apply_typed_conditions_to_codegen_8616,
+)
 from inertia.structuring.condition_call_effects import (
     ConditionCallEffectKind8616,
     classify_condition_call_effects_8616,
 )
-from inertia.postprocess.decompiler_postprocess_typed_conditions import (
-    _apply_typed_conditions_to_codegen_8616,
+from inertia.structuring.condition_comparison_polarity import (
+    ConditionComparisonPolarity8616,
+    condition_comparison_polarity_8616,
 )
-from inertia.ir.condition_ir import ConditionIR
-from inertia.ir.core import IRValue, MemSpace
-import inertia.structuring.condition_materialization as condition_materialization
+from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 
 
 class _Graph:
@@ -328,3 +335,247 @@ def test_structuring_condition_chain_preserves_side_effecting_call(
     assert stats.materialized_count == 1
     assert stats.failure_count == 0
     assert stats.preserved_side_effect_count == 1
+
+
+def _memory_cvar(codegen: object, offset: int, size: int = 2) -> CVariable:
+    """A plain segmented-memory comparison operand with exact storage."""
+    return CVariable(
+        SimMemoryVariable(offset, size),
+        variable_type=SimTypeShort(False),
+        codegen=codegen,
+    )
+
+
+def _typed_branch(codegen: object, condition: object):
+    """Wrap one guard in the CIfElse/CStatements harness used by this module."""
+    branch = CIfElse([(condition, CStatements([], codegen=codegen))], codegen=codegen)
+    root = CStatements([branch], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=0x4000, statements=root, body=root)
+    return branch
+
+
+def _sge_memory_condition() -> ConditionIR:
+    """Native-like signed taken predicate: JGE over DS:[0x132] vs 0."""
+    return ConditionIR(
+        "sge",
+        IRValue(MemSpace.DS, offset=0x132, size=2),
+        IRValue(MemSpace.CONST, const=0, size=2),
+        src_insn=0x4020,
+        block_addr=0x4000,
+    )
+
+
+def test_typed_replacement_preserves_inverted_comparison_guard_truth() -> None:
+    """An inverted CmpLT fallthrough guard must not republish the JGE taken predicate."""
+    codegen = _codegen()
+    tags = {"ins_addr": 0x4020, "vex_block_addr": 0x4000}
+    condition = CBinaryOp(
+        "CmpLT",
+        _memory_cvar(codegen, 0x132),
+        CConstant(0, SimTypeShort(False), codegen=codegen),
+        codegen=codegen,
+        tags=tags,
+    )
+    branch = _typed_branch(codegen, condition)
+    codegen._inertia_typed_conditions = (_sge_memory_condition(),)
+
+    changed = _apply_typed_conditions_to_codegen_8616(codegen.project, codegen)
+
+    assert changed is True
+    replacement = branch.condition_and_nodes[0][0]
+    assert isinstance(replacement, CUnaryOp)
+    assert replacement.op == "Not"
+    predicate = replacement.operand
+    assert isinstance(predicate, CBinaryOp)
+    assert predicate.op == "CmpGE"
+    identity = segmented_load_identity_8616(predicate.lhs)
+    assert identity is not None
+    assert identity.space is MemSpace.DS
+    assert identity.offset == 0x132
+    assert identity.width == 2
+    assert predicate.rhs.value == 0
+    assert codegen._inertia_semantic_condition_materialized_count == 1
+
+
+def test_typed_replacement_keeps_direct_comparison_guard_truth() -> None:
+    """A direct CmpGE guard receives the proven typed views without inversion."""
+    codegen = _codegen()
+    tags = {"ins_addr": 0x4020, "vex_block_addr": 0x4000}
+    condition = CBinaryOp(
+        "CmpGE",
+        _memory_cvar(codegen, 0x132),
+        CConstant(0, SimTypeShort(False), codegen=codegen),
+        codegen=codegen,
+        tags=tags,
+    )
+    branch = _typed_branch(codegen, condition)
+    codegen._inertia_typed_conditions = (_sge_memory_condition(),)
+
+    changed = _apply_typed_conditions_to_codegen_8616(codegen.project, codegen)
+
+    assert changed is True
+    replacement = branch.condition_and_nodes[0][0]
+    assert isinstance(replacement, CBinaryOp)
+    assert replacement.op == "CmpGE"
+    identity = segmented_load_identity_8616(replacement.lhs)
+    assert identity is not None and identity.offset == 0x132
+
+
+def test_typed_replacement_inverts_equality_guard_truth() -> None:
+    """CmpEQ matched to a typed NE fact stays inverse, never a bare NE."""
+    codegen = _codegen()
+    tags = {"ins_addr": 0x4020, "vex_block_addr": 0x4000}
+    condition = CBinaryOp(
+        "CmpEQ",
+        _memory_cvar(codegen, 0x132),
+        CConstant(0, SimTypeShort(False), codegen=codegen),
+        codegen=codegen,
+        tags=tags,
+    )
+    branch = _typed_branch(codegen, condition)
+    codegen._inertia_typed_conditions = (
+        ConditionIR(
+            "ne",
+            IRValue(MemSpace.DS, offset=0x132, size=2),
+            IRValue(MemSpace.CONST, const=0, size=2),
+            src_insn=0x4020,
+            block_addr=0x4000,
+        ),
+    )
+
+    changed = _apply_typed_conditions_to_codegen_8616(codegen.project, codegen)
+
+    assert changed is True
+    replacement = branch.condition_and_nodes[0][0]
+    assert isinstance(replacement, CUnaryOp)
+    assert replacement.op == "Not"
+    assert replacement.operand.op == "CmpNE"
+
+
+@pytest.mark.parametrize("structured", ["swapped", "unmatched", "opaque"])
+def test_typed_replacement_refuses_unproven_comparison_orientation(structured) -> None:
+    """Swapped, unmatched, or opaque operands must not invent guard polarity."""
+    codegen = _codegen()
+    zero = CConstant(0, SimTypeShort(False), codegen=codegen)
+    if structured == "swapped":
+        condition = CBinaryOp(
+            "CmpLT",
+            _memory_cvar(codegen, 0x134),
+            _memory_cvar(codegen, 0x132),
+            codegen=codegen,
+            tags={"ins_addr": 0x4020, "vex_block_addr": 0x4000},
+        )
+        codegen._inertia_typed_conditions = (
+            ConditionIR(
+                "sge",
+                IRValue(MemSpace.DS, offset=0x132, size=2),
+                IRValue(MemSpace.DS, offset=0x134, size=2),
+                src_insn=0x4020,
+                block_addr=0x4000,
+            ),
+        )
+    elif structured == "unmatched":
+        condition = CBinaryOp(
+            "CmpLE",
+            _memory_cvar(codegen, 0x200),
+            zero,
+            codegen=codegen,
+            tags={"ins_addr": 0x4020, "vex_block_addr": 0x4000},
+        )
+        codegen._inertia_typed_conditions = (_sge_memory_condition(),)
+    else:
+        condition = CBinaryOp(
+            "CmpLT",
+            CBinaryOp("Add", _memory_cvar(codegen, 0x132), CConstant(1, SimTypeShort(False), codegen=codegen), codegen=codegen),
+            zero,
+            codegen=codegen,
+            tags={"ins_addr": 0x4020, "vex_block_addr": 0x4000},
+        )
+        codegen._inertia_typed_conditions = (_sge_memory_condition(),)
+    branch = _typed_branch(codegen, condition)
+
+    changed = _apply_typed_conditions_to_codegen_8616(codegen.project, codegen)
+
+    assert changed is False
+    assert branch.condition_and_nodes[0][0] is condition
+
+
+def test_explicit_not_and_compound_guards_are_not_reoriented() -> None:
+    """Not-wrapped and call-effectful guards keep their structured expression."""
+    codegen = _codegen()
+    wrapped = CUnaryOp(
+        "Not",
+        CBinaryOp(
+            "CmpGE",
+            _memory_cvar(codegen, 0x132),
+            CConstant(0, SimTypeShort(False), codegen=codegen),
+            codegen=codegen,
+        ),
+        codegen=codegen,
+        tags={"ins_addr": 0x4020, "vex_block_addr": 0x4000},
+    )
+    not_branch = _typed_branch(codegen, wrapped)
+    codegen._inertia_typed_conditions = (_sge_memory_condition(),)
+
+    assert _apply_typed_conditions_to_codegen_8616(codegen.project, codegen) is False
+    assert not_branch.condition_and_nodes[0][0] is wrapped
+
+    codegen = _codegen()
+    call_guard = CBinaryOp(
+        "CmpLT",
+        _semantic_call(codegen),
+        CConstant(0, SimTypeShort(False), codegen=codegen),
+        codegen=codegen,
+        tags={"ins_addr": 0x4020, "vex_block_addr": 0x4000},
+    )
+    call_branch = _typed_branch(codegen, call_guard)
+    codegen._inertia_typed_conditions = (_sge_memory_condition(),)
+
+    assert _apply_typed_conditions_to_codegen_8616(codegen.project, codegen) is False
+    assert call_branch.condition_and_nodes[0][0] is call_guard
+
+
+def test_comparison_polarity_contract_uses_ordered_operand_identity() -> None:
+    """Polarity is proven only by complete ordered operand correspondence."""
+    codegen = _codegen()
+    zero = CConstant(0, SimTypeShort(False), codegen=codegen)
+    a = _memory_cvar(codegen, 0x132)
+    a_again = _memory_cvar(codegen, 0x132)
+    b = _memory_cvar(codegen, 0x134)
+    zero_again = CConstant(0, SimTypeShort(False), codegen=codegen)
+
+    def _polarity(left: object, right: object) -> ConditionComparisonPolarity8616:
+        return condition_comparison_polarity_8616(left, right, same_expression=_same_c_expression_8616)
+
+    assert _polarity(
+        CBinaryOp("CmpLT", a, zero, codegen=codegen),
+        CBinaryOp("CmpLT", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.DIRECT
+    assert _polarity(
+        CBinaryOp("CmpLT", a, zero, codegen=codegen),
+        CBinaryOp("CmpGE", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.INVERTED
+    assert _polarity(
+        CUnaryOp("Not", CBinaryOp("CmpGE", a, zero, codegen=codegen), codegen=codegen),
+        CBinaryOp("CmpGE", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.INVERTED
+    assert _polarity(
+        CBinaryOp("CmpNE", a, zero, codegen=codegen),
+        CBinaryOp("CmpEQ", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.INVERTED
+    assert _polarity(
+        CBinaryOp("CmpLT", b, a, codegen=codegen),
+        CBinaryOp("CmpLT", a_again, b, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.UNKNOWN
+    assert _polarity(
+        CBinaryOp("CmpLE", _memory_cvar(codegen, 0x200), zero, codegen=codegen),
+        CBinaryOp("CmpGE", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.UNKNOWN
+    assert _polarity(
+        CBinaryOp("CmpLT", CBinaryOp("Add", a, zero, codegen=codegen), zero, codegen=codegen),
+        CBinaryOp("CmpGE", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.UNKNOWN
+    assert _polarity(
+        CBinaryOp("And", a, zero, codegen=codegen),
+        CBinaryOp("CmpGE", a_again, zero_again, codegen=codegen),
+    ) is ConditionComparisonPolarity8616.UNKNOWN

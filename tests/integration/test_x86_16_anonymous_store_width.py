@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CFunctionCall, CStatements, CUnaryOp
 from angr.sim_type import SimTypeChar
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import MemSpace
 from inertia.lowering.segmented_global_loads import (

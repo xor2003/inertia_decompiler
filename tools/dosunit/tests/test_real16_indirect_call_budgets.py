@@ -13,8 +13,8 @@ import tools.dosunit.compare.real16_call_evidence as evidence
 import tools.dosunit.compare.real16_call_execution as execution
 import tools.dosunit.compare.real16_call_indirect as indirect
 import tools.dosunit.compare.straightline_ssa as S
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_call_contracts import ComposeSession, FunctionCtx, Real16CallLimits, Real16CallRefusal
+from tools.dosunit.contracts.proof_contracts import ProofStatus
 
 
 def catalog(entries):

@@ -15,11 +15,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CWhileLoop,
 )
 from angr.sim_type import SimTypeShort
+
+import inertia.structuring.composite_pretest_conditions as composite
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRInstr
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-
 from inertia.structuring.composite_pretest_conditions import (
     classify_composite_pretest_condition_8616,
     materialize_composite_pretest_conditions_8616,
@@ -129,3 +130,33 @@ def test_composite_materialization_keeps_body_and_records_refusal(lowered):
     assert guard.condition_and_nodes[0][1] is old_break
     assert guard.condition_and_nodes[0][0] is (replacement if lowered else old_condition)
     assert precision == ([(old_condition, replacement)] if lowered else [])
+
+
+@pytest.mark.parametrize("fact_count", [0, 1])
+def test_insufficient_composite_facts_need_no_ast_scan(monkeypatch, fact_count):
+    """Fewer than two facts cannot produce any composite-guard obligation."""
+    _codegen, loop, facts, edges, artifact = _fixture()
+    before = tuple(loop.body.statements)
+
+    def unexpected(*_args):
+        pytest.fail("Insufficient facts must not trigger traversal or lowering")
+
+    monkeypatch.setattr(composite, "_iter_c_nodes_deep_8616", unexpected)
+    stats = materialize_composite_pretest_conditions_8616(
+        loop, facts[:fact_count], edges, artifact, unexpected, unexpected,
+    )
+    assert stats == composite.CompositePretestStats8616()
+    assert tuple(loop.body.statements) == before
+
+
+def test_composite_loop_inside_expression_remains_reachable():
+    """Sufficient evidence must still discover loops inside embedded statements."""
+    codegen, loop, facts, edges, artifact = _fixture()
+    replacement = CConstant(0, SimTypeShort(False), codegen=codegen)
+    embedded = CMultiStatementExpression(CStatements([loop], codegen=codegen), replacement, codegen=codegen)
+    root = CAssignment(replacement, embedded, codegen=codegen)
+    stats = materialize_composite_pretest_conditions_8616(
+        root, facts, edges, artifact, lambda _plan: replacement, lambda _before, _after: True,
+    )
+    assert stats.raw_fact_count == stats.materialized_count == stats.changed_count == 1
+    assert loop.body.statements[0].condition_and_nodes[0][0] is replacement

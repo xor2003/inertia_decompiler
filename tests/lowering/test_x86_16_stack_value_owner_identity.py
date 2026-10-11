@@ -7,6 +7,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CReturn, CStatements, CVariable
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_value_projection import (
     StackValueProjectionStatus8616,
@@ -20,7 +21,6 @@ from inertia.lowering.wide_stack_argument_views import (
     WideStackArgumentOwner8616,
     materialize_wide_stack_argument_subviews_8616,
 )
-
 from inertia.validation.validation_stack_projection import validated_stack_projection_fact_8616
 
 _BYTE_BITS = 8

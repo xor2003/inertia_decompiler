@@ -7,10 +7,11 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable
+
+import inertia.structuring.condition_materialization as owner
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
 from inertia.lowering.semantic_cast import CSemanticCast8616
-import inertia.structuring.condition_materialization as owner
 
 
 @pytest.mark.parametrize("signed", [False, True])

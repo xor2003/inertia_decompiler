@@ -9,9 +9,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.lowering.stack_lowering_impl import _canonicalize_stack_cvar_expr
 from archinfo import ArchX86
 
+from inertia.lowering.stack_lowering_impl import _canonicalize_stack_cvar_expr
 from inertia.validation.validation_materialized_condition_storage import (
     MaterializedConditionStorageIntegrityStatus8616,
     MaterializedConditionStorageSurface8616,

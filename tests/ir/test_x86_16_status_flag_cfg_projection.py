@@ -5,13 +5,51 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.ir.status_flag_cfg_projection as status_flag_cfg_projection
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.ir import vex_import
+from inertia.ir.core import IRBlock, IRFunctionArtifact, IRRefusal
 from inertia.ir.status_flag_binary_cfg import (
     BinaryStatusFlagReadSummary8616,
 )
-
 from inertia.semantics.status_flag_contracts import STATUS_FLAGS_8616, StatusFlag8616
-from inertia.cli.project_loading import _build_project_from_bytes
+
+
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_flag_projection_uses_raw_cfg_without_recursive_proof(monkeypatch, incomplete):
+    """Optional flag optimization must not start whole-function call proofs."""
+    refusal = IRRefusal("unmodeled_control", "unknown successor", 0x1000)
+    artifact = IRFunctionArtifact(
+        0x1000,
+        blocks=(IRBlock(0x1000),),
+        refusals=(refusal,) if incomplete else (),
+    )
+    seen = []
+
+    def raw(project, function):
+        seen.append((project, function))
+        return SimpleNamespace(artifact=artifact)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("flag projection started universal semantic proof")
+
+    monkeypatch.setattr(vex_import, "raw_x86_16_function_bundle_8616", raw)
+    # Also intercept an already imported legacy producer before the fix.
+    monkeypatch.setattr(status_flag_cfg_projection, "build_x86_16_ir_function_artifact", forbidden, raising=False)
+    monkeypatch.setattr(status_flag_cfg_projection, "raw_x86_16_function_bundle_8616", raw, raising=False)
+    instruction = SimpleNamespace(address=0x1000, mnemonic="cmp", operands=())
+    project = SimpleNamespace(factory=SimpleNamespace(block=lambda *a, **kw: SimpleNamespace(
+        capstone=SimpleNamespace(insns=(SimpleNamespace(insn=instruction),)),
+    )))
+    function = SimpleNamespace(addr=0x1000)
+    resolver = status_flag_cfg_projection._StatusFlagFunctionSummaryResolver8616(project)
+    projection = resolver.projection_for(function, exit_live=StatusFlag8616.NONE)
+
+    assert seen == [(project, function)]
+    assert projection.blocks[0].successors_complete is not incomplete
+    decision = projection.liveness.decisions[0]
+    assert decision.dead_writes == (StatusFlag8616.NONE if incomplete else STATUS_FLAGS_8616)
 
 
 def _project(start: int, end: int) -> SimpleNamespace:

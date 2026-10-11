@@ -18,7 +18,6 @@ from inertia.lowering.indexed_global_evidence import (
     IndexedSegmentedGlobalEvidence8616,
     merge_global_object_source_evidence_8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
 )

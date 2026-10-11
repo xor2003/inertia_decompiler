@@ -4,6 +4,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+import inertia.lowering.interprocedural_storage_live_out as interprocedural_storage_live_out
+import inertia.lowering.interprocedural_storage_live_out_flow as interprocedural_storage_live_out_flow
+from inertia.alias.terminal_memory_outputs import (
+    classify_terminal_memory_output_aliases_8616,
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -16,8 +22,6 @@ from inertia.ir.condition_ir import ConditionIR, ConditionOp
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactStage8616
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.lowering.interprocedural_storage_live_out as interprocedural_storage_live_out
-import inertia.lowering.interprocedural_storage_live_out_flow as interprocedural_storage_live_out_flow
 from inertia.lowering.interprocedural_storage_contracts import (
     CallsiteStorageTrials8616,
     StorageTrialRole8616,
@@ -35,10 +39,6 @@ from inertia.lowering.interprocedural_storage_live_out_flow import (
     materialize_memory_live_out_candidate_8616,
 )
 from inertia.lowering.interprocedural_storage_return_defs import CallOutputDefinitionResult8616
-
-from inertia.alias.terminal_memory_outputs import (
-    classify_terminal_memory_output_aliases_8616,
-)
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,
     TerminalMemoryOutputEvidence8616,

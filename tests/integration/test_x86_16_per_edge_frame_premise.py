@@ -20,20 +20,12 @@ from pathlib import Path
 import angr
 import capstone
 import pytest
+
 import inertia.frontend.x86_16.frontend_function_boundary as boundary_mod
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.near_return_continuation_view as nrcv
 import inertia.ir.vex_import as vex_import
-from inertia.ir.function_ir_registry import (
-    FunctionIRArtifactVerdict8616,
-    publish_function_ir_artifact_8616,
-    registered_function_ir_artifact_8616,
-)
-from inertia.ir.ir_boundary_cfg import (
-    prove_ir_boundary_coverage_8616,
-    prove_scoped_ir_boundary_coverage_8616,
-)
-
+from inertia.cli.project_loading import _build_project
 from inertia.frontend.x86_16.frontend_caller_entry_identity import (
     caller_target_identity_8616,
 )
@@ -47,10 +39,18 @@ from inertia.frontend.x86_16.frontend_direct_callsite_index import (
 from inertia.frontend.x86_16.frontend_near_return_continuation import (
     NearCallFramePremise8616,
 )
+from inertia.ir.function_ir_registry import (
+    FunctionIRArtifactVerdict8616,
+    publish_function_ir_artifact_8616,
+    registered_function_ir_artifact_8616,
+)
+from inertia.ir.ir_boundary_cfg import (
+    prove_ir_boundary_coverage_8616,
+    prove_scoped_ir_boundary_coverage_8616,
+)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.project_loading import _build_project
 from tools.dosunit.runtime.real16_program_boot import (
     ProgramEnvironment,
     program_from_mz_bytes,

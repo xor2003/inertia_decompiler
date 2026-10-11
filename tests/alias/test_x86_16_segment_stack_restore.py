@@ -3,8 +3,18 @@ from __future__ import annotations
 import io
 
 import angr
+
+from inertia.alias.segment_stack_fragments import (
+    SegmentStackByteOrigin8616,
+    store_stack_fragments_8616,
+)
+from inertia.alias.segment_stack_restore import (
+    SegmentStackRestoreVerdict8616,
+    _solve_stack_states,
+    build_x86_16_segment_stack_restore_artifact,
+    build_x86_16_stack_register_restore_artifact_8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 from inertia.ir import (
     IRAddress,
     IRBlock,
@@ -21,17 +31,7 @@ from inertia.ir import (
 )
 from inertia.ir.core import AddressStatus
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.alias.segment_stack_fragments import (
-    SegmentStackByteOrigin8616,
-    store_stack_fragments_8616,
-)
-from inertia.alias.segment_stack_restore import (
-    SegmentStackRestoreVerdict8616,
-    _solve_stack_states,
-    build_x86_16_segment_stack_restore_artifact,
-    build_x86_16_stack_register_restore_artifact_8616,
-)
+from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 
 
 def _lift_function(code: bytes) -> IRFunctionArtifact:

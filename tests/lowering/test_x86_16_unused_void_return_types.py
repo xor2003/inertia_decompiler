@@ -7,14 +7,11 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    record_caller_return_use_evidence_8616,
-)
+
 import inertia.lowering.return_type_evidence as return_type_evidence
 import inertia.lowering.unused_void_return_types as unused_void_return_types
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.return_type_evidence import (
     collect_unobserved_callee_void_evidence_8616,
 )
@@ -27,8 +24,11 @@ from inertia.lowering.unused_void_return_types import (
     record_terminal_return_value_evidence_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.lowering.annotations import ANNOTATION_KEY
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    record_caller_return_use_evidence_8616,
+)
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616
 
 

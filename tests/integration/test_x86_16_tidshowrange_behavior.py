@@ -1,6 +1,7 @@
 """Exercise every TID layout case and prove independent corruption detection."""
 
 import pytest
+
 from tests.fixtures.x86_16_tidshowrange_behavior import assert_tidshowrange_behavior
 
 _REFERENCE = """

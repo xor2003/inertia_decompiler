@@ -7,6 +7,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.call_execution_frame_carriers import (
     CallExecutionFrameCarrierStatus8616,

@@ -22,8 +22,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.c_ast_utils import _c_ast_cycle_path_8616
 from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.widening.widening_copyprop_8616 import _widening_copy_propagation_8616

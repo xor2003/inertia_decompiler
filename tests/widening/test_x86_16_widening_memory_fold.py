@@ -12,8 +12,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.widening.widening_memory_fold_8616 import _widening_store_to_load_forwarding_8616
 
 

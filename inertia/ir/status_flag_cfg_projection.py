@@ -36,7 +36,7 @@ from inertia.semantics.status_flag_liveness import (
 )
 
 from .status_flag_binary_cfg import summarize_binary_status_flag_entry_reads_8616
-from .vex_import import build_x86_16_ir_function_artifact
+from .vex_import import raw_x86_16_function_bundle_8616
 
 _CFG_SUPPRESSION_MNEMONICS_8616 = frozenset(
     {"adc", "add", "and", "cmp", "dec", "inc", "or", "sal", "sar", "sbb", "shl", "shr", "sub", "test", "xor"}
@@ -266,10 +266,13 @@ class _StatusFlagFunctionSummaryResolver8616:
         cached = self._blocks_cache.get(function_address)
         if cached is not None:
             return cached
-        ir_artifact = build_x86_16_ir_function_artifact(
+        # Flag suppression is optional. Import native facts without recursively
+        # proving caller entry domains merely to attempt this optimization.
+        # Unresolved control keeps every flag live at the block exit.
+        ir_artifact = raw_x86_16_function_bundle_8616(
             self._project_object,
             function,
-        )
+        ).artifact
         projected: list[StatusFlagCFGBlock8616] = []
         for ir_block in ir_artifact.blocks:
             try:
@@ -295,6 +298,7 @@ class _StatusFlagFunctionSummaryResolver8616:
                     address=ir_block.addr,
                     instructions=tuple(instructions),
                     successor_addresses=ir_block.successor_addrs,
+                    successors_complete=not (ir_artifact.refusals or ir_block.refusals),
                 )
             )
         result = tuple(projected)

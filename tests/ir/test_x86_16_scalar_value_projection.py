@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.constant_flow import IRConstantFlow8616
 from inertia.ir.core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
 from inertia.ir.indexed_address_contracts import IndexedAddressFailureKind8616

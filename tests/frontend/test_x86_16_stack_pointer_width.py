@@ -6,10 +6,11 @@ import io
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
 from unicorn import UC_ARCH_X86, UC_MODE_16, Uc
 from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_EIP, UC_X86_REG_ESP, UC_X86_REG_SS
+
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
 
 
 @pytest.mark.parametrize("encoded,size,push", [("50", 2, True), ("66 50", 4, True), ("58", 2, False), ("66 58", 4, False)])

@@ -248,8 +248,8 @@ def test_mz_io_mutated_callee_fails(tmp_path: Path, callee: bytes) -> None:
 )
 def test_mz_malformed_binding_refuses(tmp_path: Path, binding: object) -> None:
     """Malformed or incompatible bindings refuse before lowering."""
-    from tools.dosunit.contracts.model import DosUnitError
     from tools.dosunit.compare.real16_binary_compare import compare_binary16
+    from tools.dosunit.contracts.model import DosUnitError
 
     oracle_img, catalog = _mz_two_level(CALLEE_IO)
     o, c = _write_mz(tmp_path, oracle_img, oracle_img)

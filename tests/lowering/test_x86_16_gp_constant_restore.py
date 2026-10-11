@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.gp_constant_restore import (
     ConstantRestorePublication8616,

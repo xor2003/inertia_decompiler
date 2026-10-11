@@ -4,10 +4,10 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from tests.cli.test_discovery_cache_contract import _cache_policy
 
 import inertia.cli.cli_function_discovery as discovery
 from inertia.cli.cli_arg_parser import parse_cli_arguments
+from tests.cli.test_discovery_cache_contract import _cache_policy
 
 
 def test_catalog_default_is_independent_of_function_timeout(monkeypatch):

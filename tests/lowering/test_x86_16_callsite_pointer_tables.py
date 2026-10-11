@@ -4,14 +4,14 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CFunctionCall, CIndexedVariable, CVariable
 from angr.sim_type import SimTypeChar, SimTypeFixedSizeArray, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsitePushSourceKind8616, CallsiteSummary8616
 from inertia.lowering.callsite_pointer_tables import (
     callsite_pointer_table_argument_type_8616,
     materialize_callsite_pointer_table_types_8616,
 )
-
 from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
+from inertia.semantics.callsite_summary import CallsitePushSourceKind8616, CallsiteSummary8616
 
 
 class _Codegen:

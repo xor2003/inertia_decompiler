@@ -9,14 +9,13 @@ import networkx as nx
 import pytest
 from angr import options as o
 from angr.codenode import BlockNode
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir import MemSpace
-from inertia.ir.ssa_function import build_x86_16_function_ssa
-from tests.fixtures.x86_16_logical_memory_fixtures import FUNCTION_ADDR, lift_ir_artifact_with_blocks
 
 from inertia.alias.terminal_pointer_outputs import (
     classify_terminal_pointer_output_aliases_8616,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir import MemSpace
+from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.semantics.branch_target_return import (
     BranchTargetReturnEffectKind8616,
     TerminalAxReturnEffectKind8616,
@@ -32,6 +31,7 @@ from inertia.semantics.terminal_pointer_outputs import (
 from inertia.widening.terminal_pointer_output_views import (
     widen_terminal_pointer_output_views_8616,
 )
+from tests.fixtures.x86_16_logical_memory_fixtures import FUNCTION_ADDR, lift_ir_artifact_with_blocks
 
 CODE_BASE = 0x100
 RETURN_ADDRESS = 0x180

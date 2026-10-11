@@ -16,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import cast
 
+from inertia.cli.generated_c_artifacts import conditional_tail_snapshot_8616
 from inertia.cli.milestone_report import (
     cache_x86_16_tail_validation_detail_artifact,
     render_x86_16_tail_validation_console_summary,
@@ -47,6 +48,7 @@ class TailValidationDisplayStatus(Enum):
     """Display verdicts shown in decompiler attempt status lines."""
 
     PASSED = "passed"
+    CONDITIONAL = "conditional"
     FAILED = "failed"
     UNCOLLECTED = "uncollected"
 
@@ -521,6 +523,8 @@ def tail_validation_display_status(
         if passed:
             return TailValidationDisplayStatus.PASSED.value
 
+        if conditional_tail_snapshot_8616(snapshot, expected_stages=expected_stages):
+            return TailValidationDisplayStatus.CONDITIONAL.value
         if _collect_failed_stages_8616(snapshot, expected_stages):
             return TailValidationDisplayStatus.FAILED.value
         return TailValidationDisplayStatus.FAILED.value

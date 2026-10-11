@@ -10,9 +10,9 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from tools.dosunit.tests.test_pe32_import_service import pe32_import_bytes, pe_environment, two_call_code
 
 from tools.dosunit.dosunit import main
+from tools.dosunit.tests.test_pe32_import_service import pe32_import_bytes, pe_environment, two_call_code
 
 
 @pytest.mark.parametrize("changed", [False, True], ids=["equivalent", "different_occurrence"])

@@ -15,9 +15,9 @@ import pytest
 import decompile as decompile_entrypoint
 import inertia.cli.cli as decompiler_cli
 import inertia.cli.cli_function_discovery as function_discovery
-from inertia.cli.function_worker_policy import requires_isolated_function_decompilation
-import tools.dev.batch_decompile_procs as batch_decompile_procs
 import tools.compiler_toolchain.import_ultra_quickc_fixtures as ultra_qc
+import tools.dev.batch_decompile_procs as batch_decompile_procs
+from inertia.cli.function_worker_policy import requires_isolated_function_decompilation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

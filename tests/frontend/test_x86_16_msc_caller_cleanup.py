@@ -14,19 +14,19 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall, CVariable
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeInt, SimTypeLongLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-from inertia.lowering.call_argument_stack_sources import (
-    PushStoreWidthVerdict8616,
-    classify_push_store_width_8616,
-)
 from inertia.frontend.x86_16.simos_86_16 import (
     SimCC8616MSCmedium,
     SimCC8616MSCsmall,
 )
-from archinfo import ArchX86
-
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+from inertia.lowering.call_argument_stack_sources import (
+    PushStoreWidthVerdict8616,
+    classify_push_store_width_8616,
+)
 from inertia.semantics.immediate_semantics import sign_extend_u8_to_u16
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 

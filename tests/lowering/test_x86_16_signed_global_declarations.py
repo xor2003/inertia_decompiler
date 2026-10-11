@@ -16,6 +16,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR, ConditionOp
 from inertia.ir.core import IRValue, MemSpace
@@ -26,7 +27,6 @@ from inertia.lowering.project_global_signedness import (
 from inertia.lowering.signed_global_declarations import (
     materialize_signed_global_declarations_8616,
 )
-
 from inertia.semantics.direct_global_ordering import DirectGlobalOrdering8616
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 

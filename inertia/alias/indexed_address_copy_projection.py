@@ -12,13 +12,12 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 
 from __future__ import annotations
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.indexed_address_contracts import IndexedAddressFact8616
 from inertia.ir.indexed_address_copy_contracts import (
     IndexedAddressCopyEvidence8616,
     IndexedAddressCopyFact8616,
 )
+from inertia.pipeline.errors import PipelineHardError
 
 from .indexed_address_access_contracts import (
     IndexedAliasAccessEvidence8616,

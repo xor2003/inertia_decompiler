@@ -21,6 +21,7 @@
   "dependencies": [],
   "guide": "tools/signatures/README.md",
   "tests": [
+    "tools/signatures/tests/test_signature_reference_identity.py",
     "tests/integration/test_ada_signature_integration.py",
     "tools/signatures/tests/test_binary_signature_metadata.py",
     "tests/cli/test_borland_mangling.py",

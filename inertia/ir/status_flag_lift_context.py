@@ -15,7 +15,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -23,7 +23,6 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol, cast
 
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.semantics.status_flag_contracts import (
     STATUS_FLAGS_8616,
     StatusFlag8616,
@@ -32,6 +31,8 @@ from inertia.semantics.status_flag_contracts import (
 )
 
 if TYPE_CHECKING:
+    from pyvex import IRSB
+
     from .status_flag_cfg_projection import StatusFlagFunctionProjection8616
 
 
@@ -156,6 +157,9 @@ class StatusFlagLiftSession8616:
     stats: StatusFlagLivenessStats8616 = field(
         default_factory=lambda: StatusFlagLivenessStats8616(0, 0, 0, 0, 0)
     )
+    source_project: object | None = field(default=None, repr=False)
+    policy_consumer_identity: object = field(default_factory=object, init=False, repr=False)
+    owned_instruction_addresses: frozenset[int] = frozenset()
     _candidate_by_address: dict[int, StatusFlagLiftCandidate8616] = field(
         init=False,
         repr=False,
@@ -187,14 +191,16 @@ class StatusFlagLiftSession8616:
         instruction_address: int,
         written: StatusFlag8616,
     ) -> StatusFlag8616:
-        """Consume one exact candidate and return its proven-dead bit subset."""
+        """Consume exact authoritative candidates; the lookup index grants no proof."""
         candidate_address = instruction_address
         candidate = self._candidate_by_address.get(candidate_address)
         if candidate is None and self.original_linear_delta:
             candidate_address = instruction_address + self.original_linear_delta
             candidate = self._candidate_by_address.get(candidate_address)
         normalized_written = written & STATUS_FLAGS_8616
-        if candidate is None or candidate.written != normalized_written:
+        if (candidate is None or candidate not in self.candidates
+                or candidate.instruction_address != candidate_address
+                or candidate.written != normalized_written):
             return StatusFlag8616.NONE
         self._materialized_addresses.add(candidate_address)
         return candidate.dead_writes
@@ -230,6 +236,123 @@ class StatusFlagLiftSession8616:
 _active_session: ContextVar[StatusFlagLiftSession8616 | None] = ContextVar(
     "x86_16_active_status_flag_lift_session", default=None
 )
+
+
+@dataclass(frozen=True, slots=True)
+class StatusFlagNativeSource8616:
+    """Exact source project and optional owned function head for one lift."""
+
+    project: object
+    function_address: int | None
+
+
+class _NativeLiftEngineBoundary8616(Protocol):
+    """Third-party engine fields authenticating the actual lazy lift source."""
+
+    project: object | None
+    _inertia_status_flag_policy_key_8616: tuple[object, ...]
+
+    def clear_cache(self) -> None:
+        """Discard engine VEX when its effective flag policy changes."""
+
+
+_native_lift_vex_8616: Callable[..., IRSB] | None = None
+
+
+_active_native_source: ContextVar[StatusFlagNativeSource8616 | None] = ContextVar(
+    "x86_16_status_flag_native_source", default=None
+)
+
+
+def status_flag_native_policy_key_8616(
+    project: object, function_address: int | None,
+) -> tuple[object, ...]:
+    """Snapshot the policy a requested native import will consume, excluding hits."""
+    session = _active_session.get()
+    if (session is None or session.source_project is not project
+            or session.function_address != function_address):
+        return ()
+    return (
+        id(project), session.policy_consumer_identity,
+        session.function_address, session.original_linear_delta,
+        session.owned_instruction_addresses,
+        tuple((candidate.instruction_address, int(candidate.written), int(candidate.dead_writes))
+              for candidate in session.candidates),
+        tuple(sorted((address, candidate.instruction_address, int(candidate.written), int(candidate.dead_writes))
+                     for address, candidate in session._candidate_by_address.items())),
+        session.packed_preservation_addresses,
+        tuple((address, int(effect.reads), int(effect.overwrites))
+              for address, effect in session.callee_effects),
+    )
+
+
+def _source_bound_lift_vex_8616(self: object, *args: object, **kwargs: object) -> IRSB:
+    """Bind actual engine ownership before lazy lifting or native-cache lookup."""
+    original = _native_lift_vex_8616
+    if original is None:
+        raise RuntimeError("status-flag source bridge was not installed")
+    external = cast(_NativeLiftEngineBoundary8616, self)
+    project = external.project
+    ambient = _active_native_source.get()
+    head = (ambient.function_address
+            if ambient is not None and ambient.project is project else None)
+    source = None if project is None else StatusFlagNativeSource8616(project, head)
+    token = _active_native_source.set(source)
+    try:
+        before = status_flag_native_policy_key_8616(project, head)
+        # Third-party angr boundary: optional engine cache stamp derives from
+        # our sole policy owner; it is not a second evidence registry.
+        previous = getattr(self, "_inertia_status_flag_policy_key_8616", None)  # Dynamic third-party angr boundary.
+        if previous != before:
+            external.clear_cache()
+        external._inertia_status_flag_policy_key_8616 = before
+        result = original(self, *args, **kwargs)
+        after = status_flag_native_policy_key_8616(project, head)
+        if after != before:
+            external.clear_cache()
+            external._inertia_status_flag_policy_key_8616 = after
+        return result
+    finally:
+        _active_native_source.reset(token)
+
+
+def _install_native_source_bridge_8616() -> None:
+    """Install one task-local ownership bridge on the third-party lift boundary."""
+    from angr.engines import UberEngine
+
+    global _native_lift_vex_8616
+    if _native_lift_vex_8616 is None:
+        _native_lift_vex_8616 = UberEngine.lift_vex
+        UberEngine.lift_vex = _source_bound_lift_vex_8616
+
+
+@contextmanager
+def status_flag_native_source_scope_8616(
+    project: object, function_address: int,
+) -> Iterator[None]:
+    """Bind one native import source and restore it even on exceptional exits.
+
+    Active-policy imports freshly invalidate the native engine cache;
+    request-local IR keys alone cannot invalidate angr's retained VEX blocks.
+    """
+    current = StatusFlagNativeSource8616(project, function_address)
+    policy_active = _active_session.get() is not None
+    token = _active_native_source.set(current)
+    if policy_active and not _clear_lift_cache_8616(project):
+        _active_native_source.reset(token)
+        raise PipelineHardError(
+            "native flag-policy cache invalidation failed",
+            layer="ir:status_flag_lift_context", function_addr=function_address,
+        )
+    try:
+        yield
+    finally:
+        _active_native_source.reset(token)
+        if policy_active and not _clear_lift_cache_8616(project):
+            raise PipelineHardError(
+                "native flag-policy cache restoration failed",
+                layer="ir:status_flag_lift_context", function_addr=function_address,
+            )
 
 
 def _suppression_candidates_8616(
@@ -353,10 +476,12 @@ def active_status_flag_lift_context_8616(
     function: object,
 ) -> Iterator[StatusFlagLiftSession8616]:
     """Build once, reuse nested same-function publication, and close once."""
+    _install_native_source_bridge_8616()
     function_address = _function_address_8616(function)
     active_session = _active_session.get()
     if active_session is not None:
-        if active_session.function_address != function_address:
+        if (active_session.function_address != function_address
+                or active_session.source_project is not project):
             raise PipelineHardError(
                 "nested status-flag lift context changed function identity",
                 layer="ir:status_flag_lift_context",
@@ -380,7 +505,7 @@ def active_status_flag_lift_context_8616(
         return
 
     candidates = _suppression_candidates_8616(projection)
-    if candidates and not _clear_lift_cache_8616(project):
+    if not _clear_lift_cache_8616(project):
         session = StatusFlagLiftSession8616(function_address, (), projection_failure_count=1)
         yield session
         session.finalize()
@@ -393,14 +518,22 @@ def active_status_flag_lift_context_8616(
         _packed_preservation_addresses_8616(projection),
         original_linear_delta=_original_linear_delta_8616(project),
         callee_effects=projection.callee_effects,
+        source_project=project,
+        owned_instruction_addresses=frozenset(
+            instruction.address for block in projection.blocks
+            for instruction in block.instructions
+        ),
     )
     token = _active_session.set(session)
+    source_token = _active_native_source.set(StatusFlagNativeSource8616(project, function_address))
     completed = False
     try:
         yield session
         completed = True
     finally:
+        _active_native_source.reset(source_token)
         _active_session.reset(token)
+        _clear_lift_cache_8616(project)
     if completed:
         session.finalize()
         _publish_stats_8616(function, session)
@@ -417,11 +550,23 @@ def architectural_status_flag_replay_8616() -> Iterator[bool]:
     session on every exit; no liveness evidence or counters are discarded.
     """
     session = _active_session.get()
+    if (session is not None and session.source_project is not None
+            and not _clear_lift_cache_8616(session.source_project)):
+        raise PipelineHardError(
+            "architectural flag replay cache invalidation failed",
+            layer="ir:status_flag_lift_context", function_addr=session.function_address,
+        )
     token = _active_session.set(None)
     try:
         yield session is not None
     finally:
         _active_session.reset(token)
+        if (session is not None and session.source_project is not None
+                and not _clear_lift_cache_8616(session.source_project)):
+            raise PipelineHardError(
+                "architectural flag replay cache restoration failed",
+                layer="ir:status_flag_lift_context", function_addr=session.function_address,
+            )
 
 
 def cfg_status_flag_dead_write_mask_8616(
@@ -430,7 +575,13 @@ def cfg_status_flag_dead_write_mask_8616(
 ) -> StatusFlag8616 | None:
     """Return an active CFG proof's dead subset, or ``None`` without a proof."""
     session = _active_session.get()
-    if session is None:
+    source = _active_native_source.get()
+    if (session is None or source is None or source.project is not session.source_project
+            or source.function_address != session.function_address):
+        return None
+    owned = session.owned_instruction_addresses
+    if (instruction_address not in owned
+            and instruction_address + session.original_linear_delta not in owned):
         return None
     return session.dead_write_mask(instruction_address, written)
 
@@ -450,7 +601,9 @@ def resolve_status_flag_lift_artifact_8616(
     function_address: int,
 ) -> ResolvedStatusFlagLiftArtifact8616 | None:
     """Resolve active evidence first, then the finalized function-owned artifact."""
-    artifact = active_status_flag_lift_artifact_8616(function_address)
+    session = _active_session.get()
+    artifact = (active_status_flag_lift_artifact_8616(function_address)
+                if session is not None and session.source_project is project else None)
     if artifact is not None:
         return ResolvedStatusFlagLiftArtifact8616(
             artifact,

@@ -14,8 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from inertia.semantics.callsite_summary import CallsitePushSourceKind8616, CallsiteSummary8616
-
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactStage8616,
@@ -24,6 +22,7 @@ from inertia.ir.function_ssa_registry import (
 from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.semantics.call_target_evidence_8616 import resolve_call_target_evidence_8616
+from inertia.semantics.callsite_summary import CallsitePushSourceKind8616, CallsiteSummary8616
 
 from .interprocedural_storage_contracts import StorageReachingDefinition8616
 from .interprocedural_storage_reaching_contracts import CallArgumentDefinitionVerdict8616

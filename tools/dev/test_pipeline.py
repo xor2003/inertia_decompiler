@@ -43,6 +43,8 @@ PYTEST_WORKER_COUNT: int = 3
 BUDGETED_BINARY_WORKERS: int = 2
 BUDGETED_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     "tools/dosunit/tests/test_dosunit_transitive_callees.py",
+    "tests/ir/test_scoped_segment_state_native.py",
+    "tests/ir/test_scoped_callee_surface.py",
 )
 
 SPLIT_CONTROL_TEST_FILES: tuple[str, ...] = (
@@ -78,7 +80,8 @@ GNU_MAKE_ORACLE_CASE_COUNTS: dict[str, int] = {
 }
 GNU_MAKE_ORACLE_PYTEST_TARGETS: tuple[str, ...] = tuple(GNU_MAKE_ORACLE_CASE_COUNTS)
 
-FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
+_UNIT_PYTEST_CANDIDATES: tuple[str, ...] = (
+    "tests/ir/test_real16_census_fact_ownership.py",
     *routine_test_targets(),
     "tools/dev/tests/test_compact_paths.py",
     "tools/dosunit/tests/test_ordered_io_environment.py",
@@ -149,6 +152,9 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tools/dosunit/tests/test_real16_selected_lowering.py",
     "tools/dosunit/tests/test_real16_self_lowering_reuse.py",
     "tools/dosunit/tests/test_real16_call_composition.py",
+    "tools/dosunit/tests/test_real16_partial_write_liveness.py",
+    "tools/dosunit/tests/test_x86_flag_scan.py",
+    "tools/dosunit/tests/test_generated_bitfield_function.py",
     "tools/dosunit/tests/test_real16_indirect_call_budgets.py",
     "tools/dosunit/tests/test_real16_argument_controls.py",
     "tools/dosunit/tests/test_real16_repeat_summary_contract.py",
@@ -199,6 +205,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tools/dosunit/tests/test_flat32_contextual_calls.py",
     "tools/dosunit/tests/test_flat32_stack_domain_cli.py",
     "tests/frontend/test_x86_16_clinic_terminal_control.py",
+    "tests/frontend/test_x86_16_clinic_context_mutations.py",
     "tools/dosunit/tests/test_flat32_tail_transfer.py",
     "tools/dosunit/tests/test_flat32_compose_total_budget.py",
     "tools/dosunit/tests/test_flat32_tail_retry_projection.py",
@@ -239,6 +246,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/frontend/test_x86_16_frontend_boundary_transport.py",
     "tests/frontend/test_x86_16_frontend_caller_entry_identity.py",
     "tests/lowering/test_x86_16_positive_bp_wide_arguments.py",
+    "tests/lowering/test_x86_16_positive_bp_function_owner.py",
     "tests/integration/test_x86_16_wide_return_type_preservation.py",
     "tests/cli/test_x86_16_cod_regressions.py::test_cod_runner_hotspots_fall_back_through_scan_safe_classifier",
     "tests/cli/test_x86_16_cli.py::test_decompile_function_disables_structuring_for_tiny_single_call_helpers",
@@ -388,6 +396,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/frontend/test_x86_16_status_flag_lift_context.py",
     "tests/ir/test_x86_16_function_condition_artifact.py",
     "tests/ir/test_x86_16_condition_transfer.py",
+    "tests/ir/test_x86_16_condition_transfer_function_owner.py",
     "tests/integration/test_x86_16_condition_sign_extension.py",
     "tests/ir/test_x86_16_condition_full_width_masks.py",
     "tests/frontend/test_x86_16_jcc_result_condition.py",
@@ -516,6 +525,8 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/lowering/test_x86_16_array_matching.py",
     "tests/lowering/test_x86_16_struct_merging.py",
     "tests/structuring/test_x86_16_structuring_condition_materialization.py",
+    "tests/structuring/test_x86_16_condition_cfg_function_owner.py",
+    "tests/structuring/test_x86_16_condition_comparison_width.py",
     "tests/ir/test_x86_16_condition_chain_refusal.py",
     "tests/frontend/test_x86_16_recorded_return_argument_replay.py",
     "tests/lowering/test_x86_16_stack_reload_instruction_ownership.py",
@@ -527,6 +538,8 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/lowering/test_x86_16_call_output_object_projection.py",
     "tests/structuring/test_x86_16_condition_exit_normalization.py",
     "tests/structuring/test_x86_16_structuring_multi_arm_condition_ownership.py",
+    "tests/structuring/test_x86_16_scalar_return_arm_review.py",
+    "tests/structuring/test_x86_16_branch_register_returns.py",
     "tests/structuring/test_x86_16_local_condition_regions.py",
     "tests/structuring/test_x86_16_structuring_loop_body_repair.py",
     "tests/postprocess/test_x86_16_dce_optimization.py",
@@ -600,7 +613,12 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/lowering/test_x86_16_gp_stack_restore.py",
     "tests/integration/test_segment_register_membership.py",
     "tests/ir/test_x86_16_vex_import.py",
+    "tests/ir/test_vex_native_boundary.py",
+    "tests/ir/test_x86_16_codegen_function_ownership.py",
     "tests/ir/test_x86_16_entry_jump_domain.py",
+    "tests/ir/test_x86_16_entry_jump_fetch_window.py",
+    "tests/ir/test_x86_16_boot_entry_link.py",
+    "tests/ir/test_x86_16_boot_callee_transport.py",
     "tests/ir/test_x86_16_invocation_domain.py",
     "tests/ir/test_x86_16_invocation_edge_feasibility.py",
     "tests/ir/test_x86_16_edge_known_bits_soundness.py",
@@ -902,6 +920,29 @@ RELATIONAL_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     "tools/dosunit/tests/test_real16_direct_jmp_coordinates.py",
     "tests/semantics/test_direct_near_call_target_binding.py",
     "tests/ir/test_x86_16_declared_call_consumption.py",
+    "tests/ir/test_fresh_declared_entry.py",
+    "tests/ir/test_declared_entry_pipeline_attach.py",
+    "tests/ir/test_invocation_call_consumption.py",
+    "tests/ir/test_callee_return_value_transport.py",
+    "tests/ir/test_callee_local_feasibility.py",
+    "tests/ir/test_real16_prefix_cut.py",
+    "tests/ir/test_real16_prefix_transcript.py",
+    "tests/ir/test_real16_prefix_capture_core.py",
+    "tests/ir/test_real16_prefix_extension_controls.py",
+    "tests/ir/test_real16_prefix_extension_pool_binding.py",
+    "tests/ir/test_real16_prefix_profitable_selection.py",
+    "tests/ir/test_root_load_snapshot.py",
+    "tests/ir/test_root_snapshot_observers.py",
+    "tests/ir/test_real16_prefix_identical_native_rebind.py",
+    "tests/ir/test_feasibility_call_cut_state.py",
+    "tests/ir/test_native_call_feasibility.py",
+    "tests/ir/test_call_code_guard_union.py",
+    "tests/ir/test_sparse_code_write_guard.py",
+    "tests/ir/test_distinct_fetched_spans.py",
+    "tests/ir/test_caller_protective_footprint.py",
+    "tests/ir/test_caller_native_range.py",
+    "tests/ir/test_caller_protective_footprint_native.py",
+    "tests/ir/test_ordinary_call_feasibility.py",
     "tests/cli/test_declared_call_transport.py",
     "tests/semantics/test_projected_call_consumption.py",
     "tests/integration/test_declared_call_admission.py",
@@ -937,6 +978,16 @@ RELATIONAL_BINARY_PYTEST_TARGETS: tuple[str, ...] = (
     'tools/dosunit/tests/test_relational_rotation_public32.py',
     'tools/dosunit/tests/test_relational_saved_public32.py',
     'tools/dosunit/tests/test_relational_saved_public16.py',
+)
+
+# Explicit proof lanes own these modules, even when component enrollment also
+# places them in the unit candidates. Derive the unit projection once so an
+# enrollment cannot run the same deadline-sensitive proof in both worker pools.
+FOCUSED_PYTEST_TARGETS: tuple[str, ...] = tuple(
+    target for target in _UNIT_PYTEST_CANDIDATES
+    if target.partition("::")[0] not in (
+        *BUDGETED_BINARY_PYTEST_TARGETS, *RELATIONAL_BINARY_PYTEST_TARGETS
+    )
 )
 
 MSC6_TINY_CONSTRUCTS: tuple[str, ...] = (

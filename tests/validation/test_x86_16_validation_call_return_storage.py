@@ -14,15 +14,15 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+from archinfo import ArchX86
+
+from inertia.ir.condition_ir import ConditionIR
+from inertia.ir.core import IRValue, MemSpace
 from inertia.semantics.callsite_summary import (
     CallsiteReturnUseKind8616,
     CallsiteSummary8616,
     bind_structured_callsite_identity_8616,
 )
-from inertia.ir.condition_ir import ConditionIR
-from inertia.ir.core import IRValue, MemSpace
-from archinfo import ArchX86
-
 from inertia.validation.tail_validation import _collect_observed_locations
 from inertia.validation.tail_validation_condition_context import (
     _owned_materialized_condition_fingerprint_8616,

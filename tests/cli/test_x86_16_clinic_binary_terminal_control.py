@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from angr import ailment
+
 from tests.frontend.test_x86_16_clinic_terminal_control import _clinic_stub, _convert, _reports, _terminal
 
 CMP16_EXE = Path(__file__).resolve().parents[2] / "examples/build_msc6_tiny/CMP16.EXE"

@@ -102,9 +102,9 @@ def test_unmodeled_carry_and_all_flags_remain_abstract(cc_op: int) -> None:
 def test_native_carry_boolean_return_projection(driver: str, case: str) -> None:
     """Both adapters agree on NEG/SBB versus NEG/SETB return and reject SETAE."""
     import angr
-    from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
     from tools.dosunit.compare.flat32_call_composition import compare_functions_with_calls
+    from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
     original = bytes.fromhex('f7d8 19c0 f7d8 c3')
     equivalent = bytes.fromhex('f7d8 0f92c0 0fb6c0 c3')

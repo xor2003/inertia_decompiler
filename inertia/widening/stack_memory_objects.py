@@ -14,8 +14,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.alias.alias_model_impl import AliasStorageFacts
 from inertia.alias.stack_memory_ssa_contracts import (
     StackMemoryAliasFactKind8616,
@@ -29,6 +27,7 @@ from inertia.ir.ssa_memory_contracts import (
     SSAMemoryAccessKind8616,
     SSAMemoryOverlapRelation8616,
 )
+from inertia.pipeline.errors import PipelineHardError
 
 from .stack_memory_objects_contracts import (
     StackMemoryObjectWideningArtifact8616,

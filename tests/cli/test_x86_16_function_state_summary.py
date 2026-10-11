@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from inertia.semantics.function_state_summary import summarize_x86_16_function_state
-
 from inertia.validation.recovery_confidence import classify_x86_16_recovery_confidence
 
 

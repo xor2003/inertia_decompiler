@@ -5,12 +5,15 @@ from __future__ import annotations
 import io
 
 import angr
+from archinfo import ArchX86
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    build_boundary_direct_callsite_index_8616,
 )
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.ssa_function import (
     SSAFunctionArtifact,
@@ -19,7 +22,7 @@ from inertia.ir.ssa_function import (
 from inertia.ir.vex_import import (
     build_x86_16_ir_function_artifact,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.lowering.interprocedural_storage_contracts import (
     StorageDefinitionKind8616,
     StorageIdentity8616,
@@ -30,14 +33,11 @@ from inertia.lowering.interprocedural_storage_return_defs import (
     CallOutputDefinitionVerdict8616,
     resolve_call_output_definitions_8616,
 )
-from archinfo import ArchX86
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsiteIndex8616,
-    build_boundary_direct_callsite_index_8616,
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
 )
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 
 
 def _lift_ssa(code: bytes) -> tuple[SSAFunctionArtifact, angr.Project, DecodedDirectCallsiteIndex8616]:

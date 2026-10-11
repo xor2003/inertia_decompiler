@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from inertia.alias.indexed_address_program import (
+    IndexedAliasFunctionSelection8616,
+    build_indexed_alias_program_evidence_8616,
+)
+from inertia.cli.cli_function_discovery import _recover_fast_exe_catalog
+from inertia.cli.project_loading import _build_project
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.indexed_address_evidence import (
     collect_indexed_address_evidence_8616,
@@ -23,23 +29,16 @@ from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.lowering.bounded_global_array_declarations import (
     materialize_project_bounded_global_arrays_8616,
 )
+from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
 from inertia.lowering.indexed_global_evidence import (
     IndexedSegmentedGlobalEvidence8616,
 )
-
-from inertia.alias.indexed_address_program import (
-    IndexedAliasFunctionSelection8616,
-    build_indexed_alias_program_evidence_8616,
-)
-from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
 from inertia.widening.indexed_global_object_layout import (
     recover_global_object_layout_evidence_8616,
 )
 from inertia.widening.indexed_global_object_program_ranges import (
     recover_program_bounded_global_object_ranges_8616,
 )
-from inertia.cli.cli_function_discovery import _recover_fast_exe_catalog
-from inertia.cli.project_loading import _build_project
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

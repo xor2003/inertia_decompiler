@@ -51,6 +51,7 @@ from inertia.cli.project_loading import (
     _build_project_from_bytes,
     _describe_exception,
     _is_blob_only_input,
+    declared_input_path_8616,
 )
 from inertia.cli.runtime_support import (
     run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
@@ -903,6 +904,7 @@ class _NonOptimizedSliceFallback8616:
                 base_addr=getattr(getattr(self.project.loader, "main_object", None), "linked_base", 0) or 0,
                 # Dynamic angr boundary: project entry point is supplied by angr.
                 entry_point=getattr(self.project, "entry", 0),
+                real16_declared_input=declared_input_path_8616(self.project),
             )
             _inherit_tail_validation_runtime_policy(self.fresh_project, self.project)
             transfer_project_evidence_8616(self.project, self.fresh_project)

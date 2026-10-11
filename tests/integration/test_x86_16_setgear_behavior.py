@@ -1,6 +1,7 @@
 """Prove the SetGear oracle rejects compile-valid semantic corruption."""
 
 import pytest
+
 from tests.fixtures.x86_16_setgear_behavior import assert_setgear_behavior
 
 _REFERENCE = """

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_type import SimTypeChar
+from angr.sim_type import SimTypeChar, SimTypePointer
 
 from inertia.ir.core import (
     SEGMENTED_LOAD_ADDRESS_TAG_8616,
@@ -96,7 +96,7 @@ def _projection_8616(load: IRInstr, definitions: dict[int, IRInstr]) -> _LoadPro
     if not isinstance(address, IRAddress) or address.size != 1:
         return None
     stable_data = (
-        address.space in {MemSpace.DS, MemSpace.ES}
+        address.space in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
         and address.status is AddressStatus.STABLE and address.segment_origin is SegmentOrigin.PROVEN
     )
     if not stable_data or load.dst is None or load.dst.source_tmp is None or load.addr is None:
@@ -133,14 +133,33 @@ def _node_origin_8616(node: structured_c.CBinaryOp) -> tuple[int, int, int] | No
     return None
 
 
+def _retained_address_root_8616(node: structured_c.CUnaryOp) -> structured_c.CBinaryOp | None:
+    """Expose a retained physical address through a width-preserving byte pointer cast."""
+    root = node.operand
+    if type(root) is structured_c.CTypeCast:
+        if not isinstance(root.dst_type, SimTypePointer) or not isinstance(root.dst_type.pts_to, SimTypeChar):
+            return None
+        expression_type = root.expr.type
+        if root.src_type is None or expression_type is None:
+            return None
+        try:
+            exact_width = root.src_type.size == root.dst_type.size == expression_type.size == 32
+        except ValueError:
+            return None
+        if not exact_width:
+            return None
+        root = root.expr
+    return root if isinstance(root, structured_c.CBinaryOp) else None
+
+
 def _replace_load_8616(node: object, proof: _LoadProjection8616, codegen: object) -> object:
     """Preserve the actual selector/offset expressions instead of current registers."""
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
         return node
     if not isinstance(node.type, SimTypeChar):
         return node
-    root = node.operand
-    if not isinstance(root, structured_c.CBinaryOp) or root.op != "Add":
+    root = _retained_address_root_8616(node)
+    if root is None or root.op != "Add":
         return node
     scale, offset = (root.lhs, root.rhs) if proof.scale_side == 0 else (root.rhs, root.lhs)
     if not isinstance(scale, structured_c.CBinaryOp) or scale.op != "Shl":
@@ -150,6 +169,22 @@ def _replace_load_8616(node: object, proof: _LoadProjection8616, codegen: object
     expected_scale = (proof.scale.block_addr, proof.scale.statement_index, proof.key[1])
     if _node_origin_8616(scale) != expected_scale:
         return node
+    if proof.address.space is MemSpace.SS:
+        # This owner is imported lazily because the canonical stack lowering
+        # consumes segmented-load projections. Tags select the candidate only;
+        # its current retained address must independently match the IR address.
+        from inertia.lowering.real_mode_linear import match_stable_ss_linear_stack_access_8616
+
+        boundary = cast(_Codegen8616, codegen)
+        access = match_stable_ss_linear_stack_access_8616(node, boundary.project, codegen)
+        if (
+            proof.address.base != ("bp",)
+            or access is None
+            or access.entry_sp_offset is not None
+            or access.width != proof.address.size
+            or access.displacement != proof.address.offset
+        ):
+            return node
     return structured_c.CFunctionCall(
         "SEG_U8", None, [scale.lhs, offset], codegen=codegen,
         tags={
@@ -208,9 +243,10 @@ def materialize_segmented_load_origins_8616(
             return node
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
             return node
-        if not isinstance(node.operand, structured_c.CBinaryOp):
+        root = _retained_address_root_8616(node)
+        if root is None:
             return node
-        origin = _node_origin_8616(node.operand)
+        origin = _node_origin_8616(root)
         candidates = projections.get(origin, []) if origin is not None else []
         if len(candidates) != 1:
             return node

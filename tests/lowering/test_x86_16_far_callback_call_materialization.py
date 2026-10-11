@@ -17,7 +17,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable
-from inertia.semantics.callsite_summary import summarize_x86_16_callsite
+
+import inertia.structuring.call_argument_path_conditions as path_conditions
+from inertia.cli.project_loading import _build_project
+from inertia.frontend.x86_16.mz_image import UnpackedMZImage
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
@@ -29,10 +32,7 @@ from inertia.lowering.far_callback_call_materialization import (
     materialize_binary_far_callback_calls_8616,
 )
 from inertia.lowering.far_pointer_type import far_pointer_type_8616
-import inertia.structuring.call_argument_path_conditions as path_conditions
-
-from inertia.frontend.x86_16.mz_image import UnpackedMZImage
-from inertia.cli.project_loading import _build_project
+from inertia.semantics.callsite_summary import summarize_x86_16_callsite
 
 _CALLER_CODE = bytes.fromhex(
     "55 8b ec 83 ec 04 83 f8 00 74 0c "

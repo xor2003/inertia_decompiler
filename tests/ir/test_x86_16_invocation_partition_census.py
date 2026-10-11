@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.ir.real16_invocation_domain as dom
 from inertia.ir.core import IRBlock, IRInstr
 from tests.ir.test_x86_16_invocation_domain_boundaries import (

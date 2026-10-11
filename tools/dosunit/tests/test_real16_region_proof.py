@@ -1,16 +1,14 @@
 """Binary-derived closed reblocking and deliberate semantic corruption controls."""
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-from tools.dosunit.tests.test_real16_call_composition import _lower
 
 from tools.dosunit.compare.paired_region_graph import CollapsedRegion, RegionExitKind
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_call_contracts import Real16CallLimits, Real16CallRefusal
 from tools.dosunit.compare.real16_loop_calls import compare_real16_loop_calls
-from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.compare.real16_region_proof import compare_real16_regions
 from tools.dosunit.compare.real16_region_transitions import related_outputs
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.runtime.real16_replay import compare_executions, replay
 from tools.dosunit.runtime.real16_replay_model import (
     CallerFrame,
@@ -19,6 +17,8 @@ from tools.dosunit.runtime.real16_replay_model import (
     Real16Vector,
     SegOffset,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 LOOP = bytes.fromhex("85c0 7406 48 894604 75fa c3")
 SPLIT = bytes.fromhex("85c0 7408 48 eb00 894604 75f8 c3")

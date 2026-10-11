@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from inertia.lowering.real_mode_linear import DirectStackMoveSourceKind8616
-
 from inertia.postprocess.pass_validation_policy import (
     CALL_RECOVERY_VALIDATION_PASS_NAMES_8616,
     DIRECT_GLOBAL_UPDATE_VALIDATION_PASS_NAMES_8616,
@@ -94,3 +93,46 @@ def test_non_idiv_stack_move_policy_excludes_only_signed_remainder() -> None:
         for kind in DirectStackMoveSourceKind8616
         if kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
     ) == NON_IDIV_DIRECT_STACK_MOVE_SOURCE_KINDS_8616
+
+
+from types import SimpleNamespace
+
+import pytest
+
+import inertia.postprocess.decompiler_postprocess_stage as post_stage
+from inertia.validation.tail_validation import (
+    collect_x86_16_tail_validation_summary,
+    compare_x86_16_tail_validation_summaries,
+    x86_16_tail_validation_result_passed,
+)
+from tests.ir.test_declared_entry_scoped_view import native_scope as native_scope
+from tests.validation.test_declared_entry_tail import attached as attached
+
+
+@pytest.mark.parametrize("outcome", ["conditional", "refused", "changed", "damaged", "semantic_failure", "premise_failure"])
+def test_rollback_identity_retains_only_preserved_conditional_result(attached, outcome):
+    """Same-scope equality permits restoration without laundering its premise."""
+    project, codegen = attached
+    summary = collect_x86_16_tail_validation_summary(project, codegen)
+    result = compare_x86_16_tail_validation_summaries(summary, summary)
+    receipt = result["entry_premise"]
+    result.update(status=outcome if outcome in {"refused", "changed"} else "conditional", changed=outcome == "changed")
+    if outcome == "damaged":
+        receipt["sha256"] = "0" * 64
+    elif outcome == "semantic_failure":
+        result["semantic_failures"] = ["retained failure"]
+    elif outcome == "premise_failure":
+        result["premise_failure"] = "entry_premise_missing_or_invalid"
+    owner = SimpleNamespace(codegen=codegen)
+    post_stage._apply_destructive_discard_identity_gate_8616(owner, result, True)
+    assert bool(getattr(codegen, "_inertia_postprocess_final_c_identity_proven_8616", False)) == (outcome == "conditional")
+    assert result["entry_premise"] is receipt
+    assert result["status"] == ("conditional" if outcome == "conditional" else "changed")
+    assert not x86_16_tail_validation_result_passed(result)
+
+
+def test_unconditional_stable_result_still_preserves_local_behavior():
+    """Local acceptance does not change existing unconditional success."""
+    result = {"status": "stable", "changed": False}
+    assert post_stage.x86_16_tail_validation_result_preserves_behavior(result)
+    assert x86_16_tail_validation_result_passed(result)

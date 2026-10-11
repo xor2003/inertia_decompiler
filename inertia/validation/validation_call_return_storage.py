@@ -26,11 +26,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.semantics.callsite_summary import (
-    CallsiteReturnUseKind8616,
-    CallsiteSummary8616,
-    structured_callsite_addr_8616,
-)
 from archinfo import Arch
 
 from inertia.ir.condition_ir import ConditionIR
@@ -39,6 +34,11 @@ from inertia.lowering.call_return_stack_conditions import (
     StoredCallReturnConditionEvidence8616,
     StoredCallReturnConditionKind8616,
     classify_stored_call_return_condition_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteReturnUseKind8616,
+    CallsiteSummary8616,
+    structured_callsite_addr_8616,
 )
 
 __all__ = [

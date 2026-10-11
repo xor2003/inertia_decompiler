@@ -14,10 +14,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable, SimTemporaryVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.postprocess.decompiler_postprocess_calls import (
-    _materialize_callsite_stack_arguments_8616,
-)
+
+from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.call_argument_semantic_gap import has_literal_push_stack_carrier_8616
 from inertia.lowering.gp_register_state import (
     RuntimeGPExpressionView8616,
@@ -28,8 +26,10 @@ from inertia.lowering.runtime_call_results import (
     RuntimeCallResultVerdict8616,
     materialize_runtime_call_result_read_8616,
 )
-
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+from inertia.postprocess.decompiler_postprocess_calls import (
+    _materialize_callsite_stack_arguments_8616,
+)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from tests.postprocess.test_x86_16_decompiler_postprocess_calls import _empty_codegen, _project
 
 _PRODUCER_CALLSITE = 0x1001

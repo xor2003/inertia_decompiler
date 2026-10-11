@@ -6,7 +6,14 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
+from inertia.alias.bp_preservation import prove_bp_preservation_8616
+from inertia.alias.saved_stack_store_window import _site_reaches_8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
 from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.ir_boundary_cfg import (
@@ -14,13 +21,6 @@ from inertia.ir.ir_boundary_cfg import (
     prove_ir_boundary_coverage_8616,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.alias.bp_preservation import prove_bp_preservation_8616
-from inertia.alias.saved_stack_store_window import _site_reaches_8616
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
 from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 from tests.ir.test_segment_call_binding_regression import (
     _coverage as _bound_binary_coverage_8616,

@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import IRBlock, IRInstr, IRValue, MemSpace
 from inertia.ir.block_ownership import (
     IRBlockOwnershipFailure8616,
@@ -17,7 +19,6 @@ from inertia.ir.block_ownership import (
 from inertia.ir.block_successor_chain import proven_suffix_owner_chain_8616
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 
 def test_real_conditional_exit_retains_taken_and_fallthrough_successors() -> None:

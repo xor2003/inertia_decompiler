@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from pytest import MonkeyPatch
+
+import inertia.lowering.interprocedural_storage_live_out as interprocedural_storage_live_out
+from inertia.alias.storage_fact_join import (
+    SegmentedAccessRelation8616,
+    segmented_access_relation_8616,
+)
+from inertia.alias.terminal_memory_outputs import (
+    TerminalMemoryAliasDisposition8616,
+    TerminalMemoryAliasFailure8616,
+    classify_terminal_memory_output_aliases_8616,
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -14,7 +26,6 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactStage8616
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.lowering.interprocedural_storage_live_out as interprocedural_storage_live_out
 from inertia.lowering.interprocedural_storage_contracts import (
     CallsiteStorageTrials8616,
 )
@@ -24,17 +35,6 @@ from inertia.lowering.interprocedural_storage_live_out import (
 from inertia.lowering.interprocedural_storage_live_out_contracts import (
     MemoryLiveOutCollectionVerdict8616,
     MemoryLiveOutFailureKind8616,
-)
-from pytest import MonkeyPatch
-
-from inertia.alias.storage_fact_join import (
-    SegmentedAccessRelation8616,
-    segmented_access_relation_8616,
-)
-from inertia.alias.terminal_memory_outputs import (
-    TerminalMemoryAliasDisposition8616,
-    TerminalMemoryAliasFailure8616,
-    classify_terminal_memory_output_aliases_8616,
 )
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,

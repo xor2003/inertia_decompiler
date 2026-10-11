@@ -17,13 +17,13 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
+from archinfo import ArchX86
+
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.lowering.segmented_global_loads import (
     DirectSegmentedGlobalStoreEvidence8616,
     materialize_direct_global_symbol_stores_from_evidence_8616,
 )
-from archinfo import ArchX86
-
 from inertia.validation.tail_validation import (
     refresh_x86_16_final_semantic_validation_8616,
     x86_16_tail_validation_snapshot_passed,

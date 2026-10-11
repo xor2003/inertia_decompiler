@@ -13,25 +13,25 @@ from pathlib import Path
 import angr
 import capstone
 import pytest
+
 import inertia.frontend.x86_16.frontend_function_boundary as boundary_mod
 import inertia.frontend.x86_16.frontend_instruction_reachability as reach_mod
 import inertia.frontend.x86_16.frontend_near_return_continuation as nrc
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.ir_boundary_cfg as ibc
 import inertia.ir.near_return_continuation_view as nrcv
 import inertia.ir.vex_import as vex_import
-from inertia.ir.function_ir_registry import (
-    FunctionIRArtifactVerdict8616,
-    publish_function_ir_artifact_8616,
-    registered_function_ir_artifact_8616,
-)
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
     DecodedDirectCallsiteIndexStats8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.ir.function_ir_registry import (
+    FunctionIRArtifactVerdict8616,
+    publish_function_ir_artifact_8616,
+    registered_function_ir_artifact_8616,
 )
 
 _BASE = 0x1000
@@ -822,17 +822,16 @@ def test_width_and_delta_positives_prove(code: bytes) -> None:
 from dataclasses import replace
 from functools import partial
 
-from inertia.ir.ir_boundary_cfg import (
-    prove_scoped_ir_boundary_coverage_8616,
-)
-
+from inertia.cli.project_loading import _build_project
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     build_boundary_direct_callsite_index_8616,
+)
+from inertia.ir.ir_boundary_cfg import (
+    prove_scoped_ir_boundary_coverage_8616,
 )
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.project_loading import _build_project
 from tools.dosunit.runtime.real16_program_boot import (
     ProgramEnvironment,
     program_from_mz_bytes,

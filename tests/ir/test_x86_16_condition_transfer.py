@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import bitstring
+
 from inertia.ir.condition_ir import ConditionIR, ConditionSource
 from inertia.ir.core import IRBinaryValue, IRCondition, IRValue, MemSpace
 from inertia.lowering.condition_transfer import (
@@ -541,6 +542,7 @@ def test_indexed_word_immediate_cmp_uses_architectural_di_index() -> None:
 def test_lifted_indexed_word_immediate_cmp_materializes_jcc_condition() -> None:
     """The full CMP/JZ lift must retain its typed indexed-memory condition."""
     import pyvex
+
     from inertia.frontend.x86_16.arch_86_16 import Arch86_16
     from inertia.ir.condition_lift_capture import isolated_condition_lift_session_8616
 
@@ -568,6 +570,7 @@ def test_lifted_indexed_word_immediate_cmp_materializes_jcc_condition() -> None:
 def test_lifted_indexed_cmp_falls_back_to_live_register_after_ds_load() -> None:
     """A DS-derived index still denotes the live architectural register at CMP."""
     import pyvex
+
     from inertia.frontend.x86_16.arch_86_16 import Arch86_16
     from inertia.ir.condition_lift_capture import isolated_condition_lift_session_8616
 
@@ -858,8 +861,8 @@ def test_full_lift_unmodeled_register_write_invalidates_condition_value() -> Non
 
 def test_indexed_byte_load_provenance_survives_word_cmp_operand_recovery():
     from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-    from inertia.ir.condition_value_extensions import sign_extend_condition_value_8616
     from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
+    from inertia.ir.condition_value_extensions import sign_extend_condition_value_8616
 
     original_index_state = dict(
         getattr(Instruction_ANY, "_inertia_condition_index_reg_state_8616", {})

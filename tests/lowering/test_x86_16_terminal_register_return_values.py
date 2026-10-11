@@ -5,14 +5,14 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable, SimTemporaryVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.lowering.terminal_register_return_values as terminal_register_return_values
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.terminal_register_return_values import (
     TerminalRegisterReturnValueRefusal8616,
     TerminalRegisterReturnValueStatus8616,
     materialize_terminal_register_return_value_8616,
 )
-
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616
 
 

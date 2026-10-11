@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from typing import Protocol, cast
 
 from angr import Project
+
 from inertia.semantics.callsite_summary import (
     CallsiteSummary8616,
     build_callsite_summary_inventory_8616,

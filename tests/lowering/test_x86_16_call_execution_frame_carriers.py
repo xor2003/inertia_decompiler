@@ -14,18 +14,19 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallsiteMachineFrameKind8616,
-    CallsiteSummary8616,
-    callsite_machine_frame_kind_8616,
-)
 from inertia.lowering.call_execution_frame_carriers import (
     CallExecutionFrameCarrierStatus8616,
     prune_consumed_call_execution_frame_carriers_8616,
 )
 from inertia.lowering.call_execution_frame_replay import (
     prune_materialized_call_execution_frames_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteMachineFrameKind8616,
+    CallsiteSummary8616,
+    callsite_machine_frame_kind_8616,
 )
 
 

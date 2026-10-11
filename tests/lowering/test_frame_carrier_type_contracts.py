@@ -10,6 +10,7 @@ from angr.ailment.expression import VirtualVariable, VirtualVariableCategory
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CConstant, CDirtyExpression, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.frame_register_carriers import collect_frame_register_carriers_8616
 from inertia.lowering.physical_registers import PhysicalRegisterView8616

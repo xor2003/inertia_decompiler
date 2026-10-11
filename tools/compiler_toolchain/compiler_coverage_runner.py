@@ -279,6 +279,37 @@ def _case_command(
     return command
 
 
+def _declared_entry_path(path: Path | None) -> Path | None:
+    """Resolve optional entry evidence before starting an isolated case."""
+    if path is None:
+        return None
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError("Declared entry evidence must be a file")
+    return resolved
+
+
+def _record_declared_entry(
+    path: Path | None, command: list[str], provenance: dict[str, object],
+) -> None:
+    """Forward and fingerprint the exact evidence consumed by the CLI."""
+    if path is not None:
+        command += ["--decompile-real16-declared-input", str(path)]
+        provenance["real16_declared_input"] = input_fingerprint(path)
+
+
+def _stable_declared_entry_outcome(
+    path: Path | None, provenance: dict[str, object],
+    outcome: CoverageOutcome, error: str | None,
+) -> tuple[CoverageOutcome, str | None]:
+    """Reject evidence changed or deleted while the child consumed it."""
+    if path is None:
+        return outcome, error
+    if not path.is_file() or provenance["real16_declared_input"] != input_fingerprint(path):
+        return CoverageOutcome.HARNESS_FAILED, "Declared entry evidence changed during execution"
+    return outcome, error
+
+
 def run_source_case(
     source: Path, output: Path, *, timeout: float = 600,
     memory_model: MSCMemoryModel | None = None,
@@ -290,9 +321,11 @@ def run_source_case(
     signature_catalog: Path | None = None,
     signature_catalogs: tuple[Path, ...] = (),
     compiler_profile: CompilerProfileSelection | None = None,
+    real16_declared_input: Path | None = None,
 ) -> CoverageOutcome:
     """Feed an external fixture through the same bounded legacy round-trip owner."""
     source = source.resolve(strict=True)
+    real16_declared_input = _declared_entry_path(real16_declared_input)
     selection = _resolve_profile_selection(memory_model, compiler_profile)
     toolchain = selection.toolchain
     case = source.stem
@@ -342,6 +375,7 @@ def run_source_case(
         catalogs=catalogs,
         catalog=catalog,
     )
+    _record_declared_entry(real16_declared_input, command, provenance)
     start = time.monotonic()
     outcome = CoverageOutcome.HARNESS_FAILED
     returncode: int | None = None
@@ -363,6 +397,9 @@ def run_source_case(
     implementation_unchanged = provenance["implementation"] == implementation_after
     environment_after = runtime_environment_snapshot().to_dict()
     environment_unchanged = provenance["environment"] == environment_after
+    outcome, error = _stable_declared_entry_outcome(
+        real16_declared_input, provenance, outcome, error,
+    )
     outcome, stability_error = _stable_input_outcome(
         outcome,
         implementation_unchanged=implementation_unchanged,

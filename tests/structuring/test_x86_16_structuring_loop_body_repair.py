@@ -22,6 +22,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.postprocess.decompiler_postprocess_stage import (
     _repair_conditional_continue_guards_from_evidence_pass_8616,
@@ -31,7 +32,6 @@ from inertia.postprocess.decompiler_postprocess_stage import (
 )
 from inertia.postprocess.decompiler_postprocess_utils import _same_c_expression_8616
 from inertia.structuring.decompiler_structuring_stage import _restore_not_shift_conditions_structuring_8616
-
 from inertia.structuring.loop_body_repair import (
     ConditionalContinueEvidence8616,
     HoistedJccTargetCopyEvidence8616,
@@ -1883,3 +1883,49 @@ def test_same_c_expression_matches_structured_function_call_operands():
     right = CFunctionCall(None, helper_func, [ds, offset_b], codegen=codegen)
 
     assert _same_c_expression_8616(left, right)
+
+
+def test_loop_repair_prefers_retained_owner_over_same_address_project_functions():
+    """Codegen's exact owner wins over both ambient same-address candidates."""
+    import angr
+
+    from inertia.structuring.loop_body_repair import _active_function_8616
+
+    project = angr.load_shellcode(b"\xc3", arch="x86", load_address=0x1000)
+    owner = angr.KnowledgeBase(project)
+    retained = owner.functions.function(addr=0x1000, create=True)
+    misleading = project.kb.functions.function(addr=0x1000, create=True)
+    project._inertia_current_decompile_function_8616 = misleading
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000), _func=retained)
+    assert _active_function_8616(project, codegen) is retained
+    assert project.kb.functions[0x1000] is misleading
+    assert owner.functions[0x1000] is retained
+
+
+def test_loop_repair_refuses_foreign_retained_owner():
+    """An ambient same-address function must not hide a foreign retained owner."""
+    import angr
+    import pytest
+
+    from inertia.pipeline.errors import PipelineHardError
+    from inertia.structuring.loop_body_repair import _active_function_8616
+
+    project = angr.load_shellcode(b"\xc3", arch="x86", load_address=0x1000)
+    other = angr.load_shellcode(b"\xc3", arch="x86", load_address=0x1000)
+    retained = other.kb.functions.function(addr=0x1000, create=True)
+    project._inertia_current_decompile_function_8616 = project.kb.functions.function(addr=0x1000, create=True)
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000), _func=retained)
+    with pytest.raises(PipelineHardError, match="different project"):
+        _active_function_8616(project, codegen)
+
+
+def test_loop_repair_missing_function_does_not_fabricate_boundary():
+    """Legacy address-only codegen yields no evidence when no function exists."""
+    import angr
+
+    from inertia.structuring.loop_body_repair import _active_function_8616
+
+    project = angr.load_shellcode(b"\xc3", arch="x86", load_address=0x1000)
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000, size=1, name="unproved"))
+    assert _active_function_8616(project, codegen) is None
+    assert 0x1000 not in project.kb.functions

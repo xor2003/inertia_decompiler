@@ -79,6 +79,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CTypeCast,
     CUnaryOp,
 )
+from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimType, SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
@@ -5452,7 +5453,8 @@ def _install_summary_prototype_8616(
     if arch is not None and hasattr(prototype, "with_arch"):
         prototype = prototype.with_arch(arch)
     callee_func.prototype = prototype
-    callee_func.is_prototype_guessed = True
+    # angr derives its read-only guessed flag from this public provenance field.
+    callee_func.prototype_source = PrototypeSource.GUESSED
 
 
 def _apply_summary_prototype_8616(
@@ -8927,6 +8929,7 @@ class _CallsiteStackArgsMaterializer8616:
         return False
 
     def _promote_current_function_return_type_from_summary_8616(self, summary: StructuredAstValue) -> bool:
+        """Consume return-use evidence while preserving stronger prototype provenance."""
         if summary.return_register != "ax" or summary.return_used is not True:
             return False
         cfunc_obj = getattr(self.codegen, "cfunc", None)
@@ -8965,7 +8968,7 @@ class _CallsiteStackArgsMaterializer8616:
                     changed_return = True
         if func is not None and getattr(func, "prototype", None) != new_prototype:
             func.prototype = new_prototype
-            func.is_prototype_guessed = False
+            func.prototype_source = max(func.prototype_source, PrototypeSource.CALLSITE_DECOMPILER)
             changed_return = True
         if changed_return:
             self.codegen._inertia_call_return_function_return_type_promoted_8616 = (

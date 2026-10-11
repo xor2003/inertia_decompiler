@@ -8,9 +8,18 @@ capture-time word state and refusal of unsupported or out-of-block views.
 from __future__ import annotations
 
 import pytest
-from inertia.ir.core import IRValue, MemSpace
+
 import inertia.widening.entry_word_transport as _transport
 import inertia.widening.entry_word_transport_state as _state
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
+from inertia.ir.core import IRValue, MemSpace
+from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
+from inertia.widening.entry_word_transport_contracts import (
+    EntryWordTransportRefusalKind8616 as _Refusal,
+)
+from inertia.widening.entry_word_transport_contracts import (
+    EntryWordTransportVerdict8616 as _Verdict,
+)
 from tests.widening.test_x86_16_entry_word_transport import (
     ENTRY_8616,
     EXTERNAL,
@@ -25,15 +34,6 @@ from tests.widening.test_x86_16_entry_word_transport import (
     _reg,
     _seed_instrs,
     _tmp,
-)
-
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
-from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
-from inertia.widening.entry_word_transport_contracts import (
-    EntryWordTransportRefusalKind8616 as _Refusal,
-)
-from inertia.widening.entry_word_transport_contracts import (
-    EntryWordTransportVerdict8616 as _Verdict,
 )
 
 

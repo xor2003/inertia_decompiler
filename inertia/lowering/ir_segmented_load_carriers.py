@@ -1296,8 +1296,10 @@ def _collect_register_def_reads_8616(
         lhs_ids.add(id(node.lhs))
         identity = _register_ssa_identity_8616(node.lhs)
         definition_addresses = instruction_addrs_from_node_8616(node)
-        if identity is not None and len(definition_addresses) == 1:
-            definitions.setdefault(identity, set()).add(next(iter(definition_addresses)))
+        if identity is not None:
+            # Tags describe origin, not execution order. Inlined expressions
+            # may carry several origins or the same origin as their uses.
+            definitions.setdefault(identity, set()).update(definition_addresses)
     reads: dict[_RegisterSSAIdentity8616, list[structured_c.CVariable]] = {}
     for node in _iter_c_nodes_deep_8616(statements):
         if id(node) in lhs_ids or not isinstance(node, structured_c.CVariable):
@@ -1350,7 +1352,10 @@ def _materialize_identity_assignment_8616(
     if not use_addrs or cfunc is None:
         return None
     first_use = min(use_addrs)
-    if any(address < first_use for address in definitions.get(identity, ())):
+    if identity in definitions:
+        # An existing SSA definition owns this value. A physical-register
+        # reload cannot repair uncertain dominance or replace a newer version.
+        # Leave malformed def/use paths to validation rather than guessing.
         return None
     fact = _nearest_linear_logical_fact_8616(
         codegen,

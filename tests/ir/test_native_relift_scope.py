@@ -4,6 +4,13 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsite8616,
+    DecodedDirectCallsiteIndex8616,
+    DecodedDirectCallsiteIndexStats8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.ir import (
     IRBlock,
     IRFunctionArtifact,
@@ -19,13 +26,6 @@ from inertia.ir.function_ir_registry import (
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.segment_call_preservation import prove_segment_call_preservation_8616
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsite8616,
-    DecodedDirectCallsiteIndex8616,
-    DecodedDirectCallsiteIndexStats8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 
 @pytest.fixture
@@ -124,7 +124,6 @@ def native_leaf_transfer():
         architectural_live_in_state,
         transfer_block_with_instruction_states,
     )
-
     from tests.ir.test_x86_16_direct_call_segment_context import _context
     context = _context()
     assert context.complete

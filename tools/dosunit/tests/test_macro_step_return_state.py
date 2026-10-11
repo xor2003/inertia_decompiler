@@ -2,9 +2,9 @@
 
 import angr
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 from tools.dosunit.compare.flat32_macro_proof import compare_macro_cfg
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 ORACLE = bytes.fromhex("e3088d5b018d49ffebf6c3")
 CANDIDATE_PREFIX = bytes.fromhex("e3108d5b018d49ffe3088d5b018d49ffebee")

@@ -1,8 +1,6 @@
 """Stack restoration must consume exact values, not shared expression labels."""
 
 import pytest
-from inertia.ir.core import IRValue, MemSpace
-from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 
 from inertia.alias.segment_stack_fragments import (
     SegmentStackByteOrigin8616,
@@ -12,6 +10,8 @@ from inertia.alias.segment_stack_restore import (
     SegmentStackRestoreVerdict8616,
     build_x86_16_stack_register_restore_artifact_8616,
 )
+from inertia.ir.core import IRValue, MemSpace
+from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 
 _FAR_LOAD_ADDRESS = 0x1005
 

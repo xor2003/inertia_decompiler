@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
+import inertia.semantics.call_stack_effect_pipeline as call_stack_effect_pipeline
 from inertia.ir import IRFunctionArtifact, vex_import
 from inertia.ir.function_ir_registry import (
     FunctionIRArtifactFailure8616,
@@ -19,8 +21,6 @@ from inertia.ir.function_ssa_registry import (
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.ir.vex_import import apply_x86_16_vex_ir_artifact
-import inertia.semantics.call_stack_effect_pipeline as call_stack_effect_pipeline
-
 from inertia.semantics.call_output_contracts import CallOutputStats8616
 from inertia.semantics.call_outputs import CallOutputArtifact8616
 from inertia.semantics.call_stack_effect_contracts import (

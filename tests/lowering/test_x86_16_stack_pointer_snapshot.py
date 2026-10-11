@@ -13,16 +13,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.near_pointer_argument as near_pointer_argument_module
-from inertia.lowering.near_pointer_argument import (
-    NearPointerArgumentFact8616,
-    collect_near_pointer_argument_facts_8616,
-)
-from inertia.lowering.stack_pointer_snapshot import (
-    StackPointerSnapshotMaterializationError8616,
-    StackPointerSnapshotTracker8616,
-)
 from capstone.x86_const import (
     X86_INS_CMP,
     X86_INS_INC,
@@ -35,6 +25,17 @@ from capstone.x86_const import (
     X86_REG_BX,
     X86_REG_INVALID,
     X86_REG_SI,
+)
+
+import inertia.lowering.near_pointer_argument as near_pointer_argument_module
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.near_pointer_argument import (
+    NearPointerArgumentFact8616,
+    collect_near_pointer_argument_facts_8616,
+)
+from inertia.lowering.stack_pointer_snapshot import (
+    StackPointerSnapshotMaterializationError8616,
+    StackPointerSnapshotTracker8616,
 )
 
 

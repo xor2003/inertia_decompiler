@@ -17,10 +17,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from inertia.pipeline.errors import PipelineHardError
-from inertia.semantics.segment_program_layout_codec import segment_program_function_evidence_from_record_8616
-from inertia.validation.tail_validation import x86_16_tail_validation_snapshot_passed
-
 from inertia.cli.cache import (
     DECOMPILATION_CACHE_DIR,
     _cache_file_fingerprint,
@@ -33,6 +29,9 @@ from inertia.cli.cache import (
 from inertia.cli.cache_runtime_contract import live_decompilation_diagnostics_requested_8616
 from inertia.cli.cli_arg_parser import CliArguments
 from inertia.cli.direct_addr_failure_family import FailureFamilySnapshot
+from inertia.pipeline.errors import PipelineHardError
+from inertia.semantics.segment_program_layout_codec import segment_program_function_evidence_from_record_8616
+from inertia.validation.tail_validation import x86_16_tail_validation_snapshot_passed
 
 SERIAL_WORKER_CACHE_NAMESPACE_8616: str = "serial_clean_worker"
 SERIAL_WORKER_CACHE_SCHEMA_8616: int = 2
@@ -81,6 +80,7 @@ class SerialWorkerCacheInputs8616:
     semantic_environment: tuple[tuple[str, str], ...]
     result_schema: int
     declared_call_effects: tuple[Path, ...] = ()
+    real16_declared_input: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,7 @@ def serial_worker_cache_inputs_8616(
         signature_catalog=args.signature_catalog,
         evidence_sha256=evidence_file_digest_8616(evidence_path),
         declared_call_effects=tuple(args.declared_call_effects),
+        real16_declared_input=args.real16_declared_input,
         semantic_environment=semantic_worker_environment_8616(environment),
         result_schema=result_schema,
     )
@@ -161,6 +162,7 @@ def build_serial_worker_cache_key_8616(inputs: SerialWorkerCacheInputs8616) -> d
             "blob": inputs.blob,
             "signature_catalog": signature_fingerprint,
             "evidence_sha256": inputs.evidence_sha256,
+            "real16_declared_input": _cache_file_fingerprint(inputs.real16_declared_input),
             "declared_call_effects": [
                 _cache_file_fingerprint(path) for path in inputs.declared_call_effects
             ],
@@ -220,7 +222,7 @@ def load_serial_worker_cache_8616(
     enabled: bool,
 ) -> SerialWorkerCacheLookup8616:
     """Load one exact validated result or return an explicit miss/refusal."""
-    if inputs.declared_call_effects:
+    if inputs.declared_call_effects or inputs.real16_declared_input is not None:
         return SerialWorkerCacheLookup8616(
             SerialWorkerCacheVerdict8616.DISABLED, None, None,
             SerialWorkerCacheReason8616.LIVE_DECLARATION_AUTHORITY_REQUIRED,

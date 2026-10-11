@@ -5,8 +5,8 @@ from dataclasses import replace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CStatements
 from angr.sim_type import SimTypeShort
-from inertia.lowering.semantic_cast import CSemanticCast8616
 
+from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.structuring.condition_chain_provenance import bind_condition_chain_provenance_8616
 from inertia.structuring.condition_evidence_closure import ConditionEvidenceClosure8616
 from inertia.validation.tail_validation import _canonicalize_final_branch_condition_fingerprint_8616

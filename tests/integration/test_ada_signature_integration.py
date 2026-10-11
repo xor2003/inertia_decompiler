@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.signatures.omf_pat import PatModule, PatPublicName, format_pat_module_line
 from tools.ada_script.signatures import MatchStatus, apply_signatures
+from tools.signatures.omf_pat import PatModule, PatPublicName, format_pat_module_line
 
 ROOT = Path(__file__).resolve().parents[2]
 BODY = bytes.fromhex("55 8b ec b8 00 00 57 56 8b 46 04") + b"\x90" * 24 + bytes.fromhex("5e 5f 8b e5 5d c3")

@@ -16,6 +16,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
+from inertia.alias.alias_model_impl import (
+    AliasStorageFacts,
+    _StackSlotIdentity,
+    _StorageDomainSignature,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.segment_contract import (
@@ -40,12 +46,6 @@ from inertia.lowering.stack_lowering_from_facts import (
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
-)
-
-from inertia.alias.alias_model_impl import (
-    AliasStorageFacts,
-    _StackSlotIdentity,
-    _StorageDomainSignature,
 )
 from inertia.validation.validation_storage import validate_storage_identities_8616
 

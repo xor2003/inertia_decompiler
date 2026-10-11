@@ -2,18 +2,18 @@
 from __future__ import annotations
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.call_continuation_inputs import (
-    make_two_call_inputs,
-    swap_declared_continuations,
-)
-from tools.dosunit.tests.recursive_proof_fixtures.flat_call_continuation_inputs import make_flat_two_call_system
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import prove_image_bound_real16_domain
 from tools.dosunit.recursive_proofs.recursive_joint_admission import admit_joint_system
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason
 from tools.dosunit.recursive_proofs.recursive_joint_proof import check_joint_system
+from tools.dosunit.tests.recursive_proof_fixtures.call_continuation_inputs import (
+    make_two_call_inputs,
+    swap_declared_continuations,
+)
+from tools.dosunit.tests.recursive_proof_fixtures.flat_call_continuation_inputs import make_flat_two_call_system
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 
 @pytest.fixture(scope="module")

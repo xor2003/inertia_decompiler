@@ -9,8 +9,8 @@ from angr import ailment
 from angr.analyses.decompiler.return_maker import ReturnMaker
 from angr.calling_conventions import SimRegArg
 from angr.sim_type import SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.decompiler_return_compat import (
     apply_x86_16_decompiler_return_compatibility,
 )

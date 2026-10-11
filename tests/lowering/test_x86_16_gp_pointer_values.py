@@ -4,9 +4,9 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall, CVariable
 from angr.sim_type import SimTypeChar, SimTypePointer
 from angr.sim_variable import SimStackVariable
-from inertia.lowering.gp_register_state import runtime_gp_state_assignment_8616
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+from inertia.lowering.gp_register_state import runtime_gp_state_assignment_8616
 from tests.lowering.test_x86_16_segmented_runtime_lowering import _project
 
 

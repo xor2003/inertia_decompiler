@@ -2,12 +2,12 @@
 
 import claripy
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from pyvex.block import IRTypeEnv
 from pyvex.const import U8, U16, U32
 from pyvex.expr import Binop, Const, Get, RdTmp
 from pyvex.stmt import Put, WrTmp
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.vex_bit_source import project_bit_source_8616
 
 _CAPTURED_REGISTER_OFFSET = 36

@@ -11,8 +11,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from tools.dosunit.tests.recursive_proof_fixtures.flat_call_continuation_inputs import TWO_FLAT_CALLS
-
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.flat32_image_bound_domain import Flat32AccessDomain
 from tools.dosunit.recursive_proofs.flat32_native_effect_binding import Flat32NativeBlockRequest
 from tools.dosunit.recursive_proofs.flat32_pe_component import Flat32PeComponent, build_flat32_pe_component
@@ -20,7 +19,7 @@ from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundFlat32
 from tools.dosunit.recursive_proofs.loaded_byte_relation import propose_loaded_byte_relation
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import LoadedRelationProof, prove_loaded_byte_relation
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
-from tools.dosunit.contracts.register_state_relations import MachineState
+from tools.dosunit.tests.recursive_proof_fixtures.flat_call_continuation_inputs import TWO_FLAT_CALLS
 
 IMAGE_BASE: int = 0x400000
 TEXT_RVA: int = 0x1000

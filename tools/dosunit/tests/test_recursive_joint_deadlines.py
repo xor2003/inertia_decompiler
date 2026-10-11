@@ -6,7 +6,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.recursive_proofs import real16_image_bound_joint_proof as owner
@@ -32,6 +31,7 @@ from tools.dosunit.recursive_proofs.stack.recursive_stack_proofs import (
     StackObligation,
     StackProofReason,
 )
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 def test_structural_layout_does_not_admit_symbolic_dispatch(tmp_path: Path) -> None:

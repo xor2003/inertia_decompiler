@@ -17,8 +17,6 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.catalog.binary_callee_intake import (
     IntakeBudget,
@@ -28,8 +26,9 @@ from tools.dosunit.catalog.binary_callee_intake import (
     IntakeStatus,
     intake_uncatalogued_leaf,
 )
-from tools.dosunit.contracts.callee_proof_scope import complete_leaf_block
 from tools.dosunit.compare.real16_call_evidence import group_functions
+from tools.dosunit.contracts.callee_proof_scope import complete_leaf_block
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 CALLER_OFFSET = 0x200
 CALLEE_OFFSET = 0x230

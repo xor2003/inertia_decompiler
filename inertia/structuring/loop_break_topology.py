@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 import networkx as nx
-from inertia.semantics.register_source_block_inventory import collect_register_source_block_inventory_8616
 
 from inertia.ir.function_ssa_registry import registered_function_ssa_artifact_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.semantics.register_source_block_inventory import collect_register_source_block_inventory_8616
 
 from .condition_exit_normalization import transparent_condition_exit_8616
 from .natural_loop_topology import (

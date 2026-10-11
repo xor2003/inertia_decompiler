@@ -10,9 +10,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
 )
 from angr.sim_type import SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.structuring.condition_materialization as condition_materialization
 
+import inertia.structuring.condition_materialization as condition_materialization
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.structuring.tagged_subtree_projection import (
     StructuredSubtreeEntryTags8616,
     collect_structured_subtree_entry_tags_8616,

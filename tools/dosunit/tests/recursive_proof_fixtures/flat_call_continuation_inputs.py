@@ -22,6 +22,7 @@ from tools.dosunit.compare.flat32_call_contracts import (
 from tools.dosunit.compare.flat32_call_lowering import _lift_block
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.contracts.proof_contracts import Architecture, ContractIdentity
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.recursive_call_components import FunctionId
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointNodeId,
@@ -29,7 +30,6 @@ from tools.dosunit.recursive_proofs.recursive_joint_contracts import (
     JointStepPair,
     JointSystem,
 )
-from tools.dosunit.contracts.register_state_relations import MachineState
 
 FLAT_BASE: int = 0x100000
 TWO_FLAT_CALLS: bytes = bytes.fromhex("e3114985c07407e8f4ffffffeb05e8edffffffc3")

@@ -6,6 +6,7 @@ Candidate NOPs preserve instruction effects without making bytes identical.
 from typing import Protocol
 
 import pytest
+
 from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _compare_loops
 
 pytest_plugins = ["test_flat32_comparator_lane"]

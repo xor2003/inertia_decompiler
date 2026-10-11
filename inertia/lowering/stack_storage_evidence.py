@@ -12,12 +12,11 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
+from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
 from inertia.ir.analysis.stack_frame_ir import (
     FrameAccessArtifact,
     FrameCoordinateStatus8616,
 )
-
-from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace
 from inertia.ir.ssa_function import SSAFunctionArtifact
 

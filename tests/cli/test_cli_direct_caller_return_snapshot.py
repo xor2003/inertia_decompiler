@@ -15,16 +15,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.cli import cli_core
+from inertia.cli.direct_request_cache import DirectRequestCacheVerdict8616
+from inertia.cli.work_items import WorkItemStatus
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
     CallerReturnUseVerdict8616,
     caller_return_use_evidence_by_addr_8616,
     record_caller_return_use_evidence_8616,
 )
-
-from inertia.cli import cli_core
-from inertia.cli.direct_request_cache import DirectRequestCacheVerdict8616
-from inertia.cli.work_items import WorkItemStatus
 
 _DIRECT_ADDR = 0x1234
 _CANONICAL_ADDR = 0x1240

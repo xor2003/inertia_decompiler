@@ -6,11 +6,10 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import ParamSpec, TypeVar, assert_type, get_args, get_overloads, get_type_hints
 
-from inertia.frontend.x86_16.regs import _coerce_enum, reg16_t
-from inertia.lowering.type_array_matching import _limit_sorted_mapping_8616
-
 from inertia.cli.fork_timeout import run_with_timeout_in_fork
 from inertia.cli.telemetry import trace_function
+from inertia.frontend.x86_16.regs import _coerce_enum, reg16_t
+from inertia.lowering.type_array_matching import _limit_sorted_mapping_8616
 
 
 def _parameters(annotation: object) -> Iterator[object]:

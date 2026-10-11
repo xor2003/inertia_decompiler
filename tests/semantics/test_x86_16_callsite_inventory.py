@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.lowering.callsite_inventory as callsite_inventory
 from tests.semantics.test_x86_16_call_stack_effects import _summary
 

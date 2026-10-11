@@ -6,13 +6,13 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CConstant, CStatements
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable, SimTemporaryVariable
+
 from inertia.ir.condition_ir import condition_sort_key_8616
 from inertia.lowering.wide_call_condition_binding import wide_call_identity_8616
 from inertia.lowering.wide_call_condition_capture import (
     build_proven_wide_call_condition_8616,
     commit_wide_call_condition_captures_8616,
 )
-
 from inertia.structuring.condition_chain_provenance import bind_condition_chain_provenance_8616
 from inertia.structuring.terminal_loop_exit_conditions import (
     materialize_terminal_loop_exit_conditions_8616,

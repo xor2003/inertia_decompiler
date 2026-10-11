@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CFunctionCall, CTypeCast, CVariable
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimRegisterVariable
-import inertia.postprocess.decompiler_postprocess_stage as decompiler_postprocess_stage
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.stack_variable_display_names as stack_variable_display_names
 
+import inertia.lowering.stack_variable_display_names as stack_variable_display_names
+import inertia.postprocess.decompiler_postprocess_stage as decompiler_postprocess_stage
 from inertia.cli import cli_decompilation
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 
 class _DummyCodegen:

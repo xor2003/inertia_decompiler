@@ -14,15 +14,15 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+from capstone.x86_const import X86_OP_IMM
+
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
 )
-from archinfo import ArchX86
-from capstone.x86_const import X86_OP_IMM
-
 from inertia.structuring.direct_stack_move_branches import (
     materialize_direct_stack_move_branch_ownership_8616,
     recover_direct_stack_move_branch_facts_8616,

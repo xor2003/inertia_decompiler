@@ -18,17 +18,14 @@ from pathlib import Path
 
 import angr
 import pytest
-import inertia.ir.entry_domain_call_preservation as edcp
-from inertia.ir.real16_invocation_domain import (
-    Real16InvocationFailure8616,
-    Real16InvocationKind8616,
-    prove_real16_invocation_domain_8616,
-    same_real16_entry_scope_8616,
-)
-from inertia.ir.vex_import import (
-    build_x86_16_ir_function_artifact,
-)
 
+import inertia.ir.entry_domain_call_preservation as edcp
+from inertia.cli.mz_static_intake import (
+    MzStaticIntakeRequest8616,
+    MzStaticIntakeStatus8616,
+    install_mz_static_invocation_source_8616,
+)
+from inertia.cli.project_loading import _build_project
 from inertia.frontend.x86_16.frontend_function_boundary import (
     mapped_entry_function_boundary_8616,
 )
@@ -41,12 +38,15 @@ from inertia.frontend.x86_16.frontend_local_call_evidence import (
     local_call_frame_evidence_8616,
 )
 from inertia.frontend.x86_16.mz_static_boot import recompute_mz_static_boot_8616
-from inertia.cli.mz_static_intake import (
-    MzStaticIntakeRequest8616,
-    MzStaticIntakeStatus8616,
-    install_mz_static_invocation_source_8616,
+from inertia.ir.real16_invocation_domain import (
+    Real16InvocationFailure8616,
+    Real16InvocationKind8616,
+    prove_real16_invocation_domain_8616,
+    same_real16_entry_scope_8616,
 )
-from inertia.cli.project_loading import _build_project
+from inertia.ir.vex_import import (
+    build_x86_16_ir_function_artifact,
+)
 
 LOAD_SEGMENT = 0x1000
 BASE = LOAD_SEGMENT << 4

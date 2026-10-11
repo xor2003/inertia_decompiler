@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 
 import pytest
-import inertia.semantics.callsite_summary as callsite_summary
 
+import inertia.semantics.callsite_summary as callsite_summary
 from inertia.semantics.callsite_summary_request import (
     CallsiteSummaryRequestCache8616,
 )

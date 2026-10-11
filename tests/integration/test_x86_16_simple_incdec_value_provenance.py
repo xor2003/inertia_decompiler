@@ -6,10 +6,11 @@ import angr
 import pytest
 import pyvex
 from angr import options as o
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 from inertia.ir import IRBinaryValue, IRValue, MemSpace
 from inertia.ir.condition_ir import ConditionIR
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 
 
 @pytest.mark.parametrize("opcode", [0x40, 0x48])

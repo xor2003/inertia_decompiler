@@ -13,11 +13,10 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.alias.terminal_pointer_output_contracts import TerminalPointerAliasEvidence8616
 from inertia.alias.terminal_pointer_outputs import classify_terminal_pointer_output_aliases_8616
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactFailure8616
+from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
 )

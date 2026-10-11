@@ -9,14 +9,14 @@ import angr
 import archinfo
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
-import tools.dosunit.compare.straightline_ssa as S
 import tools.dosunit.catalog.binary_callee_region_contracts as C
 import tools.dosunit.catalog.binary_callee_region_intake as INTAKE
 import tools.dosunit.catalog.binary_callee_region_lowering as LOWER
 import tools.dosunit.catalog.binary_callee_region_pending as P
 import tools.dosunit.catalog.binary_callee_region_scan as R
+import tools.dosunit.compare.straightline_ssa as S
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 _ARCH = archinfo.ArchX86()
 _BASE = 4096

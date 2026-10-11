@@ -8,6 +8,7 @@ only segment identities preserved by a fully covered leaf through its caller.
 from __future__ import annotations
 
 import pytest
+
 from inertia.ir.segment_call_preservation import (
     prove_segment_call_preservation_8616,
 )

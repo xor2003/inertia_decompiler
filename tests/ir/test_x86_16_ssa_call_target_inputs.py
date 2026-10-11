@@ -9,6 +9,7 @@ index preserves that same input-only contract. Typed IR objects only; no mocks.
 from __future__ import annotations
 
 import pytest
+
 from inertia.ir.core import (
     IRBlock,
     IRFunctionArtifact,

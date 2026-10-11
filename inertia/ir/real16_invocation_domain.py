@@ -3,7 +3,10 @@
 Layer: IR.
 Responsibility: prove the numeric CS selector domain for one exact direct
 near CALL under a single typed invocation. The admitted premise shapes are
-a source-bound program boot (``BOOT_ENTRY_PATH``) and a chained-callee
+a source-bound program boot (``BOOT_ENTRY_PATH``), a raw startup census
+over an authenticated but registry-unpublished surface whose pending
+terminal jump is re-proven under live path state (``RAW_BOOT_ENTRY_PATH``),
+and a chained-callee
 premise (``CALL_CHAINED``) that transports the parent's proven
 callsite-call register state — captured at the parent's CALL row, after
 that instruction's push effects — across one exact bound near-call edge
@@ -115,13 +118,25 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import StrEnum
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from angr.errors import AngrError
-from inertia.frontend.real16_resize_response8616 import ResizeRefusal8616, resize_response_8616
 from capstone import CsError
 from pyvex.errors import PyVEXError
 
+from inertia.frontend.real16_dosbox_int21_frame import (
+    DosBoxInt21Registers8616,
+    DosBoxInt21Write8616,
+    dosbox_int21_frame_effects_8616,
+)
+from inertia.frontend.real16_resize_response8616 import ResizeRefusal8616, resize_response_8616
+from inertia.frontend.real16_vector_response8616 import (
+    INT21_SET_VECTOR_8616,
+    VectorResponseEffect8616,
+    VectorResponseRefusal8616,
+    vector_response_8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_block_inventory import decoded_block_instructions_8616
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
@@ -138,6 +153,13 @@ from inertia.semantics.register_value_preservation import (
     register_value_projection_8616,
 )
 
+from . import real16_edge_feasibility8616 as kb_owner_8616
+from . import real16_fused_caller_prefix as caller_prefix_owner_8616
+from . import real16_initial_memory8616 as initial_memory_owner_8616
+from . import real16_path_memory8616 as path_memory_owner_8616
+from . import real16_repeated_store8616 as repeated_store_owner_8616
+from . import real16_wide_multiply8616 as multiply_owner_8616
+from . import scalar_instruction_effects as scalar_owner_8616
 from .core import (
     IRActiveUnary8616,
     IRAddress,
@@ -152,11 +174,22 @@ from .core import (
     IRValue,
     MemSpace,
 )
+from .frozen_dispatch import FrozenDispatch, frozen_dispatch_lookup
 from .instruction_origin import IRInstructionOrigin8616
 from .ir_boundary_cfg import (
     IRBoundaryCoverageResult8616,
     _instruction_census_matches_8616,
     closed_ir_boundary_cfg_8616,
+)
+from .real16_boot_entry_link import (
+    RawBootEntrySurface8616,
+    raw_boot_entry_surface_pending_8616,
+)
+from .real16_census_fact_ownership import (
+    CensusFactOwnership8616,
+    census_fact_ownership_8616,
+    census_fact_ownership_current_8616,
+    new_census_fact_sets_8616,
 )
 from .real16_declared_interrupt8616 import (
     DeclaredInterruptRefusal8616,
@@ -164,18 +197,37 @@ from .real16_declared_interrupt8616 import (
     DeclaredResizeConsumption8616,
     DeclaredResizeSurface8616,
     DeclaredServiceConsumption8616,
+    DeclaredVectorConsumption8616,
+    DeclaredVectorSurface8616,
     declared_environment_digest_8616,
+    declared_memory_span_8616,
     declared_resize_consumption_8616,
     declared_service_arena_8616,
     declared_service_consumption_8616,
+    declared_vector_consumption_8616,
     interrupt_call_vector_8616,
     service_relation_for_8616,
 )
+from .real16_dosbox_resize_effects import (
+    DosboxResizeEffects8616,
+    DosboxResizeEffectsRefusal8616,
+    stage_dosbox_resize_effects_8616,
+)
 from .real16_edge_feasibility8616 import (
     DirectionTracker8616,
+    LoadSnapshotReplay8616,
     Real16EdgeFeasibility8616,
+    acyclic_invocation_order_8616,
     invocation_feasible_scope_8616,
+    invocation_transfer_order_8616,
 )
+from .real16_fused_callee_transfer import (
+    FusedCalleeOperations8616,
+    active_fused_callee_transfer_8616,
+    source_bound_callee_transfer_8616,
+    try_fused_callee_transfer_8616,
+)
+from .real16_fused_caller_prefix import FusedCallerPrefix8616, try_fused_caller_prefix_8616
 from .real16_initial_memory8616 import InvocationInitialMemory8616, invocation_initial_memory_8616
 from .real16_path_memory8616 import (
     SEGMENT_BASE_NAME_8616,
@@ -192,7 +244,13 @@ from .real16_path_memory8616 import (
 from .real16_repeated_store8616 import (
     RepeatedStoreStatus8616,
     native_repeated_store_8616,
+    repeated_store_candidate_shape_8616,
     repeated_store_effect_8616,
+)
+from .real16_scratch_protection import (
+    CallerIntervalSelectionStatus8616,
+    ScratchCallerRange8616,
+    select_caller_intervals_8616,
 )
 from .real16_wide_multiply8616 import wide_multiply_value_8616
 from .scalar_instruction_effects import (
@@ -202,10 +260,19 @@ from .scalar_instruction_effects import (
 )
 from .segment_call_preservation import SegmentCallPreservationResult8616
 from .segment_effect_closure import SegmentEffectClosureResult8616
-from .segment_state_transfer import call_preservation_at_instruction_8616
+from .segment_state_transfer import bound_call_preservation_at_instruction_8616
 from .ssa_function import build_x86_16_ir_predecessor_map
 
+if TYPE_CHECKING:
+    from inertia.frontend.x86_16.declared_function_entry import DeclaredFunctionEntryAdmission8616
+    from inertia.semantics.direct_near_call_target_binding import DirectNearCallTargetBinding8616
+
+    from .declared_selector_invariant import DeclaredSegmentInvariant
+    from .native_import_surface_cache import NativeCensusSourceBinding8616
+
+
 __all__ = [
+    "DeclaredFunctionEntryLink8616",
     "Real16CallChainLink8616",
     "Real16CallInvocation8616",
     "Real16EnclosedEntryLink8616",
@@ -214,9 +281,13 @@ __all__ = [
     "Real16InvocationFailure8616",
     "Real16InvocationKind8616",
     "Real16InvocationRefusalSite8616",
+    "prove_fresh_real16_chained_invocation_domain_8616",
+    "prove_fresh_real16_declared_function_entry_domain_8616",
     "prove_real16_chained_invocation_domain_8616",
+    "prove_real16_declared_function_entry_domain_8616",
     "prove_real16_enclosed_invocation_domain_8616",
     "prove_real16_invocation_domain_8616",
+    "prove_real16_raw_boot_invocation_domain_8616",
     "real16_invocation_discharges_8616",
     "real16_native_census_import_8616",
 ]
@@ -278,6 +349,7 @@ _SEGMENT_BASE_NAME_8616 = SEGMENT_BASE_NAME_8616
 class Real16InvocationFailure8616(StrEnum):
     """Typed refusal reasons for source-bound invocation-domain proofs."""
 
+    DECLARED_ENTRY_UNPROVEN = "declared_entry_unproven"
     BOOT_UNBOUND = "boot_unbound"
     BOOT_MALFORMED = "boot_malformed"
     BOOT_NOT_REPRODUCED = "boot_not_reproduced"
@@ -316,6 +388,8 @@ class Real16InvocationAssumption8616(StrEnum):
     #: Entry CS:IP projected from the retained MZ header by
     #: ``mz_invocation_source_8616``; authoritative, not caller-supplied.
     MZ_HEADER_ENTRY = "mz_header_entry"
+    #: Explicit source-bound application state; original startup reachability is unproved.
+    DECLARED_FUNCTION_ENTRY = "declared_function_entry"
     #: Initial SS:SP projected from the same retained MZ header.
     MZ_HEADER_STACK = "mz_header_stack"
     #: A static-header input carries no declared environment: the seed
@@ -390,9 +464,31 @@ class Real16InvocationKind8616(StrEnum):
     through that fallthrough to the callsite.
     """
 
+    DECLARED_FUNCTION_ENTRY = "declared_function_entry"
     BOOT_ENTRY_PATH = "boot_entry_path"
+    #: ``RAW_BOOT_ENTRY_PATH``: the same source-bound program entry, proven
+    #: over an authenticated raw census surface — a retained
+    #: ``RawBootEntrySurface8616`` whose only outstanding obligation is a
+    #: pending selector-window terminal jump. The surface grants neither
+    #: complete coverage nor registry publication; each traversed pending
+    #: transfer re-proves its destination under the live register/tmp
+    #: state, and the premise stays invocation-local.
+    RAW_BOOT_ENTRY_PATH = "raw_boot_entry_path"
     CALL_CHAINED = "call_chained"
     ENCLOSED_ENTRY = "enclosed_entry"
+
+
+@dataclass(frozen=True, slots=True)
+class DeclaredFunctionEntryLink8616:
+    """Bind an explicit conditional entry declaration to its native census surface.
+
+    The declaration supplies entry state, never original-program reachability.
+    Every derivation reauthenticates its source, environment and live image.
+    """
+
+    admission: DeclaredFunctionEntryAdmission8616
+    artifact: IRFunctionArtifact
+    boundary: ExactFunctionRangeBoundary8616
 
 
 class _BootEntrySurface8616(Protocol):
@@ -550,7 +646,10 @@ class _DerivedDomain8616:
     #: reached its callsite row.
     callsite_memory: PathMemorySnapshot8616 | None
     service_consumptions: tuple[
-        DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616, ...
+        DeclaredServiceConsumption8616
+        | DeclaredResizeConsumption8616
+        | DeclaredVectorConsumption8616,
+        ...,
     ]
     #: ``(block_addr, successor_addr)`` edges proven untraversable by the
     #: invocation-local known-bits feasibility pass; empty when nothing
@@ -611,6 +710,24 @@ class _NestedRefusal8616:
     refusal_site: Real16InvocationRefusalSite8616 | None
 
 
+class _EntryCallPoolConsultation8616(StrEnum):
+    """Observed entry-call evidence-pool consultation of one derivation.
+
+    ``UNKNOWN`` is the only value a derivation may carry without running
+    the canonical census: early, structural, and mock attempts report no
+    observation, never a claimed absence of dependency. ``UNUSED`` is
+    reported only by a census that ran to its post-census exit without
+    any CALL row — real or feasibility scratch — reaching the pool
+    lookup; ``READ`` means at least one lookup executed, including
+    failed or empty-pool lookups. This is dependency evidence, never a
+    semantic-equality input.
+    """
+
+    UNKNOWN = "unknown"
+    UNUSED = "unused"
+    READ = "read"
+
+
 @dataclass(frozen=True, slots=True)
 class _Derivation8616:
     """One derivation attempt: the domain, the refusal, and real counts.
@@ -633,6 +750,16 @@ class _Derivation8616:
     #: Edges the invocation-local feasibility pass proved untraversable
     #: before the refusal; diagnostic evidence, never universal.
     infeasible_edges: tuple[tuple[int, int], ...] = ()
+    #: Actual resolved edge from a synchronous construction, never a pending request.
+    constructed_chain: Real16CallChainLink8616 | None = None
+    #: Observed entry-call evidence-pool dependency. Only the canonical
+    #: post-census exits report ``UNUSED``/``READ``; the ``UNKNOWN``
+    #: default must never be read as proof of no dependency.
+    entry_call_pool_consultation: _EntryCallPoolConsultation8616 = (
+        _EntryCallPoolConsultation8616.UNKNOWN
+    )
+    #: Private diagnostic ownership only; never a CURRENT admission or proof.
+    prefix_census: _OwnedPrefixCensus8616 | None = field(default=None, compare=False, repr=False)
 
 
 def _early_derivation_8616(
@@ -681,6 +808,53 @@ def _image_slice_8616(image: _BootImageSurface8616, addr: int, size: int) -> byt
         if base <= addr and addr + size <= base + len(data):
             return bytes(data[addr - base : addr - base + size])
     return None
+
+
+class _LoaderMemorySurface8616(Protocol):
+    """Dynamic angr loader-memory read boundary (``Clemory.load``)."""
+
+    def load(self, addr: int, n: int) -> bytes:
+        """Read up to ``n`` bytes; short reads stop at unallocated regions."""
+        ...
+
+
+class _LoaderSurface8616(Protocol):
+    """Loader handle exposing the byte-memory surface."""
+
+    @property
+    def memory(self) -> _LoaderMemorySurface8616:
+        """Read the loader's byte memory."""
+        ...
+
+
+class _ProjectLoaderSurface8616(Protocol):
+    """Project slot carrying the dynamic third-party loader boundary."""
+
+    @property
+    def loader(self) -> _LoaderSurface8616:
+        """Read the project's loader handle."""
+        ...
+
+
+def _loaded_bytes_8616(project: object, addr: int, size: int) -> bytes | None:
+    """Read the project's currently loaded bytes, ``None`` when unreadable.
+
+    The frontend decode cache keys on address and decode options, not byte
+    freshness, so the retained machine census must also bind to what the
+    loader actually maps now. ``Clemory.load`` stops at the first
+    unallocated region and raises ``KeyError`` when nothing backs the
+    start; a short read is unreadable for this contract and becomes
+    ``None`` — a typed byte-binding refusal downstream, never a
+    substituted default.
+    """
+    try:
+        loaded = cast(_ProjectLoaderSurface8616, project).loader.memory.load(addr, size)
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(loaded, bytes | bytearray | memoryview):
+        return None
+    live = bytes(loaded)
+    return live if len(live) == size else None
 
 
 def _instruction_bytes_8616(instruction: object) -> bytes | None:
@@ -972,6 +1146,19 @@ def _recompute_boot_8616(
     source_evidence = _invocation_boot_evidence_8616(boot)
     if isinstance(source_evidence, Real16InvocationFailure8616):
         return source_evidence
+    return _recompute_validated_boot_8616(boot, boot_recompute)
+
+
+def _recompute_validated_boot_8616(
+    boot: object,
+    boot_recompute: Callable[[object], object] | None,
+) -> Real16InvocationFailure8616 | None:
+    """Replay the callback immediately after this operation validates the source.
+
+    The derivation owner already extracted source evidence synchronously. It
+    consumes that fresh check once; independent callers use the full wrapper.
+    No positive verdict or mutable boot identity is retained between operations.
+    """
     if boot_recompute is None or not callable(boot_recompute):
         return Real16InvocationFailure8616.BOOT_UNBOUND
     try:
@@ -1016,11 +1203,72 @@ def _dangerous_block_addrs_8616(
     return frozenset(reached)
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class _PrefixTerminalCall8616:
+    """Core-private terminal continuation; scalar containers move out of the walk.
+
+    CALL resets only the separate direction tracker and register dictionary.
+    The callsite register/memory copies remain owned by the census context.
+    No subsequent row may mutate the transferred continuation containers.
+    """
+
+    artifact: IRFunctionArtifact
+    block: IRBlock
+    index: int
+    instruction: IRInstr
+    direction: bool | None
+    tmps: dict[int, int]
+    dirty: set[str]
+    instruction_entry: dict[str, int]
+    current_addr: int
+
+
+@dataclass(slots=True)
+class _PrefixSourceBindings8616:
+    """Shared capture metadata; scratch scopes cannot hide missing authority."""
+
+    bindings: dict[int, NativeCensusSourceBinding8616] = field(default_factory=dict)
+    complete: bool = True
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _PrefixConsumedCall8616:
+    """Exact successful ordinary CALL consumption, never callback authority."""
+
+    artifact: IRFunctionArtifact
+    block: IRBlock
+    instruction: IRInstr
+    proof: _BoundaryProof8616
+    scope: Real16InvocationDomain8616 | None
+    preserved_registers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _OwnedPrefixCensus8616:
+    """Private successful-census data, requiring fresh admission before any reuse.
+
+    Retaining context ownership avoids another fact/row scan. This is neither
+    detached public data nor an authenticated receipt, and never bypasses calls.
+    """
+
+    context: _PathCensusContext8616 = field(repr=False)
+    seed: _PathState8616 = field(repr=False)
+    artifact: IRFunctionArtifact = field(repr=False)
+    boundary: ExactFunctionRangeBoundary8616 = field(repr=False)
+    boot_recompute: Callable[[object], object] | None = field(repr=False)
+    counts: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)
+    stores: int = 0
+    producers: tuple[object, ...] = field(default=(), repr=False)
+    simulation_work: int = 0
+    fact_ownership: CensusFactOwnership8616 | None = field(default=None, repr=False)
+    consumed_calls: tuple[_PrefixConsumedCall8616, ...] = field(default=(), repr=False)
+
+
 @dataclass(slots=True)
 class _PathCensusContext8616:
     """Shared authority for one root-to-callsite raw-effect census.
 
-    ``manifest`` accumulates every proved fetched instruction byte range
+    ``manifest`` retains every distinct proved fetched instruction byte range
     (call path plus every admitted leaf callee) before and during effect
     simulation, so each STORE is checked against *all* bytes that may be
     fetched — including bytes fetched after the store executes.
@@ -1073,7 +1321,7 @@ class _PathCensusContext8616:
     selector: int
     image: _BootImageSurface8616
     boot: object
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None
     call_preservations: tuple[SegmentCallPreservationResult8616, ...]
     entry_call_preservations: tuple[object, ...]
     declared_services: tuple[DeclaredInterruptService8616, ...]
@@ -1085,7 +1333,9 @@ class _PathCensusContext8616:
     #: Declared allocation ``[start, end)`` for program-owned-handler checks.
     arena: tuple[int, int] | None
     service_consumptions: list[
-        DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616
+        DeclaredServiceConsumption8616
+        | DeclaredResizeConsumption8616
+        | DeclaredVectorConsumption8616
     ]
     stop_block_addr: int | None
     callsite_addr: int | None
@@ -1095,7 +1345,7 @@ class _PathCensusContext8616:
     #: transported premise's seed carries the same bytes the register
     #: state was proven under.
     callsite_memory: PathMemory8616 | None
-    manifest: list[tuple[int, int]]
+    manifest: set[tuple[int, int]]
     machine_bytes: dict[int, bytes]
     native_blocks: dict[int, dict[int, IRBlock]]
     checked_stores: int
@@ -1108,6 +1358,10 @@ class _PathCensusContext8616:
     work_units: int
     work_limit: int
     deadline: float
+    #: Count every authenticated fetched-span admission, including repeats;
+    #: protection uses the distinct manifest, while public replay/counts retain
+    #: the original admission multiplicity.
+    fetched_span_admissions: int = 0
     accounted_work_units: int = 0
     #: The first classified instruction row the census refused — real
     #: diagnostic evidence for the exact failing site, never a guess.
@@ -1117,6 +1371,32 @@ class _PathCensusContext8616:
     #: both later phases consume.
     edge_feasibility: Real16EdgeFeasibility8616 | None = None
     initial_memory: InvocationInitialMemory8616 | None = None
+    #: Monotonic consultation receipt for the in-flight entry-domain
+    #: pool: set once any CALL row reaches the pool lookup in
+    #: ``_consume_call_boundary_8616`` — a failed or empty lookup still
+    #: counts as a read. Feasibility scratch copies propagate it back to
+    #: the owning context on every exit so a scratch-only consultation is
+    #: never reported as unused.
+    entry_call_pool_consulted: bool = False
+    #: Opt-in private diagnostics, never proof authority; scratch work cannot
+    #: retain the requested CALL because it clears callsite_addr.
+    prefix_capture_requested: bool = False
+    prefix_consumed: bool = False
+    prefix_simulation_work: int = 0
+    prefix_boot_recompute: Callable[[object], object] | None = field(default=None, repr=False)
+    prefix_terminal_call: _PrefixTerminalCall8616 | None = None
+    prefix_call_consumptions: list[_PrefixConsumedCall8616] = field(default_factory=list, repr=False)
+    #: Existing immutable import keys retained only for opt-in capture. Missing
+    #: or changed authority keeps the data ineligible for future continuation.
+    prefix_sources: _PrefixSourceBindings8616 = field(default_factory=_PrefixSourceBindings8616)
+    #: ``(function_addr, block_addr) -> (boundary, stop_after)`` for each
+    #: ``ctx.native_blocks`` entry that is a consumed-row prefix copy rather
+    #: than a whole block. Whole-block consumers (repeated stores) re-derive
+    #: the full block through the recorded authenticated boundary before
+    #: binding; never a proof or reuse authority on its own.
+    prefix_native_entries: dict[
+        tuple[int, int], tuple[ExactFunctionRangeBoundary8616, int],
+    ] = field(default_factory=dict, repr=False)
 
 
 def _census_work_exceeded_8616(ctx: _PathCensusContext8616) -> bool:
@@ -1130,6 +1410,17 @@ def _census_work_exceeded_8616(ctx: _PathCensusContext8616) -> bool:
             ctx.work_units > ctx.work_limit
             or traversal.census_work_units > _CENSUS_WORK_LIMIT_8616
         )
+
+
+def _census_resource_failure_8616(
+    ctx: _PathCensusContext8616,
+) -> Real16InvocationFailure8616 | None:
+    """Account shared work and retain resource refusal before proof fallbacks."""
+    if _census_work_exceeded_8616(ctx):
+        return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+    if time.monotonic() > ctx.deadline:
+        return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+    return None
 
 
 def _census_deadline_8616() -> float:
@@ -1175,9 +1466,15 @@ def _census_reimport_8616(
         guard._inertia_real16_native_census_8616 = guard_depth
 
 
+_CANONICAL_CENSUS_REIMPORT_8616 = _census_reimport_8616
+
+
 def _native_effect_blocks_8616(
     ctx: _PathCensusContext8616,
     boundary: ExactFunctionRangeBoundary8616,
+    *,
+    selected_blocks: frozenset[int] | None = None,
+    terminal: tuple[int, int] | None = None,
 ) -> dict[int, IRBlock] | Real16InvocationFailure8616:
     """Re-derive one artifact's native blocks through the authoritative importer.
 
@@ -1186,12 +1483,94 @@ def _native_effect_blocks_8616(
     under the artifact's own exact boundary. Only named decode-boundary
     failures translate to ``native_effect_unproven``; the returned map is
     per-block so each simulated block can be compared in full (rows,
-    refusals, and successors), never just by shared address.
+    refusals, and successors), never just by shared address. ``terminal``
+    is an optional explicit ``(block_addr, stop_after)`` consumed-row
+    cutoff: the detached copy of that one block then carries only the
+    prefix rows the census consumes, recorded in
+    ``ctx.prefix_native_entries`` so whole-block consumers re-derive or
+    decline; suffix rows are never authorized.
     """
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     if boundary.project is not ctx.project:
         return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    from .native_import_surface_cache import _request_native_census_blocks_8616
+    from .vex_import import (
+        _census_finishing_producers_8616,
+        _census_raw_native_blocks_8616,
+        _native_import_producers_8616,
+    )
+
+    if _census_reimport_8616 is _CANONICAL_CENSUS_REIMPORT_8616:
+        try:
+            selected = _request_native_census_blocks_8616(
+                ctx.project, boundary, _census_raw_native_blocks_8616,
+                selected_blocks=selected_blocks,
+                producers=(
+                    _census_reimport_8616,
+                    *_census_finishing_producers_8616(),
+                    *_native_import_producers_8616(),
+                ),
+                terminal=terminal,
+            )
+        except _DECODE_REFUSAL_TYPES_8616:
+            return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+        if selected is not None:
+            ctx.work_units += selected.work_units
+            if _census_work_exceeded_8616(ctx):
+                return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+            if time.monotonic() > ctx.deadline:
+                return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+            _record_native_prefix_selection_8616(ctx, boundary, selected.blocks, selected.prefix_rows)
+            _retain_prefix_source_binding_8616(ctx, boundary, selected.source_binding)
+            return selected.blocks
+    _retain_prefix_source_binding_8616(ctx, boundary, None)
+    result = _uncached_native_effect_blocks_8616(ctx, boundary)
+    if not isinstance(result, Real16InvocationFailure8616):
+        _record_native_prefix_selection_8616(ctx, boundary, result, ())
+    return result
+
+
+def _record_native_prefix_selection_8616(
+    ctx: _PathCensusContext8616, boundary: ExactFunctionRangeBoundary8616,
+    blocks: dict[int, IRBlock], prefix_rows: tuple[tuple[int, int], ...],
+) -> None:
+    """Replace cutoff metadata for the actual detached blocks being returned.
+
+    A full selection supersedes an earlier prefix: historical cutoffs must
+    never weaken later whole-block binding. Other selected block entries and
+    other functions retain their independently bound records.
+    """
+    for block_addr in blocks:
+        ctx.prefix_native_entries.pop((boundary.addr, block_addr), None)
+    for block_addr, stop_after in prefix_rows:
+        ctx.prefix_native_entries[(boundary.addr, block_addr)] = (boundary, stop_after)
+
+
+def _retain_prefix_source_binding_8616(
+    ctx: _PathCensusContext8616, boundary: ExactFunctionRangeBoundary8616,
+    binding: NativeCensusSourceBinding8616 | None,
+) -> None:
+    """Retain existing source keys without rescanning facts or granting reuse."""
+    if not ctx.prefix_capture_requested:
+        return
+    retained = ctx.prefix_sources
+    previous = retained.bindings.get(boundary.addr)
+    # Cache hits retain the same immutable projection key object. A rebuilt or
+    # evicted projection declines optional capture rather than scanning the key.
+    if binding is None or (previous is not None and previous.key is not binding.key):
+        retained.complete = False
+    elif previous is None:
+        retained.bindings[boundary.addr] = binding
+
+
+def _uncached_native_effect_blocks_8616(
+    ctx: _PathCensusContext8616,
+    boundary: ExactFunctionRangeBoundary8616,
+) -> dict[int, IRBlock] | Real16InvocationFailure8616:
+    """Retain the full authoritative import for unsupported/custom producers."""
+    if time.monotonic() > ctx.deadline:
+        return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     relifted = _census_reimport_8616(ctx, boundary)
     if isinstance(relifted, Real16InvocationFailure8616):
         return relifted
@@ -1232,6 +1611,7 @@ def _native_effect_blocks_8616(
 # ---------------------------------------------------------------------
 
 _NATIVE_BINDING_DEPTH_LIMIT_8616 = 16
+_NATIVE_BINDING_MEMO_MAX_PAIRS_8616 = 2048
 
 # Owned field sets — exactly the fields each comparator below examines.
 _IR_BLOCK_FIELDS_8616 = frozenset(
@@ -1274,39 +1654,155 @@ _IR_ORIGIN_FIELDS_8616 = frozenset(
 _IR_REFUSAL_FIELDS_8616 = frozenset({"kind", "detail", "block_addr"})
 
 
-def _native_fields_current_8616(node: object, expected: frozenset[str]) -> bool:
+class _NativeTermMemo8616:
+    """Identity memo and schema cache scoped to one binding comparison.
+
+    The all-field comparator walks shared immutable IR DAGs and revisits
+    the same ``(left, right)`` object pair many times. Pair results are
+    monotone in ``depth``: a pair proven equal at depth ``d`` stays equal
+    at every shallower depth (the bound only gains headroom), and a pair
+    refused at ``d`` stays refused at every deeper depth — every
+    non-depth refusal (type, field schema, length, leaf value) is
+    depth-independent, and a depth-exceeded subtree only exceeds earlier
+    at greater depths. The memo therefore records the deepest proven
+    depth and the shallowest refused depth per identity pair; a hit must
+    still satisfy the caller's depth, so memoization never bypasses the
+    bound. Stored typed-node pairs are pinned for the memo's lifetime so
+    recycled identities cannot alias a stale key. Projection tuples and
+    mutable containers are not memoized. At the pair cap, new pairs use
+    ordinary recursive comparison without retention. The memo is
+    constructed per top-level comparison, never shared across requests,
+    and the per-type schema cache cannot outlive the classes it read.
+    """
+
+    __slots__ = ("_false_depths", "_pins", "_schemas", "_true_depths")
+
+    def __init__(self) -> None:
+        """Create an empty per-comparison memo."""
+        self._true_depths: dict[tuple[int, int], int] = {}
+        self._false_depths: dict[tuple[int, int], int] = {}
+        self._pins: dict[tuple[int, int], tuple[object, object]] = {}
+        self._schemas: dict[type, frozenset[str]] = {}
+
+    def lookup(self, key: tuple[int, int], depth: int) -> bool | None:
+        """Return a stored verdict still valid at ``depth``, else ``None``."""
+        proven = self._true_depths.get(key)
+        if proven is not None and depth <= proven:
+            return True
+        refused = self._false_depths.get(key)
+        if refused is not None and depth >= refused:
+            return False
+        return None
+
+    def store(
+        self,
+        key: tuple[int, int],
+        left: object,
+        right: object,
+        depth: int,
+        result: bool,
+    ) -> None:
+        """Record ``result`` at ``depth`` and pin both keyed objects."""
+        if key not in self._pins:
+            if len(self._pins) >= _NATIVE_BINDING_MEMO_MAX_PAIRS_8616:
+                return
+            self._pins[key] = (left, right)
+        if result:
+            previous = self._true_depths.get(key)
+            if previous is None or previous < depth:
+                self._true_depths[key] = depth
+        else:
+            previous = self._false_depths.get(key)
+            if previous is None or previous > depth:
+                self._false_depths[key] = depth
+
+    def declared_fields(self, node_type: type) -> frozenset[str]:
+        """Return the dataclass field names declared by ``node_type``."""
+        declared = self._schemas.get(node_type)
+        if declared is None:
+            declared = frozenset(
+                member.name for member in fields(node_type)
+            )
+            self._schemas[node_type] = declared
+        return declared
+
+
+def _native_fields_current_8616(
+    node: object, expected: frozenset[str], memo: _NativeTermMemo8616
+) -> bool:
     """Return whether ``node`` still declares exactly the owned field set."""
-    if not is_dataclass(node):
+    return is_dataclass(node) and memo.declared_fields(type(node)) == expected
+
+
+def _native_sequence_equal_8616(
+    left: tuple[object, ...] | list[object],
+    right: tuple[object, ...] | list[object],
+    depth: int,
+    memo: _NativeTermMemo8616,
+) -> bool:
+    """Compare sequence fields without recursive calls for exact scalar leaves.
+
+    Scalar leaves still consume the ordinary child depth. Subclasses, enums
+    and owned nodes take the full comparator, including its refusal and memo
+    rules; identical containers never bypass validation of their contents.
+    """
+    if len(left) != len(right):
         return False
-    return frozenset(member.name for member in fields(node)) == expected
+    for item_left, item_right in zip(left, right, strict=True):
+        leaf_type = type(item_left)
+        scalar = leaf_type is int or leaf_type is str or leaf_type is bool or item_left is None
+        if scalar and leaf_type is type(item_right):
+            if depth >= _NATIVE_BINDING_DEPTH_LIMIT_8616 or item_left != item_right:
+                return False
+        elif not _native_term_equal_8616(item_left, item_right, depth + 1, memo):
+            return False
+    return True
 
 
-def _native_term_equal_8616(left: object, right: object, depth: int) -> bool:
+def _native_term_equal_8616(
+    left: object,
+    right: object,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
+) -> bool:
     """Compare two packed binding terms exactly.
 
     ``False`` covers both a real difference and a structure the
     comparator cannot prove complete — an unprovable field is a refusal,
-    not a pass.
+    not a pass. ``memo`` scopes identity memoization to one top-level
+    comparison; omitted, it is created fresh.
     """
+    if memo is None:
+        memo = _NativeTermMemo8616()
     if depth > _NATIVE_BINDING_DEPTH_LIMIT_8616 or type(left) is not type(right):
         return False
     if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
-        return len(left) == len(right) and all(
-            _native_term_equal_8616(item_left, item_right, depth + 1)
-            for item_left, item_right in zip(left, right, strict=True)
-        )
-    comparator = _NATIVE_COMPARATORS_8616.get(type(left))
+        return _native_sequence_equal_8616(left, right, depth, memo)
+    comparator = frozen_dispatch_lookup(_NATIVE_COMPARATORS_8616, type(left))
     if comparator is not None:
-        return comparator(left, right, depth)
+        key = (id(left), id(right))
+        hit = memo.lookup(key, depth)
+        if hit is not None:
+            return hit
+        result = comparator(left, right, depth, memo)
+        memo.store(key, left, right, depth, result)
+        return result
     # A typed IR node this comparator does not own cannot be fully
     # compared -> refuse. Plain leaves (ints, strings, enums, None)
     # compare by value under the already-proven common type.
     return not is_dataclass(left) and left == right
 
 
-def _native_value_equal_8616(left: IRValue, right: IRValue, depth: int) -> bool:
+def _native_value_equal_8616(
+    left: IRValue,
+    right: IRValue,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
+) -> bool:
     """All-field binding equality for one IRValue, capture ids included."""
-    if not _native_fields_current_8616(left, _IR_VALUE_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_VALUE_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (
@@ -1322,40 +1818,58 @@ def _native_value_equal_8616(left: IRValue, right: IRValue, depth: int) -> bool:
             right.source_tmp, right.call_output, right.active_unary,
         ),
         depth + 1,
+        memo,
     )
 
 
 def _native_active_unary_equal_8616(
-    left: IRActiveUnary8616, right: IRActiveUnary8616, depth: int
+    left: IRActiveUnary8616,
+    right: IRActiveUnary8616,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one active unary evidence node."""
-    if not _native_fields_current_8616(left, _IR_ACTIVE_UNARY_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_ACTIVE_UNARY_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (left.op, left.operand, left.result_bits),
         (right.op, right.operand, right.result_bits),
         depth + 1,
+        memo,
     )
 
 
 def _native_binary_value_equal_8616(
-    left: IRBinaryValue, right: IRBinaryValue, depth: int
+    left: IRBinaryValue,
+    right: IRBinaryValue,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one typed binary value expression."""
-    if not _native_fields_current_8616(left, _IR_BINARY_VALUE_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_BINARY_VALUE_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (left.op, left.lhs, left.rhs, left.size),
         (right.op, right.lhs, right.rhs, right.size),
         depth + 1,
+        memo,
     )
 
 
 def _native_address_equal_8616(
-    left: IRAddress, right: IRAddress, depth: int
+    left: IRAddress,
+    right: IRAddress,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one typed segmented address."""
-    if not _native_fields_current_8616(left, _IR_ADDRESS_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_ADDRESS_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (
@@ -1368,27 +1882,39 @@ def _native_address_equal_8616(
             right.base_values,
         ),
         depth + 1,
+        memo,
     )
 
 
 def _native_condition_equal_8616(
-    left: IRCondition, right: IRCondition, depth: int
+    left: IRCondition,
+    right: IRCondition,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one typed branch condition."""
-    if not _native_fields_current_8616(left, _IR_CONDITION_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_CONDITION_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (left.op, left.args, left.expr, left.width_bits),
         (right.op, right.args, right.expr, right.width_bits),
         depth + 1,
+        memo,
     )
 
 
 def _native_call_effect_equal_8616(
-    left: IRCallStackEffect8616, right: IRCallStackEffect8616, depth: int
+    left: IRCallStackEffect8616,
+    right: IRCallStackEffect8616,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one typed call stack effect."""
-    if not _native_fields_current_8616(left, _IR_CALL_EFFECT_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_CALL_EFFECT_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (
@@ -1400,6 +1926,7 @@ def _native_call_effect_equal_8616(
             right.escaped_ranges, right.complete, right.bp_preserved,
         ),
         depth + 1,
+        memo,
     )
 
 
@@ -1407,22 +1934,31 @@ def _native_call_output_equal_8616(
     left: IRCallOutputProvenance8616,
     right: IRCallOutputProvenance8616,
     depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one call-output provenance record."""
-    if not _native_fields_current_8616(left, _IR_CALL_OUTPUT_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_CALL_OUTPUT_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (left.callsite_addr, left.target_addr, left.shape),
         (right.callsite_addr, right.target_addr, right.shape),
         depth + 1,
+        memo,
     )
 
 
 def _native_origin_equal_8616(
-    left: IRInstructionOrigin8616, right: IRInstructionOrigin8616, depth: int
+    left: IRInstructionOrigin8616,
+    right: IRInstructionOrigin8616,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one instruction origin tag."""
-    if not _native_fields_current_8616(left, _IR_ORIGIN_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_ORIGIN_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (
@@ -1434,25 +1970,39 @@ def _native_origin_equal_8616(
             right.is_block_next, right.block_next_tmp, right.is_instruction_mark,
         ),
         depth + 1,
+        memo,
     )
 
 
 def _native_refusal_equal_8616(
-    left: IRRefusal, right: IRRefusal, depth: int
+    left: IRRefusal,
+    right: IRRefusal,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
 ) -> bool:
     """All-field binding equality for one typed IR refusal."""
-    if not _native_fields_current_8616(left, _IR_REFUSAL_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_REFUSAL_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (left.kind, left.detail, left.block_addr),
         (right.kind, right.detail, right.block_addr),
         depth + 1,
+        memo,
     )
 
 
-def _native_instr_equal_8616(left: IRInstr, right: IRInstr, depth: int) -> bool:
+def _native_instr_equal_8616(
+    left: IRInstr,
+    right: IRInstr,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
+) -> bool:
     """All-field binding equality for one typed instruction row."""
-    if not _native_fields_current_8616(left, _IR_INSTR_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_INSTR_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (
@@ -1464,36 +2014,59 @@ def _native_instr_equal_8616(left: IRInstr, right: IRInstr, depth: int) -> bool:
             right.call_stack_effect, right.origin,
         ),
         depth + 1,
+        memo,
     )
 
 
-def _native_block_equal_8616(left: IRBlock, right: IRBlock, depth: int) -> bool:
+def _native_block_equal_8616(
+    left: IRBlock,
+    right: IRBlock,
+    depth: int,
+    memo: _NativeTermMemo8616 | None = None,
+) -> bool:
     """All-field binding equality for one typed IR block."""
-    if not _native_fields_current_8616(left, _IR_BLOCK_FIELDS_8616):
+    if memo is None:
+        memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(left, _IR_BLOCK_FIELDS_8616, memo):
         return False
     return _native_term_equal_8616(
         (left.addr, left.instrs, left.refusals, left.successor_addrs),
         (right.addr, right.instrs, right.refusals, right.successor_addrs),
         depth + 1,
+        memo,
     )
 
 
-_NATIVE_COMPARATORS_8616: dict[type, Callable[..., bool]] = {
-    IRBlock: _native_block_equal_8616,
-    IRInstr: _native_instr_equal_8616,
-    IRValue: _native_value_equal_8616,
-    IRBinaryValue: _native_binary_value_equal_8616,
-    IRAddress: _native_address_equal_8616,
-    IRCondition: _native_condition_equal_8616,
-    IRCallStackEffect8616: _native_call_effect_equal_8616,
-    IRCallOutputProvenance8616: _native_call_output_equal_8616,
-    IRActiveUnary8616: _native_active_unary_equal_8616,
-    IRInstructionOrigin8616: _native_origin_equal_8616,
-    IRRefusal: _native_refusal_equal_8616,
-}
+_NATIVE_COMPARATORS_8616: FrozenDispatch[type, Callable[..., bool]] = (
+    (IRBlock, _native_block_equal_8616),
+    (IRInstr, _native_instr_equal_8616),
+    (IRValue, _native_value_equal_8616),
+    (IRBinaryValue, _native_binary_value_equal_8616),
+    (IRAddress, _native_address_equal_8616),
+    (IRCondition, _native_condition_equal_8616),
+    (IRCallStackEffect8616, _native_call_effect_equal_8616),
+    (IRCallOutputProvenance8616, _native_call_output_equal_8616),
+    (IRActiveUnary8616, _native_active_unary_equal_8616),
+    (IRInstructionOrigin8616, _native_origin_equal_8616),
+    (IRRefusal, _native_refusal_equal_8616),
+)
 
 
-def _native_block_bound_8616(native: object, block: IRBlock) -> bool:
+def _native_prefix_count_8616(block: IRBlock, stop_after: int) -> int | None:
+    """Select exactly the same ordered native prefix the effect walker consumes."""
+    if type(stop_after) is not int or type(block.addr) is not int or stop_after < block.addr:
+        return None
+    for index, instruction in enumerate(block.instrs):
+        if type(instruction) is not IRInstr or type(instruction.addr) is not int:
+            return None
+        if instruction.addr > stop_after:
+            return index
+    return len(block.instrs)
+
+
+def _native_block_bound_8616(
+    native: object, block: IRBlock, *, stop_after: int | None = None,
+) -> bool:
     """Return whether ``block`` is the exact re-derived native block.
 
     Whole-block source/effect/provenance binding: the artifact block and
@@ -1501,12 +2074,25 @@ def _native_block_bound_8616(native: object, block: IRBlock) -> bool:
     type and equal over every declared field of every row. ``native`` is
     ``None`` or a non-block when the census never bound this block's
     bytes — an unbound block can never prove a native effect, so binding
-    refuses rather than comparing.
+    refuses rather than comparing. An explicit cutoff binds every consumed row
+    and all block metadata; no suffix row is consumed or authorized. Whole-block
+    consumers, including repeated stores, retain the default full binding.
     """
-    return (
-        type(native) is IRBlock
-        and type(block) is IRBlock
-        and _native_block_equal_8616(native, block, 0)
+    if type(native) is not IRBlock or type(block) is not IRBlock:
+        return False
+    if stop_after is None:
+        return _native_block_equal_8616(native, block, 0)
+    count = _native_prefix_count_8616(block, stop_after)
+    native_count = _native_prefix_count_8616(native, stop_after)
+    if count is None or count != native_count:
+        return False
+    memo = _NativeTermMemo8616()
+    if not _native_fields_current_8616(native, _IR_BLOCK_FIELDS_8616, memo):
+        return False
+    return _native_term_equal_8616(
+        (native.addr, native.instrs[:count], native.refusals, native.successor_addrs),
+        (block.addr, block.instrs[:count], block.refusals, block.successor_addrs),
+        1, memo,
     )
 
 
@@ -1550,8 +2136,17 @@ def _bind_fetched_bytes_8616(
     *,
     selector: int,
     image: _BootImageSurface8616,
+    project: object,
 ) -> Real16InvocationFailure8616 | None:
-    """Bind every in-scope fetched instruction byte range to the image."""
+    """Bind every in-scope fetched instruction byte range to the image.
+
+    The decoded ``encoded`` bytes can come from the frontend block-inventory
+    cache, which is keyed on decode coordinates, not byte freshness. The
+    retained bytes must therefore agree three ways: with the boot source
+    image, with the census decode, and with the bytes the project loader
+    maps right now. A loader read that cannot produce exactly ``size``
+    bytes, or any disagreement, is ``native_bytes_mismatch``.
+    """
     window_base = selector << _SEGMENT_SHIFT_8616
     window_end = window_base + _WORD_LIMIT_8616
     for address in sorted(in_scope):
@@ -1564,6 +2159,9 @@ def _bind_fetched_bytes_8616(
             return Real16InvocationFailure8616.CODE_SCOPE_VIOLATION
         image_slice = _image_slice_8616(image, address, size)
         if image_slice is None or image_slice != encoded:
+            return Real16InvocationFailure8616.NATIVE_BYTES_MISMATCH
+        live = _loaded_bytes_8616(project, address, size)
+        if live is None or live != image_slice:
             return Real16InvocationFailure8616.NATIVE_BYTES_MISMATCH
     return None
 
@@ -1610,7 +2208,7 @@ def _census_block_bytes_8616(
     stop_after: int | None,
     boundary: ExactFunctionRangeBoundary8616 | None = None,
 ) -> Real16InvocationFailure8616 | None:
-    """Census one block's fetched bytes and append them to the manifest.
+    """Census current block bytes before adding distinct protected spans.
 
     ``stop_after`` truncates the in-scope census at the callsite machine
     instruction for the block that owns it; every other block binds its
@@ -1644,13 +2242,15 @@ def _census_block_bytes_8616(
     if in_scope != expected:
         return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
     failure = _bind_fetched_bytes_8616(
-        machine_addrs, in_scope, selector=ctx.selector, image=ctx.image
+        machine_addrs, in_scope, selector=ctx.selector, image=ctx.image,
+        project=ctx.project,
     )
     if failure is not None:
         return failure
-    ctx.manifest.extend(
+    ctx.manifest.update(
         (address, machine_addrs[address][0]) for address in sorted(in_scope)
     )
+    ctx.fetched_span_admissions += len(in_scope)
     for address in sorted(in_scope):
         ctx.machine_bytes[address] = machine_addrs[address][1]
     return None
@@ -2209,6 +2809,8 @@ def _transfer_row_failure_8616(
     ctx: _PathCensusContext8616,
     instruction: IRInstr,
     block: IRBlock,
+    registers: dict[str, int],
+    tmps: dict[int, int],
 ) -> Real16InvocationFailure8616 | None:
     """Classify one CJMP/JMP/RET row's effect on the path state.
 
@@ -2224,6 +2826,12 @@ def _transfer_row_failure_8616(
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     if instruction.addr == ctx.callsite_addr:
         return None
+    if type(ctx.chain) in (RawBootEntrySurface8616, DeclaredFunctionEntryLink8616) and block.refusals:
+        if instruction.op != "JMP" or len(instruction.args) != 1:
+            return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
+        target = _eval_value_8616(instruction.args[0], registers, tmps)
+        if target is None or block.successor_addrs != (target,):
+            return Real16InvocationFailure8616.CS_PATH_UNPROVEN
     if instruction.dst is not None:
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     return None
@@ -2273,7 +2881,7 @@ def _simulate_instruction_8616(
             )
         )
     elif op in ("CJMP", "JMP", "RET"):
-        failure = _transfer_row_failure_8616(ctx, instruction, block)
+        failure = _transfer_row_failure_8616(ctx, instruction, block, registers, tmps)
     else:
         # Every other effect must be closed by the authoritative scalar
         # classifier before any destination is accepted: an UNKNOWN kind,
@@ -2393,6 +3001,42 @@ def _store_data_bytes_8616(
     return (evaluated & mask).to_bytes(size, "little")
 
 
+def _native_store_span_8616(
+    instruction: IRInstr,
+    instruction_entry: dict[str, int],
+    dirty: set[str],
+    tmps: dict[int, int],
+) -> tuple[int, int] | None:
+    """Bind a raw STORE span to its already evaluated native address.
+
+    The census authenticates the whole native block, including each exact
+    Store statement's origin, before calling this helper. Temporary values
+    are block-local and evaluated in native order. An unsupported storage
+    space can therefore retain a proven machine write span without acquiring
+    a guessed segment alias. LOAD consumers keep their existing address model.
+    A typed span that contradicts its native capture is never admitted.
+    """
+    address = instruction.args[0]
+    if not isinstance(address, IRAddress):
+        return None
+    logical = _store_span_8616(instruction, address, instruction_entry, dirty, tmps)
+    origin = instruction.origin
+    if origin is None or origin.address_tmp is None:
+        return logical
+    captured = tmps.get(origin.address_tmp)
+    if captured is None:
+        return logical
+    size = address.size if type(address.size) is int and address.size > 0 else instruction.size
+    if type(size) is not int or size <= 0 or type(captured) is not int:
+        return None
+    if not 0 <= captured <= (_WORD_LIMIT_8616 << _SEGMENT_SHIFT_8616) + _WORD_LIMIT_8616:
+        return None
+    native = (captured, size)
+    if logical is not None:
+        return logical if logical == native else None
+    return native if address.space is MemSpace.UNKNOWN else None
+
+
 def _census_store_8616(
     ctx: _PathCensusContext8616,
     instruction: IRInstr,
@@ -2417,9 +3061,7 @@ def _census_store_8616(
         # Without fetched-byte proof of a 16-bit effective-address domain
         # the typed offsets cannot be trusted (a 0x67 prefix widens them).
         return Real16InvocationFailure8616.STORE_ADDRESS_UNPROVEN
-    span = _store_span_8616(
-        instruction, instruction.args[0], instruction_entry, dirty, tmps
-    )
+    span = _native_store_span_8616(instruction, instruction_entry, dirty, tmps)
     if span is None:
         return Real16InvocationFailure8616.STORE_ADDRESS_UNPROVEN
     base, size = span
@@ -2470,7 +3112,7 @@ class _BoundaryProof8616(Protocol):
     def preserved_registers_for(
         self, invocation_scope: Real16InvocationDomain8616 | None
     ) -> tuple[str, ...]:
-        """Project registers only under the authenticated consuming entry."""
+        """Replay completeness for the entry; return empty for incomplete evidence."""
         ...
 
     @property
@@ -2507,6 +3149,18 @@ def _derivation_scope_bound_8616(
     ):
         return False
     chain = ctx.chain
+    if type(chain) is DeclaredFunctionEntryLink8616:
+        return (
+            required.kind is Real16InvocationKind8616.DECLARED_FUNCTION_ENTRY
+            and _in_flight_scopes_coterminous_8616(required.chain, chain, 0)
+        )
+    if type(chain) is RawBootEntrySurface8616:
+        return (
+            required.kind is Real16InvocationKind8616.RAW_BOOT_ENTRY_PATH
+            and type(required.chain) is RawBootEntrySurface8616
+            and required.chain.artifact is artifact
+            and required.chain.boundary is chain.boundary
+        )
     if chain is None:
         return (
             required.kind is Real16InvocationKind8616.BOOT_ENTRY_PATH
@@ -2517,6 +3171,40 @@ def _derivation_scope_bound_8616(
     return _in_flight_scopes_coterminous_8616(required.chain, chain, 0)
 
 
+def _selector_scope_for_proof_8616(proof: _BoundaryProof8616) -> DeclaredSegmentInvariant | None:
+    """Read the distinct weak premise only from its canonical entry-record owner."""
+    from .entry_domain_call_preservation import EntryDomainCallPreservation8616
+
+    if type(proof) is not EntryDomainCallPreservation8616:
+        return None
+    return cast(EntryDomainCallPreservation8616, proof).selector_scope
+
+
+def _selector_derivation_bound_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    proof: _BoundaryProof8616, scope: DeclaredSegmentInvariant,
+) -> bool:
+    """Bind weak selector evidence to the identical declared root and incoming CS."""
+    from .declared_selector_invariant import DeclaredSegmentInvariant
+    from .entry_domain_call_preservation import EntryDomainCallPreservation8616
+
+    if type(scope) is not DeclaredSegmentInvariant or type(proof) is not EntryDomainCallPreservation8616:
+        return False
+    record = cast(EntryDomainCallPreservation8616, proof)
+    root = scope.root_link
+    source = scope.source
+    projection = record.selector_projection
+    if type(root) is not DeclaredFunctionEntryLink8616 or source is None or projection is None:
+        return False
+    if (ctx.chain is not root or ctx.project is not scope.project or ctx.boot is not source.boot
+            or artifact is not root.artifact or record.boundary is not root.boundary):
+        return False
+    if (record.artifact is not artifact or root.admission is not scope.admission
+            or root.boundary.project is not ctx.project or projection.incoming_cs != ctx.selector):
+        return False
+    return projection.scope is scope and record.required_scope is None
+
+
 def _ctx_consuming_scope_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -2524,12 +3212,17 @@ def _ctx_consuming_scope_8616(
 ) -> Real16InvocationDomain8616 | object | None:
     """Return the authenticated scope this census may consume under.
 
-    ``None`` means the proof is universal evidence; the record's own
+    ``None`` means no full-invocation premise. Selector records retain their
+    separate scope on ``_ConsumedCallBoundary8616`` and authenticate their root
+    here; only records lacking both scopes are universal. The record's own
     ``required_scope`` means conditional evidence the census may consume
     under that authenticated entry. The sentinel ``_CTX_SCOPE_REFUSE``
     means the record's required entry provenance differs from the scope
     this census derives, so the evidence cannot cross this path.
     """
+    selector = _selector_scope_for_proof_8616(proof)
+    if selector is not None:
+        return None if _selector_derivation_bound_8616(ctx, artifact, proof, selector) else _CTX_SCOPE_REFUSE_8616
     required = proof.required_scope
     if required is None:
         return None
@@ -2541,12 +3234,64 @@ def _ctx_consuming_scope_8616(
 _CTX_SCOPE_REFUSE_8616: object = object()
 
 
+@dataclass(frozen=True, slots=True)
+class _ConsumedCallBoundary8616:
+    """Synchronous call authentication result; never retained across phases."""
+
+    proof: _BoundaryProof8616
+    scope: Real16InvocationDomain8616 | None
+    preserved_registers: tuple[str, ...] | None
+    selector_scope: DeclaredSegmentInvariant | None = None
+
+
+def _selector_incoming_state_bound_8616(
+    consumed: _ConsumedCallBoundary8616, registers: dict[str, int],
+) -> bool:
+    """Require the actual caller CS before using a weak selector projection."""
+    if consumed.selector_scope is None:
+        return True
+    from .entry_domain_call_preservation import EntryDomainCallPreservation8616
+
+    proof = consumed.proof
+    if type(proof) is not EntryDomainCallPreservation8616:
+        return False
+    projection = cast(EntryDomainCallPreservation8616, proof).selector_projection
+    return projection is not None and registers.get("cs") == projection.incoming_cs
+
+
+def _call_scope_uses_owned_identity_8616(ctx: _PathCensusContext8616) -> bool:
+    """Restrict immediate reuse to scopes whose matching cannot replay parents."""
+    return ctx.chain is None or type(ctx.chain) in (
+        DeclaredFunctionEntryLink8616, RawBootEntrySurface8616,
+    )
+
+
 def _call_boundary_proof_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
     instruction: IRInstr,
 ) -> _BoundaryProof8616 | None:
+    """Select one currently authenticated CALL proof without retaining replay."""
+    consumed = _consume_call_boundary_8616(ctx, artifact, block, instruction)
+    if consumed is None or consumed.selector_scope is not None:
+        # Bare-proof consumers have no slot to retain weak provenance.
+        return None
+    if _call_scope_uses_owned_identity_8616(ctx) and _ctx_consuming_scope_8616(
+        ctx, artifact, consumed.proof,
+    ) is not consumed.scope:
+        return None
+    return consumed.proof
+
+
+def _consume_call_boundary_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    block: IRBlock,
+    instruction: IRInstr,
+    *,
+    project_registers: bool = False,
+) -> _ConsumedCallBoundary8616 | None:
     """Select the bound complete call proof for one in-path CALL row.
 
     The registry-bound pool serves registered caller artifacts; the
@@ -2557,11 +3302,12 @@ def _call_boundary_proof_8616(
     authenticated consuming entry — a stale, forged, or foreign-scope
     record is refused rather than inherited.
     """
-    proof = call_preservation_at_instruction_8616(
+    proof = bound_call_preservation_at_instruction_8616(
         artifact, block, instruction, ctx.call_preservations
     )
-    if proof is not None:
-        return proof
+    if proof is not None and proof.complete_for(None):
+        names = proof.preserved_registers_for(None) if project_registers else None
+        return _ConsumedCallBoundary8616(proof, None, names)
     if instruction.op == "CALL" and any(
         candidate is block for candidate in artifact.blocks
     ):
@@ -2580,7 +3326,11 @@ def _call_boundary_proof_8616(
             if scope is not _CTX_SCOPE_REFUSE_8616 and scoped[0].complete_for(
                 cast(Real16InvocationDomain8616 | None, scope)
             ):
-                return scoped[0]
+                typed_scope = cast(Real16InvocationDomain8616 | None, scope)
+                names = scoped[0].preserved_registers_for(typed_scope) if project_registers else None
+                return _ConsumedCallBoundary8616(scoped[0], typed_scope, names)
+    # Reaching the pool lookup is itself a consultation, hit or miss.
+    ctx.entry_call_pool_consulted = True
     if not ctx.entry_call_preservations:
         return None
     # Deferred import: the entry-domain owner is staged against the same
@@ -2600,16 +3350,55 @@ def _call_boundary_proof_8616(
     )
     if len(candidates) != 1:
         return None
-    record = candidates[0]
+    record = cast(EntryDomainCallPreservation8616, candidates[0])
     ctx.work_units += 1
     if _census_work_exceeded_8616(ctx):
         return None
     scope = _ctx_consuming_scope_8616(ctx, artifact, record)
     if scope is _CTX_SCOPE_REFUSE_8616:
         return None
-    if not record.complete_for(cast(Real16InvocationDomain8616 | None, scope)):
-        return None
-    return cast(_BoundaryProof8616, record)
+    return _consume_entry_call_record_8616(
+        cast(_BoundaryProof8616, record),
+        cast(Real16InvocationDomain8616 | None, scope),
+        project_registers=project_registers,
+        selector_scope=record.selector_scope,
+    )
+
+
+def _consume_entry_call_record_8616(
+    record: _BoundaryProof8616,
+    scope: Real16InvocationDomain8616 | None,
+    *,
+    project_registers: bool,
+    selector_scope: DeclaredSegmentInvariant | None = None,
+) -> _ConsumedCallBoundary8616 | None:
+    """Authenticate either the record or its immediate segment projection once."""
+    if selector_scope is not None:
+        from .entry_domain_call_preservation import EntryDomainCallPreservation8616
+
+        if type(record) is not EntryDomainCallPreservation8616 or scope is not None:
+            return None
+        selector_record = cast(EntryDomainCallPreservation8616, record)
+        if project_registers:
+            names = selector_record.preserved_registers_for_selector(selector_scope)
+            if not names:
+                return None
+        else:
+            if not selector_record.complete_for_selector(selector_scope):
+                return None
+            names = None
+        return _ConsumedCallBoundary8616(record, None, names, selector_scope)
+    if project_registers:
+        names = record.preserved_registers_for(scope)
+        # Entry proofs require preserved CS to be complete; an empty
+        # projection therefore keeps the original service-fallback route.
+        if not names:
+            return None
+    else:
+        if not record.complete_for(scope):
+            return None
+        names = None
+    return _ConsumedCallBoundary8616(record, scope, names)
 
 
 def _declared_service_frame_8616(
@@ -2626,7 +3415,8 @@ def _declared_service_frame_8616(
     disjoint from every instruction byte this surface may fetch — the
     already-censused manifest and every instruction span in the artifact,
     including bytes fetched after this crossing. Returns the frame's
-    linear base on success.
+    linear base on success. Every frame byte requires declared memory coverage;
+    header stack containment cannot authorize an arbitrary runtime SS:SP.
     """
     ss = _register_read_8616("ss", registers)
     sp = _register_read_8616("sp", registers)
@@ -2668,12 +3458,101 @@ def _declared_service_frame_8616(
         # The declared handler address lies inside the program's own
         # allocated arena — that is program-owned code, never DOS.
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
-    if ctx.arena is None:
+    if (ctx.arena is None
+            or declared_memory_span_8616(ctx.environment, frame_linear, bound.frame_bytes) is None):
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
     return frame_linear
 
 
+def _declared_dosbox_entry_writes_8616(
+    ctx: _PathCensusContext8616,
+    bound: DeclaredInterruptService8616,
+    registers: dict[str, int],
+    artifact: IRFunctionArtifact,
+) -> tuple[DosBoxInt21Write8616, ...] | Real16InvocationFailure8616:
+    """Validate every explicit backend write before committing ordered effects."""
+    policy = bound.dosbox_int21_entry_policy
+    if policy is None:
+        return ()
+    ss = _register_read_8616("ss", registers)
+    sp = _register_read_8616("sp", registers)
+    if ss is None or sp is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    saved = DosBoxInt21Registers8616(*(
+        _register_read_8616(name, registers)
+        for name in ("ax", "bx", "cx", "dx", "si", "di", "bp", "ds", "es")
+    ))
+    effects = dosbox_int21_frame_effects_8616(
+        psp_segment=policy.psp_segment, ss=ss, sp=sp, registers=saved,
+    )
+    if effects.failure is not None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    # The shared architectural frame is consumed separately exactly once.
+    writes = effects.writes[1:]
+    spans = [*ctx.manifest]
+    spans.extend((row.addr, row.size) for block in artifact.blocks for row in block.instrs
+                 if row.addr is not None and row.size is not None)
+    for write in writes:
+        start, end = write.linear, write.linear + write.size
+        if declared_memory_span_8616(ctx.environment, start, write.size) is None:
+            return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+        if start < 0x400:
+            return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+        if any(start < base + size and base < end for base, size in spans):
+            return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+        frame = effects.writes[0]
+        if start < frame.linear + frame.size and frame.linear < end:
+            return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+        if _dosbox_metadata_alias_8616(bound, start, end):
+            return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    return writes
+
+
+def _dosbox_metadata_alias_8616(bound: DeclaredInterruptService8616, start: int, end: int) -> bool:
+    """Keep entry writes from invalidating the allocator's authenticated input."""
+    surface = bound.resize
+    if surface is not None and surface.dosbox is not None:
+        return any(start < entry.address + len(entry.image) and entry.address < end
+                   for entry in surface.dosbox.chain)
+    return (surface is not None and start < surface.metadata_linear + len(surface.metadata)
+            and surface.metadata_linear < end)
+
+
+def _commit_dosbox_entry_writes_8616(
+    ctx: _PathCensusContext8616, memory: PathMemory8616,
+    writes: tuple[DosBoxInt21Write8616, ...],
+) -> None:
+    """Materialize native store order; unknown words revoke stale byte facts."""
+    for write in writes:
+        memory.apply_write(write.linear, write.size, write.data)
+        ctx.checked_stores += 1
+
+
 def _declared_service_crossing_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    instruction: IRInstr,
+    registers: dict[str, int],
+    memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Apply services only under an explicit application memory baseline.
+
+    Existing boot routes keep their declared environment contract. Arbitrary
+    application entries cannot inherit IVT or allocator bytes from startup
+    unless their conditional declaration explicitly includes that baseline.
+    Ordinary CALLs are not services and retain their call-boundary refusal.
+    """
+    if interrupt_call_vector_8616(instruction) is None:
+        return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+    authority = _declared_entry_authority_8616(ctx.chain)
+    if isinstance(authority, Real16InvocationFailure8616):
+        return authority
+    if authority is not None and not authority.spec.use_environment_memory:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    return _cross_authenticated_declared_service_8616(ctx, artifact, instruction, registers, memory)
+
+
+def _cross_authenticated_declared_service_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     instruction: IRInstr,
@@ -2699,6 +3578,8 @@ def _declared_service_crossing_8616(
     preserved is dropped, and the consumption is recorded on the census.
     Anything insufficient refuses; a declaration never proves itself.
     """
+
+
     vector = interrupt_call_vector_8616(instruction)
     if vector is None:
         return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
@@ -2734,11 +3615,19 @@ def _declared_service_crossing_8616(
         return _declared_resize_service_apply_8616(
             ctx, bound, bound.resize, registers, artifact, memory
         )
+    if bound.vectors is not None:
+        return _declared_vector_service_apply_8616(
+            ctx, bound, bound.vectors, registers, artifact, memory, al
+        )
     frame_linear = _declared_service_frame_8616(
         ctx, bound, registers, artifact
     )
     if isinstance(frame_linear, Real16InvocationFailure8616):
         return frame_linear
+    entry_writes = _declared_dosbox_entry_writes_8616(ctx, bound, registers, artifact)
+    if isinstance(entry_writes, Real16InvocationFailure8616):
+        return entry_writes
+    _commit_dosbox_entry_writes_8616(ctx, memory, entry_writes)
     _declared_version_service_apply_8616(
         ctx, bound, registers, frame_linear, memory
     )
@@ -2807,6 +3696,180 @@ def _declared_ivt_revoked_8616(
         byte in memory.known or byte in memory.unknown
         for byte in range(slot_linear, slot_linear + 4)
     )
+
+
+def _vector_current_slot_8616(
+    memory: PathMemory8616,
+    surface: DeclaredVectorSurface8616,
+    number: int,
+) -> bytes | None:
+    """Recompute the live four bytes of IVT slot ``number`` on this path.
+
+    Reads the *path's* must-meet byte overlay, never a visitation-order
+    ledger: a byte provably written on every path supplies its proven
+    value, a byte possibly modified or content-unproven leaves the slot
+    incomplete, and an unmodified byte keeps the declared initial IVT
+    image the bound surface carries. ``None`` means the live slot is
+    incomplete: the canonical owner is never fed guessed bytes. A prior
+    admitted AH=25h commit is observed here because it joined the same
+    overlay — query-after-update consumes the updated state, not the
+    initial snapshot.
+    """
+    if memory.tainted:
+        return None
+    slot_linear = number * 4
+    slot = bytearray(surface.ivt[slot_linear : slot_linear + 4])
+    if len(slot) != 4:
+        return None
+    for offset in range(4):
+        byte_addr = slot_linear + offset
+        if byte_addr in memory.known:
+            slot[offset] = memory.known[byte_addr]
+        elif byte_addr in memory.unknown:
+            return None
+    return bytes(slot)
+
+
+def _vector_slot_write_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    slot_linear: int,
+    slot_after: bytes,
+    memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Serialize one canonical IVT slot write into the path memory overlay.
+
+    The exact four-byte span must be disjoint from every fetched byte and
+    the module manifest, then commits with its proven bytes so a later
+    AH=35h query on this path reads them rather than the declared initial
+    image.
+    """
+    write_end = slot_linear + len(slot_after)
+    for start, extent in ctx.manifest:
+        if slot_linear < start + extent and start < write_end:
+            return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    for block in artifact.blocks:
+        for fetched in block.instrs:
+            if (
+                type(fetched.addr) is int
+                and type(fetched.size) is int
+                and fetched.size > 0
+                and slot_linear < fetched.addr + fetched.size
+                and fetched.addr < write_end
+            ):
+                return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    memory.apply_write(slot_linear, len(slot_after), slot_after)
+    ctx.checked_stores += 1
+    return None
+
+
+def _vector_register_effects_8616(
+    response: VectorResponseEffect8616,
+    registers: dict[str, int],
+) -> None:
+    """Apply only the canonical ES/BX word writes; retain untouched lane facts.
+
+    The validated vector relation models no other register changes. A proven
+    EBX value preserves its high word when the BX result is installed; an
+    unknown EBX stays unknown rather than acquiring invented upper bits.
+    """
+    if response.es is None or response.bx is None:
+        return
+    prior_ebx = _register_read_8616("ebx", registers)
+    dirty: set[str] = set()
+    _apply_register_write_8616("es", 2, response.es, registers, dirty)
+    _apply_register_write_8616("bx", 2, response.bx, registers, dirty)
+    if prior_ebx is not None:
+        registers["ebx"] = (prior_ebx & 0xFFFF0000) | response.bx
+
+
+def _declared_vector_service_apply_8616(
+    ctx: _PathCensusContext8616,
+    bound: DeclaredInterruptService8616,
+    surface: DeclaredVectorSurface8616,
+    registers: dict[str, int],
+    artifact: IRFunctionArtifact,
+    memory: PathMemory8616,
+    number: int,
+) -> Real16InvocationFailure8616 | None:
+    """Commit one declared get/set-vector crossing under the bound relation.
+
+    Requires proven AH (already bound as ``bound.function``), proven AL as
+    the target vector ``number``, a proven SS/SP architectural frame
+    disjoint from the dispatch slot, the *target* slot and every fetched
+    byte, and — for AH=25h — proven DS/DX. The live slot bytes come from
+    this path's must-meet overlay over the declared initial IVT image, so
+    an earlier AH=25h commit or proven store is observed and a byte any
+    predecessor path left unproven refuses. The shared canonical owner
+    ``vector_response_8616`` computes the admitted effect; its typed
+    DOS_UPDATE/FUNCTION_UNSUPPORTED refusals refuse the crossing honestly.
+    Every AH=25h answer commits a real slot write, including identical bytes.
+    The write still requires code/frame disjointness and joins the census.
+    A later dispatch may conservatively refuse because its slot was written.
+    """
+    frame_linear = _declared_service_frame_8616(
+        ctx, bound, registers, artifact
+    )
+    if isinstance(frame_linear, Real16InvocationFailure8616):
+        return frame_linear
+    slot_linear = number * 4
+    if (
+        frame_linear < slot_linear + 4
+        and slot_linear < frame_linear + bound.frame_bytes
+    ):
+        # The architectural entry frame would clobber the live slot the
+        # service reads or writes — the effect could not be authenticated.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    entry_writes = _declared_dosbox_entry_writes_8616(
+        ctx, bound, registers, artifact
+    )
+    if isinstance(entry_writes, Real16InvocationFailure8616):
+        return entry_writes
+    slot_before = _vector_current_slot_8616(memory, surface, number)
+    if slot_before is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    ds = dx = None
+    if bound.function == INT21_SET_VECTOR_8616:
+        ds = _register_read_8616("ds", registers)
+        dx = _register_read_8616("dx", registers)
+        if ds is None or dx is None:
+            return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    response = vector_response_8616(
+        function=bound.function,
+        number=number,
+        slot_before=slot_before,
+        ds=ds,
+        dx=dx,
+    )
+    if isinstance(response, VectorResponseRefusal8616):
+        # DOS_UPDATE/FUNCTION_UNSUPPORTED are undeclared service state,
+        # never a DOS error result — the crossing keeps the typed refusal.
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    # The architectural frame is a real write; its contents stay unmodeled.
+    memory.apply_write(frame_linear, bound.frame_bytes, None)
+    ctx.checked_stores += 1
+    _commit_dosbox_entry_writes_8616(ctx, memory, entry_writes)
+    if response.slot_after is not None:
+        failure = _vector_slot_write_8616(
+            ctx, artifact, slot_linear, response.slot_after, memory
+        )
+        if failure is not None:
+            return failure
+    ctx.service_consumptions.append(
+        declared_vector_consumption_8616(
+            bound,
+            frame_linear=frame_linear,
+            number=number,
+            slot_before=slot_before,
+            slot_after=response.slot_after,
+            answer_es=response.es,
+            answer_bx=response.bx,
+            request_ds=ds,
+            request_dx=dx,
+        )
+    )
+    _vector_register_effects_8616(response, registers)
+    return None
 
 
 def _resize_current_metadata_8616(
@@ -2925,6 +3988,79 @@ def _resize_register_effects_8616(
             del registers[name]
 
 
+def _dosbox_resize_code_spans_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+) -> tuple[tuple[int, int], ...]:
+    """Protect every previously fetched and retained native instruction byte."""
+    return (*sorted(ctx.manifest), *((row.addr, row.size)
+            for block in artifact.blocks for row in block.instrs
+            if type(row.addr) is int and type(row.size) is int and row.size > 0))
+
+
+def _dosbox_resize_metadata_after_8616(
+    surface: DeclaredResizeSurface8616, effects: DosboxResizeEffects8616,
+) -> bytes:
+    """Project exact final-header effects without dropping other ordered writes."""
+    updated = bytearray(effects.current_chain[-1])
+    for write in effects.response.writes:
+        if surface.metadata_linear <= write.address < surface.metadata_linear + len(updated):
+            offset = write.address - surface.metadata_linear
+            updated[offset:offset + len(write.data)] = write.data
+    return bytes(updated)
+
+
+def _declared_dosbox_resize_apply_8616(
+    ctx: _PathCensusContext8616, bound: DeclaredInterruptService8616,
+    surface: DeclaredResizeSurface8616, registers: dict[str, int],
+    artifact: IRFunctionArtifact, memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Stage the entire native prefix and allocator effect before committing it."""
+    policy = surface.dosbox
+    ax, es, bx = (_register_read_8616(name, registers) for name in ("ax", "es", "bx"))
+    if policy is None or ax is None or es is None or bx is None:
+        return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    frame = _declared_service_frame_8616(ctx, bound, registers, artifact)
+    if isinstance(frame, Real16InvocationFailure8616):
+        return frame
+    entry = _declared_dosbox_entry_writes_8616(ctx, bound, registers, artifact)
+    if isinstance(entry, Real16InvocationFailure8616):
+        return entry
+    # Model prefix order on a private path copy. A header touched by unknown
+    # frame/save bytes must refuse, even when its initial bytes were declared.
+    prepared = memory.copy()
+    prepared.apply_write(frame, bound.frame_bytes, None)
+    for write in entry:
+        prepared.apply_write(write.linear, write.size, write.data)
+    effects = stage_dosbox_resize_effects_8616(
+        policy, environment=ctx.environment, memory=prepared,
+        segment=es, paragraphs=bx, ax=ax,
+        code_spans=_dosbox_resize_code_spans_8616(ctx, artifact),
+        frame_spans=((frame, bound.frame_bytes),
+                     *((write.linear, write.size) for write in entry[1:])),
+    )
+    if isinstance(effects, DosboxResizeEffectsRefusal8616):
+        return (Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+                if effects is DosboxResizeEffectsRefusal8616.CODE_WRITE
+                else Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN)
+    response = effects.response
+    memory.apply_write(frame, bound.frame_bytes, None)
+    ctx.checked_stores += 1
+    _commit_dosbox_entry_writes_8616(ctx, memory, entry)
+    for allocator_write in response.writes:
+        memory.apply_write(allocator_write.address, len(allocator_write.data), allocator_write.data)
+        ctx.checked_stores += 1
+    ctx.service_consumptions.append(declared_resize_consumption_8616(
+        bound, frame_linear=frame, request_ax=ax,
+        answer_ax=response.ax, answer_bx=response.bx, carry=response.carry,
+        metadata_before=effects.current_chain[-1],
+        metadata_after=_dosbox_resize_metadata_after_8616(surface, effects),
+        dosbox_writes=response.writes, dosbox_current_chain=effects.current_chain,
+        dosbox_new_header_before=effects.new_header_before,
+    ))
+    _resize_register_effects_8616(bound, response.ax, response.bx, response.carry, registers)
+    return None
+
+
 def _declared_resize_service_apply_8616(
     ctx: _PathCensusContext8616,
     bound: DeclaredInterruptService8616,
@@ -2945,6 +4081,8 @@ def _declared_resize_service_apply_8616(
     response: its typed OTHER_BLOCK/CHAIN refusals refuse the crossing,
     its effects are serialized by the helpers above.
     """
+    if surface.dosbox is not None:
+        return _declared_dosbox_resize_apply_8616(ctx, bound, surface, registers, artifact, memory)
     ax = _register_read_8616("ax", registers)
     es = _register_read_8616("es", registers)
     bx = _register_read_8616("bx", registers)
@@ -2963,6 +4101,9 @@ def _declared_resize_service_apply_8616(
         # The architectural entry frame would clobber modeled allocator
         # metadata — the service read could not be authenticated.
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    entry_writes = _declared_dosbox_entry_writes_8616(ctx, bound, registers, artifact)
+    if isinstance(entry_writes, Real16InvocationFailure8616):
+        return entry_writes
     current = _resize_current_metadata_8616(memory, surface)
     if current is None:
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
@@ -2978,6 +4119,7 @@ def _declared_resize_service_apply_8616(
         # OTHER_BLOCK/CHAIN are undeclared allocator state, never a DOS
         # error result — the crossing keeps the typed refusal.
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+    _commit_dosbox_entry_writes_8616(ctx, memory, entry_writes)
     # The architectural frame is a real write; its contents stay unmodeled.
     memory.apply_write(frame_linear, bound.frame_bytes, None)
     ctx.checked_stores += 1
@@ -3004,6 +4146,28 @@ def _declared_resize_service_apply_8616(
     return None
 
 
+def _consume_cross_call_boundary_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    block: IRBlock,
+    instruction: IRInstr,
+) -> _ConsumedCallBoundary8616 | None:
+    """Share immediate authentication only when scope matching has no callbacks."""
+    if _call_scope_uses_owned_identity_8616(ctx):
+        return _consume_call_boundary_8616(
+            ctx, artifact, block, instruction, project_registers=True,
+        )
+    proof = _call_boundary_proof_8616(ctx, artifact, block, instruction)
+    if proof is None:
+        return None
+    scope = _ctx_consuming_scope_8616(ctx, artifact, proof)
+    if scope is _CTX_SCOPE_REFUSE_8616:
+        return _ConsumedCallBoundary8616(proof, None, ())
+    typed_scope = cast(Real16InvocationDomain8616 | None, scope)
+    names = proof.preserved_registers_for(typed_scope)
+    return _ConsumedCallBoundary8616(proof, typed_scope, names)
+
+
 def _cross_call_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -3014,9 +4178,14 @@ def _cross_call_8616(
 ) -> Real16InvocationFailure8616 | None:
     """Close one interior CALL boundary or the proved callsite itself."""
     if ctx.callsite_addr is None:
-        # Callee scope: admitted callees are leaf, so any nested CALL is an
-        # uncensused callee-write boundary.
-        return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
+        # A native interrupt has a separate source-bound declared effect.
+        # Consume its frame, memory and register evidence in callee walks too;
+        # ordinary nested calls still need a separate callee-write proof.
+        return (
+            _declared_service_crossing_8616(ctx, artifact, instruction, registers, memory)
+            if interrupt_call_vector_8616(instruction) is not None
+            else Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
+        )
     if instruction.addr == ctx.callsite_addr:
         # The proven callsite: its own stack push was already censused as a
         # STORE row. The register and memory state at this row — after that
@@ -3028,27 +4197,32 @@ def _cross_call_8616(
         ctx.callsite_memory = memory.copy()
         registers.clear()
         return None
-    proof = _call_boundary_proof_8616(ctx, artifact, block, instruction)
-    if proof is None:
+    consumed = _consume_cross_call_boundary_8616(ctx, artifact, block, instruction)
+    if consumed is None:
         # No near-call boundary proof binds this row: either it lifts to an
         # interrupt vector — where exactly one declared service relation may
         # carry it — or it keeps the unchanged unproven-call verdict.
-        return _declared_service_crossing_8616(
+        return _unbound_call_failure_8616(
             ctx, artifact, instruction, registers, memory
         )
-    callee = proof.callee
-    # Reauthenticate the consuming entry at the use itself: the projection
-    # may only be read under the scope the census derives.
-    scope = _ctx_consuming_scope_8616(ctx, artifact, proof)
+    proof = consumed.proof
     if (
-        scope is _CTX_SCOPE_REFUSE_8616
-        or not proof.complete_for(cast(Real16InvocationDomain8616 | None, scope))
-        or type(callee) is not SegmentEffectClosureResult8616
-        or type(callee.coverage.artifact) is not IRFunctionArtifact
+        consumed.preserved_registers is None
+        or "cs" not in consumed.preserved_registers
+        or (
+            _call_scope_uses_owned_identity_8616(ctx)
+            and _ctx_consuming_scope_8616(ctx, artifact, proof) is not consumed.scope
+        )
     ):
         return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
-    preserved_scope = cast(Real16InvocationDomain8616 | None, scope)
-    if "cs" not in proof.preserved_registers_for(preserved_scope):
+    if not _selector_incoming_state_bound_8616(consumed, registers):
+        return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+    preserved_scope = consumed.scope
+    callee = proof.callee
+    if (
+        type(callee) is not SegmentEffectClosureResult8616
+        or type(callee.coverage.artifact) is not IRFunctionArtifact
+    ):
         return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
     callee_addr = callee.coverage.artifact.function_addr
     window_base = ctx.selector << _SEGMENT_SHIFT_8616
@@ -3059,11 +4233,89 @@ def _cross_call_8616(
     )
     if isinstance(callee_exits, Real16InvocationFailure8616):
         return callee_exits
-    preserved = set(proof.preserved_registers_for(preserved_scope))
+    failure = _reconcile_call_exit_8616(
+        proof, preserved_scope, callee, callee_exits, registers, memory,
+        selector_scope=consumed.selector_scope,
+    )
+    if failure is None and ctx.prefix_capture_requested:
+        _record_prefix_call_8616(ctx, artifact, block, instruction, consumed)
+    return failure
+
+
+def _record_prefix_call_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    instruction: IRInstr, consumed: _ConsumedCallBoundary8616,
+) -> None:
+    """Charge optional exact consumption retention without revoking success."""
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    if consumed.selector_scope is not None:
+        ctx.prefix_capture_requested = False
+        return
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        pending = ctx.work_units - ctx.accounted_work_units
+        if (time.monotonic() > ctx.deadline or ctx.work_units + 1 > ctx.work_limit
+            or traversal.census_work_units + pending + 1 > _CENSUS_WORK_LIMIT_8616):
+            ctx.prefix_capture_requested = False
+            return
+        names = consumed.preserved_registers
+        if names is None:
+            ctx.prefix_capture_requested = False
+            return
+        ctx.work_units += 1
+        ctx.prefix_call_consumptions.append(_PrefixConsumedCall8616(
+            artifact, block, instruction, consumed.proof, consumed.scope, names,
+        ))
+
+
+def _unbound_call_failure_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    instruction: IRInstr,
+    registers: dict[str, int],
+    memory: PathMemory8616,
+) -> Real16InvocationFailure8616 | None:
+    """Preserve exhausted proof resources before admitting service fallback."""
+    failure = _census_resource_failure_8616(ctx)
+    if failure is not None:
+        return failure
+    return _declared_service_crossing_8616(
+        ctx, artifact, instruction, registers, memory,
+    )
+
+
+def _reconcile_call_exit_8616(
+    proof: _BoundaryProof8616,
+    scope: Real16InvocationDomain8616 | None,
+    callee: SegmentEffectClosureResult8616,
+    callee_exits: dict[int, _PathState8616],
+    registers: dict[str, int],
+    memory: PathMemory8616,
+    *, selector_scope: DeclaredSegmentInvariant | None = None,
+) -> Real16InvocationFailure8616 | None:
+    """Reauthenticate after simulation before transporting any callee effects."""
+    if selector_scope is not None:
+        from .entry_domain_call_preservation import EntryDomainCallPreservation8616
+
+        if type(proof) is not EntryDomainCallPreservation8616 or scope is not None:
+            return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+        selector_record = cast(EntryDomainCallPreservation8616, proof)
+        preserved = set(selector_record.preserved_registers_for_selector(selector_scope))
+    else:
+        preserved = set(proof.preserved_registers_for(scope))
+    if "cs" not in preserved:
+        return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
     for name in tuple(registers):
         if name not in preserved:
             del registers[name]
-    registers.update(_post_call_registers_8616(callee, callee_exits))
+    returned = _post_call_registers_8616(callee, callee_exits)
+    dirty: set[str] = set()
+    # Write narrow views first so a proven containing view restores all of
+    # its lanes last; partial returns invalidate stale containing constants.
+    for name in sorted(returned, key=lambda item: (_register_width_8616(item) or 0, item)):
+        width = _register_width_8616(name)
+        if width is not None:
+            _apply_register_write_8616(name, width // 8, returned[name], registers, dirty)
     memory.assign(_post_call_memory_8616(callee, callee_exits))
     return None
 
@@ -3072,29 +4324,33 @@ def _post_call_registers_8616(
     callee: SegmentEffectClosureResult8616,
     callee_exits: dict[int, _PathState8616],
 ) -> dict[str, int]:
-    """Return the bound callee's must-met post-return continuation state.
+    """Meet source-bound return values independently across every return exit.
 
-    The post-call ``sp`` is not a preservation claim: it is the bound
-    callee's own simulated return state, met must-style across every
-    return exit. An empty map — the caller key stays dropped and later
-    stack rows refuse honestly — when the callee has no return blocks,
-    when a return exit carried no ``sp``, or when the exits disagree.
+    Normalize overlapping register views through the canonical lane owner
+    before meeting: a return with AX and one with AL/AH can prove the same
+    AX. Missing or disagreeing values stay unknown independently, including
+    SP. Callee IP/EIP describe its return transfer, never caller data state.
     """
-    if not callee.return_block_addrs:
-        return {}
-    if any(
-        return_addr not in callee_exits
-        or "sp" not in callee_exits[return_addr].registers
-        for return_addr in callee.return_block_addrs
+    if not callee.return_block_addrs or any(
+        address not in callee_exits for address in callee.return_block_addrs
     ):
         return {}
-    sp = _meet_registers_8616(
-        [
-            callee_exits[return_addr].registers
-            for return_addr in callee.return_block_addrs
-        ]
-    ).get("sp")
-    return {"sp": sp} if type(sp) is int else {}
+    states = [callee_exits[address].registers for address in callee.return_block_addrs]
+    candidates = {
+        member
+        for register in Arch86_16.register_list
+        if register.general_purpose
+        for member in register_value_family_8616(register.name)
+    }
+    normalized: list[dict[str, int]] = []
+    for state in states:
+        projected: dict[str, int] = {}
+        for name in sorted(candidates):
+            value = _register_read_8616(name, state)
+            if type(value) is int:
+                projected[name] = value
+        normalized.append(projected)
+    return _meet_registers_8616(normalized)
 
 
 def _post_call_memory_8616(
@@ -3155,6 +4411,73 @@ def _census_callee_bytes_8616(
     return None
 
 
+def _callee_feasible_scope_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    returns: frozenset[int], seed: _PathState8616,
+    *, transfer_order: tuple[int, ...] | None = None,
+) -> tuple[frozenset[int], frozenset[tuple[int, int]]] | Real16InvocationFailure8616:
+    """Prune a shared-return callee under its own seed without dropping required exits."""
+    if time.monotonic() > ctx.deadline:
+        return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+    if _census_work_exceeded_8616(ctx):
+        return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+    scope = frozenset(block.addr for block in artifact.blocks)
+    dead_edges: frozenset[tuple[int, int]] = frozenset()
+    # The return-summary consumer still requires every original return exit.
+    # Restrict this optimization to the shared-return shape, preserving the
+    # existing complete scope for multiple-return and malformed closures.
+    if len(returns) == 1 and returns <= scope and any(
+        row.op == "CJMP" for block in artifact.blocks for row in block.instrs
+    ):
+        blocks = {block.addr: block for block in artifact.blocks}
+        terminal = blocks[next(iter(returns))]
+        if terminal.instrs and type(terminal.instrs[-1].addr) is int:
+            native = ctx.native_blocks.get(artifact.function_addr, {})
+            load_rows = {
+                id(row): (row, native_row)
+                for block in artifact.blocks
+                if _native_block_bound_8616(native.get(block.addr), block)
+                for row, native_row in zip(block.instrs, native[block.addr].instrs, strict=True)
+                if row.op == "LOAD"
+            }
+
+            def read_load(
+                instruction: IRInstr, span: tuple[int, int] | None, memory: PathMemory8616,
+            ) -> int | None:
+                """Publish callee LOAD constants only from native-bound rows and live memory."""
+                pair = load_rows.get(id(instruction))
+                if pair is None or pair[0] is not instruction or not _native_instr_equal_8616(instruction, pair[1], 0):
+                    return None
+                value = path_load_value_8616(instruction, span, memory, ctx.initial_memory)
+                return value if type(value) is int else None
+
+            feasible = invocation_feasible_scope_8616(
+                artifact=artifact, dangerous=scope,
+                predecessor_map=build_x86_16_ir_predecessor_map(artifact),
+                head_addr=artifact.function_addr, call_block_addr=terminal.addr,
+                callsite_addr=terminal.instrs[-1].addr,
+                seed=seed.registers, seed_memory=seed.memory, read_load=read_load,
+                apply_service=lambda _instruction, _registers, _memory: False,
+                iteration_limit=_PATH_STATE_ITERATION_LIMIT_8616,
+                deadline=ctx.deadline, work_limit=max(0, ctx.work_limit - ctx.work_units),
+                transfer_order=transfer_order,
+                load_snapshot_replay=(
+                    LoadSnapshotReplay8616.READ_ONLY_OWNED
+                    if ctx.initial_memory is None or type(ctx.initial_memory) is InvocationInitialMemory8616
+                    else LoadSnapshotReplay8616.OBSERVABLE
+                ),
+            )
+            ctx.work_units += feasible.work_units
+            if time.monotonic() > ctx.deadline:
+                return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+            if _census_work_exceeded_8616(ctx):
+                return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+            if returns <= feasible.live_blocks:
+                scope = feasible.live_blocks
+                dead_edges = frozenset(feasible.infeasible_edges)
+    return scope, dead_edges
+
+
 def _simulate_callee_8616(
     ctx: _PathCensusContext8616,
     proof: _BoundaryProof8616,
@@ -3175,18 +4498,46 @@ def _simulate_callee_8616(
     callee = proof.callee
     if type(callee) is not SegmentEffectClosureResult8616:
         return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
+    callee = cast("SegmentEffectClosureResult8616", callee)
     artifact = callee.coverage.artifact
     if not isinstance(artifact, IRFunctionArtifact):
         return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
-    return _simulate_scope_8616(
-        ctx,
-        artifact,
-        frozenset(block.addr for block in artifact.blocks),
-        artifact.function_addr,
-        seed,
-        stop_after=None,
-        callsite_addr=None,
+    transfer_order: tuple[int, ...] | None = None
+    if not callee.callsite_addrs and ctx.work_units < ctx.work_limit:
+        ordered = acyclic_invocation_order_8616(
+            frozenset(block.addr for block in artifact.blocks),
+            build_x86_16_ir_predecessor_map(artifact), deadline=ctx.deadline,
+            work_limit=max(0, ctx.work_limit - ctx.work_units),
+        )
+        ctx.work_units += ordered.work_units
+        if time.monotonic() > ctx.deadline:
+            return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+        if _census_work_exceeded_8616(ctx):
+            return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+        transfer_order = ordered.blocks
+    feasible = _callee_feasible_scope_8616(
+        ctx, artifact, frozenset(callee.return_block_addrs), seed,
+        transfer_order=transfer_order,
     )
+    if isinstance(feasible, Real16InvocationFailure8616):
+        return feasible
+    scope, dead_edges = feasible
+    fused_operations = _BASE_FUSED_CALLEE_OPERATIONS_8616 if not callee.callsite_addrs else None
+    with source_bound_callee_transfer_8616(ctx, artifact, fused_operations):
+        return _simulate_scope_8616(
+            ctx,
+            artifact,
+            scope,
+            artifact.function_addr,
+            seed,
+            stop_after=None,
+            callsite_addr=None,
+            infeasible_edges=dead_edges,
+            transfer_order=(
+                tuple(addr for addr in transfer_order if addr in scope)
+                if transfer_order is not None else None
+            ),
+        )
 
 
 def _refuse_unbound_block_rows_8616(
@@ -3222,6 +4573,29 @@ def _refuse_unbound_block_rows_8616(
         _record_first_failure_site_8616(ctx, artifact, block, instruction)
 
 
+def _repeated_store_native_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+) -> tuple[object, Real16InvocationFailure8616 | None]:
+    """Resolve the whole native block a repeated store must bind.
+
+    A recorded consumed-row prefix copy can never satisfy a whole-block
+    effect: the full block is re-derived through the same authenticated
+    boundary the census already proved, the map entry is upgraded and the
+    prefix record is consumed. ``(None, failure)`` refuses; ``(block,
+    None)`` leaves the ordinary whole-block binding unchanged.
+    """
+    entry = ctx.prefix_native_entries.get((artifact.function_addr, block.addr))
+    if entry is None:
+        return ctx.native_blocks.get(artifact.function_addr, {}).get(block.addr), None
+    full = _native_effect_blocks_8616(ctx, entry[0], selected_blocks=frozenset({block.addr}))
+    if isinstance(full, Real16InvocationFailure8616):
+        return None, full
+    if block.addr in full:
+        ctx.native_blocks[artifact.function_addr][block.addr] = full[block.addr]
+    ctx.prefix_native_entries.pop((artifact.function_addr, block.addr), None)
+    return full.get(block.addr), None
+
+
 def _apply_repeated_store_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     registers: dict[str, int], memory: PathMemory8616, direction: bool | None,
@@ -3234,9 +4608,13 @@ def _apply_repeated_store_8616(
     repeat = native_repeated_store_8616(ctx.project, block, encoded)
     if repeat is None:
         return RepeatedStoreStatus8616.NOT_APPLICABLE, None
-    native = ctx.native_blocks.get(artifact.function_addr, {}).get(block.addr)
-    if not _native_block_bound_8616(native, block):
-        return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    native, prefix_failure = _repeated_store_native_8616(ctx, artifact, block)
+    if prefix_failure is not None or not _native_block_bound_8616(native, block):
+        return RepeatedStoreStatus8616.REFUSED, (
+            prefix_failure
+            if prefix_failure is not None
+            else Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+        )
     effect = repeated_store_effect_8616(repeat, registers, direction)
     if effect is None:
         return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.STORE_ADDRESS_UNPROVEN
@@ -3284,27 +4662,27 @@ def _simulate_path_block_8616(
     stop_after: int | None,
 ) -> _PathState8616 | Real16InvocationFailure8616:
     """Bind then simulate one block's ordered effects; return exit state."""
-    if time.monotonic() > ctx.deadline:
-        return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
-    ctx.work_units += len(block.instrs) + 1
-    if _census_work_exceeded_8616(ctx):
-        return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
-    native_blocks = ctx.native_blocks.get(artifact.function_addr)
-    native_block = (
-        None if native_blocks is None else native_blocks.get(block.addr)
-    )
-    if not _native_block_bound_8616(native_block, block):
-        # Binding precedes materialization: the simulated rows must be
-        # exactly what the authoritative importer re-derives from the
-        # fetched native bytes. Inserted, deleted, reordered, or
-        # operand/capture-tampered rows — including rows carrying a
-        # copied origin tag or mutated ``compare=False`` capture ids —
-        # diverge from the re-derived block and can never prove a native
-        # effect. The block's in-scope rows are real census rows, so each
-        # is classified and individually refused to keep the ledger
-        # closed rather than retaining phantom materializations.
-        _refuse_unbound_block_rows_8616(ctx, artifact, block, stop_after)
-        return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    fused = _try_active_fused_callee_transfer_8616(ctx, artifact, block, entry, stop_after)
+    if fused is not None:
+        return fused
+    prefix: FusedCallerPrefix8616 | _PathState8616 | Real16InvocationFailure8616 | None
+    prefix = _try_fused_caller_prefix_8616(ctx, artifact, block, entry, stop_after)
+    if prefix is None:
+        prefix = _prepare_ordinary_path_block_8616(ctx, artifact, block, entry, stop_after)
+    if not isinstance(prefix, FusedCallerPrefix8616):
+        assert prefix is not None
+        return prefix
+    return _resume_path_block_8616(ctx, artifact, block, prefix, stop_after)
+
+
+def _prepare_ordinary_path_block_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    entry: _PathState8616, stop_after: int | None,
+) -> FusedCallerPrefix8616 | _PathState8616 | Real16InvocationFailure8616:
+    """Preserve ordinary bind-before-effects ordering, including repeated stores."""
+    binding_failure = _bind_path_block_before_transfer_8616(ctx, artifact, block, stop_after)
+    if binding_failure is not None:
+        return binding_failure
     registers = dict(entry.registers)
     memory = entry.memory.copy()
     status, failure = _apply_repeated_store_8616(
@@ -3313,29 +4691,181 @@ def _simulate_path_block_8616(
     if status is not RepeatedStoreStatus8616.NOT_APPLICABLE:
         _record_repeated_store_rows_8616(ctx, artifact, block, failure)
         return failure if failure is not None else _PathState8616(registers, memory, entry.direction)
-    direction = DirectionTracker8616(registers, entry.direction)
-    tmps: dict[int, int] = {}
-    dirty: set[str] = set()
-    instruction_entry = dict(registers)
-    current_addr: int | None = None
-    for index, instruction in enumerate(block.instrs):
+    return FusedCallerPrefix8616(
+        0, registers, memory, DirectionTracker8616(registers, entry.direction),
+        {}, set(), dict(registers), None,
+    )
+
+
+def _resume_path_block_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    state: FusedCallerPrefix8616, stop_after: int | None,
+) -> _PathState8616 | Real16InvocationFailure8616:
+    """Execute only the bound suffix, retaining the complete scalar prefix state."""
+    for index in range(state.next_index, len(block.instrs)):
+        instruction = block.instrs[index]
         if type(instruction.addr) is not int:
             return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
         if stop_after is not None and instruction.addr > stop_after:
             break
-        if instruction.addr != current_addr:
-            current_addr = instruction.addr
-            instruction_entry = dict(registers)
-            dirty = set()
+        if instruction.addr != state.current_addr:
+            state.current_addr = instruction.addr
+            state.instruction_entry = dict(state.registers)
+            state.dirty = set()
+        capture_terminal = (
+            ctx.prefix_capture_requested and instruction.op == "CALL"
+            and instruction.addr == ctx.callsite_addr and index == len(block.instrs) - 1
+        )
+        direction_before_call = state.direction.direction() if capture_terminal else None
         failure = _simulate_instruction_8616(
             ctx, artifact, block, instruction,
-            registers, tmps, instruction_entry, dirty, memory,
+            state.registers, state.tmps, state.instruction_entry, state.dirty, state.memory,
             (block.addr, index),
         )
         if failure is not None:
             return failure
-        direction.step(instruction, registers, tmps)
-    return _PathState8616(registers, memory, direction.direction())
+        if capture_terminal:
+            # The row's existing charge includes constant-size continuation
+            # metadata. No scalar container or fact set is copied here.
+            ctx.prefix_terminal_call = _PrefixTerminalCall8616(
+                artifact, block, index, instruction, direction_before_call,
+                state.tmps, state.dirty, state.instruction_entry, instruction.addr,
+            )
+        state.direction.step(instruction, state.registers, state.tmps)
+    return _PathState8616(state.registers, state.memory, state.direction.direction())
+
+
+_CANONICAL_TERMINAL_CONTINUATION_8616: tuple[object, ...] = (
+    _simulate_instruction_8616, _resume_path_block_8616, DirectionTracker8616.step,
+)
+
+
+def _terminal_call_owned_8616(
+    artifact: IRFunctionArtifact, terminal: _PrefixTerminalCall8616,
+) -> bool:
+    """Require the exact physical-last CALL row before any continuation work."""
+    block = terminal.block
+    index = terminal.index
+    if type(index) is not int or index < 0 or index != len(block.instrs) - 1:
+        return False
+    if terminal.artifact is not artifact or not any(owned is block for owned in artifact.blocks):
+        return False
+    return (
+        block.instrs[index] is terminal.instruction
+        and terminal.instruction.op == "CALL"
+        and terminal.current_addr == terminal.instruction.addr
+    )
+
+
+def _prefix_cut_state_matches_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    terminal: _PrefixTerminalCall8616, state: _PathState8616,
+) -> bool:
+    """Compare current converged cut data with the complete ordinary state.
+
+    This prerequisite grants no native/source, seed, callback or fact-ledger
+    authority. A consumer must establish those separately before resuming.
+    Exact equality deliberately rejects extra or missing facts, partial joins,
+    tainted memory and duplicate projection entries. Comparison consumes this
+    operation's existing work/deadline allowance before touching containers.
+    """
+    feasible = ctx.edge_feasibility
+    if feasible is None or not feasible.converged or feasible.call_cut is None:
+        return False
+    cut = feasible.call_cut
+    ctx.work_units += (
+        len(artifact.blocks) + len(cut.registers) + len(state.registers)
+        + len(cut.memory_known) + len(state.memory.known)
+        + len(cut.memory_unknown) + len(state.memory.unknown) + 1
+    )
+    if _census_resource_failure_8616(ctx) is not None:
+        return False
+    if not _terminal_call_owned_8616(artifact, terminal) or state.memory.tainted:
+        return False
+    direction_bound = cut.direction is state.direction and terminal.direction is state.direction
+    if (
+        cut.artifact is not artifact or cut.block is not terminal.block
+        or cut.instruction is not terminal.instruction or cut.index != terminal.index
+        or not direction_bound
+    ):
+        return False
+    if (
+        len(cut.registers) != len(state.registers)
+        or len(cut.memory_known) != len(state.memory.known)
+        or len(cut.memory_unknown) != len(state.memory.unknown)
+    ):
+        return False
+    equal = (
+        dict(cut.registers) == state.registers
+        and dict(cut.memory_known) == state.memory.known
+        and set(cut.memory_unknown) == state.memory.unknown
+    )
+    return equal and _census_resource_failure_8616(ctx) is None
+
+
+def _resume_terminal_call_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    terminal: _PrefixTerminalCall8616, state: _PathState8616,
+) -> _PathState8616 | Real16InvocationFailure8616:
+    """Execute a CURRENT-authenticated CALL continuation through ordinary effects.
+
+    This low-level seam grants no prefix admission. Its caller must freshly
+    establish seed/source/callback and must-state authority before supplying
+    retained data. Native rows and carried writes still bind against this
+    operation's complete manifest here. CALL's prior push rows are not rerun;
+    the ordinary CALL interpreter authenticates and applies its callee afresh.
+    """
+    if time.monotonic() > ctx.deadline:
+        return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+    ctx.work_units += len(artifact.blocks) + 1
+    failure = _census_resource_failure_8616(ctx)
+    if failure is not None:
+        return failure
+    if not _terminal_call_owned_8616(artifact, terminal):
+        return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    ctx.work_units += len(state.registers) + len(state.memory.known) + len(state.memory.unknown) + 4
+    failure = _census_resource_failure_8616(ctx)
+    if failure is not None:
+        return failure
+    failure = _bind_path_block_before_transfer_8616(ctx, artifact, terminal.block, None)
+    if failure is not None:
+        return failure
+    if not _feasibility_code_unmodified_8616(ctx, state.memory):
+        return _census_resource_failure_8616(ctx) or Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+    current = (_simulate_instruction_8616, _resume_path_block_8616, DirectionTracker8616.step)
+    if not all(left is right for left, right in zip(current, _CANONICAL_TERMINAL_CONTINUATION_8616, strict=True)):
+        return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    registers = dict(state.registers)
+    # This exact final CALL cannot write scalar temporaries, dirty lanes or
+    # instruction-entry registers. The canonical interpreter receives them
+    # only for reads; no suffix exists that could mutate the captured maps.
+    continuation = FusedCallerPrefix8616(
+        terminal.index, registers, state.memory.copy(),
+        DirectionTracker8616(registers, terminal.direction),
+        terminal.tmps, terminal.dirty, terminal.instruction_entry,
+        terminal.current_addr,
+    )
+    stop = ctx.callsite_addr if terminal.block.addr == ctx.stop_block_addr else None
+    return _resume_path_block_8616(ctx, artifact, terminal.block, continuation, stop)
+
+
+def _scope_path_entry_8616(
+    addr: int,
+    head: int,
+    predecessors: list[int],
+    exits: dict[int, _PathState8616],
+    seed: _PathState8616,
+) -> _PathState8616 | None:
+    """Meet available predecessors, including backedges into the seeded head."""
+    ready = [exits[pred] for pred in predecessors if pred in exits]
+    if addr == head:
+        return _meet_path_state_8616(
+            [_PathState8616(dict(seed.registers), seed.memory, seed.direction), *ready]
+        )
+    if predecessors and not ready:
+        # Wait for a contributing predecessor; an empty meet would lose facts.
+        return None
+    return _meet_path_state_8616(ready)
 
 
 def _simulate_scope_8616(
@@ -3348,14 +4878,16 @@ def _simulate_scope_8616(
     stop_after: int | None,
     callsite_addr: int | None,
     infeasible_edges: frozenset[tuple[int, int]] = frozenset(),
+    transfer_order: tuple[int, ...] | None = None,
+    prefix_exit: tuple[int, _PathState8616] | None = None,
 ) -> dict[int, _PathState8616] | Real16InvocationFailure8616:
     """Fixpoint-simulate every in-scope block's effects under the seed.
 
     Returns the per-block exit state map on success so a callee-scope
     caller can recover the bound callee's proven return state; a typed
-    refusal otherwise. Only the authenticated root census supplies
-    ``infeasible_edges``; nested callee scopes keep the empty default and
-    never inherit unrelated root pruning from the shared context.
+    refusal otherwise. Each authenticated root or callee census supplies
+    only its own ``infeasible_edges``; callee scopes never inherit unrelated
+    root pruning from the shared context.
 
     Register facts *and* memory bytes join must-style (kept only when
     every contributing predecessor exit agrees), so loops and
@@ -3371,10 +4903,13 @@ def _simulate_scope_8616(
     simulated at least once: an unvisited block's effects were never
     checked.
     """
+    order = invocation_transfer_order_8616(scope, transfer_order)
+    if order is None:
+        return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
     predecessor_map = build_x86_16_ir_predecessor_map(artifact)
     entries: dict[int, _PathState8616] = {}
-    exits: dict[int, _PathState8616] = {}
+    exits: dict[int, _PathState8616] = {} if prefix_exit is None else {prefix_exit[0]: prefix_exit[1]}
     scope_callsite = ctx.callsite_addr
     ctx.callsite_addr = callsite_addr
     try:
@@ -3382,30 +4917,15 @@ def _simulate_scope_8616(
             if time.monotonic() > ctx.deadline:
                 return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
             changed = False
-            for addr in sorted(scope):
+            for addr in order:
                 predecessors = [
                     pred for pred in predecessor_map.get(addr, ())
-                    if pred in scope and (pred, addr) not in infeasible_edges
+                    if (pred in scope or (prefix_exit is not None and pred == prefix_exit[0]))
+                    and (pred, addr) not in infeasible_edges
                 ]
-                if addr == head:
-                    entry = _meet_path_state_8616(
-                        [
-                            _PathState8616(
-                                dict(seed.registers), seed.memory, seed.direction
-                            )
-                        ]
-                        + [exits[pred] for pred in predecessors if pred in exits]
-                    )
-                else:
-                    ready = [exits[pred] for pred in predecessors if pred in exits]
-                    if predecessors and not ready:
-                        # No predecessor exit exists yet; simulating under
-                        # an empty state would poison the meet. Wait a
-                        # round — exits only grow, so this starves only
-                        # for blocks no in-scope path can reach, which the
-                        # exits check below then refuses.
-                        continue
-                    entry = _meet_path_state_8616(ready)
+                entry = _scope_path_entry_8616(addr, head, predecessors, exits, seed)
+                if entry is None:
+                    continue
                 if entries.get(addr) == entry and addr in exits:
                     continue
                 entries[addr] = entry
@@ -3464,16 +4984,914 @@ def _feasibility_apply_service_8616(
     scratch = replace(
         ctx,
         service_consumptions=[],
+        prefix_call_consumptions=[],
         callsite_call_state=None,
         callsite_memory=None,
         first_failure_site=None,
         edge_feasibility=None,
     )
-    result = _declared_service_crossing_8616(
-        scratch, artifact, instruction, registers, memory
-    )
+    try:
+        result = _declared_service_crossing_8616(
+            scratch, artifact, instruction, registers, memory
+        )
+    finally:
+        ctx.entry_call_pool_consulted = (
+            ctx.entry_call_pool_consulted or scratch.entry_call_pool_consulted
+        )
     ctx.work_units += scratch.work_units - before
     return result is None
+
+
+def _feasibility_caller_range_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+) -> tuple[int, int] | None:
+    """Protect the closed native interval after charged block-extent checks.
+
+    Frontend closure partitions every decoded block into contiguous positive
+    instructions inside decode_start..decode_end. Recheck primitive native
+    extents and complete block-head correspondence here, rather than expanding
+    every native instruction into all its IR rows. Including intervening gaps
+    is conservative protection, never evidence authorizing effects.
+    """
+    ctx.work_units += 1
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return None
+    if type(boundary) is not ExactFunctionRangeBoundary8616 or boundary.project is not ctx.project or boundary.addr != artifact.function_addr:
+        return None
+    start, end = boundary.decode_start, boundary.decode_end
+    if type(start) is not int or type(end) is not int or not 0 <= start <= boundary.addr < end:
+        return None
+    native_heads: set[int] = set()
+    for candidate in boundary.blocks:
+        ctx.work_units += 1
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+            return None
+        native_block = cast(_CensusBlockExtent8616, candidate)
+        if type(native_block.addr) is not int or type(native_block.size) is not int or native_block.size <= 0 or native_block.addr in native_heads or not start <= native_block.addr < native_block.addr + native_block.size <= end:
+            return None
+        native_heads.add(native_block.addr)
+    artifact_heads: set[int] = set()
+    for block in artifact.blocks:
+        ctx.work_units += 1
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx) or type(block.addr) is not int or block.addr in artifact_heads:
+            return None
+        artifact_heads.add(block.addr)
+    if not native_heads or native_heads != boundary.block_addrs_set or artifact_heads != native_heads:
+        return None
+    return start, end
+
+
+@dataclass(frozen=True, slots=True)
+class _FeasibilityCallBinding8616:
+    """Owned callable over one private call map and captured native geometry.
+
+    The rejection predicate and actual handler read the same private map.
+    They are owned methods rather than caller-supplied proof callbacks.
+    """
+
+    ctx: _PathCensusContext8616
+    artifact: IRFunctionArtifact
+    boundary: ExactFunctionRangeBoundary8616
+    selected_rows: dict[int, tuple[IRBlock, IRInstr]]
+    blocks: tuple[IRBlock, ...]
+    native_blocks: object
+    captured: tuple[int, int]
+
+    def __call__(
+        self, instruction: IRInstr, registers: dict[str, int], memory: PathMemory8616,
+    ) -> bool:
+        """Bind current native geometry before fresh callee scratch effects."""
+        ctx = self.ctx
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+            return False
+        pair = self.selected_rows.get(id(instruction))
+        if self.artifact.blocks is not self.blocks or self.boundary.blocks is not self.native_blocks:
+            return False
+        if self.boundary.project is not ctx.project or self.boundary.addr != self.artifact.function_addr or (self.boundary.decode_start, self.boundary.decode_end) != self.captured:
+            return False
+        if pair is None or pair[1] is not instruction:
+            return False
+        start, end = self.captured
+        return _feasibility_call_scratch_8616(
+            ctx, self.artifact, pair[0], instruction, registers, memory,
+            (*ctx.manifest, (start, end - start)),
+            caller_range=ScratchCallerRange8616(start, end),
+        )
+
+    def terminal_noop(self, instruction: IRInstr) -> bool:
+        """Prove this handler rejects the exact row before scratch effects."""
+        if type(self.selected_rows) is not dict:
+            return False
+        pair = self.selected_rows.get(id(instruction))
+        if pair is None:
+            return True
+        return type(pair) is tuple and len(pair) == 2 and pair[1] is not instruction
+
+
+def _feasibility_call_handler_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    call_rows: dict[int, tuple[IRBlock, IRInstr]],
+) -> _FeasibilityCallBinding8616 | None:
+    """Capture a conservative native range and a detached private call map.
+
+    The closed Frontend boundary protects every native instruction byte,
+    including gaps between reachable blocks. Current fetched spans and all
+    call/native proofs remain fresh per crossing.
+    """
+    if ctx.callsite_addr is None or not call_rows or time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return None
+    captured = _feasibility_caller_range_8616(ctx, artifact, boundary)
+    if captured is None:
+        return None
+    ctx.work_units += len(call_rows)
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return None
+    return _FeasibilityCallBinding8616(
+        ctx, artifact, boundary, dict(call_rows), artifact.blocks, boundary.blocks, captured,
+    )
+
+
+def _feasibility_call_rows_8616(
+    blocks: dict[int, IRBlock], native: dict[int, IRBlock],
+    dangerous: frozenset[int], callsite_addr: int,
+    *, call_cut: kb_owner_8616.Real16CallCutRequest8616 | None = None,
+    prefix_blocks: frozenset[int] = frozenset(),
+) -> dict[int, tuple[IRBlock, IRInstr]]:
+    """Name native-bound interior CALLs for fresh branch or requested-cut state.
+
+    An exact optional cut also needs current callee effects in a branchless
+    scope. It opts into ordinary fresh hooks under the existing budgets; it
+    never authorizes cached effects or changes the default no-branch shortcut.
+    ``prefix_blocks`` names blocks whose native copy is a consumed-row prefix;
+    they bind at the exact ``callsite_addr`` cutoff, never as whole blocks.
+    """
+    if call_cut is None and not any(row.op == "CJMP" for address in dangerous for row in blocks[address].instrs):
+        # This pass only proves branch edges. Ordinary census simulation still
+        # applies callee effects when a straight-line caller has no edge to prune.
+        return {}
+    return {
+        id(row): (block, row)
+        for address in dangerous
+        for block in (blocks[address],)
+        if _native_block_bound_8616(
+            native.get(address), block,
+            stop_after=callsite_addr if address in prefix_blocks else None,
+        )
+        for row in (
+            block.instrs[:len(native[address].instrs)]
+            if address in prefix_blocks else block.instrs
+        )
+        if row.op == "CALL" and row.addr != callsite_addr
+    }
+
+
+def _feasibility_protected_union_8616(
+    ctx: _PathCensusContext8616, *, caller_range: ScratchCallerRange8616 | None = None,
+) -> tuple[tuple[int, int], ...] | None:
+    """Build an operation-local exact interval union under the census budget.
+
+    Each input-span insertion and each unique-span merge charges one work
+    unit. Sorting only the unique typed intervals is bounded by that charged
+    input size; it never visits their bytes. The original manifest remains
+    authoritative and unchanged, and no union survives this operation.
+    """
+    intervals = _feasibility_union_inputs_8616(ctx, caller_range)
+    if intervals is None:
+        return None
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(intervals):
+        ctx.work_units += 1
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+            return None
+        if merged and start <= merged[-1][1]:
+            previous_start, previous_end = merged[-1]
+            merged[-1] = (previous_start, max(previous_end, end))
+        else:
+            merged.append((start, end))
+    return tuple(merged)
+
+
+def _feasibility_code_unmodified_8616(
+    ctx: _PathCensusContext8616, memory: PathMemory8616,
+    *, caller_range: ScratchCallerRange8616 | None = None,
+) -> bool:
+    """Check exact code/write overlap using the cheaper bounded query lane.
+
+    Union construction is charged by its owner. Each span-size inspection,
+    binary-search comparison and final containment check charges one unit;
+    the dense lane retains one unit per protected-byte membership query.
+    Written-byte ledgers are never copied and no result survives this call.
+    """
+    if memory.tainted or time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return False
+    spans = _feasibility_protected_union_8616(ctx, caller_range=caller_range)
+    if spans is None:
+        return False
+    if not memory.known and not memory.unknown:
+        return True
+    protected_bytes = 0
+    for start, end in spans:
+        ctx.work_units += 1
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+            return False
+        protected_bytes += end - start
+    written_bytes = len(memory.known) + len(memory.unknown)
+    if len(spans) + written_bytes * (len(spans).bit_length() + 1) < protected_bytes:
+        for written in (memory.known, memory.unknown):
+            for address in written:
+                if not _feasibility_written_byte_outside_code_8616(ctx, spans, address):
+                    return False
+        return True
+    return _feasibility_code_byte_walk_8616(ctx, memory, spans)
+
+
+def _feasibility_written_byte_outside_code_8616(
+    ctx: _PathCensusContext8616, spans: tuple[tuple[int, int], ...], address: int,
+) -> bool:
+    """Charge each search comparison and exact half-open containment query."""
+    lower, upper = 0, len(spans)
+    while lower < upper:
+        ctx.work_units += 1
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+            return False
+        middle = (lower + upper) // 2
+        if spans[middle][0] <= address:
+            lower = middle + 1
+        else:
+            upper = middle
+    ctx.work_units += 1
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return False
+    return not lower or address >= spans[lower - 1][1]
+
+
+def _feasibility_code_byte_walk_8616(
+    ctx: _PathCensusContext8616, memory: PathMemory8616,
+    spans: tuple[tuple[int, int], ...],
+) -> bool:
+    """Retain the dense lane's charged protected-byte membership queries."""
+    for start, end in spans:
+        for address in range(start, end):
+            ctx.work_units += 1
+            if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+                return False
+            if address in memory.known or address in memory.unknown:
+                return False
+    return True
+
+
+def _feasibility_callsite_bytes_current_8616(
+    ctx: _PathCensusContext8616, instruction: IRInstr,
+) -> bool:
+    """Rebind the exact caller CALL bytes after callee-side callbacks."""
+    address = instruction.addr
+    if type(address) is not int:
+        return False
+    encoded = ctx.machine_bytes.get(address)
+    if encoded is None:
+        return False
+    ctx.work_units += len(encoded)
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return False
+    return _bind_fetched_bytes_8616(
+        {address: (len(encoded), encoded)}, {address}, selector=ctx.selector,
+        image=ctx.image, project=ctx.project,
+    ) is None
+
+
+def _feasibility_call_effect_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    instruction: IRInstr, state: _PathState8616,
+    *, caller_range: ScratchCallerRange8616 | None = None,
+) -> bool:
+    """Authenticate, byte-bind and simulate one nonrecursive leaf call."""
+    consumed = _consume_cross_call_boundary_8616(ctx, artifact, block, instruction)
+    if consumed is None or consumed.preserved_registers is None or "cs" not in consumed.preserved_registers:
+        return False
+    proof = consumed.proof
+    if not _selector_incoming_state_bound_8616(consumed, state.registers):
+        return False
+    if _call_scope_uses_owned_identity_8616(ctx) and _ctx_consuming_scope_8616(ctx, artifact, proof) is not consumed.scope:
+        return False
+    callee = proof.callee
+    if type(callee) is not SegmentEffectClosureResult8616 or type(callee.coverage.artifact) is not IRFunctionArtifact:
+        return False
+    address = callee.coverage.artifact.function_addr
+    window = ctx.selector << _SEGMENT_SHIFT_8616
+    if not window <= address <= window + _WORD_LIMIT_8616:
+        return False
+    if _census_callee_bytes_8616(ctx, proof) is not None:
+        return False
+    if not _feasibility_code_unmodified_8616(ctx, state.memory, caller_range=caller_range):
+        return False
+    exits = _simulate_callee_8616(ctx, proof, state)
+    if isinstance(exits, Real16InvocationFailure8616):
+        return False
+    return _feasibility_callsite_bytes_current_8616(ctx, instruction) and _reconcile_call_exit_8616(
+        proof, consumed.scope, callee, exits, state.registers, state.memory,
+        selector_scope=consumed.selector_scope,
+    ) is None
+
+
+def _feasibility_apply_call_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    block: IRBlock,
+    instruction: IRInstr,
+    registers: dict[str, int],
+    memory: PathMemory8616,
+) -> bool:
+    """Apply one current bound leaf call without publishing speculative census.
+
+    Native bytes and the full caller/callee code manifest precede simulation;
+    incoming path writes may not overlap either fetched-code surface. Late
+    proof authentication precedes committing data effects. All speculative
+    work is charged through the original resource owner, but its receipts,
+    manifests and row ledgers never enter the real census.
+    """
+    if ctx.callsite_addr is None or instruction.addr == ctx.callsite_addr:
+        return False
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return False
+    protected_spans = _dosbox_resize_code_spans_8616(ctx, artifact)
+    return _feasibility_call_scratch_8616(
+        ctx, artifact, block, instruction, registers, memory, protected_spans,
+    )
+
+
+def _feasibility_call_scratch_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    instruction: IRInstr, registers: dict[str, int], memory: PathMemory8616,
+    caller_spans: tuple[tuple[int, int], ...] | frozenset[tuple[int, int]],
+    *, caller_range: ScratchCallerRange8616 | None = None,
+) -> bool:
+    """Run unchanged fresh call authentication over detached protective data.
+
+    Prepared coordinates are not evidence: the canonical call proof, native
+    callee binding, caller bytes and late preservation still authenticate every
+    crossing. This private scratch consumer never publishes its manifest.
+    """
+    if ctx.callsite_addr is None or instruction.addr == ctx.callsite_addr:
+        return False
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return False
+    before = ctx.work_units
+    protected_spans = caller_spans
+    scratch = replace(
+        ctx,
+        service_consumptions=[],
+        prefix_call_consumptions=[],
+        callsite_call_state=None,
+        callsite_memory=None,
+        manifest=set(protected_spans),
+        fetched_span_admissions=0,
+        machine_bytes={instruction.addr: ctx.machine_bytes[instruction.addr]} if instruction.addr in ctx.machine_bytes else {},
+        native_blocks={},
+        prefix_native_entries={},
+        censused_callees=set(),
+        raw_facts=set(), normalized_facts=set(), classified_facts=set(),
+        materialized_facts=set(), failures=0, checked_stores=0,
+        first_failure_site=None, edge_feasibility=None,
+    )
+    try:
+        if time.monotonic() > scratch.deadline or _census_work_exceeded_8616(scratch):
+            return False
+        scratch.work_units += len(protected_spans) + len(registers) + len(memory.known) + len(memory.unknown)
+        if _census_work_exceeded_8616(scratch):
+            return False
+        state = _PathState8616(dict(registers), memory.copy())
+        applied = (
+            _feasibility_call_effect_8616(scratch, artifact, block, instruction, state)
+            if caller_range is None else
+            _feasibility_call_effect_8616(scratch, artifact, block, instruction, state, caller_range=caller_range)
+        )
+        if not applied:
+            return False
+        if time.monotonic() > scratch.deadline or _census_work_exceeded_8616(scratch):
+            return False
+        registers.clear()
+        registers.update(state.registers)
+        memory.assign(state.memory)
+        return True
+    finally:
+        ctx.work_units += scratch.work_units - before
+        ctx.accounted_work_units = scratch.accounted_work_units
+        ctx.entry_call_pool_consulted = (
+            ctx.entry_call_pool_consulted or scratch.entry_call_pool_consulted
+        )
+
+
+def _prefix_execution_producers_8616() -> tuple[object, ...]:
+    """Name current ordinary effect owners, including mutable dispatch owners."""
+    return (*_fused_callee_producers_8616(), _simulate_scope_8616, _resume_path_block_8616,
+            _cross_call_8616, _consume_cross_call_boundary_8616, _reconcile_call_exit_8616,
+            _record_prefix_call_8616, _prefix_call_pools_bound_8616,
+            _prefix_call_bound_8616, _prefix_calls_current_8616,
+            _PrefixConsumedCall8616, _PrefixConsumedCall8616.__init__,
+            new_census_fact_sets_8616, census_fact_ownership_8616, census_fact_ownership_current_8616)
+
+
+def _prefix_root_bound_8616(old: _PathCensusContext8616, current: _PathCensusContext8616) -> bool:
+    """Require the same authenticated root declaration and callback inputs."""
+    left, right = old.chain, current.chain
+    if type(left) is DeclaredFunctionEntryLink8616 and type(right) is DeclaredFunctionEntryLink8616:
+        if left.admission is not right.admission:
+            return False
+    elif type(left) is not RawBootEntrySurface8616 or type(right) is not RawBootEntrySurface8616:
+        return False
+    return (old.project is current.project and old.boot is current.boot
+            and old.selector == current.selector and old.environment is current.environment
+            and old.environment_digest == current.environment_digest
+            and old.arena == current.arena)
+
+
+def _prefix_initial_memory_equal_8616(
+    ctx: _PathCensusContext8616, left: InvocationInitialMemory8616 | None,
+    right: InvocationInitialMemory8616 | None,
+) -> bool:
+    """Charge byte comparisons when fresh equivalent snapshots do not share bytes."""
+    if left is None or right is None:
+        return left is right
+    ctx.work_units += len(left.chunks) + len(left.write_ranges) + 1
+    if _census_resource_failure_8616(ctx) is not None:
+        return False
+    if left.write_ranges != right.write_ranges or len(left.chunks) != len(right.chunks):
+        return False
+    for (address, old), (current_address, current) in zip(left.chunks, right.chunks, strict=True):
+        if address != current_address or len(old) != len(current):
+            return False
+        if old is not current:
+            ctx.work_units += len(old)
+            if _census_resource_failure_8616(ctx) is not None or old != current:
+                return False
+    return _census_resource_failure_8616(ctx) is None
+
+
+def _prefix_inputs_equal_8616(
+    ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616, seed: _PathState8616,
+) -> bool:
+    """Charge and match exact seeds, immutable initial bytes and proof pools."""
+    old = data.context
+    ctx.work_units += (len(seed.registers) + len(data.seed.registers)
+                       + len(seed.memory.known) + len(data.seed.memory.known)
+                       + len(seed.memory.unknown) + len(data.seed.memory.unknown)
+                       + len(old.call_preservations) + len(old.entry_call_preservations) + 1)
+    if _census_resource_failure_8616(ctx) is not None:
+        return False
+    if (data.boot_recompute is not ctx.prefix_boot_recompute or old.service_consumptions
+        or not _prefix_root_bound_8616(old, ctx) or data.seed != seed):
+        return False
+    if not _prefix_call_pools_bound_8616(ctx, data):
+        return False
+    return _prefix_initial_memory_equal_8616(ctx, old.initial_memory, ctx.initial_memory)
+
+
+def _prefix_call_pools_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+    """Match used CALL identities, preserving strict registry/service influence.
+
+    Only entry-pool permutations and unused record regeneration are supported.
+    Registry priority and service fallback retain their original identity order.
+    A new proof object for a used CALL never substitutes the old authority.
+    """
+    old = data.context
+    pools = ((old.call_preservations, ctx.call_preservations), (old.declared_services, ctx.declared_services))
+    ctx.work_units += sum(len(a) for a, _ in pools) + len(data.consumed_calls) * (
+        len(ctx.call_preservations) + len(ctx.entry_call_preservations) + 1)
+    if _census_resource_failure_8616(ctx) is not None:
+        return False
+    if any(len(a) > len(b) or any(x is not y for x, y in zip(a, b[:len(a)], strict=True)) for a, b in pools):
+        return False
+    for consumed in data.consumed_calls:
+        callee = consumed.proof.callee
+        if (consumed.artifact is not data.artifact or callee is None or type(callee) is not SegmentEffectClosureResult8616
+            or callee.callsite_addrs):
+            return False
+        if not any(proof is consumed.proof for proof in ctx.call_preservations) and not any(
+            proof is consumed.proof for proof in ctx.entry_call_preservations
+        ):
+            return False
+    return True
+
+
+def _prefix_structural_extension_lower_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+) -> int | None:
+    """Charge immutable header visits for mandatory structural extension work."""
+    rows, edges = 0, 0
+    for block in artifact.blocks:
+        ctx.work_units += 1
+        if _census_resource_failure_8616(ctx) is not None or type(block) is not IRBlock:
+            return None
+        rows += len(block.instrs)
+        edges += len(block.successor_addrs)
+    return (8 * (len(artifact.blocks) + edges + len(boundary.block_addrs_set)
+                 + len(boundary.successor_edges)) + 1 + len(artifact.blocks) + rows)
+
+
+def _prefix_extension_profitable_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, data: _OwnedPrefixCensus8616,
+) -> bool:
+    """Charge a conservative extension-only lower bound; grant no authority.
+
+    Header lengths count mandatory structural prepayment/global census and
+    retained native rebinding. Ordinary shared feasibility/native work is not
+    included. Advice may only choose whether independent proof checks run.
+    """
+    lower = _prefix_structural_extension_lower_8616(ctx, artifact, boundary)
+    if lower is None:
+        return False
+    old = data.context
+    if old.edge_feasibility is None:
+        return False
+    for function, blocks in old.native_blocks.items():
+        ctx.work_units += 1
+        if _census_resource_failure_8616(ctx) is not None:
+            return False
+        for address, block in blocks.items():
+            ctx.work_units += 1
+            if _census_resource_failure_8616(ctx) is not None or type(block) is not IRBlock:
+                return False
+            if function != data.artifact.function_addr or address in old.edge_feasibility.live_blocks:
+                lower += len(block.instrs) + 1
+    return lower < data.simulation_work and _census_resource_failure_8616(ctx) is None
+
+
+def _select_prefix_extension_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616, callsite_addr: int,
+) -> _OwnedPrefixCensus8616 | None:
+    """Select guarded private data; selection grants no continuation authority."""
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    if type(ctx.chain) not in (DeclaredFunctionEntryLink8616, RawBootEntrySurface8616):
+        return None
+    selected = None
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        for identity, data in traversal.invocation_prefixes.items():
+            ctx.work_units += 1
+            if _census_resource_failure_8616(ctx) is not None:
+                return None
+            domain = traversal.retained_domains.get(identity)
+            if (domain is None or identity in traversal.active_domains
+                or traversal.domain_verdicts.get(identity) is not True):
+                continue
+            old = data.context
+            # Owned closure authenticates membership without a second row walk.
+            # Native comparisons still cost at least one visit per retained row.
+            if (data.fact_ownership is None
+                or len(old.raw_facts) + len(data.producers) >= data.simulation_work):
+                continue
+            if old.edge_feasibility is None or ctx.stop_block_addr in old.edge_feasibility.live_blocks:
+                continue
+            if (old.prefix_consumed or data.artifact is not artifact or data.boundary is not boundary
+                or old.callsite_addr == callsite_addr or not _prefix_terminal_data_bound_8616(data)):
+                continue
+            if (_prefix_extension_profitable_8616(ctx, artifact, boundary, data)
+                and _prefix_inputs_equal_8616(ctx, data, seed)
+                and (selected is None or len(old.raw_facts) > len(selected.context.raw_facts))):
+                selected = data
+    return selected
+
+
+def _prefix_feasibility_request_8616(
+    data: _OwnedPrefixCensus8616 | None,
+) -> kb_owner_8616.Real16CallCutRequest8616 | None:
+    """Observe the selected row during the existing current feasibility walk."""
+    terminal = None if data is None else data.context.prefix_terminal_call
+    if terminal is None:
+        return None
+    return kb_owner_8616.Real16CallCutRequest8616(
+        terminal.artifact, terminal.block, terminal.index, terminal.instruction,
+    )
+
+
+def _prefix_suffix_scope_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, data: _OwnedPrefixCensus8616,
+) -> frozenset[int] | None:
+    """Charge the existing live graph's suffix and require unchanged prefix joins."""
+    feasible, old_feasible = ctx.edge_feasibility, data.context.edge_feasibility
+    terminal = data.context.prefix_terminal_call
+    if feasible is None or old_feasible is None or terminal is None:
+        return None
+    blocks = {block.addr: block for block in artifact.blocks}
+    pending, suffix = list(terminal.block.successor_addrs), set()
+    dead = frozenset(feasible.infeasible_edges)
+    while pending:
+        addr = pending.pop()
+        ctx.work_units += 1
+        if _census_resource_failure_8616(ctx) is not None:
+            return None
+        if addr in suffix or addr not in feasible.live_blocks:
+            continue
+        suffix.add(addr)
+        ctx.work_units += len(blocks[addr].successor_addrs)
+        pending.extend(next_addr for next_addr in blocks[addr].successor_addrs if (addr, next_addr) not in dead)
+    prefix = feasible.live_blocks - suffix
+    if prefix != old_feasible.live_blocks or terminal.block.addr in suffix:
+        return None
+    old_dead = frozenset(edge for edge in old_feasible.infeasible_edges if edge[0] in prefix and edge[1] in prefix)
+    current_dead = frozenset(edge for edge in feasible.infeasible_edges if edge[0] in prefix and edge[1] in prefix)
+    return frozenset(suffix) if old_dead == current_dead else None
+
+
+def _prefix_sources_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+    """Reauthenticate all retained byte/producer keys after current callbacks."""
+    from .native_import_surface_cache import native_census_source_current_8616
+    from .vex_import import (
+        _census_finishing_producers_8616,
+        _census_raw_native_blocks_8616,
+        _native_import_producers_8616,
+    )
+
+    old = data.context
+    if (not old.prefix_sources.complete or not ctx.prefix_sources.complete
+        or data.artifact.function_addr not in old.prefix_sources.bindings):
+        return False
+    producers = (_census_raw_native_blocks_8616, _census_reimport_8616,
+                 *_census_finishing_producers_8616(), *_native_import_producers_8616())
+    for address, binding in old.prefix_sources.bindings.items():
+        current = ctx.prefix_sources.bindings.get(address)
+        ctx.work_units += len(binding.boundary.reachable_instruction_addrs) + binding.boundary.size + 1
+        if _census_resource_failure_8616(ctx) is not None:
+            return False
+        if (current is None or current.boundary is not binding.boundary
+            or current.key is not binding.key or not native_census_source_current_8616(binding, producers=producers)):
+            return False
+    actual = _prefix_execution_producers_8616()
+    ctx.work_units += len(actual)
+    return (len(actual) == len(data.producers) == len(_CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616)
+            and all(a is b is c for a, b, c in zip(
+                actual, data.producers, _CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616, strict=True))
+            and _census_resource_failure_8616(ctx) is None)
+
+
+def _prefix_block_facts_bound_8616(
+    ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616,
+    root_blocks: dict[int, IRBlock], function: int, address: int, block: IRBlock,
+) -> int | None:
+    """Rebind native rows, comparing an identical root owner only once.
+
+    First binding authenticates all fields. With no intervening callback,
+    repeating those exact inputs adds no evidence. Distinct root objects keep
+    independent binding and work; post-callback freshness stays separate.
+    """
+    native = ctx.native_blocks.get(function, {}).get(address)
+    ctx.work_units += len(block.instrs) + 1
+    if _census_resource_failure_8616(ctx) is not None or not _native_block_bound_8616(native, block):
+        return None
+    if function == data.artifact.function_addr:
+        root = root_blocks.get(address)
+        if root is not block:
+            ctx.work_units += len(block.instrs) + 1
+        if (_census_resource_failure_8616(ctx) is not None
+            or (root is not block and not _native_block_bound_8616(native, root))):
+            return None
+    return len(block.instrs)
+
+
+def _prefix_native_rows_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+    """Rebind retained root IR after callbacks without reopening transferred ledgers."""
+    old_feasible = data.context.edge_feasibility
+    if old_feasible is None:
+        return False
+    native = ctx.native_blocks.get(data.artifact.function_addr, {})
+    for block in data.artifact.blocks:
+        if block.addr not in old_feasible.live_blocks:
+            continue
+        ctx.work_units += len(block.instrs) + 1
+        if _census_resource_failure_8616(ctx) is not None or not _native_block_bound_8616(native.get(block.addr), block):
+            return False
+    return True
+
+
+def _prefix_call_bound_8616(
+    ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616, block: IRBlock, row: IRInstr,
+) -> bool:
+    """Close one ordinary proof callback under the exact consuming scope."""
+    consumed = _consume_cross_call_boundary_8616(ctx, data.artifact, block, row)
+    if consumed is None or consumed.selector_scope is not None:
+        return False
+    if consumed.preserved_registers is None or "cs" not in consumed.preserved_registers:
+        return False
+    if (_call_scope_uses_owned_identity_8616(ctx)
+        and _ctx_consuming_scope_8616(ctx, data.artifact, consumed.proof) is not consumed.scope):
+        return False
+    retained = tuple(record for record in data.consumed_calls if record.instruction is row)
+    ctx.work_units += len(data.consumed_calls)
+    if _census_resource_failure_8616(ctx) is not None or not retained:
+        return False
+    if any(record.artifact is not data.artifact or record.block is not block
+           or record.proof is not consumed.proof or record.scope is not consumed.scope
+           or record.preserved_registers != consumed.preserved_registers for record in retained):
+        return False
+    callee = consumed.proof.callee
+    if (callee is None or type(callee) is not SegmentEffectClosureResult8616
+        or type(callee.coverage) is not IRBoundaryCoverageResult8616
+        or type(callee.coverage.artifact) is not IRFunctionArtifact):
+        return False
+    address = callee.coverage.artifact.function_addr
+    return address in data.context.native_blocks and address in ctx.native_blocks
+
+
+def _prefix_calls_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+    """Perform ordinary fresh proof authentication for every skipped earlier CALL."""
+    feasible = data.context.edge_feasibility
+    terminal = data.context.prefix_terminal_call
+    if feasible is None or terminal is None:
+        return False
+    rows: set[int] = set()
+    for block in data.artifact.blocks:
+        if block.addr not in feasible.live_blocks:
+            continue
+        for row in block.instrs:
+            ctx.work_units += 1
+            if _census_resource_failure_8616(ctx) is not None:
+                return False
+            if row.op != "CALL" or row is terminal.instruction:
+                continue
+            rows.add(id(row))
+            if not _prefix_call_bound_8616(ctx, data, block, row):
+                return False
+    ctx.work_units += len(data.consumed_calls)
+    if any(id(record.instruction) not in rows for record in data.consumed_calls):
+        return False
+    return _census_resource_failure_8616(ctx) is None
+
+
+def _prefix_enrolled_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+    """Require the exact still-guarded canonical enrollment at consumption."""
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        for identity, retained in traversal.invocation_prefixes.items():
+            ctx.work_units += 1
+            if _census_resource_failure_8616(ctx) is not None:
+                return False
+            if retained is data:
+                domain = traversal.retained_domains.get(identity)
+                return (domain is not None and domain.project is ctx.project
+                        and identity not in traversal.active_domains
+                        and traversal.domain_verdicts.get(identity) is True)
+    return False
+
+
+def _prefix_facts_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+    """Authenticate unchanged owned ledgers and independently rebind native rows.
+
+    Guarded successful enrollment and pinned canonical producers establish the
+    original row provenance. The current ownership receipt detects subsequent
+    ledger edits. Native maps can include unvisited callee blocks, so their row
+    union is not a second definition of the completed census fact set.
+    """
+    old = data.context
+    if data.counts != _census_counts_8616(old) or data.stores != old.checked_stores or old.failures:
+        return False
+    ctx.work_units += 32
+    if _census_resource_failure_8616(ctx) is not None:
+        return False
+    if data.fact_ownership is None or not census_fact_ownership_current_8616(
+        data.fact_ownership, (old.raw_facts, old.normalized_facts, old.classified_facts, old.materialized_facts),
+    ):
+        return False
+    if old.edge_feasibility is None:
+        return False
+    ctx.work_units += len(data.artifact.blocks)
+    root_blocks = {block.addr: block for block in data.artifact.blocks}
+    for function, blocks in old.native_blocks.items():
+        for address, block in blocks.items():
+            if function == data.artifact.function_addr and address not in old.edge_feasibility.live_blocks:
+                continue
+            if _prefix_block_facts_bound_8616(ctx, data, root_blocks, function, address, block) is None:
+                return False
+    return _census_resource_failure_8616(ctx) is None
+
+
+def _prefix_work_allowance_8616(ctx: _PathCensusContext8616) -> int:
+    """Respect the same local and ambient allowance before structural work."""
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        pending = ctx.work_units - ctx.accounted_work_units
+        return cast(int, max(0, min(ctx.work_limit - ctx.work_units,
+                          _CENSUS_WORK_LIMIT_8616 - traversal.census_work_units - pending)))
+
+
+def _prefix_after_callbacks_8616(
+    ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616,
+) -> Real16InvocationFailure8616 | None:
+    """Fail closed after ownership transfer if callbacks invalidate old sources."""
+    if _prefix_sources_current_8616(ctx, data) and _prefix_native_rows_current_8616(ctx, data):
+        return None
+    return _census_resource_failure_8616(ctx) or Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+
+
+def _prefix_extension_inputs_8616(
+    ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616, seed: _PathState8616,
+) -> bool:
+    """Keep completion, ownership and admission checks before any data move."""
+    return (_census_counts_8616(ctx) == (0, 0, 0, 0, 0) and ctx.checked_stores == 0
+            and not ctx.service_consumptions and _prefix_enrolled_current_8616(ctx, data)
+            and _prefix_inputs_equal_8616(ctx, data, seed))
+
+
+def _try_prefix_extension_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616, data: _OwnedPrefixCensus8616,
+) -> bool | Real16InvocationFailure8616:
+    """Authenticate once, transfer exact ledgers, then run fresh CALL and suffix."""
+    from .real16_prefix_cut import PrefixCallRow8616, PrefixCutBudget8616, PrefixCutExtent8616, admit_prefix_cut_8616
+
+    old, terminal = data.context, data.context.prefix_terminal_call
+    feasible = ctx.edge_feasibility
+    if (ctx.callsite_addr is None or feasible is None or old.prefix_consumed
+        or terminal is None or not _prefix_extension_inputs_8616(ctx, data, seed)):
+        return False
+    later = _callsite_block_8616(artifact, ctx.callsite_addr)
+    if isinstance(later, Real16InvocationFailure8616):
+        return False
+    rows = [(index, row) for index, row in enumerate(later.instrs) if row.op == "CALL" and row.addr == ctx.callsite_addr]
+    if len(rows) != 1 or ctx.stop_block_addr != later.addr:
+        return False
+    budget = PrefixCutBudget8616(_prefix_work_allowance_8616(ctx), ctx.deadline)
+    structural = admit_prefix_cut_8616(
+        artifact, boundary, PrefixCallRow8616(artifact, terminal.block, terminal.index, terminal.instruction),
+        PrefixCallRow8616(artifact, later, rows[0][0], rows[0][1]), budget=budget,
+        extent=PrefixCutExtent8616.BEFORE_LATER_CALL,
+    )
+    ctx.work_units += structural.work_units
+    if not structural.complete:
+        return _census_resource_failure_8616(ctx) or False
+    suffix = _prefix_suffix_scope_8616(ctx, artifact, data)
+    # The executor stops rows within the target block, not the graph globally.
+    # Authenticate every actual live/suffix block against the absorbing extent.
+    ctx.work_units += len(feasible.live_blocks) + (0 if suffix is None else len(suffix))
+    if (_census_resource_failure_8616(ctx) is not None
+        or structural.witness is None or suffix is None
+        or not feasible.live_blocks.issubset(structural.witness.region)
+        or not suffix.issubset(structural.witness.region)):
+        return _census_resource_failure_8616(ctx) or False
+    if (not _prefix_calls_current_8616(ctx, data)
+        or not _prefix_sources_current_8616(ctx, data) or not _prefix_facts_bound_8616(ctx, data)):
+        return _census_resource_failure_8616(ctx) or False
+    if old.callsite_call_state is None or old.callsite_memory is None:
+        return False
+    state = _PathState8616(old.callsite_call_state, old.callsite_memory, terminal.direction)
+    if not _prefix_cut_state_matches_8616(ctx, artifact, terminal, state):
+        return _census_resource_failure_8616(ctx) or False
+    if not _feasibility_code_unmodified_8616(ctx, state.memory):
+        return _census_resource_failure_8616(ctx) or False
+    return _execute_prefix_extension_8616(ctx, artifact, seed, data, state, suffix)
+
+
+def _execute_prefix_extension_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, seed: _PathState8616,
+    data: _OwnedPrefixCensus8616, state: _PathState8616, suffix: frozenset[int],
+) -> bool | Real16InvocationFailure8616:
+    """Move single-use facts and execute only current ordinary CALL/suffix effects."""
+    old, terminal, feasible = data.context, data.context.prefix_terminal_call, ctx.edge_feasibility
+    if terminal is None or feasible is None:
+        return False
+    ctx.work_units += len(data.consumed_calls)
+    failure = _census_resource_failure_8616(ctx)
+    if failure is not None:
+        return failure
+    ctx.prefix_call_consumptions.extend(data.consumed_calls)
+    old.prefix_consumed = True
+    ctx.raw_facts, old.raw_facts = old.raw_facts, set()
+    ctx.normalized_facts, old.normalized_facts = old.normalized_facts, set()
+    ctx.classified_facts, old.classified_facts = old.classified_facts, set()
+    ctx.materialized_facts, old.materialized_facts = old.materialized_facts, set()
+    ctx.checked_stores = old.checked_stores
+    ctx.entry_call_pool_consulted |= old.entry_call_pool_consulted
+    resumed = _resume_terminal_call_8616(ctx, artifact, terminal, state)
+    if isinstance(resumed, Real16InvocationFailure8616):
+        return resumed
+    failure = _prefix_after_callbacks_8616(ctx, data)
+    if failure is not None:
+        return failure
+    exits = _simulate_scope_8616(
+        ctx, artifact, suffix, artifact.function_addr, seed,
+        stop_after=ctx.callsite_addr, callsite_addr=ctx.callsite_addr,
+        infeasible_edges=frozenset(feasible.infeasible_edges),
+        prefix_exit=(terminal.block.addr, resumed),
+    )
+    if isinstance(exits, Real16InvocationFailure8616):
+        return exits
+    failure = _prefix_after_callbacks_8616(ctx, data)
+    return failure if failure is not None else True
+
+
+def _complete_prefix_extension_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616,
+    prefix: _OwnedPrefixCensus8616 | None,
+) -> bool | Real16InvocationFailure8616:
+    """Keep optional absence on the ordinary path without fabricating facts."""
+    return False if prefix is None else _try_prefix_extension_8616(ctx, artifact, boundary, seed, prefix)
 
 
 def _census_invocation_8616(
@@ -3499,7 +5917,11 @@ def _census_invocation_8616(
     requires each raw STORE to be exactly evaluated and disjoint from the
     whole fetched-byte manifest.
     """
-    native = _native_effect_blocks_8616(ctx, boundary)
+    prefix = _select_prefix_extension_8616(ctx, artifact, boundary, seed, callsite_addr)
+    native = _native_effect_blocks_8616(
+        ctx, boundary, selected_blocks=dangerous,
+        terminal=(call_block.addr, callsite_addr),
+    )
     if isinstance(native, Real16InvocationFailure8616):
         # Census-level refusal: no row was classified, so the row ledger
         # stays untouched — the typed failure is the report.
@@ -3522,11 +5944,21 @@ def _census_invocation_8616(
     # ledger in the simulation phases keeps every still-live row closed —
     # pruning only skips obligations for blocks no converged must-state
     # can reach. An unproven edge changes nothing.
+    truncated = frozenset(
+        address for function, address in ctx.prefix_native_entries
+        if function == artifact.function_addr
+    )
     load_rows = {
         id(row): (row, native_row)
         for addr in dangerous
-        if _native_block_bound_8616(native.get(addr), blocks_by_addr[addr])
-        for row, native_row in zip(blocks_by_addr[addr].instrs, native[addr].instrs, strict=True)
+        if _native_block_bound_8616(
+            native.get(addr), blocks_by_addr[addr],
+            stop_after=callsite_addr if addr in truncated else None,
+        )
+        for row, native_row in zip(
+            blocks_by_addr[addr].instrs[:len(native[addr].instrs)],
+            native[addr].instrs, strict=True,
+        )
         if row.op == "LOAD"
     }
 
@@ -3547,6 +5979,32 @@ def _census_invocation_8616(
         status, _ = _apply_repeated_store_8616(ctx, artifact, block, registers, memory, direction, count_store=False)
         return status
 
+    call_cut = _prefix_feasibility_request_8616(prefix)
+    call_rows = _feasibility_call_rows_8616(
+        blocks_by_addr, native, dangerous, callsite_addr, call_cut=call_cut,
+        prefix_blocks=truncated,
+    )
+
+    call_binding = _feasibility_call_handler_8616(ctx, artifact, boundary, call_rows)
+    apply_call = (
+        call_binding
+        if call_binding is not None and ctx.callsite_addr is not None
+        else None
+    )
+
+    omission = (
+        _snapshot_omission_hooks_8616(ctx)
+        if _snapshot_omission_hooks_8616 is _CANONICAL_SNAPSHOT_HOOKS_8616
+        else None
+    )
+    repeat_consult_noop = None if omission is None else omission[0]
+    load_reader_readonly = None if omission is None else omission[1]
+    terminal_call_noop = (
+        _snapshot_terminal_noop_8616(call_binding, apply_call)
+        if repeat_consult_noop is not None
+        and _snapshot_terminal_noop_8616 is _CANONICAL_TERMINAL_NOOP_8616
+        else None
+    )
     ctx.edge_feasibility = invocation_feasible_scope_8616(
         artifact=artifact,
         dangerous=dangerous,
@@ -3558,6 +6016,10 @@ def _census_invocation_8616(
         seed_memory=seed.memory,
         read_load=read_load,
         apply_repeat=apply_repeat,
+        apply_call=apply_call,
+        repeat_consult_noop=repeat_consult_noop,
+        load_reader_readonly=load_reader_readonly,
+        terminal_call_noop=terminal_call_noop,
         apply_service=(
             lambda instruction, registers, memory: (
                 _feasibility_apply_service_8616(
@@ -3568,25 +6030,67 @@ def _census_invocation_8616(
         iteration_limit=_PATH_STATE_ITERATION_LIMIT_8616,
         deadline=ctx.deadline,
         work_limit=max(0, ctx.work_limit - ctx.work_units),
+        call_cut=call_cut,
     )
-    ctx.work_units += ctx.edge_feasibility.work_units
-    live = ctx.edge_feasibility.live_blocks
-    failure = _census_path_callees_8616(ctx, artifact, blocks_by_addr, live, callsite_addr)
+    failure = _census_feasible_path_callees_8616(
+        ctx, artifact, blocks_by_addr, ctx.edge_feasibility, callsite_addr,
+    )
     if failure is not None:
         return failure
+    return _finish_invocation_scope_8616(ctx, artifact, boundary, seed, callsite_addr, prefix)
+
+
+def _finish_invocation_scope_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616,
+    callsite_addr: int, prefix: _OwnedPrefixCensus8616 | None,
+) -> Real16InvocationFailure8616 | None:
+    """Use admitted continuation or retain the ordinary full scope walk."""
+    feasible = ctx.edge_feasibility
+    if feasible is None:
+        return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
+    extended = _complete_prefix_extension_8616(ctx, artifact, boundary, seed, prefix)
+    if isinstance(extended, Real16InvocationFailure8616):
+        return extended
+    if extended:
+        return None
+    before = ctx.work_units
     exits = _simulate_scope_8616(
         ctx,
         artifact,
-        live,
+        feasible.live_blocks,
         artifact.function_addr,
         seed,
         stop_after=callsite_addr,
         callsite_addr=callsite_addr,
-        infeasible_edges=frozenset(ctx.edge_feasibility.infeasible_edges),
+        infeasible_edges=frozenset(feasible.infeasible_edges),
     )
     if isinstance(exits, Real16InvocationFailure8616):
         return exits
+    ctx.prefix_simulation_work = ctx.work_units - before
     return None
+
+
+def _census_feasible_path_callees_8616(
+    ctx: _PathCensusContext8616,
+    artifact: IRFunctionArtifact,
+    blocks_by_addr: dict[int, IRBlock],
+    feasibility: Real16EdgeFeasibility8616,
+    callsite_addr: int,
+) -> Real16InvocationFailure8616 | None:
+    """Account feasibility work before admitting further callee-proof consumers.
+
+    Scratch call work and the feasibility row walk share this census budget.
+    A resource refusal must survive instead of becoming missing-call evidence
+    through further authentication after budget or deadline exhaustion.
+    """
+    ctx.work_units += feasibility.work_units
+    failure = _census_resource_failure_8616(ctx)
+    if failure is not None:
+        return failure
+    return _census_path_callees_8616(
+        ctx, artifact, blocks_by_addr, feasibility.live_blocks, callsite_addr,
+    )
 
 
 def _census_path_callees_8616(
@@ -3601,19 +6105,20 @@ def _census_path_callees_8616(
         for instruction in blocks_by_addr[addr].instrs:
             if instruction.op != "CALL" or instruction.addr == callsite_addr:
                 continue
-            proof = _call_boundary_proof_8616(
-                ctx,
-                artifact,
-                blocks_by_addr[addr],
-                instruction,
+            consumed = _consume_call_boundary_8616(
+                ctx, artifact, blocks_by_addr[addr], instruction,
             )
-            if proof is None:
+            if consumed is None:
                 continue
-            scope = _ctx_consuming_scope_8616(ctx, artifact, proof)
-            if scope is _CTX_SCOPE_REFUSE_8616 or not proof.complete_for(
-                cast(Real16InvocationDomain8616 | None, scope)
-            ):
-                continue
+            # Retain both premise kinds during byte-manifest authentication.
+            # No selector effects are projected before path-state simulation.
+            proof = consumed.proof
+            if not _call_scope_uses_owned_identity_8616(ctx):
+                scope = _ctx_consuming_scope_8616(ctx, artifact, proof)
+                if scope is _CTX_SCOPE_REFUSE_8616 or not proof.complete_for(
+                    cast(Real16InvocationDomain8616 | None, scope),
+                ):
+                    continue
             failure = _census_callee_bytes_8616(ctx, proof)
             if failure is not None:
                 return failure
@@ -3629,6 +6134,39 @@ def _census_counts_8616(ctx: _PathCensusContext8616) -> tuple[int, int, int, int
         len(ctx.materialized_facts),
         ctx.failures,
     )
+
+
+def _retained_parent_census_surface_8616(
+    parent: Real16InvocationDomain8616 | None,
+) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+    """Name the exact artifact/boundary objects a parent premise censused.
+
+    Ordinary proven coverage is the retained surface. A
+    ``RAW_BOOT_ENTRY_PATH`` premise carries no coverage by contract; its
+    identical census objects live on the retained
+    ``RawBootEntrySurface8616`` chain. This accessor only *names* retained
+    objects — it grants no proof: ``parent.complete`` replays, decoded-row
+    and index membership, and every edge identity check remain mandatory
+    at their own sites. Any other coverage-free kind — an in-flight
+    chained or enclosed parent — has no retained surface to name and
+    returns ``None``.
+    """
+    if type(parent) is not Real16InvocationDomain8616:
+        return None
+    coverage = parent.coverage
+    if coverage is not None:
+        if type(coverage) is not IRBoundaryCoverageResult8616:
+            return None
+        return coverage.artifact, coverage.boundary
+    chain = parent.chain
+    if (
+        parent.kind in (Real16InvocationKind8616.RAW_BOOT_ENTRY_PATH, Real16InvocationKind8616.DECLARED_FUNCTION_ENTRY)
+        and (type(chain) is RawBootEntrySurface8616 or type(chain) is DeclaredFunctionEntryLink8616)
+        and type(chain.artifact) is IRFunctionArtifact
+        and type(chain.boundary) is ExactFunctionRangeBoundary8616
+    ):
+        return chain.artifact, chain.boundary
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -3659,6 +6197,13 @@ class Real16CallChainLink8616:
     derivation because it requires the parent's replayed census state.
     The link is evidence for exactly one edge — it is never a general
     statement about the callee under other entries.
+
+    Optional ``entry_binding`` independently proves the native near-CALL's
+    control target under the identical parent prefix. It permits entry-only
+    transport while the current candidate's return certificate is unfinished
+    and remains visible in the parent pool. Callee return effects still need
+    their own closure; an explicitly supplied invalid ``edge`` still refuses.
+    Links without this certificate retain the existing edge-proof contract.
     """
 
     parent: Real16InvocationDomain8616
@@ -3670,6 +6215,7 @@ class Real16CallChainLink8616:
     callee_artifact: IRFunctionArtifact
     callee_boundary: ExactFunctionRangeBoundary8616
     edge: object | None = None
+    entry_binding: DirectNearCallTargetBinding8616 | None = None
 
     @property
     def complete(self) -> bool:
@@ -3684,14 +6230,16 @@ class Real16CallChainLink8616:
         if (
             type(parent) is not Real16InvocationDomain8616
             or not parent.complete
-            or parent.coverage is None
         ):
             return False
+        parent_surface = _retained_parent_census_surface_8616(parent)
         if (
-            self.callsite_artifact is not parent.coverage.artifact
-            or self.callsite_boundary is not parent.coverage.boundary
+            parent_surface is None
+            or self.callsite_artifact is not parent_surface[0]
+            or self.callsite_boundary is not parent_surface[1]
         ):
             return False
+        parent_artifact = parent_surface[0]
         if type(self.callsite_index) is not DecodedDirectCallsiteIndex8616:
             return False
         if not self.callsite_index.stats.closed:
@@ -3701,7 +6249,7 @@ class Real16CallChainLink8616:
             return False
         if (
             callsite.callsite_addr != parent.callsite_addr
-            or callsite.caller_start != parent.coverage.artifact.function_addr
+            or callsite.caller_start != parent_artifact.function_addr
         ):
             return False
         callee_artifact = self.callee_artifact
@@ -3717,12 +6265,7 @@ class Real16CallChainLink8616:
             parent, self.callsite_index, callsite, callee_artifact.function_addr,
         ):
             return False
-        if not _chain_edge_bound_8616(
-            parent,
-            parent.coverage.artifact,
-            callee_artifact.function_addr,
-            self.edge,
-        ):
+        if not _chain_call_entry_bound_8616(self):
             return False
         return _transported_call_state_8616(self.call_state) is not None
 
@@ -3821,8 +6364,8 @@ def _enclosed_parent_bound_8616(
 ) -> bool:
     """Re-check the retained parent premise and callsite row identity.
 
-    The parent must still prove complete coverage over the identical
-    callsite artifact/boundary pair, the index must remain a closed
+    The parent must still replay complete and name the identical retained
+    census artifact/boundary pair, the index must remain a closed
     decoded index, and the retained row must be the exact in-index row
     at the parent's proven callsite inside the parent's proven head.
     """
@@ -3830,12 +6373,15 @@ def _enclosed_parent_bound_8616(
     if (
         type(parent) is not Real16InvocationDomain8616
         or not parent.complete
-        or parent.coverage is None
     ):
         return False
+    parent_surface = _retained_parent_census_surface_8616(parent)
+    if parent_surface is None:
+        return False
+    parent_artifact, parent_boundary = parent_surface
     if (
-        link.callsite_artifact is not parent.coverage.artifact
-        or link.callsite_boundary is not parent.coverage.boundary
+        link.callsite_artifact is not parent_artifact
+        or link.callsite_boundary is not parent_boundary
     ):
         return False
     if (
@@ -3848,7 +6394,7 @@ def _enclosed_parent_bound_8616(
         return False
     return (
         callsite.callsite_addr == parent.callsite_addr
-        and callsite.caller_start == parent.coverage.artifact.function_addr
+        and callsite.caller_start == parent_artifact.function_addr
     )
 
 
@@ -3865,9 +6411,10 @@ def _bound_callsite_entry_8616(
     A counterfeit index cannot replace bytes from the parent's native census.
     The caller separately replays the parent against its source-bound boot.
     """
-    if parent.coverage is None:
+    parent_surface = _retained_parent_census_surface_8616(parent)
+    if parent_surface is None:
         return False
-    encoded = callsite.bound_near_coordinates(parent.coverage.boundary)
+    encoded = callsite.bound_near_coordinates(parent_surface[1])
     return (
         encoded is not None and encoded[1] == entry
         and any(row is callsite for row in index.for_target(callsite.target_addr))
@@ -4027,33 +6574,108 @@ def _transported_call_state_8616(
     return registers
 
 
-def _chain_link_identity_8616(
+def _near_call_entry_binding_bound_8616(
+    chain: Real16CallChainLink8616,
+    consumer: Callable[[Real16CallInvocation8616], bool] | None = None,
+) -> bool:
+    """Reauthenticate entry-only control evidence against the native CALL.
+
+    This certificate proves the unconsumed near-CALL transports entry state;
+    it proves no callee return or preservation effects. The parent pool stays
+    intact, including this candidate's unfinished preservation record.
+    """
+    from inertia.semantics.direct_near_call_target_binding import (
+        DirectNearCallTargetBinding8616,
+        _consume_direct_near_call_target_binding_from_decoded_8616,
+        _retained_binding_fields_equal_8616,
+        _retained_coordinate_facts_8616,
+        prove_direct_near_call_target_binding_from_decoded_8616,
+    )
+
+    binding = chain.entry_binding
+    if binding is None or type(binding) is not DirectNearCallTargetBinding8616 or binding.invocation is None:
+        return False
+    invocation = binding.invocation
+    parent = chain.parent
+    if (
+        type(invocation) is not Real16CallInvocation8616
+        or invocation.premise is not parent or invocation.project is not parent.project
+        or type(binding.callsite_addr) is not int or type(binding.target_addr) is not int
+    ):
+        return False
+    if (
+        binding.callsite_addr != parent.callsite_addr
+        or binding.target_addr != chain.callee_artifact.function_addr
+        or invocation.callsite_addr != binding.callsite_addr
+        or invocation.target_addr != binding.target_addr
+        or not any(block is invocation.block for block in chain.callsite_artifact.blocks)
+    ):
+        return False
+    if not (
+        _retained_coordinate_facts_8616(binding.callsite_addr, binding.target_addr, binding.shape)
+        and binding.stats.closed
+    ):
+        return False
+    instructions = tuple(
+        row for row in invocation.block.instrs
+        if row.op == "CALL" and row.addr == parent.callsite_addr
+    )
+    if len(instructions) != 1:
+        return False
+    if consumer is None:
+        replayed = prove_direct_near_call_target_binding_from_decoded_8616(
+            parent.project, block=invocation.block, instruction=instructions[0],
+            decoded=chain.callsite, invocation=parent,
+        )
+    else:
+        replayed = _consume_direct_near_call_target_binding_from_decoded_8616(
+            parent.project, block=invocation.block, instruction=instructions[0],
+            decoded=chain.callsite, invocation=parent, consumer=consumer,
+        )
+    # Reconcile only exact owned primitive records after the forced census:
+    # no property/equality hook can invalidate the capture during this step.
+    return _retained_binding_fields_equal_8616(binding, replayed)
+
+
+
+def _chain_call_entry_bound_8616(chain: Real16CallChainLink8616) -> bool:
+    """Select entry-only control or the unchanged retained-return contract."""
+    if chain.entry_binding is None:
+        return _chain_edge_bound_8616(
+            chain.parent,chain.callsite_artifact,chain.callee_artifact.function_addr,chain.edge,
+        )
+    if chain.edge is not None and not _edge_proof_bound_8616(
+        chain.edge,chain.callsite_artifact,chain.parent.callsite_addr,
+        chain.callee_artifact.function_addr,chain.parent,
+    ):
+        return False
+    return _near_call_entry_binding_bound_8616(chain)
+
+
+def _chain_link_owned_identity_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     chain: Real16CallChainLink8616,
 ) -> Real16InvocationFailure8616 | None:
-    """Bind the retained link's static identities before any replay.
+    """Bind exact owned parent/index/near-row and caller/callee surface identities.
 
-    Every identity in the link must be the exact retained object: the
-    typed parent premise with its coverage, the identical caller artifact
-    and boundary objects the parent censused, the closed typed index, the
-    exact decoded near-call row, the identical callee artifact/boundary
-    under proof, index membership under the callee head's normalized
-    identity, and the bound-edge proof rule. Any divergence refuses
-    ``chain_link_unproven``.
+    Native encoding, lookup membership and edge proof belong to the wrapper;
+    this subset executes no native getter, loader callback or parent replay.
     """
     parent = chain.parent
     if (
         type(parent) is not Real16InvocationDomain8616
         or parent.project is not project
-        or parent.coverage is None
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    parent_artifact = parent.coverage.artifact
+    parent_surface = _retained_parent_census_surface_8616(parent)
+    if parent_surface is None:
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    parent_artifact, parent_boundary = parent_surface
     if (
         chain.callsite_artifact is not parent_artifact
-        or chain.callsite_boundary is not parent.coverage.boundary
+        or chain.callsite_boundary is not parent_boundary
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     if (
@@ -4074,16 +6696,91 @@ def _chain_link_identity_8616(
         or chain.callee_boundary is not boundary
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    return None
+
+
+def _chain_link_identity_8616(
+    project: object,
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    chain: Real16CallChainLink8616,
+    *,
+    validate_entry: bool = True,
+) -> Real16InvocationFailure8616 | None:
+    """Bind the retained link's static identities before any replay.
+
+    Every identity in the link must be the exact retained object: the
+    typed parent premise with its retained census surface, the identical
+    caller artifact and boundary objects the parent censused, the closed
+    typed index, the exact decoded near-call row, the identical callee
+    artifact/boundary
+    under proof, index membership under the callee head's normalized
+    identity, and the bound-edge proof rule. Any divergence refuses
+    ``chain_link_unproven``.
+    """
+    failure = _chain_link_owned_identity_8616(project, artifact, boundary, chain)
+    if failure is not None:
+        return failure
+    parent, callsite = chain.parent, chain.callsite
     # Lookup membership alone cannot prove the executed destination. Bind
     # the retained encoding to the parent census and require exact entry.
     if not _bound_callsite_entry_8616(
         parent, chain.callsite_index, callsite, artifact.function_addr,
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    if not _chain_edge_bound_8616(
-        parent, parent_artifact, artifact.function_addr, chain.edge
-    ):
+    if validate_entry and not _chain_call_entry_bound_8616(chain):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    return None
+
+
+def _derive_parent_for_chain_8616(
+    parent: Real16InvocationDomain8616, chain_depth: int,
+) -> _Derivation8616:
+    """Force one current parent derivation without admitting a cached verdict."""
+    return _derive_invocation_domain_8616(
+        parent.project, parent.coverage, parent.callsite_addr, parent.boot,
+        parent.boot_recompute, parent.call_preservations, chain=parent.chain,
+        entry_call_preservations=parent.entry_call_preservations,
+        declared_services=parent.declared_services, chain_depth=chain_depth + 1,
+        prefix_capture=type(parent.chain) in (DeclaredFunctionEntryLink8616, RawBootEntrySurface8616),
+    )
+
+
+def _consume_chain_parent_8616(
+    chain: Real16CallChainLink8616, chain_depth: int,
+) -> _Derivation8616 | None:
+    """Capture the one forced parent replay performed after native CALL gates."""
+    captured: _Derivation8616 | None = None
+    parent = chain.parent
+
+    def consume(invocation: Real16CallInvocation8616) -> bool:
+        """Force this exact parent capture inside the ordinary admission guard."""
+        def verify() -> bool:
+            """Capture source-bound effects while the parent remains active."""
+            nonlocal captured
+            captured = _derive_parent_for_chain_8616(parent, chain_depth)
+            if captured.failure is not None or captured.domain is None:
+                return False
+            accepted = (
+                _replayed_domain_equal_8616(captured, parent)
+                and _invocation_use_bound_8616(
+                    parent, project=invocation.project, block=invocation.block,
+                    callsite_addr=invocation.callsite_addr, target_addr=invocation.target_addr,
+                )
+            )
+            if accepted:
+                _enroll_prefix_census_data_8616(parent, captured)
+            return accepted
+
+        if not _retained_domain_kind_bound_8616(parent):
+            return False
+        return parent._consume_completion_8616(verify, force_current=True)
+
+    accepted = _near_call_entry_binding_bound_8616(chain, consume)
+    if accepted:
+        return captured
+    if captured is not None and captured.failure is not None:
+        return captured
     return None
 
 
@@ -4114,8 +6811,9 @@ def _chain_link_seed_8616(
     """
     if _chain_link_depth_exceeded_8616(chain_depth):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    consume_entry = chain.entry_binding is not None and chain.edge is None
     identity_failure = _chain_link_identity_8616(
-        project, artifact, boundary, chain
+        project, artifact, boundary, chain, validate_entry=not consume_entry,
     )
     if identity_failure is not None:
         return identity_failure
@@ -4123,18 +6821,25 @@ def _chain_link_seed_8616(
     retained_state = _transported_call_state_8616(chain.call_state)
     if retained_state is None:
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    derived = _derive_invocation_domain_8616(
-        project,
-        parent.coverage,
-        parent.callsite_addr,
-        parent.boot,
-        parent.boot_recompute,
-        parent.call_preservations,
-        chain=parent.chain,
-        entry_call_preservations=parent.entry_call_preservations,
-        declared_services=parent.declared_services,
-        chain_depth=chain_depth + 1,
+    derived = (
+        _consume_chain_parent_8616(chain, chain_depth) if consume_entry
+        else _derive_parent_for_chain_8616(parent, chain_depth)
     )
+    if derived is None:
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    return _chain_seed_from_capture_8616(chain, derived, retained_state)
+
+
+def _chain_seed_from_capture_8616(
+    chain: Real16CallChainLink8616, derived: _Derivation8616,
+    retained_state: dict[str, int] | None = None,
+) -> tuple[dict[str, int], PathMemory8616] | Real16InvocationFailure8616 | _NestedRefusal8616:
+    """Consume exact caller state and memory without callbacks or another replay."""
+    parent = chain.parent
+    if retained_state is None:
+        retained_state = _transported_call_state_8616(chain.call_state)
+    if retained_state is None:
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     if derived.failure is not None or derived.domain is None:
         return _NestedRefusal8616(
             Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN,
@@ -4185,18 +6890,16 @@ def _enclosed_link_identity_8616(
     divergence refuses ``enclosed_link_unproven``.
     """
     parent = link.parent
+    parent_surface = _retained_parent_census_surface_8616(parent)
     if (
         type(parent) is not Real16InvocationDomain8616
         or parent.project is not project
-        or parent.coverage is None
+        or parent_surface is None
+        or link.callsite_artifact is not parent_surface[0]
+        or link.callsite_boundary is not parent_surface[1]
     ):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
-    parent_artifact = parent.coverage.artifact
-    if (
-        link.callsite_artifact is not parent_artifact
-        or link.callsite_boundary is not parent.coverage.boundary
-    ):
-        return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
+    parent_artifact = parent_surface[0]
     if (
         type(link.callsite_index) is not DecodedDirectCallsiteIndex8616
         or not link.callsite_index.stats.closed
@@ -4334,9 +7037,64 @@ def _replayed_domain_equal_8616(
     )
 
 
+def _census_link_surface_8616(
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616,
+) -> (
+    tuple[object, object, object, object, Real16InvocationFailure8616]
+    | Real16InvocationFailure8616
+):
+    """Name one retained link's census surface, anchor pair, and refusal.
+
+    The *census surface* is the artifact/boundary pair the path proof
+    actually runs over — the callee pair for a ``CALL_CHAINED`` link, the
+    enclosing pair for an ``ENCLOSED_ENTRY`` link, the raw pair itself for
+    a raw boot surface — while the *anchor pair* — always the callee pair
+    — is what a supplied coverage must bind. A raw boot surface is
+    eligible only when every retained refusal is a pending selector-window
+    gate; raw census geometry is not edge proof, so any other refusal
+    stays unbound. A declared application link accepts a refusal-free or
+    selector-pending surface; its distinct seed authenticates the explicit
+    entry authority instead of assuming original startup reaches that head.
+    """
+    if type(chain) is DeclaredFunctionEntryLink8616:
+        pending = RawBootEntrySurface8616(chain.artifact, chain.boundary)
+        refusals = (*chain.artifact.refusals, *(row for block in chain.artifact.blocks for row in block.refusals))
+        if refusals and not raw_boot_entry_surface_pending_8616(pending):
+            return Real16InvocationFailure8616.COVERAGE_UNBOUND
+        return (chain.artifact, chain.boundary, chain.artifact, chain.boundary,
+                Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN)
+    if type(chain) is RawBootEntrySurface8616:
+        if not raw_boot_entry_surface_pending_8616(chain):
+            return Real16InvocationFailure8616.COVERAGE_UNBOUND
+        return (
+            chain.artifact,
+            chain.boundary,
+            chain.artifact,
+            chain.boundary,
+            Real16InvocationFailure8616.COVERAGE_UNBOUND,
+        )
+    if type(chain) is Real16CallChainLink8616:
+        return (
+            chain.callee_artifact,
+            chain.callee_boundary,
+            chain.callee_artifact,
+            chain.callee_boundary,
+            Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN,
+        )
+    if type(chain) is Real16EnclosedEntryLink8616:
+        return (
+            chain.enclosing_artifact,
+            chain.enclosing_boundary,
+            chain.callee_artifact,
+            chain.callee_boundary,
+            Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN,
+        )
+    return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+
+
 def _derive_census_surface_8616(
     coverage: IRBoundaryCoverageResult8616 | None,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None,
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
 ) -> (
     tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616]
     | Real16InvocationFailure8616
@@ -4363,20 +7121,17 @@ def _derive_census_surface_8616(
     anchor_artifact: object = None
     anchor_boundary: object = None
     link_failure: Real16InvocationFailure8616 | None = None
-    if type(chain) is Real16CallChainLink8616:
-        surface_artifact = chain.callee_artifact
-        surface_boundary = chain.callee_boundary
-        anchor_artifact = chain.callee_artifact
-        anchor_boundary = chain.callee_boundary
-        link_failure = Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    elif type(chain) is Real16EnclosedEntryLink8616:
-        surface_artifact = chain.enclosing_artifact
-        surface_boundary = chain.enclosing_boundary
-        anchor_artifact = chain.callee_artifact
-        anchor_boundary = chain.callee_boundary
-        link_failure = Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
-    elif chain is not None:
-        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+    if chain is not None:
+        link_surface = _census_link_surface_8616(chain)
+        if isinstance(link_surface, Real16InvocationFailure8616):
+            return link_surface
+        (
+            surface_artifact,
+            surface_boundary,
+            anchor_artifact,
+            anchor_boundary,
+            link_failure,
+        ) = link_surface
     if (
         coverage is not None
         and isinstance(coverage, IRBoundaryCoverageResult8616)
@@ -4415,12 +7170,76 @@ def _derive_census_surface_8616(
     return Real16InvocationFailure8616.COVERAGE_UNBOUND
 
 
+def _declared_function_entry_seed_8616(
+    project: object,
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    evidence: _BootEvidence8616,
+    link: DeclaredFunctionEntryLink8616,
+) -> tuple[int, _PathState8616, int, int, int, int, tuple[Real16InvocationAssumption8616, ...]] | Real16InvocationFailure8616:
+    """Authenticate declared application state without traversing original startup.
+
+    Source image bytes authenticate native instructions, not writable data at
+    the application entry. Only the explicit baseline premise and overlays
+    initialize memory; absent register lanes remain unknown.
+    """
+    from inertia.frontend.x86_16.declared_function_entry import (
+        DeclaredFunctionEntryAdmission8616,
+        revalidate_declared_function_entry_8616,
+    )
+
+    if type(link.admission) is not DeclaredFunctionEntryAdmission8616:
+        return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
+    specification = link.admission.spec
+    chunks = evidence.image.chunks
+    if len(chunks) != 1 or chunks[0][0] != evidence.load_segment << _SEGMENT_SHIFT_8616:
+        return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
+    base, module = chunks[0]
+    if (
+        evidence.environment_digest is None
+        or not revalidate_declared_function_entry_8616(
+            link.admission, source=evidence.source, loaded_module=module,
+            environment_sha256=evidence.environment_digest,
+        )
+    ):
+        return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
+    if (
+        _loaded_bytes_8616(project, base, len(module)) != module
+        or specification.load_segment != evidence.load_segment
+        or specification.range_start != boundary.addr
+        or specification.range_end != boundary.addr + boundary.size
+    ):
+        return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
+    if (
+        (specification.entry_segment << _SEGMENT_SHIFT_8616) + specification.entry_offset != artifact.function_addr
+        or link.artifact is not artifact or link.boundary is not boundary
+    ):
+        return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
+    registers = dict(specification.registers)
+    registers["cs"] = specification.entry_segment
+    memory = path_memory_initial_8616()
+    for span in specification.memory:
+        # Declared application memory may override writable module data, but
+        # cannot replace the native code this proof authenticates separately.
+        if any(code.contains(span.address + offset) for code in evidence.image.code_ranges for offset in range(len(span.data))):
+            return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+        memory.apply_write(span.address, len(span.data), span.data)
+    return (
+        specification.entry_segment, _PathState8616(registers, memory),
+        specification.entry_segment, specification.entry_offset,
+        registers["ss"], registers["sp"],
+        (Real16InvocationAssumption8616.DECLARED_FUNCTION_ENTRY,
+         Real16InvocationAssumption8616.DECLARED_CODE_SCOPE,
+         Real16InvocationAssumption8616.REPLAY_CORROBORATION),
+    )
+
+
 def _invocation_entry_seed_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     evidence: _BootEvidence8616,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None,
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
     chain_depth: int,
 ) -> (
     tuple[
@@ -4437,7 +7256,10 @@ def _invocation_entry_seed_8616(
 ):
     """Resolve the census selector/seed/entry coordinate for this domain.
 
-    A ``None`` chain keeps the boot-entry rule: the source-authenticated
+    A ``None`` chain keeps the boot-entry rule — and a retained
+    ``RawBootEntrySurface8616`` uses that same boot-entry seed, since a raw
+    startup surface is boot-rooted too; only its census surface and
+    pending-transfer handling differ: the source-authenticated
     MZ entry must equal the censused function head, and the seed is the
     initialized invocation state over initial memory. A retained chain
     instead replays the complete edge and seeds the transported call-row
@@ -4448,7 +7270,9 @@ def _invocation_entry_seed_8616(
     ``ENCLOSED_ENTRY`` link — must sit inside the transported selector's
     addressable band.
     """
-    if chain is None:
+    if type(chain) is DeclaredFunctionEntryLink8616:
+        return _declared_function_entry_seed_8616(project, artifact, boundary, evidence, chain)
+    if chain is None or type(chain) is RawBootEntrySurface8616:
         if evidence.entry_linear != artifact.function_addr:
             return Real16InvocationFailure8616.ENTRY_NOT_FUNCTION_HEAD
         return (
@@ -4500,7 +7324,12 @@ def _invocation_entry_seed_8616(
 
 def _service_assumption_8616(
     assumptions: tuple[Real16InvocationAssumption8616, ...],
-    consumptions: tuple[DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616, ...],
+    consumptions: tuple[
+        DeclaredServiceConsumption8616
+        | DeclaredResizeConsumption8616
+        | DeclaredVectorConsumption8616,
+        ...,
+    ],
 ) -> tuple[Real16InvocationAssumption8616, ...]:
     """Mark the consumed declared-service evidence on the proven premise."""
     if not consumptions:
@@ -4519,22 +7348,30 @@ def _derive_invocation_domain_8616(
     boot_recompute: Callable[[object], object] | None,
     call_preservations: tuple[SegmentCallPreservationResult8616, ...],
     *,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None = None,
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None = None,
     entry_call_preservations: tuple[object, ...] = (),
     declared_services: tuple[DeclaredInterruptService8616, ...] = (),
     chain_depth: int = 0,
+    construction: _DeclaredCallChainConstruction8616 | None = None,
+    prefix_capture: bool = False,
 ) -> _Derivation8616:
-    """Keep all nested domain derivations inside one shared replay budget."""
+    """Share the replay budget; optionally retain private diagnostic census data.
+
+    Prefix capture grants no admission or reuse authority and is disabled for
+    ordinary callers until current authentication and extension are implemented.
+    """
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
-    with segment_call_dependency_traversal_scope_8616():
+    with segment_call_dependency_traversal_scope_8616() as traversal:
         if time.monotonic() > _census_deadline_8616():
             return _early_derivation_8616(Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED)
+        if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616:
+            return _early_derivation_8616(Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED)
         return _derive_invocation_domain_body_8616(
             project, coverage, callsite_addr, boot, boot_recompute, call_preservations,
             chain=chain, entry_call_preservations=entry_call_preservations,
             declared_services=declared_services,
-            chain_depth=chain_depth,
+            chain_depth=chain_depth, construction=construction, prefix_capture=prefix_capture,
         )
 
 
@@ -4555,6 +7392,58 @@ def _seeded_refusal_derivation_8616(
     return _early_derivation_8616(seeded)
 
 
+def _declared_entry_authority_8616(
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
+) -> DeclaredFunctionEntryAdmission8616 | Real16InvocationFailure8616 | None:
+    """Inspect the root after all allowed links; refuse an unresolved origin.
+
+    Entry seeding permits sixteen transport links followed by a declared root.
+    An origin beyond that cap must not inherit the ordinary boot baseline.
+    """
+    for _ in range(_CHAIN_DEPTH_LIMIT_8616 + 1):
+        if type(chain) is DeclaredFunctionEntryLink8616:
+            return chain.admission
+        if type(chain) not in (Real16CallChainLink8616, Real16EnclosedEntryLink8616):
+            return None
+        chain = cast(Real16CallChainLink8616 | Real16EnclosedEntryLink8616, chain).parent.chain
+    return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
+
+
+def _invocation_initial_memory_for_entry_8616(
+    evidence: _BootEvidence8616,
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
+) -> InvocationInitialMemory8616 | None:
+    """Keep a declared root's unknown-memory policy across transported calls.
+
+    The callsite snapshot transports known overlays. A descendant must not
+    resurrect undeclared module/global bytes from the original loader state.
+    """
+    authority = _declared_entry_authority_8616(chain)
+    if isinstance(authority, Real16InvocationFailure8616):
+        return None
+    initialized = invocation_initial_memory_8616(
+        evidence.environment, evidence.environment_digest, evidence.image.chunks,
+    )
+    if authority is None:
+        return initialized
+    # Allocation authority does not imply known initial contents. Fresh native
+    # writes may be read within authenticated ranges even when the entry omits
+    # baseline bytes; unwritten data must stay unknown in descendants as well.
+    chunks = (
+        initialized.chunks
+        if initialized is not None and authority.spec.use_environment_memory
+        else ()
+    )
+    write_ranges = (
+        () if initialized is None
+        else tuple((base, len(data)) for base, data in initialized.chunks)
+    )
+    return InvocationInitialMemory8616(
+        chunks + tuple((span.address, span.data) for span in authority.spec.memory),
+        write_ranges=write_ranges,
+    )
+
+
 def _derive_invocation_domain_body_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
@@ -4563,10 +7452,12 @@ def _derive_invocation_domain_body_8616(
     boot_recompute: Callable[[object], object] | None,
     call_preservations: tuple[SegmentCallPreservationResult8616, ...],
     *,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None = None,
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None = None,
     entry_call_preservations: tuple[object, ...] = (),
     declared_services: tuple[DeclaredInterruptService8616, ...] = (),
     chain_depth: int = 0,
+    construction: _DeclaredCallChainConstruction8616 | None = None,
+    prefix_capture: bool = False,
 ) -> _Derivation8616:
     """Derive the exact CS selector domain, or a typed refusal + counts.
 
@@ -4579,7 +7470,7 @@ def _derive_invocation_domain_body_8616(
     pair for ``CALL_CHAINED`` or its enclosing pair for
     ``ENCLOSED_ENTRY``.
     """
-    surface = _derive_census_surface_8616(coverage, chain)
+    surface = _construction_census_surface_8616(coverage, chain, construction)
     if isinstance(surface, Real16InvocationFailure8616):
         return _early_derivation_8616(surface)
     artifact, boundary = surface
@@ -4590,7 +7481,7 @@ def _derive_invocation_domain_body_8616(
     evidence = _invocation_boot_evidence_8616(boot)
     if isinstance(evidence, Real16InvocationFailure8616):
         return _early_derivation_8616(evidence)
-    failure = _recompute_boot_8616(boot, boot_recompute)
+    failure = _recompute_validated_boot_8616(boot, boot_recompute)
     if failure is not None:
         return _early_derivation_8616(failure)
     if (
@@ -4598,8 +7489,8 @@ def _derive_invocation_domain_body_8616(
         != evidence.image.file_sha256
     ):
         return _early_derivation_8616(Real16InvocationFailure8616.BOOT_NOT_REPRODUCED)
-    seeded = _invocation_entry_seed_8616(
-        project, artifact, boundary, evidence, chain, chain_depth
+    seeded, chain = _construction_entry_seed_8616(
+        project, artifact, boundary, evidence, chain, chain_depth, construction,
     )
     if isinstance(seeded, _NestedRefusal8616 | Real16InvocationFailure8616):
         return _seeded_refusal_derivation_8616(seeded)
@@ -4616,12 +7507,11 @@ def _derive_invocation_domain_body_8616(
     if isinstance(call_block, Real16InvocationFailure8616):
         return _early_derivation_8616(call_block)
     dangerous = _dangerous_block_addrs_8616(artifact, call_block)
+    facts = new_census_fact_sets_8616() if prefix_capture else (set(), set(), set(), set())
     ctx = _PathCensusContext8616(
         project=project,
         selector=selector,
-        initial_memory=invocation_initial_memory_8616(
-            evidence.environment, evidence.environment_digest, evidence.image.chunks
-        ),
+        initial_memory=_invocation_initial_memory_for_entry_8616(evidence, chain),
         image=evidence.image,
         boot=boot,
         chain=chain,
@@ -4636,20 +7526,22 @@ def _derive_invocation_domain_body_8616(
         callsite_addr=callsite_addr,
         callsite_call_state=None,
         callsite_memory=None,
-        manifest=[],
+        manifest=set(),
         machine_bytes={},
         native_blocks={},
         checked_stores=0,
         censused_callees=set(),
-        raw_facts=set(),
-        normalized_facts=set(),
-        classified_facts=set(),
-        materialized_facts=set(),
+        raw_facts=facts[0],
+        normalized_facts=facts[1],
+        classified_facts=facts[2],
+        materialized_facts=facts[3],
         failures=0,
         work_units=0,
         work_limit=_CENSUS_WORK_LIMIT_8616,
         deadline=_census_deadline_8616(),
         first_failure_site=None,
+        prefix_capture_requested=prefix_capture,
+        prefix_boot_recompute=boot_recompute,
     )
     failure = _census_invocation_8616(
         ctx, artifact, boundary, dangerous, call_block, callsite_addr, seed
@@ -4661,6 +7553,11 @@ def _derive_invocation_domain_body_8616(
         materialized_count,
         failure_count,
     ) = _census_counts_8616(ctx)
+    consultation = (
+        _EntryCallPoolConsultation8616.READ
+        if ctx.entry_call_pool_consulted
+        else _EntryCallPoolConsultation8616.UNUSED
+    )
     if failure is not None:
         return _Derivation8616(
             domain=None,
@@ -4676,6 +7573,7 @@ def _derive_invocation_domain_body_8616(
                 if ctx.edge_feasibility is None
                 else ctx.edge_feasibility.infeasible_edges
             ),
+            entry_call_pool_consultation=consultation,
         )
     consumptions = tuple(ctx.service_consumptions)
     assumptions = _service_assumption_8616(assumptions, consumptions)
@@ -4684,7 +7582,9 @@ def _derive_invocation_domain_body_8616(
         if ctx.edge_feasibility is None
         else ctx.edge_feasibility.live_blocks
     )
+    captured = _retain_prefix_census_8616(ctx, seed, artifact, boundary, boot_recompute)
     return _Derivation8616(
+        constructed_chain=chain if construction is not None and type(chain) is Real16CallChainLink8616 else None,
         domain=_DerivedDomain8616(
             minimum_selector=selector,
             maximum_selector=selector,
@@ -4695,7 +7595,7 @@ def _derive_invocation_domain_body_8616(
             load_segment=evidence.load_segment,
             source_sha256=evidence.image.file_sha256,
             path_block_addrs=tuple(sorted(path_blocks)),
-            fetched_range_count=len(ctx.manifest),
+            fetched_range_count=ctx.fetched_span_admissions,
             checked_store_count=ctx.checked_stores,
             assumptions=assumptions,
             callsite_artifact=artifact,
@@ -4723,13 +7623,83 @@ def _derive_invocation_domain_body_8616(
         classified_fact_count=classified_fact_count,
         materialized_count=materialized_count,
         failure_count=failure_count,
+        entry_call_pool_consultation=consultation,
+        prefix_census=captured,
     )
 
 
+def _retain_prefix_census_8616(
+    ctx: _PathCensusContext8616, seed: _PathState8616,
+    artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
+    boot_recompute: Callable[[object], object] | None,
+) -> _OwnedPrefixCensus8616 | None:
+    """Transfer successful private data if the original budget admits one handoff.
+
+    Called only after ordinary census success. A capture miss keeps that success;
+    it grants no authentication, replay verdict or extension permission.
+    """
+    if ctx.prefix_consumed or not ctx.prefix_capture_requested or ctx.prefix_terminal_call is None:
+        return None
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        pending = ctx.work_units - ctx.accounted_work_units
+        estimate_work = len(artifact.blocks)
+        if (time.monotonic() > ctx.deadline or ctx.work_units + estimate_work > ctx.work_limit
+                or traversal.census_work_units + pending + estimate_work > _CENSUS_WORK_LIMIT_8616):
+            return None
+        lower = _prefix_structural_extension_lower_8616(ctx, artifact, boundary)
+        if lower is None or lower >= ctx.prefix_simulation_work:
+            return None
+        pending = ctx.work_units - ctx.accounted_work_units
+        capture_work = 3 * len(_BASE_FUSED_CALLEE_OPERATIONS_8616.producers) + 39 + len(ctx.prefix_call_consumptions)
+        if (time.monotonic() > ctx.deadline or ctx.work_units + capture_work > ctx.work_limit
+                or traversal.census_work_units + pending + capture_work > _CENSUS_WORK_LIMIT_8616):
+            return None
+        ctx.work_units += capture_work
+        producers = _prefix_execution_producers_8616()
+        ownership = census_fact_ownership_8616(
+            (ctx.raw_facts, ctx.normalized_facts, ctx.classified_facts, ctx.materialized_facts),
+        )
+        if _census_resource_failure_8616(ctx) is not None:
+            return None
+        ctx.prefix_capture_requested = False
+        return _OwnedPrefixCensus8616(
+            ctx, seed, artifact, boundary, boot_recompute,
+            _census_counts_8616(ctx), ctx.checked_stores, producers, ctx.prefix_simulation_work, ownership,
+            tuple(ctx.prefix_call_consumptions),
+        )
+
+
 def _service_consumption_dict_8616(
-    consumption: DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616,
+    consumption: (
+        DeclaredServiceConsumption8616
+        | DeclaredResizeConsumption8616
+        | DeclaredVectorConsumption8616
+    ),
 ) -> dict[str, object]:
     """Serialize one consumed declared-service record with its kind tag."""
+    if isinstance(consumption, DeclaredVectorConsumption8616):
+        return {
+            "kind": "vector",
+            "callsite_addr": consumption.callsite_addr,
+            "vector": consumption.vector,
+            "function": consumption.function,
+            "number": consumption.number,
+            "slot_linear": consumption.slot_linear,
+            "slot_before_hex": consumption.slot_before.hex(),
+            "slot_after_hex": (
+                None if consumption.slot_after is None
+                else consumption.slot_after.hex()
+            ),
+            "answer_es": consumption.answer_es,
+            "answer_bx": consumption.answer_bx,
+            "request_ds": consumption.request_ds,
+            "request_dx": consumption.request_dx,
+            "frame_linear": consumption.frame_linear,
+            "frame_bytes": consumption.frame_bytes,
+            "relation_sha256": consumption.relation_sha256,
+        }
     if isinstance(consumption, DeclaredServiceConsumption8616):
         return {
             "kind": "version",
@@ -4744,7 +7714,7 @@ def _service_consumption_dict_8616(
             "frame_bytes": consumption.frame_bytes,
             "relation_sha256": consumption.relation_sha256,
         }
-    return {
+    record: dict[str, object] = {
         "kind": "resize",
         "callsite_addr": consumption.callsite_addr,
         "vector": consumption.vector,
@@ -4760,6 +7730,20 @@ def _service_consumption_dict_8616(
         "frame_bytes": consumption.frame_bytes,
         "relation_sha256": consumption.relation_sha256,
     }
+    if consumption.dosbox_writes is not None:
+        record["dosbox_writes"] = [
+            {"address": write.address, "data_hex": write.data.hex()}
+            for write in consumption.dosbox_writes
+        ]
+        record["dosbox_current_chain"] = (
+            None if consumption.dosbox_current_chain is None
+            else [image.hex() for image in consumption.dosbox_current_chain]
+        )
+        record["dosbox_new_header_before_hex"] = (
+            None if consumption.dosbox_new_header_before is None
+            else consumption.dosbox_new_header_before.hex()
+        )
+    return record
 
 
 @dataclass(frozen=True, slots=True)
@@ -4799,7 +7783,7 @@ class Real16InvocationDomain8616:
     materialized_count: int
     failure_count: int
     project: object = field(compare=False, repr=False)
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None = field(
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None = field(
         default=None, compare=False
     )
     entry_call_preservations: tuple[object, ...] = field(
@@ -4812,7 +7796,10 @@ class Real16InvocationDomain8616:
     callsite_memory: PathMemorySnapshot8616 | None = None
     declared_services: tuple[DeclaredInterruptService8616, ...] = ()
     service_consumptions: tuple[
-        DeclaredServiceConsumption8616 | DeclaredResizeConsumption8616, ...
+        DeclaredServiceConsumption8616
+        | DeclaredResizeConsumption8616
+        | DeclaredVectorConsumption8616,
+        ...,
     ] = ()
     #: The exact classified census row that first failed, when the census
     #: reached one; ``None`` on success and on structural/budget refusals
@@ -4823,43 +7810,46 @@ class Real16InvocationDomain8616:
     #: Invocation-local evidence only — never a universal dead-code claim.
     infeasible_edges: tuple[tuple[int, int], ...] = ()
 
+    #: Historical canonical consultation is scheduling advice only. Sharing
+    #: still requires a fresh UNUSED receipt, not this retained observation.
+    entry_call_pool_advice: _EntryCallPoolConsultation8616 = _EntryCallPoolConsultation8616.UNKNOWN
+
     @property
     def complete(self) -> bool:
         """Replay once per shared bounded traversal; cyclic evidence refuses."""
-        from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+        return self._complete_with_fresh_derivation_8616(None)
 
-        with segment_call_dependency_traversal_scope_8616() as traversal:
-            identity = id(self)
-            if identity in traversal.active_domains:
-                return False
-            if time.monotonic() > _census_deadline_8616():
-                return False
-            if identity in traversal.domain_verdicts:
-                return traversal.domain_verdicts[identity]
-            if traversal.remaining_domains <= 0 or len(traversal.active_domains) >= _CHAIN_DEPTH_LIMIT_8616:
-                return False
-            traversal.remaining_domains -= 1
-            traversal.retained_domains[identity] = self
-            traversal.active_domains.add(identity)
-            try:
-                verdict = self._replay_complete_8616()
-            finally:
-                traversal.active_domains.remove(identity)
-            traversal.domain_verdicts[identity] = verdict
-            return verdict
+    def _complete_with_fresh_derivation_8616(self, derived: _Derivation8616 | None) -> bool:
+        """Apply the normal traversal gate to replay or an immediate derivation.
+
+        Checked factories supply ``derived`` synchronously; public completeness
+        supplies ``None`` and reauthenticates through its ordinary replay.
+        """
+        def verify() -> bool:
+            """Consume the immediate derivation or perform ordinary replay."""
+            if derived is None:
+                return self._replay_complete_8616()
+            return derived.failure is None and _replayed_domain_equal_8616(derived, self)
+
+        return self._consume_completion_8616(verify)
+
+    def _consume_completion_8616(
+        self, verify: Callable[[], bool], *, force_current: bool = False,
+    ) -> bool:
+        """Run ordinary or forced-current verification inside one shared guard.
+
+        Ordinary completeness retains its per-traversal verdict behavior. A
+        synchronous consumer forces the verifier after all native callbacks,
+        even for a cached positive, while preserving active-domain/depth bounds
+        and charging an uncached domain only once. Cached refusals never replay.
+        """
+        return _consume_invocation_admission_8616(self, verify, force_current=force_current)
 
     def _replay_complete_8616(self) -> bool:
         """Recompute the retained domain only after entering the shared guard."""
         if self.failure is not None:
             return False
-        if self.kind is Real16InvocationKind8616.BOOT_ENTRY_PATH:
-            link_bound = self.chain is None
-        elif self.kind is Real16InvocationKind8616.CALL_CHAINED:
-            link_bound = type(self.chain) is Real16CallChainLink8616
-        elif self.kind is Real16InvocationKind8616.ENCLOSED_ENTRY:
-            link_bound = type(self.chain) is Real16EnclosedEntryLink8616
-        else:
-            link_bound = False
+        link_bound = _retained_domain_kind_bound_8616(self)
         if not link_bound:
             # Kind and retained edge must agree: a transported premise
             # without its retained link — or a boot premise carrying one —
@@ -4875,10 +7865,14 @@ class Real16InvocationDomain8616:
             chain=self.chain,
             entry_call_preservations=self.entry_call_preservations,
             declared_services=self.declared_services,
+            prefix_capture=type(self.chain) in (DeclaredFunctionEntryLink8616, RawBootEntrySurface8616),
         )
         if derived.failure is not None or derived.domain is None:
             return False
-        return _replayed_domain_equal_8616(derived, self)
+        if not _replayed_domain_equal_8616(derived, self):
+            return False
+        _enroll_prefix_census_data_8616(self, derived)
+        return True
 
     @property
     def domain_interval(self) -> tuple[int, int] | None:
@@ -4891,6 +7885,7 @@ class Real16InvocationDomain8616:
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the typed proof for receipts and logging."""
+        authority = _declared_entry_authority_8616(self.chain)
         return {
             "verdict": "proven" if self.complete else "unknown_refuse",
             "failure": self.failure.value if self.failure else None,
@@ -4915,9 +7910,30 @@ class Real16InvocationDomain8616:
             "maximum_selector": self.maximum_selector,
             "path_block_addrs": list(self.path_block_addrs),
             "infeasible_edges": [list(edge) for edge in self.infeasible_edges],
+            "entry_call_pool_advice": self.entry_call_pool_advice.value,
             "fetched_range_count": self.fetched_range_count,
             "checked_store_count": self.checked_store_count,
-            "chained": self.chain is not None,
+            "declared_function_entry": (
+                authority.to_dict()
+                if authority is not None and not isinstance(authority, Real16InvocationFailure8616) else None
+            ),
+            "chained": isinstance(
+                self.chain,
+                (Real16CallChainLink8616, Real16EnclosedEntryLink8616),
+            ),
+            "call_entry_binding": (
+                {
+                    "callsite_addr": self.chain.entry_binding.callsite_addr,
+                    "target_addr": self.chain.entry_binding.target_addr,
+                    "shape": (
+                        self.chain.entry_binding.shape.to_dict()
+                        if self.chain.entry_binding.shape is not None else None
+                    ),
+                    "entry_only": True,
+                }
+                if isinstance(self.chain, Real16CallChainLink8616)
+                and self.chain.entry_binding is not None else None
+            ),
             "callsite_call_state": dict(self.callsite_call_state),
             "callsite_memory": (
                 None
@@ -4939,6 +7955,351 @@ class Real16InvocationDomain8616:
             "materialized_count": self.materialized_count,
             "failure_count": self.failure_count,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _DeclaredInvocationConstruction8616:
+    """Resource-admission target for a fresh prefix; never a proof claim."""
+
+    project: object
+    surface: DeclaredFunctionEntryLink8616
+    callsite_addr: int
+    boot: object
+    boot_recompute: Callable[[object], object] | None
+    coverage: IRBoundaryCoverageResult8616 | None = None
+    entry_call_preservations: tuple[object, ...] = ()
+    declared_services: tuple[DeclaredInterruptService8616, ...] = ()
+
+
+
+class _DeclaredNearBindingProvider8616(Protocol):
+    """Canonical native binding owner invoked before the caller is constructed."""
+
+    def __call__(
+        self, factory: Callable[[], Real16CallInvocation8616 | None], /,
+    ) -> DirectNearCallTargetBinding8616:
+        """Run native gates first, then call the IR-owned fresh factory once."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class _DeclaredCallChainConstruction8616:
+    """Operation-local inputs; grants neither a premise nor a retained edge."""
+
+    caller: _DeclaredInvocationConstruction8616
+    callsite_index: DecodedDirectCallsiteIndex8616
+    callsite: DecodedDirectCallsite8616
+    block: IRBlock
+    callee_artifact: IRFunctionArtifact
+    callee_boundary: ExactFunctionRangeBoundary8616
+    binding_provider: _DeclaredNearBindingProvider8616
+
+
+
+_InvocationEntrySeed8616 = tuple[
+    int, _PathState8616, int, int, int, int,
+    tuple[Real16InvocationAssumption8616, ...],
+]
+type _RetainedInvocationLink8616 = (
+    Real16CallChainLink8616 | Real16EnclosedEntryLink8616
+    | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None
+)
+
+
+def _construction_census_surface_8616(
+    coverage: IRBoundaryCoverageResult8616 | None,
+    chain: _RetainedInvocationLink8616,
+    request: _DeclaredCallChainConstruction8616 | None,
+) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | Real16InvocationFailure8616:
+    """Select only the raw native intake surface before a pending edge exists."""
+    if request is None:
+        return _derive_census_surface_8616(coverage, chain)
+    if (not closed_ir_boundary_cfg_8616(request.callee_boundary, request.callee_artifact)
+            or not _instruction_census_matches_8616(request.callee_boundary, request.callee_artifact)):
+        return Real16InvocationFailure8616.COVERAGE_UNBOUND
+    return request.callee_artifact, request.callee_boundary
+
+
+def _construction_entry_seed_8616(
+    project: object, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, evidence: _BootEvidence8616,
+    chain: _RetainedInvocationLink8616, chain_depth: int,
+    request: _DeclaredCallChainConstruction8616 | None,
+) -> tuple[_InvocationEntrySeed8616 | Real16InvocationFailure8616 | _NestedRefusal8616, _RetainedInvocationLink8616]:
+    """Resolve a pending edge only after boot callbacks, transporting pure capture."""
+    if request is None:
+        return _invocation_entry_seed_8616(project, artifact, boundary, evidence, chain, chain_depth), chain
+    if _chain_link_depth_exceeded_8616(chain_depth):
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN, None
+    resolved = _construct_declared_chain_entry_8616(request)
+    if resolved is None:
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN, None
+    actual, parent_capture = resolved
+    captured_seed = _chain_seed_from_capture_8616(actual, parent_capture)
+    if isinstance(captured_seed, _NestedRefusal8616 | Real16InvocationFailure8616):
+        return captured_seed, actual
+    registers, memory = captured_seed
+    selector = registers["cs"]
+    offset = artifact.function_addr - (selector << _SEGMENT_SHIFT_8616)
+    if not 0 <= offset <= _WORD_LIMIT_8616 or "ss" not in registers:
+        return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN, actual
+    return (
+        selector, _PathState8616(registers, memory), selector, offset,
+        registers["ss"], registers["sp"],
+        (*actual.parent.assumptions, Real16InvocationAssumption8616.CHAINED_CALL_ENTRY),
+    ), actual
+
+
+def _construct_declared_chain_entry_8616(
+    request: _DeclaredCallChainConstruction8616,
+) -> tuple[Real16CallChainLink8616, _Derivation8616] | None:
+    """Bind native row/provenance first, then capture one guarded caller prefix."""
+    target = request.caller
+    row = request.callsite
+    surface = target.surface
+    if (type(row) is not DecodedDirectCallsite8616
+            or type(request.callsite_index) is not DecodedDirectCallsiteIndex8616):
+        return None
+    encoded = row.bound_near_coordinates(surface.boundary)
+    if (
+        encoded is None or encoded[1] != request.callee_artifact.function_addr
+        or row.callsite_addr != target.callsite_addr
+        or row.caller_start != surface.artifact.function_addr
+        or not request.callsite_index.stats.closed
+    ):
+        return None
+    if not any(item is row for item in request.callsite_index.for_target(row.target_addr)):
+        return None
+    captured: tuple[Real16InvocationDomain8616, _Derivation8616] | None = None
+    invocation: Real16CallInvocation8616 | None = None
+
+    def construct() -> Real16CallInvocation8616 | None:
+        """Authenticate after the provider's last native callback, once only."""
+        nonlocal captured, invocation
+        if captured is not None:
+            return None
+        captured = _construct_declared_invocation_domain_8616(target)
+        if captured is None:
+            return None
+        parent, _derived = captured
+        if not _invocation_use_bound_8616(
+            parent, project=target.project, block=request.block,
+            callsite_addr=target.callsite_addr, target_addr=request.callee_artifact.function_addr,
+        ):
+            return None
+        invocation = Real16CallInvocation8616(
+            parent, target.callsite_addr, request.callee_artifact.function_addr,
+            target.project, request.block,
+        )
+        return invocation
+
+    binding = request.binding_provider(construct)
+    if (captured is None or invocation is None or binding.invocation is not invocation
+            or binding.failure is not None or not binding.stats.closed):
+        return None
+    parent, derived = captured
+    chain = Real16CallChainLink8616(
+        parent, request.callsite_index, row, surface.artifact, surface.boundary,
+        parent.callsite_call_state, request.callee_artifact, request.callee_boundary,
+        entry_binding=binding,
+    )
+    if _chain_link_owned_identity_8616(
+        target.project, request.callee_artifact, request.callee_boundary, chain,
+    ) is not None:
+        return None
+    return chain, derived
+
+
+def _construct_declared_chained_invocation_domain_8616(
+    request: _DeclaredCallChainConstruction8616,
+) -> tuple[DirectNearCallTargetBinding8616, Real16InvocationDomain8616] | None:
+    """Validate callee boot first, then construct its caller and pure entry transport."""
+    target = request.caller
+    derived = _derive_invocation_domain_8616(
+        target.project, None, request.callee_artifact.function_addr,
+        target.boot, target.boot_recompute, (),
+        declared_services=target.declared_services, construction=request,
+    )
+    chain = derived.constructed_chain
+    if chain is None or chain.entry_binding is None:
+        return None
+    domain = _domain_from_derivation_8616(
+        target.project, None, request.callee_artifact.function_addr,
+        target.boot, target.boot_recompute, (), (), target.declared_services,
+        Real16InvocationKind8616.CALL_CHAINED, chain, derived,
+    )
+    if not domain._complete_with_fresh_derivation_8616(derived):
+        return None
+    return chain.entry_binding, domain
+
+
+def _consume_invocation_admission_8616(
+    subject: Real16InvocationDomain8616 | _DeclaredInvocationConstruction8616,
+    verify: Callable[[], bool],
+    *, force_current: bool = False,
+) -> bool:
+    """Own the single active/depth/deadline/domain guard for replay and construction.
+
+    Construction tokens acquire resource admission only. They neither retain a
+    verdict nor occupy the proof registry; their live invocation pins identity
+    until the active guard leaves. Canonical successful factories enroll only
+    the real domain produced by the admitted native derivation.
+    """
+    construction = isinstance(subject, _DeclaredInvocationConstruction8616)
+    if isinstance(subject, Real16InvocationDomain8616) and subject.failure is not None:
+        return False
+    from .segment_call_preservation import (
+        DeclaredInvocationConstructionKey8616,
+        segment_call_dependency_traversal_scope_8616,
+    )
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        domain_identity = id(subject)
+        identity = (
+            DeclaredInvocationConstructionKey8616(
+                id(subject.project), subject.surface.artifact.function_addr, subject.callsite_addr,
+            )
+            if isinstance(subject, _DeclaredInvocationConstruction8616) else domain_identity
+        )
+        if identity in traversal.active_domains or time.monotonic() > _census_deadline_8616():
+            return False
+        cached = not construction and domain_identity in traversal.domain_verdicts
+        if cached and (not force_current or not traversal.domain_verdicts[domain_identity]):
+            return traversal.domain_verdicts[domain_identity]
+        if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616:
+            return False
+        if (not cached and traversal.remaining_domains <= 0) or len(traversal.active_domains) >= _CHAIN_DEPTH_LIMIT_8616:
+            return False
+        if not cached:
+            traversal.remaining_domains -= 1
+        if isinstance(subject, Real16InvocationDomain8616):
+            traversal.retained_domains[domain_identity] = subject
+        traversal.active_domains.add(identity)
+        verdict = False
+        try:
+            verdict = verify()
+        finally:
+            traversal.active_domains.remove(identity)
+            if not construction and not verdict:
+                # Paired admission may fail after its inner derivation succeeds.
+                # Pending data never outlives a failed or exceptional verifier.
+                traversal.invocation_prefixes.pop(domain_identity, None)
+        if not construction:
+            traversal.domain_verdicts[domain_identity] = verdict
+        return verdict
+
+
+def _construct_declared_invocation_domain_8616(
+    target: _DeclaredInvocationConstruction8616,
+) -> tuple[Real16InvocationDomain8616, _Derivation8616] | None:
+    """Derive exactly once after normal admission, returning only current facts."""
+    captured: tuple[Real16InvocationDomain8616, _Derivation8616] | None = None
+
+    def verify() -> bool:
+        """Run the canonical producer while construction remains active."""
+        nonlocal captured
+        captured = _derive_declared_function_entry_domain_8616(
+            target.project, target.surface, target.callsite_addr,
+            boot=target.boot, boot_recompute=target.boot_recompute,
+            coverage=target.coverage,
+            entry_call_preservations=target.entry_call_preservations,
+            declared_services=target.declared_services,
+            prefix_capture=True,
+        )
+        domain, derived = captured
+        return derived.failure is None and _replayed_domain_equal_8616(derived, domain)
+
+    if not _consume_invocation_admission_8616(target, verify):
+        return None
+    if captured is None:
+        return None
+    domain, _derived = captured
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        traversal.retained_domains[id(domain)] = domain
+        traversal.domain_verdicts[id(domain)] = True
+        _enroll_prefix_census_data_8616(domain, _derived)
+    return captured
+
+
+def _prefix_terminal_data_bound_8616(data: _OwnedPrefixCensus8616) -> bool:
+    """Bind terminal metadata to its captured row without claiming native proof."""
+    ctx = data.context
+    terminal = ctx.prefix_terminal_call
+    if terminal is None:
+        return False
+    index = terminal.index
+    if type(index) is not int or index < 0 or index != len(terminal.block.instrs) - 1:
+        return False
+    return (
+        terminal.artifact is data.artifact
+        and ctx.stop_block_addr == terminal.block.addr
+        and terminal.block.instrs[index] is terminal.instruction
+        and terminal.instruction.addr == ctx.callsite_addr
+    )
+
+
+def _enroll_prefix_census_data_8616(
+    subject: Real16InvocationDomain8616, derived: _Derivation8616,
+) -> None:
+    """Keep guarded successful replay data within its existing bounded traversal.
+
+    Callers invoke this only after projection equality succeeds. Enrollment
+    does not authenticate carried effects or permit callback/continuation reuse.
+    Missing capture authority leaves the ordinary completed proof unchanged.
+    """
+    data = derived.prefix_census
+    if derived.failure is not None or derived.domain is None or data is None:
+        return
+    chain = subject.chain
+    if type(chain) not in (DeclaredFunctionEntryLink8616, RawBootEntrySurface8616):
+        return
+    root = cast(DeclaredFunctionEntryLink8616 | RawBootEntrySurface8616, chain)
+    ctx = data.context
+    if ctx.prefix_consumed:
+        return
+    source = ctx.prefix_sources.bindings.get(data.artifact.function_addr)
+    if not ctx.prefix_sources.complete or source is None or not _prefix_terminal_data_bound_8616(data):
+        return
+    if (
+        ctx.project is not subject.project or ctx.chain is not chain
+        or data.artifact is not root.artifact or data.boundary is not root.boundary
+    ):
+        return
+    if ctx.boot is not subject.boot or data.boot_recompute is not subject.boot_recompute:
+        return
+    if (
+        source.project is not subject.project or source.boundary is not data.boundary
+        or ctx.callsite_addr != subject.callsite_addr
+    ):
+        return
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        identity = id(subject)
+        if traversal.retained_domains.get(identity) is not subject:
+            return
+        if identity not in traversal.active_domains and traversal.domain_verdicts.get(identity) is not True:
+            return
+        traversal.invocation_prefixes[identity] = data
+
+
+def _retained_domain_kind_bound_8616(domain: Real16InvocationDomain8616) -> bool:
+    """Require the retained provenance link to match its typed domain kind."""
+    if domain.kind is Real16InvocationKind8616.DECLARED_FUNCTION_ENTRY:
+        link_bound = type(domain.chain) is DeclaredFunctionEntryLink8616
+    elif domain.kind is Real16InvocationKind8616.BOOT_ENTRY_PATH:
+        link_bound = domain.chain is None
+    elif domain.kind is Real16InvocationKind8616.RAW_BOOT_ENTRY_PATH:
+        link_bound = type(domain.chain) is RawBootEntrySurface8616 and domain.coverage is None
+    elif domain.kind is Real16InvocationKind8616.CALL_CHAINED:
+        link_bound = type(domain.chain) is Real16CallChainLink8616
+    elif domain.kind is Real16InvocationKind8616.ENCLOSED_ENTRY:
+        link_bound = type(domain.chain) is Real16EnclosedEntryLink8616
+    else:
+        link_bound = False
+    return link_bound
 
 
 @dataclass(frozen=True, slots=True)
@@ -4967,6 +8328,38 @@ class Real16CallInvocation8616:
         )
 
 
+def _discharge_consuming_artifact_8616(
+    premise: Real16InvocationDomain8616,
+    project: object,
+) -> IRFunctionArtifact | None:
+    """Return the premise's consumption-anchored artifact for ``project``.
+
+    A coverage-bound premise consumes its registered artifact. A retained
+    raw boot surface and a transported link — which may prove an in-flight
+    callee artifact that cannot carry registry coverage — instead consume
+    their identical retained census objects: the surface pair itself, or
+    the link's callee pair for an ``ENCLOSED_ENTRY`` link whose census ran
+    over the enclosing pair. Project identity is part of the anchor; a
+    foreign project has no consuming surface.
+    """
+    coverage = premise.coverage
+    if coverage is not None:
+        if coverage.boundary.project is not project:
+            return None
+        return coverage.artifact
+    chain = premise.chain
+    if type(chain) is RawBootEntrySurface8616 or type(chain) is DeclaredFunctionEntryLink8616:
+        if chain.boundary.project is not project:
+            return None
+        return chain.artifact
+    if type(chain) not in (Real16CallChainLink8616, Real16EnclosedEntryLink8616):
+        return None
+    link = cast(Real16CallChainLink8616 | Real16EnclosedEntryLink8616, chain)
+    if link.callee_boundary.project is not project:
+        return None
+    return link.callee_artifact
+
+
 def real16_invocation_discharges_8616(
     premise: Real16InvocationDomain8616 | None,
     *,
@@ -4987,23 +8380,21 @@ def real16_invocation_discharges_8616(
         return False
     if not premise.complete:
         return False
+    return _invocation_use_bound_8616(
+        premise, project=project, block=block, callsite_addr=callsite_addr,
+        target_addr=target_addr,
+    )
+
+
+def _invocation_use_bound_8616(
+    premise: Real16InvocationDomain8616,
+    *, project: object, block: IRBlock, callsite_addr: int, target_addr: int,
+) -> bool:
+    """Check pure consumption coordinates after current premise authentication."""
     if premise.callsite_addr != callsite_addr:
         return False
-    coverage = premise.coverage
-    if coverage is not None:
-        if coverage.boundary.project is not project:
-            return False
-        artifact = coverage.artifact
-    elif premise.chain is not None:
-        # Transported premises may prove an in-flight callee artifact that
-        # cannot carry registry coverage; the retained link's identical
-        # callee objects are the consumption anchor instead. For an
-        # ``ENCLOSED_ENTRY`` link the census ran over the enclosing pair,
-        # but consumption still binds the enclosed callee surface.
-        if premise.chain.callee_boundary.project is not project:
-            return False
-        artifact = premise.chain.callee_artifact
-    else:
+    artifact = _discharge_consuming_artifact_8616(premise, project)
+    if artifact is None:
         return False
     if not any(owner is block for owner in artifact.blocks):
         return False
@@ -5022,7 +8413,7 @@ def _domain_from_derivation_8616(
     entry_preservations: tuple[object, ...],
     declared_services: tuple[DeclaredInterruptService8616, ...],
     kind: Real16InvocationKind8616,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None,
+    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
     derived: _Derivation8616,
 ) -> Real16InvocationDomain8616:
     """Project one derivation into the immutable retained premise record."""
@@ -5062,6 +8453,7 @@ def _domain_from_derivation_8616(
             declared_services=declared_services,
             refusal_site=derived.refusal_site,
             infeasible_edges=derived.infeasible_edges,
+            entry_call_pool_advice=derived.entry_call_pool_consultation,
         )
     domain = derived.domain
     return Real16InvocationDomain8616(
@@ -5097,6 +8489,7 @@ def _domain_from_derivation_8616(
         declared_services=declared_services,
         service_consumptions=domain.service_consumptions,
         infeasible_edges=domain.infeasible_edges,
+        entry_call_pool_advice=derived.entry_call_pool_consultation,
     )
 
 
@@ -5159,7 +8552,113 @@ def prove_real16_invocation_domain_8616(
     )
 
 
-def prove_real16_chained_invocation_domain_8616(
+def _derive_declared_function_entry_domain_8616(
+    project: object,
+    surface: DeclaredFunctionEntryLink8616 | None,
+    callsite_addr: int,
+    *,
+    boot: object,
+    boot_recompute: Callable[[object], object] | None,
+    coverage: IRBoundaryCoverageResult8616 | None = None,
+    entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
+    prefix_capture: bool = False,
+) -> tuple[Real16InvocationDomain8616, _Derivation8616]:
+    """Prove a local native prefix under one explicit conditional entry authority.
+
+    Missing declarations refuse; this route never substitutes the MZ header's
+    entry or publishes a function artifact universally.
+    """
+    records = tuple(entry_call_preservations)
+    services = tuple(declared_services)
+    derived = (
+        _early_derivation_8616(Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN)
+        if type(surface) is not DeclaredFunctionEntryLink8616 else _derive_invocation_domain_8616(
+            project, coverage, callsite_addr, boot, boot_recompute, (),
+            chain=surface, entry_call_preservations=records, declared_services=services,
+            prefix_capture=prefix_capture,
+        )
+    )
+    domain = _domain_from_derivation_8616(
+        project, coverage, callsite_addr, boot, boot_recompute, (), records,
+        services, Real16InvocationKind8616.DECLARED_FUNCTION_ENTRY, surface, derived,
+    )
+    return domain, derived
+
+
+def prove_real16_declared_function_entry_domain_8616(
+    project: object,
+    surface: DeclaredFunctionEntryLink8616 | None,
+    callsite_addr: int,
+    *,
+    boot: object,
+    boot_recompute: Callable[[object], object] | None,
+    coverage: IRBoundaryCoverageResult8616 | None = None,
+    entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
+) -> Real16InvocationDomain8616:
+    """Construct a retained conditional domain; later completeness replays normally."""
+    domain, _derived = _derive_declared_function_entry_domain_8616(
+        project, surface, callsite_addr, boot=boot, boot_recompute=boot_recompute,
+        coverage=coverage, entry_call_preservations=entry_call_preservations,
+        declared_services=declared_services,
+    )
+    return domain
+
+
+def prove_fresh_real16_declared_function_entry_domain_8616(
+    project: object,
+    surface: DeclaredFunctionEntryLink8616 | None,
+    callsite_addr: int,
+    *,
+    boot: object,
+    boot_recompute: Callable[[object], object] | None,
+    coverage: IRBoundaryCoverageResult8616 | None = None,
+    entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
+) -> Real16InvocationDomain8616 | None:
+    """Consume one new authenticated derivation without immediately deriving it twice.
+
+    Projection equality and the unchanged traversal/deadline gate admit only
+    the same fresh result. No derived evidence or positive cache is exported:
+    later public ``domain.complete`` still invokes native/source replay.
+    """
+    if type(surface) is not DeclaredFunctionEntryLink8616:
+        return None
+    captured = _construct_declared_invocation_domain_8616(
+        _DeclaredInvocationConstruction8616(
+            project, surface, callsite_addr, boot, boot_recompute, coverage,
+            tuple(entry_call_preservations), tuple(declared_services),
+        )
+    )
+    return None if captured is None else captured[0]
+
+
+def prove_real16_raw_boot_invocation_domain_8616(
+    project: object,
+    surface: RawBootEntrySurface8616,
+    callsite_addr: int,
+    *,
+    boot: object,
+    boot_recompute: Callable[[object], object] | None,
+    entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
+) -> Real16InvocationDomain8616:
+    """Census authenticated raw startup facts without publishing pending edges."""
+    records = tuple(entry_call_preservations)
+    services = tuple(declared_services)
+    derived = _derive_invocation_domain_8616(
+        project, None, callsite_addr, boot, boot_recompute, (),
+        chain=surface, entry_call_preservations=records,
+        declared_services=services,
+    )
+    return _domain_from_derivation_8616(
+        project, None, callsite_addr, boot, boot_recompute, (), records,
+        services, Real16InvocationKind8616.RAW_BOOT_ENTRY_PATH, surface, derived,
+    )
+
+
+def _derive_chained_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
     callsite_addr: int,
@@ -5170,7 +8669,7 @@ def prove_real16_chained_invocation_domain_8616(
     call_preservations: Sequence[SegmentCallPreservationResult8616] = (),
     entry_call_preservations: Sequence[object] = (),
     declared_services: Sequence[DeclaredInterruptService8616] = (),
-) -> Real16InvocationDomain8616:
+) -> tuple[Real16InvocationDomain8616, _Derivation8616]:
     """Prove a callee-head CS domain transported across one bound edge.
 
     The retained ``chain`` must name the complete parent premise, the
@@ -5201,7 +8700,7 @@ def prove_real16_chained_invocation_domain_8616(
         entry_call_preservations=entry_preservations,
         declared_services=services,
     )
-    return _domain_from_derivation_8616(
+    domain = _domain_from_derivation_8616(
         project,
         coverage,
         callsite_addr,
@@ -5214,6 +8713,56 @@ def prove_real16_chained_invocation_domain_8616(
         chain,
         derived,
     )
+    return domain, derived
+
+
+def prove_real16_chained_invocation_domain_8616(
+    project: object,
+    coverage: IRBoundaryCoverageResult8616 | None,
+    callsite_addr: int,
+    *,
+    boot: object | None,
+    boot_recompute: Callable[[object], object] | None,
+    chain: Real16CallChainLink8616 | None,
+    call_preservations: Sequence[SegmentCallPreservationResult8616] = (),
+    entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
+) -> Real16InvocationDomain8616:
+    """Construct a retained chained domain; public completeness replays normally."""
+    domain, _derived = _derive_chained_invocation_domain_8616(
+        project, coverage, callsite_addr, boot=boot, boot_recompute=boot_recompute,
+        chain=chain, call_preservations=call_preservations,
+        entry_call_preservations=entry_call_preservations, declared_services=declared_services,
+    )
+    return domain
+
+
+def prove_fresh_real16_chained_invocation_domain_8616(
+    project: object,
+    coverage: IRBoundaryCoverageResult8616 | None,
+    callsite_addr: int,
+    *,
+    boot: object | None,
+    boot_recompute: Callable[[object], object] | None,
+    chain: Real16CallChainLink8616 | None,
+    call_preservations: Sequence[SegmentCallPreservationResult8616] = (),
+    entry_call_preservations: Sequence[object] = (),
+    declared_services: Sequence[DeclaredInterruptService8616] = (),
+) -> Real16InvocationDomain8616 | None:
+    """Consume one fresh chained derivation under unchanged traversal admission.
+
+    Exact link typing retains the public replay kind/link gate. No fresh
+    derivation escapes this factory; later public completeness still replays.
+    """
+    if type(chain) is not Real16CallChainLink8616:
+        return None
+    domain, derived = _derive_chained_invocation_domain_8616(
+        project, coverage, callsite_addr, boot=boot, boot_recompute=boot_recompute,
+        chain=chain, call_preservations=call_preservations,
+        entry_call_preservations=entry_call_preservations, declared_services=declared_services,
+    )
+    return domain if domain._complete_with_fresh_derivation_8616(derived) else None
+
 
 
 def prove_real16_enclosed_invocation_domain_8616(
@@ -5344,12 +8893,25 @@ def _link_scope_anchor_8616(
             left.enclosing_artifact is right.enclosing_artifact
             and left.enclosing_boundary == right.enclosing_boundary
         )
+    if isinstance(left, Real16CallChainLink8616) and isinstance(right, Real16CallChainLink8616):
+        left_binding, right_binding = left.entry_binding, right.entry_binding
+        if left_binding is None or right_binding is None:
+            return left_binding is right_binding
+        return (
+            left_binding.callsite_addr == right_binding.callsite_addr
+            and left_binding.target_addr == right_binding.target_addr
+            and left_binding.shape == right_binding.shape
+            and left_binding.invocation is not None
+            and right_binding.invocation is not None
+            and left_binding.invocation.block is right_binding.invocation.block
+            and left_binding.invocation.project is right_binding.invocation.project
+        )
     return True
 
 
 def _in_flight_scopes_coterminous_8616(
-    left: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None,
-    right: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | None,
+    left: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
+    right: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
     depth: int,
 ) -> bool:
     """Authenticate two unregistered scopes through retained transport edges.
@@ -5365,6 +8927,23 @@ def _in_flight_scopes_coterminous_8616(
     structural recursion; exceeding it refuses rather than recursing
     without bound.
     """
+    if type(left) is DeclaredFunctionEntryLink8616 or type(right) is DeclaredFunctionEntryLink8616:
+        return (
+            type(left) is DeclaredFunctionEntryLink8616
+            and type(right) is DeclaredFunctionEntryLink8616
+            and left.admission is right.admission
+            and left.artifact is right.artifact
+            and left.boundary is right.boundary
+        )
+    if type(left) is RawBootEntrySurface8616 or type(right) is RawBootEntrySurface8616:
+        if type(left) is not RawBootEntrySurface8616 or type(right) is not RawBootEntrySurface8616:
+            return False
+        raw_left = cast(RawBootEntrySurface8616, left)
+        raw_right = cast(RawBootEntrySurface8616, right)
+        return (
+            raw_left.artifact is raw_right.artifact
+            and raw_left.boundary is raw_right.boundary
+        )
     if type(left) not in (Real16CallChainLink8616, Real16EnclosedEntryLink8616):
         return False
     if type(right) not in (Real16CallChainLink8616, Real16EnclosedEntryLink8616):
@@ -5378,6 +8957,300 @@ def _in_flight_scopes_coterminous_8616(
     if not _link_scope_anchor_8616(left_link, right_link):
         return False
     return _same_scope_8616(left_link.parent, right_link.parent, depth + 1)
+
+
+def _shared_replay_inputs_8616(
+    offered: Real16InvocationDomain8616,
+    required: Real16InvocationDomain8616,
+) -> bool:
+    """Require exact root replay inputs, including entry-call pool identity."""
+    return (
+        _shared_root_replay_inputs_8616(offered, required)
+        and offered.entry_call_preservations is required.entry_call_preservations
+    )
+
+
+def _shared_root_replay_inputs_8616(
+    offered: Real16InvocationDomain8616,
+    required: Real16InvocationDomain8616,
+) -> bool:
+    """Bind root replay inputs apart from the separately observed entry pool.
+
+    A single replay may stand in for ``offered.complete`` and
+    ``required.complete`` only for declared-entry or raw-boot roots when every
+    non-entry-pool input ``_derive_invocation_domain_8616`` consumes is identical —
+    tuples that the census compares by identity internally are admitted
+    only as the same tuple or as both empty — or, for the root link types
+    whose entire consumed surface is their identity-bound fields, when
+    those fields are the identical objects. Transported links always retain
+    independent replay: the root capture does not freeze their mutable
+    parent, edge, binding and call-state surfaces, even for one shared link.
+    """
+    def _same_consumables(
+        left: tuple[object, ...], right: tuple[object, ...],
+    ) -> bool:
+        """Share only exact tuple identities or genuine empty immutable tuples."""
+        return type(left) is tuple and type(right) is tuple and (
+            left is right or (len(left) == 0 and len(right) == 0)
+        )
+
+    if not (
+        offered.project is required.project
+        and offered.boot is required.boot
+        and offered.boot_recompute is required.boot_recompute
+        and offered.coverage is required.coverage
+        and offered.callsite_addr == required.callsite_addr
+        and _same_consumables(offered.call_preservations, required.call_preservations)
+        and type(offered.entry_call_preservations) is tuple
+        and type(required.entry_call_preservations) is tuple
+        and _same_consumables(offered.declared_services, required.declared_services)
+    ):
+        return False
+    left, right = offered.chain, required.chain
+    if type(left) is not type(right):
+        return False
+    if type(left) is DeclaredFunctionEntryLink8616:
+        declared, peer = left, cast(DeclaredFunctionEntryLink8616, right)
+        return (
+            declared.admission is peer.admission
+            and declared.artifact is peer.artifact
+            and declared.boundary is peer.boundary
+        )
+    if type(left) is RawBootEntrySurface8616:
+        raw_left = cast(RawBootEntrySurface8616, left)
+        raw_right = cast(RawBootEntrySurface8616, right)
+        return (
+            raw_left.artifact is raw_right.artifact
+            and raw_left.boundary is raw_right.boundary
+        )
+    return False
+
+
+@dataclass(frozen=True, slots=True)
+class _EntryPoolGateScan8616:
+    """One charged row scan's unique owner, CALL blocks and CFG edge census."""
+
+    owner: IRBlock
+    other_calls: frozenset[int]
+    edges: frozenset[tuple[int, int]]
+    block_addrs: frozenset[int]
+    successor_count: int
+
+
+def _scan_entry_pool_gate_8616(
+    artifact: IRFunctionArtifact, callsite_addr: int,
+) -> _EntryPoolGateScan8616 | None:
+    """Inspect each row once, retaining owner uniqueness and suffix CALL facts."""
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    owner: IRBlock | None = None
+    other_calls: set[int] = set()
+    edges: set[tuple[int, int]] = set()
+    block_addrs: set[int] = set()
+    successor_count = 0
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        deadline = _census_deadline_8616()
+        for block in artifact.blocks:
+            traversal.census_work_units += 1 + len(block.successor_addrs)
+            if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616 or time.monotonic() > deadline:
+                return None
+            block_addrs.add(block.addr)
+            successor_count += len(block.successor_addrs)
+            edges.update((block.addr, successor) for successor in block.successor_addrs)
+            owns_callsite = False
+            for instruction in block.instrs:
+                traversal.census_work_units += 1
+                if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616 or time.monotonic() > deadline:
+                    return None
+                owns_callsite = owns_callsite or instruction.addr == callsite_addr
+                if instruction.op == "CALL" and instruction.addr != callsite_addr:
+                    other_calls.add(block.addr)
+            if owns_callsite:
+                if owner is not None:
+                    return None
+                owner = block
+        if owner is None:
+            return None
+        traversal.census_work_units += len(other_calls) + len(edges) + len(block_addrs)
+        if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616 or time.monotonic() > deadline:
+            return None
+        return _EntryPoolGateScan8616(owner, frozenset(other_calls), frozenset(edges), frozenset(block_addrs), successor_count)
+
+
+def _entry_pool_unused_prefix_8616(subject: Real16InvocationDomain8616) -> bool:
+    """Charge one row scan and canonical CFG discovery for pool independence.
+
+    The stop block's suffix is included. Graph construction does not scan
+    instruction rows, so its block/edge visits are charged separately from
+    the single owner/CALL row walk; no proof budget or deadline is renewed.
+    """
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    chain = subject.chain
+    if type(chain) is DeclaredFunctionEntryLink8616:
+        artifact = chain.artifact
+    elif type(chain) is RawBootEntrySurface8616:
+        artifact = cast(RawBootEntrySurface8616, chain).artifact
+    else:
+        return False
+    if type(artifact) is not IRFunctionArtifact:
+        return False
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        scan = _scan_entry_pool_gate_8616(artifact, subject.callsite_addr)
+        if scan is None:
+            return False
+        deadline = _census_deadline_8616()
+        # Canonical predecessor construction visits four block projections,
+        # all successor rows, and each distinct predecessor edge on output.
+        traversal.census_work_units += 4 * len(artifact.blocks) + scan.successor_count + len(scan.edges)
+        if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616 or time.monotonic() > deadline:
+            return False
+        dangerous = _dangerous_block_addrs_8616(artifact, scan.owner)
+        # BFS visits each reached node and its distinct incoming predecessors.
+        traversal.census_work_units += len(scan.edges)
+        if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616 or time.monotonic() > deadline:
+            return False
+        traversal.census_work_units += len(dangerous) + sum(
+            1 for source, target in scan.edges if source in scan.block_addrs and target in dangerous
+        ) + len(scan.other_calls)
+        if traversal.census_work_units > _CENSUS_WORK_LIMIT_8616 or time.monotonic() > deadline:
+            return False
+        return dangerous.isdisjoint(scan.other_calls)
+
+
+@dataclass(frozen=True, slots=True)
+class _SharedReplayCapture8616:
+    """Retain exact replay input identities before any native callback executes."""
+
+    identities: tuple[object, ...]
+    root_surface: tuple[object, ...]
+    callsite_addr: int
+    kind: Real16InvocationKind8616
+
+    def binds(self, subject: Real16InvocationDomain8616) -> bool:
+        """Reject replacement inputs even when both subjects changed identically."""
+        current = _capture_shared_replay_8616(subject)
+        return (
+            current is not None
+            and self.callsite_addr == current.callsite_addr
+            and self.kind is current.kind
+            and all(left is right for left, right in zip(self.identities, current.identities, strict=True))
+            and all(left is right for left, right in zip(self.root_surface, current.root_surface, strict=True))
+        )
+
+
+def _capture_shared_replay_8616(
+    subject: Real16InvocationDomain8616,
+) -> _SharedReplayCapture8616 | None:
+    """Capture typed consumables and each root link's authority surface separately."""
+    consumables = (
+        subject.call_preservations, subject.entry_call_preservations,
+        subject.declared_services,
+    )
+    if (
+        subject.failure is not None
+        or not _retained_domain_kind_bound_8616(subject)
+        or type(subject.callsite_addr) is not int
+        or any(type(value) is not tuple for value in consumables)
+    ):
+        return None
+    chain = subject.chain
+    root_surface: tuple[object, ...] = ()
+    if type(chain) is DeclaredFunctionEntryLink8616:
+        root_surface = (chain.admission, chain.artifact, chain.boundary)
+    elif type(chain) is RawBootEntrySurface8616:
+        raw_chain = cast(RawBootEntrySurface8616, chain)
+        root_surface = (raw_chain.artifact, raw_chain.boundary)
+    else:
+        # Only these roots have their whole consumed surface captured here.
+        return None
+    return _SharedReplayCapture8616(
+        (subject.project, subject.coverage, subject.boot, subject.boot_recompute,
+         subject.chain, *consumables),
+        root_surface, subject.callsite_addr, subject.kind,
+    )
+
+
+def _consume_required_pool_result_8616(
+    required: Real16InvocationDomain8616,
+    derived: _Derivation8616,
+    captures_bound: Callable[[], bool],
+) -> bool:
+    """Share an observed unused pool or authenticate required independently.
+
+    The caller owns required's existing active guard; offered has already
+    left its inner guard before this fallback invokes native callbacks.
+    """
+    if derived.entry_call_pool_consultation is _EntryCallPoolConsultation8616.UNUSED:
+        return _replayed_domain_equal_8616(derived, required)
+    return required._replay_complete_8616() and captures_bound()
+
+
+def _complete_shared_replay_8616(
+    offered: Real16InvocationDomain8616,
+    required: Real16InvocationDomain8616,
+    *, require_unused_entry_pool: bool = False,
+) -> bool:
+    """Authenticate two input-identical domains with one current derivation.
+
+    Both identities acquire ordinary resource admission, including cached
+    refusals and cycle/depth limits. Forced-current verification prevents a
+    cached positive from skipping the pair check. Per-subject input captures
+    bind the replay after callbacks, before either fresh result is consumed.
+    """
+    offered_capture = _capture_shared_replay_8616(offered)
+    required_capture = _capture_shared_replay_8616(required)
+    if offered_capture is None or required_capture is None:
+        return False
+    derived: _Derivation8616 | None = None
+
+    def derive_offered() -> bool:
+        """Derive once, authenticate offered and preserve both exact captures."""
+        nonlocal derived
+        if not offered_capture.binds(offered) or not required_capture.binds(required):
+            return False
+        derived = _derive_invocation_domain_8616(
+            offered.project,
+            offered.coverage,
+            offered.callsite_addr,
+            offered.boot,
+            offered.boot_recompute,
+            offered.call_preservations,
+            chain=offered.chain,
+            entry_call_preservations=offered.entry_call_preservations,
+            declared_services=offered.declared_services,
+            prefix_capture=True,
+        )
+        accepted = (
+            derived.failure is None and derived.domain is not None
+            and offered_capture.binds(offered)
+            and required_capture.binds(required)
+            and _replayed_domain_equal_8616(derived, offered)
+        )
+        if accepted:
+            _enroll_prefix_census_data_8616(offered, derived)
+        return accepted
+
+    def verify_both() -> bool:
+        """Bind exact-input peers to one current derivation."""
+        return derive_offered() and derived is not None and _replayed_domain_equal_8616(derived, required)
+
+    def admit_required() -> bool:
+        """Keep the peer independently active while deriving the common result."""
+        return required._consume_completion_8616(verify_both, force_current=True)
+
+    def verify_required_pool() -> bool:
+        """Share UNUSED or retain independent replay after offered leaves active."""
+        if not offered._consume_completion_8616(derive_offered, force_current=True) or derived is None:
+            return False
+        return _consume_required_pool_result_8616(
+            required, derived,
+            lambda: offered_capture.binds(offered) and required_capture.binds(required),
+        )
+
+    if require_unused_entry_pool:
+        return required._consume_completion_8616(verify_required_pool, force_current=True)
+    return offered._consume_completion_8616(admit_required, force_current=True)
 
 
 def _same_scope_8616(
@@ -5413,7 +9286,32 @@ def _same_scope_8616(
         identity = _in_flight_scopes_coterminous_8616(
             offered.chain, required.chain, depth
         )
-    return identity and offered.complete and required.complete
+    if not identity:
+        return False
+    if offered is required:
+        return offered.complete
+    if _shared_replay_inputs_8616(offered, required):
+        return _complete_shared_replay_8616(offered, required)
+    if (
+        offered.entry_call_preservations is not required.entry_call_preservations
+        and _shared_root_replay_inputs_8616(offered, required)
+        and _unused_pool_replay_selected_8616(offered)
+    ):
+        return _complete_shared_replay_8616(offered, required, require_unused_entry_pool=True)
+    return offered.complete and required.complete
+
+
+def _unused_pool_replay_selected_8616(subject: Real16InvocationDomain8616) -> bool:
+    """Use prior consultation only to select work; fresh replay owns sharing.
+
+    READ keeps independent replay. UNUSED avoids the redundant static scan,
+    but the chosen consumer must still derive and check a new UNUSED receipt.
+    Unknown or foreign advice retains the conservative charged eligibility gate.
+    """
+    advice = subject.entry_call_pool_advice
+    if advice is _EntryCallPoolConsultation8616.READ:
+        return False
+    return advice is _EntryCallPoolConsultation8616.UNUSED or _entry_pool_unused_prefix_8616(subject)
 
 
 def same_real16_entry_scope_8616(
@@ -5452,3 +9350,391 @@ def real16_scope_crosses_call_8616(
         and link.complete
         and callee.complete
     )
+
+
+def _fused_callee_header_equal_8616(
+    native: IRBlock, block: IRBlock, memo: _NativeTermMemo8616,
+) -> bool:
+    """Bind whole-block metadata at the original comparator nesting depth."""
+    return (
+        type(native) is IRBlock and type(block) is IRBlock
+        and type(native.instrs) is tuple and type(block.instrs) is tuple
+        and len(native.instrs) == len(block.instrs)
+        and _native_fields_current_8616(native, _IR_BLOCK_FIELDS_8616, memo)
+        and _native_term_equal_8616(
+            (native.addr, native.refusals, native.successor_addrs),
+            (block.addr, block.refusals, block.successor_addrs), 1, memo,
+        )
+    )
+
+
+def _fused_callee_producers_8616() -> tuple[object, ...]:
+    """Capture every evaluator/reader/store boundary allowed in pure transfer."""
+    return (
+        caller_prefix_owner_8616.fused_caller_prefix_producers_8616,
+        *caller_prefix_owner_8616.fused_caller_prefix_producers_8616(),
+        frozen_dispatch_lookup, scalar_owner_8616.frozen_dispatch_lookup, kb_owner_8616.frozen_dispatch_lookup,
+        _simulate_instruction_8616, _census_store_8616, _eval_value_8616,
+        _native_store_span_8616, _store_span_8616, _store_data_bytes_8616, _address_domain16_8616,
+        _eval_atom_8616, _eval_unary_op_8616, _eval_convert_unary_8616,
+        _eval_binary_op_8616, _eval_base_plain_8616,
+        _simulate_census_tmp_write_8616, _simulate_reg_write_8616,
+        _binary_parts_8616, _expr_provenance_only_8616, _register_read_8616,
+        _register_tile_8616, _register_width_8616, _value_mask_8616,
+        register_value_family_8616, register_value_projection_8616,
+        store_atom_clean_8616, wide_multiply_value_8616,
+        _simulate_tmp_write_8616, _transfer_row_failure_8616,
+        _apply_register_write_8616, _writes_segment_register_8616,
+        _eval_value_inner_8616, _eval_plain_value_8616, _eval_base_value_8616,
+        _native_instr_equal_8616, _native_term_equal_8616,
+        _native_fields_current_8616, _apply_repeated_store_8616,
+        native_repeated_store_8616, scalar_instruction_effect_8616,
+        path_load_value_8616, path_memory_owner_8616._path_byte_8616, _census_work_exceeded_8616,
+        DirectionTracker8616.__init__, DirectionTracker8616.step, DirectionTracker8616.direction,
+        _PathState8616.__init__, _PathCensusContext8616.__init__, _NativeTermMemo8616,
+        _fused_callee_header_equal_8616, _refuse_unbound_block_rows_8616, _record_first_failure_site_8616,
+        PathMemory8616.copy, PathMemory8616.apply_write, PathMemory8616.assign,
+        InvocationInitialMemory8616.byte_at, InvocationInitialMemory8616.permits_write_read,
+        initial_memory_owner_8616._valid_write_ranges_8616,
+        multiply_owner_8616.wide_multiply_shape_8616,
+        path_memory_owner_8616.store_atom_clean_8616,
+        scalar_owner_8616._unknown_8616, scalar_owner_8616._readable_scalar_source_8616,
+        scalar_owner_8616._closed_destination_8616, scalar_owner_8616._closed_write_8616,
+        scalar_owner_8616._const_target_8616, scalar_owner_8616._binary_operands_valid_8616,
+        scalar_owner_8616._classify_comparison_8616, scalar_owner_8616._classify_binary_8616,
+        scalar_owner_8616._classify_boolean_binary_8616, scalar_owner_8616._classify_widening_product_8616,
+        scalar_owner_8616.no_effect_claim_shape_8616, scalar_owner_8616.scalar_binary_operation_8616,
+        type(scalar_owner_8616._CLASSIFIERS_8616),
+        scalar_owner_8616._CLASSIFIERS_8616,
+        kb_owner_8616._kb_width_mask_8616,
+        kb_owner_8616._kb_lowest_unknown_8616,
+        kb_owner_8616._kb_add_8616,
+        kb_owner_8616._kb_sub_8616,
+        kb_owner_8616._kb_and_8616,
+        kb_owner_8616._kb_or_8616,
+        kb_owner_8616._kb_xor_8616,
+        kb_owner_8616._kb_not_8616,
+        kb_owner_8616._kb_shift_8616,
+        kb_owner_8616._kb_cmp_eq_8616,
+        kb_owner_8616._kb_cmp_ne_8616,
+        kb_owner_8616._kb_cmp_order_8616,
+        kb_owner_8616._kb_mul_8616,
+        kb_owner_8616._kb_binary_op_8616,
+        kb_owner_8616._kb_unary_op_8616,
+        kb_owner_8616._kb_unary_evidence_8616,
+        kb_owner_8616._kb_expr_provenance_only_8616,
+        kb_owner_8616._kb_convert_token_8616,
+        kb_owner_8616._kb_read_register_8616,
+        kb_owner_8616._kb_write_register_8616,
+        kb_owner_8616._kb_eval_value_8616,
+        kb_owner_8616._kb_eval_plain_8616,
+        kb_owner_8616._kb_fit_width_8616,
+        kb_owner_8616._kb_seed_state_8616,
+        kb_owner_8616._kb_poison_destination_8616,
+        kb_owner_8616._kb_dirty_write_8616,
+        kb_owner_8616._kb_dirty_all_8616,
+        kb_owner_8616._kb_eval_base_8616,
+        kb_owner_8616._kb_eval_base_plain_8616,
+        kb_owner_8616._kb_data_row_8616,
+        kb_owner_8616._kb_tmp_write_8616,
+        kb_owner_8616.direction_fact_8616,
+        type(kb_owner_8616._KB_BINOP_PLAIN_8616),
+        kb_owner_8616._KB_BINOP_PLAIN_8616,
+        kb_owner_8616.scalar_instruction_effect_8616,
+        kb_owner_8616.register_value_family_8616, kb_owner_8616.register_value_projection_8616,
+        kb_owner_8616.wide_multiply_shape_8616, kb_owner_8616.wide_multiply_value_8616,
+        type(_NATIVE_COMPARATORS_8616),
+        _NATIVE_COMPARATORS_8616,
+    )
+
+
+def _make_fused_callee_operations_8616() -> FusedCalleeOperations8616:
+    """Retain exact canonical producers before tests/plugins can replace them."""
+    return FusedCalleeOperations8616(
+        _fused_callee_producers_8616(), _PathCensusContext8616, _NativeTermMemo8616,
+        _fused_callee_header_equal_8616, _native_instr_equal_8616,
+        _simulate_instruction_8616, _census_work_exceeded_8616,
+        _refuse_unbound_block_rows_8616, _PathState8616,
+        Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN,
+        Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN,
+        Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED,
+        Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED,
+        Real16InvocationFailure8616.PATH_DECODE_MISMATCH, _record_first_failure_site_8616,
+    )
+
+
+_CANONICAL_FUSED_FACTORY_8616 = _make_fused_callee_operations_8616
+_CANONICAL_FUSED_PRODUCER_BUILDER_8616 = _fused_callee_producers_8616
+_CANONICAL_CALLER_PRODUCER_BUILDER_8616 = caller_prefix_owner_8616.fused_caller_prefix_producers_8616
+_BASE_FUSED_CALLEE_OPERATIONS_8616 = _make_fused_callee_operations_8616()
+_CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616 = _prefix_execution_producers_8616()
+
+
+def _try_fused_caller_prefix_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    entry: _PathState8616, stop_after: int | None,
+) -> FusedCallerPrefix8616 | Real16InvocationFailure8616 | None:
+    """Attempt caller fusion only when its charged identity seal can save work."""
+    if type(ctx.callsite_addr) is not int:
+        return None
+    ctx.work_units += 1
+    if type(block) is not IRBlock or type(block.instrs) is not tuple:
+        return None
+    if len(block.instrs) <= len(_BASE_FUSED_CALLEE_OPERATIONS_8616.producers) + 17:
+        return None
+    if (_make_fused_callee_operations_8616 is not _CANONICAL_FUSED_FACTORY_8616
+            or _fused_callee_producers_8616 is not _CANONICAL_FUSED_PRODUCER_BUILDER_8616
+            or caller_prefix_owner_8616.fused_caller_prefix_producers_8616
+            is not _CANONICAL_CALLER_PRODUCER_BUILDER_8616):
+        return None
+    return try_fused_caller_prefix_8616(
+        ctx, artifact, block, entry, stop_after=stop_after,
+        operations=_make_fused_callee_operations_8616(),
+        canonical_operations=_BASE_FUSED_CALLEE_OPERATIONS_8616,
+    )
+
+
+def _try_active_fused_callee_transfer_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
+    entry: _PathState8616, stop_after: int | None,
+) -> _PathState8616 | Real16InvocationFailure8616 | None:
+    """Keep ordinary blocks untouched; check live authority only in fresh scope."""
+    if not active_fused_callee_transfer_8616(ctx, artifact):
+        return None
+    # The fixed authority walk cannot save work on short blocks. The ordinary
+    # or verified fused consumer accounts this visit at its existing work gate.
+    ctx.work_units += 1
+    if type(block) is not IRBlock or type(block.instrs) is not tuple:
+        return None
+    if len(block.instrs) <= len(_BASE_FUSED_CALLEE_OPERATIONS_8616.producers) + 18:
+        return None
+    # Builders themselves must be canonical before any callback-capable
+    # producer discovery executes. The next existing gate charges these visits.
+    ctx.work_units += 2
+    if (_make_fused_callee_operations_8616 is not _CANONICAL_FUSED_FACTORY_8616
+            or _fused_callee_producers_8616 is not _CANONICAL_FUSED_PRODUCER_BUILDER_8616):
+        return None
+    return try_fused_callee_transfer_8616(
+        ctx, artifact, block, entry, stop_after=stop_after,
+        operations=_make_fused_callee_operations_8616(),
+    )
+
+
+def _bind_path_block_before_transfer_8616(
+    ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
+    block: IRBlock, stop_after: int | None,
+) -> Real16InvocationFailure8616 | None:
+    """Preserve the original charged whole-block binding for ordinary transfers."""
+    if time.monotonic() > ctx.deadline:
+        return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
+    prefix_count = None if stop_after is None else _native_prefix_count_8616(block, stop_after)
+    ctx.work_units += (len(block.instrs) if prefix_count is None else prefix_count) + 1
+    if _census_work_exceeded_8616(ctx):
+        return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
+    native_blocks = ctx.native_blocks.get(artifact.function_addr)
+    native_block = (
+        None if native_blocks is None else native_blocks.get(block.addr)
+    )
+    if not _native_block_bound_8616(native_block, block, stop_after=stop_after):
+        # Binding precedes materialization: the simulated rows must be
+        # exactly what the authoritative importer re-derives from the
+        # fetched native bytes. Inserted, deleted, reordered, or
+        # operand/capture-tampered rows — including rows carrying a
+        # copied origin tag or mutated ``compare=False`` capture ids —
+        # diverge from the re-derived block and can never prove a native
+        # effect. The block's in-scope rows are real census rows, so each
+        # is classified and individually refused to keep the ledger
+        # closed rather than retaining phantom materializations.
+        _refuse_unbound_block_rows_8616(ctx, artifact, block, stop_after)
+        return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    return None
+
+
+def _feasibility_union_inputs_8616(
+    ctx: _PathCensusContext8616, caller_range: ScratchCallerRange8616 | None,
+) -> set[tuple[int, int]] | None:
+    """Collect the original or exactly equivalent temporary interval input."""
+    if caller_range is not None:
+        selection = select_caller_intervals_8616(ctx, ctx.manifest, caller_range, _census_work_exceeded_8616)
+        if selection.status is CallerIntervalSelectionStatus8616.REFUSED:
+            return None
+        if selection.status is CallerIntervalSelectionStatus8616.SELECTED:
+            return selection.intervals
+    intervals: set[tuple[int, int]] = set()
+    for start, extent in ctx.manifest:
+        ctx.work_units += 1
+        if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+            return None
+        if extent > 0:
+            intervals.add((start, start + extent))
+    return intervals
+
+
+def _snapshot_omission_hooks_8616(
+    ctx: _PathCensusContext8616,
+) -> tuple[Callable[[IRBlock], bool], Callable[[], bool]] | None:
+    """Per-moment no-op proofs for the root census's discarded snapshot replays.
+
+    The first predicate answers whether the canonical repeat hook is a
+    proven side-effect-free non-candidate for one block *now*; the second
+    answers whether the census LOAD reader is a pure owned lookup *now*.
+    Both re-read the live ``ctx`` fields and current module bindings on
+    every call, so a rebound helper, foreign decoder, replaced project or
+    manifest mapping, or foreign initial memory keeps the ordinary
+    observable replay instead of a stale verdict. Declined ``None`` under
+    an expired deadline or exceeded work boundary: no optional policy is
+    prepared past the current budget. No caller-supplied flag grants this
+    authority — only the owned chain's own current state does.
+    """
+    if not _CANONICAL_SNAPSHOT_CHECK_8616():
+        return None
+    if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
+        return None
+    project = ctx.project
+
+    def repeat_consult_noop(block: IRBlock) -> bool:
+        """True only while the repeat hook provably returns before any effect."""
+        machine_bytes = ctx.machine_bytes
+        if type(machine_bytes) is not dict or ctx.project is not project:
+            return False
+        encoded = machine_bytes.get(block.addr)
+        if encoded is not None:
+            if type(encoded) is not bytes:
+                return False
+            # Cheap structural gate first: a possible candidate never pays
+            # the full producer check and always keeps its obligatory replay.
+            if _CANONICAL_REPEAT_SHAPE_8616(block, encoded):
+                return False
+        return _CANONICAL_SNAPSHOT_CHECK_8616()
+
+    def load_reader_readonly() -> bool:
+        """True only while the census LOAD reader remains side-effect-free."""
+        if not _CANONICAL_SNAPSHOT_CHECK_8616():
+            return False
+        initial = ctx.initial_memory
+        return initial is None or type(initial) is InvocationInitialMemory8616
+
+    return repeat_consult_noop, load_reader_readonly
+
+
+def _snapshot_terminal_noop_8616(
+    call_binding: _FeasibilityCallBinding8616 | None,
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None,
+) -> Callable[[IRInstr], bool] | None:
+    """Per-moment inert verdict for the exact terminal CALL row's consult.
+
+    True only while consulting the call hook on one exact row is provably
+    inert *now*: no handler exists, or the current apply object is the
+    canonical handler whose own paired map verdict already proves it rejects
+    this row before any scratch effect. Interrupt/service rows and foreign
+    or rebound consult chains always decline to the ordinary observable
+    replay.
+    """
+    if not _CANONICAL_SNAPSHOT_CHECK_8616():
+        return None
+
+    def terminal_call_noop(instruction: IRInstr) -> bool:
+        """True only while this exact CALL row's consult is provably inert."""
+        if type(instruction) is not IRInstr or type(instruction.op) is not str:
+            return False
+        if not _CANONICAL_SNAPSHOT_CHECK_8616():
+            return False
+        if not kb_owner_8616._ordinary_call_target_8616(instruction):
+            return False
+        if interrupt_call_vector_8616(instruction) is not None:
+            return False
+        if apply_call is None:
+            return True
+        if type(call_binding) is not _FeasibilityCallBinding8616 or apply_call is not call_binding:
+            return False
+        return call_binding.terminal_noop(instruction)
+
+    return terminal_call_noop
+
+
+def _snapshot_bindings_check_8616() -> bool:
+    """Current self-check via the captured canonical verifier only."""
+    return (
+        _snapshot_bindings_check_8616 is _CANONICAL_SNAPSHOT_CHECK_8616
+        and _snapshot_bindings_current_8616 is _CANONICAL_SNAPSHOT_BINDINGS_8616
+        and _CANONICAL_SNAPSHOT_BINDINGS_8616()
+    )
+
+
+def _snapshot_bindings_current_8616() -> bool:
+    """Every consulted snapshot boundary still denotes the owned implementation.
+
+    The builder identities are compared before either is invoked so a
+    rebound producer function is never called to judge itself. The fresh
+    tuple is then compared elementwise by identity — not equality — against
+    the import-time capture, mirroring ``canonical_fused_operations_match``.
+    """
+    if (_fused_callee_producers_8616 is not _CANONICAL_FUSED_PRODUCER_BUILDER_8616
+            or _snapshot_omission_producers_8616 is not _CANONICAL_SNAPSHOT_PRODUCER_BUILDER_8616
+            or _FeasibilityCallBinding8616 is not _CANONICAL_FEASIBILITY_BINDING_CLASS_8616):
+        return False
+    actual = _CANONICAL_SNAPSHOT_PRODUCER_BUILDER_8616()
+    return len(actual) == len(_BASE_SNAPSHOT_PRODUCERS_8616) and all(
+        left is right
+        for left, right in zip(actual, _BASE_SNAPSHOT_PRODUCERS_8616, strict=True)
+    )
+
+
+def _snapshot_omission_producers_8616() -> tuple[object, ...]:
+    """Every evaluator/hook boundary a discarded snapshot replay may reach.
+
+    Extends the existing fused-callee producer boundary — which already pins
+    the repeat hook, scalar classifier, LOAD evaluator, and the complete
+    known-bits lattice — with the snapshot walk's own consult chain and the
+    repeated-store decoder boundary. It widens no authority: every name is
+    checked, never trusted.
+    """
+    return (
+        *_CANONICAL_FUSED_PRODUCER_BUILDER_8616(),
+        _apply_repeated_store_8616,
+        repeated_store_candidate_shape_8616,
+        repeated_store_owner_8616.repeated_store_candidate_shape_8616,
+        repeated_store_owner_8616.native_repeated_store_8616,
+        repeated_store_owner_8616.decoded_repeated_store_8616,
+        repeated_store_owner_8616.repeated_store_effect_8616,
+        interrupt_call_vector_8616,
+        kb_owner_8616.interrupt_call_vector_8616,
+        kb_owner_8616.path_memory_tainted_8616,
+        kb_owner_8616._kb_snapshot_observed_8616,
+        kb_owner_8616._snapshot_terminal_exemption_8616,
+        kb_owner_8616._kb_block_exit_8616,
+        kb_owner_8616._kb_repeat_exit_8616,
+        kb_owner_8616._kb_known_registers_8616,
+        kb_owner_8616._kb_transfer_effect_8616,
+        kb_owner_8616._kb_call_row_8616,
+        kb_owner_8616._ordinary_call_target_8616,
+        kb_owner_8616._kb_store_row_8616,
+        kb_owner_8616._kb_store_span_8616,
+        kb_owner_8616._kb_store_data_8616,
+        kb_owner_8616._kb_eval_atom_8616,
+        kb_owner_8616.store_atom_clean_8616,
+        kb_owner_8616._kb_cjmp_exit_8616,
+        kb_owner_8616._kb_cjmp_path_exit_8616,
+        PathMemory8616.taint,
+        _FeasibilityCallBinding8616,
+        _FeasibilityCallBinding8616.__init__,
+        _FeasibilityCallBinding8616.__call__,
+        _FeasibilityCallBinding8616.terminal_noop,
+        _feasibility_call_handler_8616,
+        _feasibility_call_rows_8616,
+        _snapshot_omission_hooks_8616,
+        _snapshot_terminal_noop_8616,
+        _snapshot_bindings_check_8616,
+        _snapshot_bindings_current_8616,
+        InvocationInitialMemory8616,
+    )
+
+
+_CANONICAL_REPEAT_SHAPE_8616 = repeated_store_candidate_shape_8616
+_CANONICAL_FEASIBILITY_BINDING_CLASS_8616 = _FeasibilityCallBinding8616
+_CANONICAL_SNAPSHOT_PRODUCER_BUILDER_8616 = _snapshot_omission_producers_8616
+_CANONICAL_SNAPSHOT_BINDINGS_8616 = _snapshot_bindings_current_8616
+_CANONICAL_SNAPSHOT_CHECK_8616 = _snapshot_bindings_check_8616
+_CANONICAL_SNAPSHOT_HOOKS_8616 = _snapshot_omission_hooks_8616
+_CANONICAL_TERMINAL_NOOP_8616 = _snapshot_terminal_noop_8616
+_BASE_SNAPSHOT_PRODUCERS_8616 = _snapshot_omission_producers_8616()

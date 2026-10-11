@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 import z3
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.recursive_proofs import real16_domain_dispatch as owner
@@ -19,6 +18,7 @@ from tools.dosunit.recursive_proofs.real16_domain_dispatch import (
 )
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import prove_image_bound_real16_domain
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointStepKind
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 def test_actual_dispatch_closes_every_full_width_edge(tmp_path: Path) -> None:

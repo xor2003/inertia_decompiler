@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 
 import pytest
-import inertia.postprocess.decompiler_postprocess_stage as postprocess_stage
 
+import inertia.postprocess.decompiler_postprocess_stage as postprocess_stage
 from inertia.postprocess.pass_runtime import (
     build_postprocess_runtime_config_8616,
     postprocess_optional_reject_budget_8616,

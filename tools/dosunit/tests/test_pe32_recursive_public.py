@@ -17,17 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.flat32_pe_recursive_inputs import (
-    BASE_CASE_FLIPPED,
-    DATA_BASE,
-    ENTRY,
-    PROGRESS_FLIPPED,
-    STACK_HI,
-    default_access_domain,
-    pe32_recursive_bytes,
-)
-from tools.dosunit.tests.recursive_proof_fixtures.flat_call_continuation_inputs import TWO_FLAT_CALLS
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 from tools.dosunit.compare.pe32_recursive_compare import (
     REQUEST_BUDGET_MS,
@@ -44,6 +33,17 @@ from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.recursive_proofs.flat32_image_bound_domain import Flat32AccessDomain
 from tools.dosunit.recursive_proofs.flat32_image_bound_joint_proof import Flat32ModelRequirement
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason
+from tools.dosunit.tests.recursive_proof_fixtures.flat32_pe_recursive_inputs import (
+    BASE_CASE_FLIPPED,
+    DATA_BASE,
+    ENTRY,
+    PROGRESS_FLIPPED,
+    STACK_HI,
+    default_access_domain,
+    pe32_recursive_bytes,
+)
+from tools.dosunit.tests.recursive_proof_fixtures.flat_call_continuation_inputs import TWO_FLAT_CALLS
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 _DRIVERS: tuple[str, ...] = ("msc8", "bc5")
 _ACCESS = default_access_domain()

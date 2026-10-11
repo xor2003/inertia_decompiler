@@ -6,6 +6,7 @@ from inertia.alias.register_reaching_source import (
     RegisterReachingSourceVerdict8616,
     resolve_register_reaching_source_8616,
 )
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.semantics.call_register_effects import (
     SyntheticCallRegisterEffectVerdict8616,
@@ -16,7 +17,6 @@ from inertia.semantics.callsite_register_provenance import (
     recover_register_source_before_instruction_8616,
 )
 from inertia.semantics.callsite_summary import summarize_x86_16_callsite
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 def _preserve(block: int, *predecessors: int) -> RegisterBlockTransfer8616:

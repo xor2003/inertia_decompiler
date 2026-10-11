@@ -13,11 +13,16 @@ silently substituting MS C 6 commands.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
+import os
 import re
+import signal
 import string
+import subprocess
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +31,7 @@ from pathlib import Path
 
 from tools.compiler_toolchain.compiler_coverage_manifest import CoverageManifest
 from tools.compiler_toolchain.msc6_memory_model import MSCMemoryModel
+from tools.dev.process_metrics import process_tree_pids
 
 MSC6_AX_PROFILE_ID: str = "msc6_ax"
 MSC6_AX_TOOLCHAIN_ROOT: Path = Path("/home/xor/inertia_player/dos_compilers/Microsoft C v6ax")
@@ -47,6 +53,13 @@ class CompileBackend(StrEnum):
 
     KVIKDOS = "kvikdos"
     DOSBOX = "dosbox"
+
+
+class KvikdosDPMIMode(StrEnum):
+    """Explicit host DPMI policy, independent of the DOS program's flags."""
+
+    AUTO = "auto"
+    OFF = "off"
 
 
 MANIFEST_COMPILER_NAMES: dict[CompilerIdentity, str] = {
@@ -72,6 +85,7 @@ _REGISTRY_PROFILE_FIELDS = frozenset({
     "compile_arguments", "cod_argument", "link_argument", "extra_object_format",
 })
 _REGISTRY_TOOL_KINDS = frozenset({"compiler", "linker"})
+_REGISTRY_OPTIONAL_PROFILE_FIELDS = frozenset({"kvikdos_dpmi_mode"})
 _REGISTRY_FIELDS = frozenset({"schema", "profiles", "runners", "probe_evidence", "dependencies"})
 _TOOL_FIELDS = frozenset({"dos_path", "sha256"})
 _PROBE_PRODUCT_MARKERS: dict[CompilerIdentity, str] = {
@@ -200,6 +214,8 @@ class CompilerToolchain:
     DOS paths (``c:\\``/``e:\\``) are embedded by the profile, never guessed.
     ``compile_backend`` selects the emulator hosting compiler/linker stages;
     linked 16-bit output always executes under ``run_backend``.
+    ``kvikdos_dpmi_mode`` selects a measured kvikdos host policy for both
+    stages and output execution; AUTO preserves the runner's default argv.
     """
 
     profile_id: str
@@ -229,6 +245,7 @@ class CompilerToolchain:
     dosbox_host_environment: tuple[tuple[str, str], ...] = ()
     kvikdos_executable: Path | None = None
     kvikdos_sha256: str | None = None
+    kvikdos_dpmi_mode: KvikdosDPMIMode = KvikdosDPMIMode.AUTO
 
     def __post_init__(self) -> None:
         """Reject structural settings the shared runner cannot honor."""
@@ -255,6 +272,8 @@ class CompilerToolchain:
 
     def _validate_backends(self) -> None:
         """Require pinned runners for each explicitly selected backend."""
+        if not isinstance(self.kvikdos_dpmi_mode, KvikdosDPMIMode):
+            raise ValueError("kvikdos_dpmi_mode must be a typed KvikdosDPMIMode")
         if self.uses_dosbox and self.dosbox_executable is None:
             raise ValueError("DOSBox backends must declare dosbox_executable")
         if self.uses_dosbox and self.dosbox_sha256 is None:
@@ -470,6 +489,7 @@ class CompilerToolchain:
                 str(self.kvikdos_executable) if self.kvikdos_executable is not None else None
             ),
             "kvikdos_sha256": self.kvikdos_sha256,
+            "kvikdos_dpmi_mode": self.kvikdos_dpmi_mode.value,
         }
 
 
@@ -615,9 +635,14 @@ def _registry_toolchain(
     dependencies: dict[str, tuple[ToolIdentity, ...]],
 ) -> CompilerToolchain:
     """Validate one registry profile record into a typed toolchain."""
-    if not isinstance(record, dict) or set(record) != _REGISTRY_PROFILE_FIELDS:
+    if (
+        not isinstance(record, dict)
+        or not set(record) >= _REGISTRY_PROFILE_FIELDS
+        or not set(record) <= _REGISTRY_PROFILE_FIELDS | _REGISTRY_OPTIONAL_PROFILE_FIELDS
+    ):
         raise ValueError(
-            f"{source}: profile records must have fields {sorted(_REGISTRY_PROFILE_FIELDS)}"
+            f"{source}: profile records must have fields {sorted(_REGISTRY_PROFILE_FIELDS)} "
+            f"and may include {sorted(_REGISTRY_OPTIONAL_PROFILE_FIELDS)}"
         )
     compile_backend = CompileBackend(_text(record["compile_backend"], "profile.compile_backend"))
     run_backend = CompileBackend(_text(record["run_backend"], "profile.run_backend"))
@@ -668,6 +693,9 @@ def _registry_toolchain(
         dosbox_host_environment=dosbox[2] if dosbox is not None else (),
         kvikdos_executable=kvikdos[0] if kvikdos is not None else None,
         kvikdos_sha256=kvikdos[1] if kvikdos is not None else None,
+        kvikdos_dpmi_mode=KvikdosDPMIMode(
+            _text(record.get("kvikdos_dpmi_mode", "auto"), "profile.kvikdos_dpmi_mode")
+        ),
     )
     if toolchain.profile_id == MSC6_AX_PROFILE_ID:
         raise ValueError(f"{source}: {MSC6_AX_PROFILE_ID!r} is reserved for the built-in profile")
@@ -768,6 +796,11 @@ def _verify_probe_profile(
             f"probe run runner {record.get('run_runner')!r} != {toolchain.run_backend.value!r}"
         )
     problems.extend(_probe_dependency_problems(toolchain, probe))
+    if record.get("kvikdos_dpmi_mode", "auto") != toolchain.kvikdos_dpmi_mode.value:
+        problems.append(
+            f"probe kvikdos DPMI mode {record.get('kvikdos_dpmi_mode', 'auto')!r} "
+            f"!= {toolchain.kvikdos_dpmi_mode.value!r}"
+        )
     if problems:
         raise ValueError(
             f"{source}: profile {toolchain.profile_id!r} does not match probe "
@@ -956,3 +989,428 @@ def compiler_toolchain_lock(toolchain: CompilerToolchain) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
+class ToolStageOutcome(StrEnum):
+    """Distinguish DOS compiler evidence from launcher and artifact failures."""
+
+    PASSED = "passed"
+    COMPILE_FAILED = "compile_failed"
+    LAUNCH_FAILED = "launch_failed"
+    TIMED_OUT = "timed_out"
+    ARTIFACT_MISSING = "artifact_missing"
+    INCOMPLETE = "incomplete"
+
+
+@dataclass(frozen=True)
+class ToolStageReceipt:
+    """One original tool invocation and its retained host/guest evidence."""
+
+    outcome: ToolStageOutcome
+    exit_code: int | None
+    command: tuple[str, ...]
+    stdout: str
+    stderr: str
+
+    @property
+    def passed(self) -> bool:
+        """Require compiler success and every declared output artifact."""
+        return self.outcome is ToolStageOutcome.PASSED
+
+    @property
+    def signal(self) -> int | None:
+        """Expose host signal termination separately from DOS compiler failure."""
+        return -self.exit_code if self.exit_code is not None and self.exit_code < 0 else None
+
+
+_STAGE_PROCESS_CLEANUP_GRACE_SECONDS: float = 0.5
+
+
+def _kill_owned_process_group(process: subprocess.Popen[str]) -> None:
+    """Kill only the isolated stage process group owned by this caller."""
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _kill_owned_process_tree(process: subprocess.Popen[str]) -> None:
+    """Snapshot and kill this root's descendants before terminating its group."""
+    descendants = process_tree_pids((process.pid,)) or (process.pid,)
+    for pid in reversed(descendants):
+        if pid != process.pid:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+    _kill_owned_process_group(process)
+
+
+def _timeout_output_text(value: str | bytes | None) -> str | None:
+    """Normalize one partial timeout stream while retaining undecodable bytes."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _combine_timeout_output(before: str | bytes | None, after: str | bytes | None) -> str | None:
+    """Keep the fullest partial stream when bounded cleanup retries communicate."""
+    initial = _timeout_output_text(before)
+    final = _timeout_output_text(after)
+    if not initial:
+        return final
+    if not final:
+        return initial
+    if final.startswith(initial):
+        return final
+    if initial.startswith(final):
+        return initial
+    return initial + final
+
+
+def _run(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int | float = 60,
+    env: dict[str, str] | None = None,
+    cleanup_process_group: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command with captured output and explicit environment overrides."""
+    runtime_env = os.environ.copy()
+    if env is not None:
+        runtime_env.update(env)
+    if not cleanup_process_group:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd is not None else None,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            env=runtime_env,
+        )
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=runtime_env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as failure:
+        _kill_owned_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=_STAGE_PROCESS_CLEANUP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired as drain_failure:
+            _kill_owned_process_group(process)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=_STAGE_PROCESS_CLEANUP_GRACE_SECONDS)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    with contextlib.suppress(OSError):
+                        stream.close()
+            stdout = _combine_timeout_output(failure.output, drain_failure.output) or ""
+            stderr = _combine_timeout_output(failure.stderr, drain_failure.stderr) or ""
+        raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr) from failure
+    except BaseException:
+        _kill_owned_process_tree(process)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=_STAGE_PROCESS_CLEANUP_GRACE_SECONDS)
+        raise
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+def _kvikdos_toolchain_command(
+    kvikdos: Path,
+    out_dir: Path,
+    spec: CompilerToolchain,
+    *,
+    path_dos: tuple[str, ...],
+    environment: tuple[tuple[str, str], ...],
+    program: str,
+) -> list[str]:
+    """Assemble one emulator invocation for a verified toolchain program."""
+    return [
+        str(kvikdos),
+        f"--mount=c:{out_dir}/",
+        f"--mount=e:{spec.toolchain_root}/",
+        "--drive=c",
+        "--cwd-dos=c:\\",
+        *(f"--path-dos={path}" for path in path_dos),
+        *(f"--env={name}={value}" for name, value in environment),
+        *(["--dpmi=off"] if spec.kvikdos_dpmi_mode is KvikdosDPMIMode.OFF else []),
+        f"--prog={program}",
+        program,
+    ]
+
+
+def _dos_case_file(out_dir: Path, name: str) -> Path | None:
+    """Find a DOS-created file regardless of DOSBox name folding."""
+    for candidate in (out_dir / name, out_dir / name.upper(), out_dir / name.lower()):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _run_dosbox_stage(
+    spec: CompilerToolchain,
+    out_dir: Path,
+    *,
+    tag: str,
+    command_line: str,
+    path_dos: tuple[str, ...],
+    environment: tuple[tuple[str, str], ...],
+    required: tuple[str, ...],
+    timeout: int = 120,
+) -> ToolStageReceipt:
+    """Run one compiler/linker stage under pinned-config DOSBox.
+
+    DOSBox's host exit code only reports the launcher, and it eagerly
+    creates redirect targets even for skipped echoes, so success requires
+    the exact OK marker text with an empty FAIL marker, an error-free tool
+    log, and every required artifact fresh and nonempty.
+    """
+    batch_name = f"{tag}.BAT"
+    out_name = f"{tag}.OUT"
+    ok_name = f"{tag}OK.OUT"
+    fail_name = f"{tag}FL.OUT"
+    cleanup_error = _clear_stage_artifacts(out_dir, (batch_name, out_name, ok_name, fail_name, *required))
+    if cleanup_error is not None:
+        return cleanup_error
+    (out_dir / batch_name).write_bytes(
+        spec.dosbox_batch(
+            tag=tag,
+            command_line=command_line,
+            out_name=out_name,
+            ok_name=ok_name,
+            fail_name=fail_name,
+            path_dos=path_dos,
+            environment=environment,
+        ).encode("ascii")
+    )
+    conf_path = out_dir / "DOSBOX.CFG"
+    conf_path.write_text(spec.dosbox_conf(), encoding="ascii")
+    dosbox = spec.dosbox_executable
+    if dosbox is None:
+        return ToolStageReceipt(ToolStageOutcome.LAUNCH_FAILED, None, (), "", "DOSBox compile backend without a declared executable")
+    command = [
+        str(dosbox),
+        "-noconsole",
+        "-conf", str(conf_path),
+        "-c", f'mount c "{out_dir}"',
+        "-c", f'mount e "{spec.toolchain_root}"',
+        "-c", "c:",
+        "-c", f"call c:\\{batch_name}",
+        "-c", "exit",
+    ]
+    wall_start = time.time()
+    try:
+        proc = _run(command, timeout=timeout, env=dict(spec.dosbox_host_environment), cleanup_process_group=True)
+    except subprocess.TimeoutExpired as error:
+        return ToolStageReceipt(ToolStageOutcome.TIMED_OUT, None, tuple(command),
+                                _timeout_output_text(error.stdout) or "",
+                                (_timeout_output_text(error.stderr) or "") + str(error))
+    except OSError as error:
+        return ToolStageReceipt(ToolStageOutcome.LAUNCH_FAILED, None, tuple(command), "", str(error))
+    dos_log_path = _dos_case_file(out_dir, out_name)
+    dos_log = dos_log_path.read_text("latin1") if dos_log_path is not None else ""
+    diagnostics: list[str] = []
+    if proc.returncode != 0:
+        diagnostics.append(f"dosbox launcher exit {proc.returncode}")
+    marker_problems = _dosbox_marker_diagnostics(spec, out_dir, tag, ok_name, fail_name)
+    diagnostics.extend(marker_problems)
+    error_lines = [
+        line.strip() for line in dos_log.splitlines()
+        if "error" in line.lower() or "fatal" in line.lower()
+    ]
+    diagnostics.extend(f"{out_name}: {line}" for line in error_lines[:8])
+    diagnostics.extend(_dosbox_artifact_diagnostics(out_dir, required, wall_start))
+    log_parts = [proc.stdout, proc.stderr, dos_log]
+    log_parts.extend(diagnostic + "\n" for diagnostic in diagnostics)
+    fail_marker = _dos_case_file(out_dir, fail_name)
+    compiler_failed = bool(fail_marker is not None and fail_marker.read_text("latin1").strip()) or bool(error_lines)
+    outcome = ToolStageOutcome.PASSED
+    if proc.returncode != 0:
+        outcome = ToolStageOutcome.LAUNCH_FAILED
+    elif compiler_failed:
+        outcome = ToolStageOutcome.COMPILE_FAILED
+    elif marker_problems:
+        outcome = ToolStageOutcome.INCOMPLETE
+    elif diagnostics:
+        outcome = ToolStageOutcome.ARTIFACT_MISSING
+    return ToolStageReceipt(outcome, proc.returncode, tuple(command), "".join(log_parts), "")
+
+
+def _dosbox_marker_diagnostics(
+    spec: CompilerToolchain, out_dir: Path, tag: str, ok_name: str, fail_name: str,
+) -> list[str]:
+    """Require the exact OK marker text and an empty/absent FAIL marker."""
+    problems: list[str] = []
+    ok_path = _dos_case_file(out_dir, ok_name)
+    if ok_path is None:
+        problems.append(f"missing {ok_name} status marker")
+    else:
+        ok_text = ok_path.read_text("latin1").strip()
+        if ok_text != spec.dosbox_ok_marker(tag):
+            problems.append(f"malformed {ok_name} marker content {ok_text!r}")
+    fail_path = _dos_case_file(out_dir, fail_name)
+    if fail_path is not None and fail_path.read_text("latin1").strip():
+        problems.append(f"{fail_name} marker records DOS ERRORLEVEL >= 1")
+    return problems
+
+
+def _dosbox_artifact_diagnostics(
+    out_dir: Path, required: tuple[str, ...], wall_start: float,
+) -> list[str]:
+    """Require every declared stage artifact to be fresh and nonempty."""
+    problems: list[str] = []
+    for name in required:
+        artifact = _dos_case_file(out_dir, name)
+        if artifact is None:
+            problems.append(f"missing artifact {name}")
+        elif artifact.stat().st_size == 0 or artifact.stat().st_mtime < wall_start - 1.0:
+            problems.append(f"stale or empty artifact {name}")
+    return problems
+
+
+def _run_tool_stage(
+    spec: CompilerToolchain,
+    out_dir: Path,
+    *,
+    kvikdos: Path | None,
+    tag: str,
+    program: str,
+    argv: list[str],
+    command_line: str,
+    path_dos: tuple[str, ...],
+    environment: tuple[tuple[str, str], ...],
+    required: tuple[str, ...],
+    timeout: int = 120,
+) -> ToolStageReceipt:
+    """Run one compile/link stage on the profile's verified compile backend."""
+    if spec.compile_backend is CompileBackend.DOSBOX:
+        return _run_dosbox_stage(
+            spec,
+            out_dir,
+            tag=tag,
+            command_line=command_line,
+            path_dos=path_dos,
+            environment=environment,
+            required=required,
+            timeout=timeout,
+        )
+    if kvikdos is None:
+        return ToolStageReceipt(ToolStageOutcome.LAUNCH_FAILED, None, (), "", "selected profile has no declared kvikdos runner")
+    command = _kvikdos_toolchain_command(
+        kvikdos, out_dir, spec, path_dos=path_dos, environment=environment, program=program,
+    ) + argv
+    cleanup_error = _clear_stage_artifacts(out_dir, required)
+    if cleanup_error is not None:
+        return cleanup_error
+    started = time.time()
+    try:
+        proc = _run(command, timeout=timeout, cleanup_process_group=True)
+    except subprocess.TimeoutExpired as error:
+        return ToolStageReceipt(ToolStageOutcome.TIMED_OUT, None, tuple(command),
+                                _timeout_output_text(error.stdout) or "",
+                                (_timeout_output_text(error.stderr) or "") + str(error))
+    except OSError as error:
+        return ToolStageReceipt(ToolStageOutcome.LAUNCH_FAILED, None, tuple(command), "", str(error))
+    outcome = ToolStageOutcome.PASSED
+    diagnostics = _dosbox_artifact_diagnostics(out_dir, required, started)
+    if proc.returncode < 0:
+        outcome = ToolStageOutcome.LAUNCH_FAILED
+    elif proc.returncode != 0:
+        outcome = ToolStageOutcome.COMPILE_FAILED
+    elif diagnostics:
+        outcome = ToolStageOutcome.ARTIFACT_MISSING
+    return ToolStageReceipt(outcome, proc.returncode, tuple(command), proc.stdout,
+                            proc.stderr + "\n".join(diagnostics))
+
+
+
+
+TAIL_COMPILER_CONTEXT_ENV: str = "INERTIA_TAIL_COMPILER_CONTEXT"
+
+
+@dataclass(frozen=True)
+class FrozenCompilerContext:
+    """Bind child compilation to authoritative profile bytes and resolved settings."""
+
+    profile_id: str
+    memory_model: str
+    toolchain_root: str
+    evidence_path: str
+    evidence_sha256: str
+    profile_sha256: str
+
+    @classmethod
+    def create(cls, toolchain: CompilerToolchain, evidence_path: Path | None) -> FrozenCompilerContext:
+        """Freeze selection evidence without serializing executable commands."""
+        path = profile_registry_path(evidence_path) if toolchain.profile_id != MSC6_AX_PROFILE_ID else None
+        return cls(toolchain.profile_id, toolchain.memory_model.value, str(toolchain.toolchain_root),
+                   str(path.resolve()) if path is not None else "",
+                   _file_sha256(path) if path is not None else "",
+                   cls._profile_hash(toolchain))
+
+    @staticmethod
+    def _profile_hash(toolchain: CompilerToolchain) -> str:
+        """Fingerprint all resolved flags, backend, environment and binary pins."""
+        return hashlib.sha256(json.dumps(toolchain.to_dict(), sort_keys=True).encode()).hexdigest()
+
+    def serialize(self) -> str:
+        """Return deterministic child environment and cache identity bytes."""
+        return json.dumps({"profile_id": self.profile_id, "memory_model": self.memory_model,
+                           "toolchain_root": self.toolchain_root, "evidence_path": self.evidence_path,
+                           "evidence_sha256": self.evidence_sha256, "profile_sha256": self.profile_sha256},
+                          sort_keys=True)
+
+    @classmethod
+    def parse(cls, serialized: str) -> FrozenCompilerContext:
+        """Refuse malformed context rather than silently switching compiler lanes."""
+        data = json.loads(serialized)
+        fields = {"profile_id", "memory_model", "toolchain_root", "evidence_path", "evidence_sha256", "profile_sha256"}
+        if not isinstance(data, dict) or set(data) != fields or not all(isinstance(v, str) for v in data.values()):
+            raise ValueError("malformed frozen compiler context")
+        return cls(data["profile_id"], data["memory_model"], data["toolchain_root"], data["evidence_path"],
+                   data["evidence_sha256"], data["profile_sha256"])
+
+    def resolve(self) -> CompilerToolchain:
+        """Reverify evidence and tools before execution or any successful cache reuse."""
+        path = Path(self.evidence_path) if self.evidence_path else None
+        if path is not None and _file_sha256(path) != self.evidence_sha256:
+            raise ValueError("frozen compiler evidence changed")
+        toolchain = resolve_case_toolchain(self.profile_id, memory_model=MSCMemoryModel(self.memory_model),
+                                          msc6_root=Path(self.toolchain_root), evidence_path=path)
+        if toolchain.toolchain_root.resolve() != Path(self.toolchain_root).resolve():
+            raise ValueError("frozen compiler toolchain root disagrees with resolved profile")
+        if self._profile_hash(toolchain) != self.profile_sha256:
+            raise ValueError("frozen compiler profile changed")
+        toolchain.verify_tools()
+        return toolchain
+
+
+def compile_profile_translation_unit(toolchain: CompilerToolchain, out_dir: Path, *, timeout: int = 60) -> ToolStageReceipt:
+    """Compile only GEN.C into a fresh GEN.OBJ using the selected original profile."""
+    with compiler_toolchain_lock(toolchain):
+        return _run_tool_stage(toolchain, out_dir, kvikdos=toolchain.kvikdos_executable,
+                               tag="CC", program=toolchain.compiler_program,
+                               argv=toolchain.compile_argv(source_name="GEN.C", obj_name="GEN.OBJ"),
+                               command_line=toolchain.compile_dos_command(source_name="GEN.C", obj_name="GEN.OBJ"),
+                               path_dos=toolchain.compiler_path_dos, environment=toolchain.compiler_environment,
+                               required=("GEN.OBJ",), timeout=timeout)
+
+
+def _clear_stage_artifacts(out_dir: Path, names: tuple[str, ...]) -> ToolStageReceipt | None:
+    """Require removal of previous artifacts before admitting fresh stage evidence."""
+    try:
+        for name in names:
+            for candidate in {out_dir / name, out_dir / name.upper(), out_dir / name.lower()}:
+                if candidate.exists():
+                    candidate.unlink()
+    except OSError as error:
+        return ToolStageReceipt(ToolStageOutcome.INCOMPLETE, None, (), "", str(error))
+    return None

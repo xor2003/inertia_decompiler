@@ -14,9 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
-
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
 from inertia.semantics.terminal_pointer_output_contracts import (
     TerminalPointerOutputEvidence8616,
     TerminalPointerOutputFact8616,

@@ -8,14 +8,14 @@ from typing import Protocol
 
 import angr
 import pytest
+
 import inertia.frontend.x86_16.lift_86_16 as lift_86_16
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
-from inertia.ir.core import IRBlock, IRInstr
-from inertia.ir.vex_import import _block_to_ir
-
 from inertia.frontend.x86_16.cod_analysis_image import build_cod_analysis_image_8616
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
+from inertia.ir.core import IRBlock, IRInstr
+from inertia.ir.vex_import import _block_to_ir
+from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
 from inertia.semantics.direct_near_call_target_binding import (
     DirectNearCallCoordinates8616,
     DirectNearCallTargetBinding8616,

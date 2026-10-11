@@ -5,6 +5,7 @@
  * is not a printf port.
  */
 #include <stdarg.h>
+#include <stddef.h>
 
 long collect(int first, ...)
 {

@@ -31,7 +31,6 @@ from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
-from inertia.pipeline.errors import PipelineHardError
 from capstone.x86_const import X86_OP_IMM
 
 from inertia.ir.condition_ir import ConditionIR
@@ -40,6 +39,7 @@ from inertia.lowering.real_mode_linear import (
     DirectStackMoveSourceKind8616,
 )
 from inertia.lowering.stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+from inertia.pipeline.errors import PipelineHardError
 
 from .condition_replay import (
     StructuringConditionReplayFact8616,

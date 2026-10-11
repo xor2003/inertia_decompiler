@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from inertia.ir import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,
     TerminalMemoryOutputFailure8616,

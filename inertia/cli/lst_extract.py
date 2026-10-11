@@ -110,6 +110,8 @@ class LSTMetadata:
     debug_line_map: dict[int, tuple[int, int]] = field(default_factory=dict)
     cod_path: str | None = None
     cod_proc_kinds: dict[int, str] = field(default_factory=dict)
+    # Binary-pattern extents only; never synthesized from labels or debug bounds.
+    signature_code_ranges: dict[int, tuple[int, int]] = field(default_factory=dict)
 
 
 _DATA_LABEL_RE = re.compile(

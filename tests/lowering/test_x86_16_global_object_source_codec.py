@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 from inertia.lowering.callee_global_object_evidence import (
     CalleeGlobalObjectSourceFamilyFact8616,
 )
@@ -15,7 +16,6 @@ from inertia.lowering.global_object_source_codec import (
     global_object_source_evidence_from_record_8616,
     global_object_source_evidence_record_8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
 )

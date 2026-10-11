@@ -10,13 +10,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.real16_joint_system import build_real16_joint_system
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 import tools.dosunit.compare.straightline_ssa as S
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.compare.real16_call_evidence import group_functions
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load, bind_real16_mz
 from tools.dosunit.recursive_proofs.loaded_byte_native_transition import (
     LoadedTransitionReason,
@@ -30,7 +29,8 @@ from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import (
 from tools.dosunit.recursive_proofs.real16_entry_domain import EntryDomainReason, entry_domain_model_hash
 from tools.dosunit.recursive_proofs.real16_entry_domain_proof import prove_real16_entry_domain
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
-from tools.dosunit.contracts.register_state_relations import MachineState
+from tools.dosunit.tests.recursive_proof_fixtures.real16_joint_system import build_real16_joint_system
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 DEFAULT_BOOTSTRAP: bytes = bytes.fromhex("e8fd01b8004ccd21")
 

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -7,8 +8,8 @@ from threading import Barrier, Lock
 
 import pytest
 
-import tools.dev.batch_decompile_procs as batch_decompile_procs
 import tools.compiler_toolchain.verify_msc_example_runtime_gate as runtime_gate
+import tools.dev.batch_decompile_procs as batch_decompile_procs
 from tools.compiler_toolchain.build_msc6_examples import (
     COMPARE16_HARNESS_MAIN,
     COMPARE32_HARNESS_MAIN,
@@ -1004,7 +1005,7 @@ def test_function_fallback_uses_batch_report_when_proc_returns_nonzero_with_body
     assert isinstance(function_debug, list)
     assert len(function_debug) == 1
     assert function_debug[0][0:2] == ["f", "f"]
-    assert str(batch_decompile_procs.REPO_ROOT / "scripts" / "batch_decompile_procs.py") in function_debug[0][2]
+    assert str(Path(batch_decompile_procs.__file__).resolve()) in function_debug[0][2]
     profile = function_debug[0][3]
     assert profile["acceptance_reason"] == (None if source_free else "nonzero_exit")
     assert profile["batch_attempt"] is True
@@ -1397,3 +1398,440 @@ def test_runtime_gate_worker_control_is_not_forwarded_to_decompiler(monkeypatch,
     )
 
     assert "INERTIA_MSC_RUNTIME_DECOMPILE_WORKERS" not in captured_env
+
+
+def _conditional_entry_premise() -> dict[str, object]:
+    image_hash = hashlib.sha256(b"MZ-fixture").hexdigest()
+    spec = {
+        "version": 1, "source_sha256": image_hash, "relocated_sha256": "a" * 64,
+        "load_segment": 0x1000, "entry_segment": 0x1000, "entry_offset": 0x10,
+        "range_start": 0x10010, "range_end": 0x10020, "native_sha256": "b" * 64,
+        "environment_sha256": "c" * 64, "use_environment_memory": False,
+        "registers": [["ss", 0x2000], ["sp", 0x100]], "memory": [],
+        "return_boundary": {"kind": "near", "segment": 0x1000, "offset": 0},
+    }
+    payload = {
+        "declaration": {"spec": spec},
+        "domain": {"kind": "declared_function_entry", "entry_segment": 0x1000,
+                   "entry_offset": 0x10, "source_sha256": image_hash},
+        "boundary": {"start": 0x10010, "size": 0x10},
+    }
+    return {
+        "status": "conditional", "payload": payload,
+        "sha256": hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+    }
+
+
+def _conditional_stage_snapshot(*, changed: bool = False) -> dict[str, dict[str, object]]:
+    stage = {
+        "status": "conditional",
+        "changed": changed,
+        "entry_premise": _conditional_entry_premise(),
+    }
+    return {"structuring": dict(stage), "postprocess": dict(stage)}
+
+
+def _emit_conditional_artifacts(
+    cmd: list[str],
+    *,
+    address: int = 0x10010,
+    name: str = "sub_10010",
+    payload: str = "int sub_10010(void) { return 1; }\n",
+    tamper: bool = False,
+    omit_receipt: bool = False,
+    changed_premise: bool = False,
+) -> None:
+    output_dir = Path(cmd[cmd.index("--output-c-dir") + 1])
+    conditional_dir = output_dir / "conditional"
+    conditional_dir.mkdir(parents=True)
+    c_path = conditional_dir / f"{address:08x}-{name}.c"
+    c_path.write_text(payload + ("/*tampered*/" if tamper else ""), encoding="utf-8")
+    if omit_receipt:
+        return
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    record = {
+        "schema": "inertia.conditional-c.v1",
+        "status": "conditional",
+        "merge_gate": "hold",
+        "address": address,
+        "name": name,
+        "payload_sha256": digest,
+        "validated_payload_sha256": digest,
+        "compiler_payload_sha256": digest,
+        "tail_validation": _conditional_stage_snapshot(changed=changed_premise),
+    }
+    c_path.with_suffix(".json").write_text(
+        json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _focused_conditional_kwargs(tmp_path: Path, **overrides: object) -> dict[str, object]:
+    from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget
+
+    image = tmp_path / "COMPARE16.EXE"
+    if not image.exists():
+        image.write_bytes(b"MZ-fixture")
+    kwargs = {
+        "decompile_py": tmp_path / "decompile.py",
+        "decompile_timeout": 60,
+        "decompile_function_discovery_backend": "auto",
+        "decompile_seed_engine": "auto",
+        "decompile_rizin_timeout": 8,
+        "decompile_force_rizin_8616": False,
+        "decompile_pat_backend": None,
+        "decompile_signature_catalog": None,
+        "function_name": "cmp_i16",
+        "binary_target": BinaryFunctionTarget("cmp_i16", 0x10010),
+        "artifact_stem": tmp_path / "cmp_i16.attempt-000",
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_conditional_child_receipt_is_bound_without_acceptance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Retain exact conditional evidence while keeping legacy acceptance false."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--output-c-dir" in cmd
+        _emit_conditional_artifacts(cmd)
+        return subprocess.CompletedProcess(cmd, 5, stdout="int sub_10010(void) { return 1; }\n", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+    exe = tmp_path / "COMPARE16.EXE"
+    exe.write_bytes(b"MZ-fixture")
+
+    ok, _stdout, _stderr, profile, _command, _name = _decompile_function_with_options(
+        exe, **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert profile["returncode"] == 5
+    assert profile["acceptance_reason"] == "tail_validation_uncollected"
+    result = profile["conditional_result"]
+    assert result["status"] == "bound"
+    assert result["address"] == 0x10010
+    assert result["name"] == "sub_10010"
+    assert result["binary_sha256"] == hashlib.sha256(b"MZ-fixture").hexdigest()
+    assert result["tail_validation"]["structuring"]["status"] == "conditional"
+    assert Path(result["receipt_path"]).is_file()
+    json.dumps(profile)
+
+
+def test_conditional_transport_refuses_target_mismatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reject an artifact emitted for a different selected native target."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        _emit_conditional_artifacts(cmd, address=0x10020, name="sub_10020")
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert profile["conditional_result"]["status"] == "target_mismatch"
+
+
+def test_conditional_transport_refuses_tampered_payload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reject C bytes that changed after the producer recorded their hash."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        _emit_conditional_artifacts(cmd, tamper=True)
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert profile["conditional_result"]["status"] == "payload_mismatch"
+
+
+def test_conditional_transport_refuses_missing_receipt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Require the structured conditional receipt alongside emitted C."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        _emit_conditional_artifacts(cmd, omit_receipt=True)
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert profile["conditional_result"]["status"] == "missing_receipt"
+
+
+def test_conditional_transport_refuses_stale_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Do not import artifacts retained from an earlier invocation."""
+    stale = tmp_path / "cmp_i16.attempt-000.c-artifacts"
+    stale.mkdir(parents=True)
+    (stale / "conditional").mkdir()
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert "--output-c-dir" not in seen["cmd"]
+    assert profile["conditional_result"]["status"] == "stale_directory"
+
+
+def test_conditional_transport_refuses_incomplete_premise(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Require unchanged complete same-premise validation stages."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        _emit_conditional_artifacts(cmd, changed_premise=True)
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert profile["conditional_result"]["status"] == "premise_incomplete"
+
+
+def test_conditional_transport_refuses_failed_or_incomplete_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Preserve child timeout without retaining partial conditional evidence."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd, timeout=60, output="partial", stderr="partial")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is False
+    assert profile["timeout"] is True
+    assert profile["conditional_result"]["status"] == "child_incomplete"
+
+
+def test_later_failed_attempt_cannot_reuse_earlier_conditional_payload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A later failure remains final despite an earlier conditional artifact."""
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if len(calls) == 1:
+            _emit_conditional_artifacts(cmd)
+            return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="decompilation validation_failed\n")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    first_ok, _o, _e, first_profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+    second_ok, _o, _e, second_profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE",
+        **_focused_conditional_kwargs(tmp_path, artifact_stem=tmp_path / "cmp_i16.attempt-001"),
+    )
+
+    assert first_ok is False
+    assert first_profile["conditional_result"]["status"] == "bound"
+    assert second_ok is False
+    assert second_profile["conditional_result"]["status"] == "not_conditional"
+    assert second_profile["conditional_result"]["payload_sha256"] is None
+
+
+def test_legacy_call_without_target_stays_unchanged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Preserve commands and acceptance for legacy named-function requests."""
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen["cmd"] = cmd
+        stderr = "[tail-validation] whole-tail validation clean across 1 functions\n"
+        return subprocess.CompletedProcess(cmd, 0, stdout="int f(void) { return 0; }", stderr=stderr)
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "TEST.EXE",
+        decompile_py=tmp_path / "decompile.py",
+        decompile_timeout=60,
+        decompile_function_discovery_backend="auto",
+        decompile_seed_engine="auto",
+        decompile_rizin_timeout=8,
+        decompile_force_rizin_8616=False,
+        decompile_pat_backend=None,
+        decompile_signature_catalog=None,
+        function_name="f",
+        artifact_stem=tmp_path / "f.attempt-000",
+    )
+
+    assert ok is True
+    assert "--output-c-dir" not in seen["cmd"]
+    assert "conditional_result" not in profile
+
+
+def test_unconditional_clean_child_records_not_conditional(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An ordinary clean child result remains unconditional legacy evidence."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--output-c-dir" in cmd
+        stderr = "[tail-validation] whole-tail validation clean across 1 functions\n"
+        return subprocess.CompletedProcess(cmd, 0, stdout="int sub_10010(void) { return 0; }", stderr=stderr)
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+
+    ok, _o, _e, profile, _c, _n = _decompile_function_with_options(
+        tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path)
+    )
+
+    assert ok is True
+    assert profile["conditional_result"]["status"] == "not_conditional"
+
+
+@pytest.mark.parametrize("field", ["validated_payload_sha256", "compiler_payload_sha256"])
+@pytest.mark.parametrize("value", [None, "0" * 64])
+def test_conditional_transport_requires_all_payload_hashes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, field: str, value: str | None,
+) -> None:
+    """A producer checksum cannot replace validation/compiler payload identity."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        _emit_conditional_artifacts(cmd)
+        receipt = next(Path(cmd[cmd.index("--output-c-dir") + 1]).glob("conditional/*.json"))
+        record = json.loads(receipt.read_text())
+        record[field] = value
+        receipt.write_text(json.dumps(record))
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+    result = _decompile_function_with_options(tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path))
+    assert result[0] is False
+    assert result[3]["conditional_result"]["status"] == "payload_mismatch"
+
+
+@pytest.mark.parametrize("mutation", ["missing_image", "changed_image", "wrong_source", "wrong_entry", "extra_failed", "extra_malformed"])
+def test_conditional_transport_binds_source_and_all_phases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str,
+) -> None:
+    """Fresh directory alone cannot validate stale image or a different scope."""
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        _emit_conditional_artifacts(cmd)
+        image = tmp_path / "COMPARE16.EXE"
+        receipt = next(Path(cmd[cmd.index("--output-c-dir") + 1]).glob("conditional/*.json"))
+        record = json.loads(receipt.read_text())
+        if mutation == "missing_image":
+            image.unlink()
+        elif mutation == "changed_image":
+            image.write_bytes(b"changed")
+        elif mutation in {"wrong_source", "wrong_entry"}:
+            for stage in record["tail_validation"].values():
+                premise = stage["entry_premise"]
+                spec = premise["payload"]["declaration"]["spec"]
+                spec["source_sha256" if mutation == "wrong_source" else "entry_offset"] = "0" * 64 if mutation == "wrong_source" else 17
+                premise["sha256"] = hashlib.sha256(json.dumps(premise["payload"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        else:
+            record["tail_validation"]["extra"] = {"status": "failed"} if mutation == "extra_failed" else None
+        receipt.write_text(json.dumps(record))
+        return subprocess.CompletedProcess(cmd, 5, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.compiler_toolchain.build_msc6_examples._run", fake_run)
+    result = _decompile_function_with_options(tmp_path / "COMPARE16.EXE", **_focused_conditional_kwargs(tmp_path))
+    assert result[0] is False
+    expected = "image_mismatch" if mutation.endswith("image") else "premise_incomplete"
+    assert result[3]["conditional_result"]["status"] == expected
+
+
+def test_conditional_transport_serializes_detached_premises(tmp_path: Path) -> None:
+    """Changing a report projection must not mutate the retained transport."""
+    from tools.compiler_toolchain.conditional_function_receipt import bind_conditional_function_artifact
+
+    from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget
+
+    image = tmp_path / "COMPARE16.EXE"
+    image.write_bytes(b"MZ-fixture")
+    output = tmp_path / "artifacts"
+    _emit_conditional_artifacts(["--output-c-dir", str(output)])
+    bound = bind_conditional_function_artifact(
+        output, target=BinaryFunctionTarget("cmp_i16", 0x10010), binary_path=image,
+        child_returncode=5, expected_binary_sha256=hashlib.sha256(image.read_bytes()).hexdigest())
+    assert bound.bound
+    first = bound.to_dict()
+    first["tail_validation"]["structuring"]["entry_premise"]["payload"]["domain"]["entry_offset"] = 0
+    second = bound.to_dict()
+    assert second["tail_validation"]["structuring"]["entry_premise"]["payload"]["domain"]["entry_offset"] == 0x10
+
+
+@pytest.mark.parametrize("damage,expected", [
+    ("none", "bound"), ("payload", "payload_mismatch"),
+    ("image", "image_mismatch"), ("receipt", "malformed_receipt"),
+    ("duplicate", "malformed_receipt"), ("stale", "stale_directory"),
+    ("failed", "not_conditional"),
+])
+def test_batch_conditional_transport(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, damage: str, expected: str) -> None:
+    """Batch receipts remain exact, fresh, and unaccepted for every result row."""
+    from tools.compiler_toolchain import build_msc6_examples as builder
+    from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget
+    from tools.dev import batch_decompile_procs as driver
+
+    image = tmp_path / "CMP16.EXE"
+    image.write_bytes(b"MZ-fixture")
+    target = BinaryFunctionTarget("cmp_i16", 0x10010)
+    options = builder._FunctionDecompileOptions(
+        exe_path=image, out_dir=tmp_path, decompile_py=tmp_path / "decompile.py",
+        decompile_timeout=10, decompile_function_discovery_backend="auto",
+        decompile_seed_engine="auto", decompile_rizin_timeout=1,
+        decompile_force_rizin_8616=False, decompile_pat_backend=None,
+        decompile_signature_catalog=None, memory_model=builder.MSCMemoryModel.SMALL,
+        decompile_c_name="GEN.c",
+    )
+    batch_dir = tmp_path / "GEN.batch"
+    if damage == "stale":
+        (batch_dir / "cmp_i16.c-artifacts").mkdir(parents=True)
+
+    def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        job = driver._load_jobs(Path(cmd[cmd.index("--job-file") + 1]))[0]
+        if damage != "stale":
+            assert "--output-c-dir" in job.argv
+            _emit_conditional_artifacts(job.argv, tamper=damage == "payload")
+            if damage == "receipt":
+                directory = Path(job.argv[job.argv.index("--output-c-dir") + 1])
+                next(directory.glob("conditional/*.json")).write_text("not json")
+        else:
+            assert "--output-c-dir" not in job.argv
+        if damage == "image":
+            image.write_bytes(b"changed")
+        stdout = batch_dir / "cmp_i16.stdout.c"
+        stderr = batch_dir / "cmp_i16.stderr.txt"
+        stdout.write_text("int sub_10010(void) { return 1; }\n")
+        stderr.write_text("")
+        row = {"proc": target.name, "returncode": 1 if damage == "failed" else 5,
+               "stdout_path": str(stdout), "stderr_path": str(stderr), "wall_seconds": 0.1}
+        rows = [row, row] if damage == "duplicate" else [row]
+        (batch_dir / "batch_report.json").write_text(json.dumps({"results": rows}))
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(builder, "_run", run)
+    debug = []
+    result = builder._try_batch_function_decompiles(
+        options, fallback_functions=(target.name,), binary_targets=(target,),
+        targets={target.name: target}, function_debug=debug,
+    )
+    assert result == {}
+    assert len(debug) == 1
+    assert debug[0][3]["conditional_result"]["status"] == expected
+    assert debug[0][3].get("returncode") != 0
+    if damage == "none":
+        def must_not_reuse(*_args: object, **_kwargs: object) -> None:
+            pytest.fail("stale batch report must refuse before running another child")
+        monkeypatch.setattr(builder, "_run", must_not_reuse)
+        later_debug = []
+        later = builder._try_batch_function_decompiles(
+            options, fallback_functions=(target.name,), binary_targets=(target,),
+            targets={target.name: target}, function_debug=later_debug,
+        )
+        assert later is None
+        assert later_debug[0][3]["conditional_result"]["status"] == "stale_directory"

@@ -12,9 +12,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.ir.condition_ir import ConditionIR
 from archinfo import ArchX86
 
+from inertia.ir.condition_ir import ConditionIR
 from inertia.structuring.multi_arm_return_chains import (
     MultiArmReturnCandidate8616,
     MultiArmReturnChainStatus8616,

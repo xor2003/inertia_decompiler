@@ -21,12 +21,13 @@ from typing import Any, Protocol, cast
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallsiteArgumentClass8616,
-    CallsitePushSourceKind8616,
-    CallsiteSummary8616,
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
 )
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -39,7 +40,6 @@ from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactVerdict8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.lowering.callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     CalleeArgumentCountVerdict8616,
@@ -70,13 +70,13 @@ from inertia.lowering.interprocedural_storage_trial_collection import (
 from inertia.lowering.interprocedural_storage_trial_types import (
     classify_input_argument_8616,
 )
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
 from inertia.semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteArgumentClass8616,
+    CallsitePushSourceKind8616,
+    CallsiteSummary8616,
 )
 
 _CALLER_ADDR = 0x1000

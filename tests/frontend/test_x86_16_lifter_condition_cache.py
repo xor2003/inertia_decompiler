@@ -5,10 +5,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pyvex
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 
 
 class _OwnedOperand:

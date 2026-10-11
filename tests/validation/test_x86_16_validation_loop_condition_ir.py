@@ -16,10 +16,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
-from inertia.ir.condition_ir import ConditionIR
-from inertia.ir.core import IRValue, MemSpace
 from archinfo import ArchX86
 
+from inertia.ir.condition_ir import ConditionIR
+from inertia.ir.core import IRValue, MemSpace
 from inertia.structuring.loop_break_jcc import LoopBranchGuardFact8616
 from inertia.validation.tail_validation import (
     _canonicalize_linear_ds_deref_condition_fingerprint_8616,

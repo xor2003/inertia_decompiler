@@ -25,7 +25,7 @@ class RecompileCheckResult:
 
     outcome: RecompileCheckOutcome
     target: str
-    exit_code: int
+    exit_code: int | None
     compiler: str | None
     stdout: str
     stderr: str
@@ -33,6 +33,8 @@ class RecompileCheckResult:
     checked_payload: str
     checked_payload_hash: str
     source_path: str | None = None
+    compiler_profile: str | None = None
+    launcher_signal: int | None = None
 
     @property
     def passed(self) -> bool:
@@ -43,3 +45,16 @@ class RecompileCheckResult:
     def toolchain_unavailable(self) -> bool:
         """Return whether the toolchain is missing or cannot execute in this environment."""
         return self.outcome is RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE
+
+
+@dataclass(frozen=True)
+class RecompileCacheIdentity:
+    """Current frozen selection identity and whether its evidence permits reuse."""
+
+    context: str | None
+    outcome: RecompileCheckOutcome
+
+    @property
+    def reusable(self) -> bool:
+        """Permit cache hits only after current evidence validation."""
+        return self.outcome is RecompileCheckOutcome.PASSED

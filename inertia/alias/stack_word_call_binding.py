@@ -15,12 +15,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
-from inertia.semantics.call_target_identity import normalize_x86_16_direct_call_target_8616
-from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
-
 from inertia.ir.core import IRBlock, IRInstr, IRValue, MemSpace
 from inertia.ir.ir_boundary_cfg import IRBoundaryCoverageResult8616
 from inertia.ir.logical_constant_word_receipt import LogicalConstantWordStats8616
+from inertia.semantics.call_target_identity import normalize_x86_16_direct_call_target_8616
+from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
 from inertia.semantics.direct_ret_call_effect import direct_near_call_target_is_bound_8616
 
 from .entry_stack_pointer_snapshots import EntryStackPointerSnapshots8616

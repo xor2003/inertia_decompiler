@@ -14,15 +14,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
 )
 from angr.sim_type import SimTypeShort
+from capstone.x86_const import X86_INS_PUSH
+
 import inertia.postprocess.decompiler_postprocess_calls as postprocess_calls
 import inertia.postprocess.decompiler_postprocess_stage as postprocess_stage
 import inertia.structuring.decompiler_structuring_stage as structuring_stage
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.postprocess.decompiler_postprocess_calls import (
-    _bind_call_argument_rematerialization_classifier_8616,
-    _materialize_callsite_stack_arguments_8616,
-)
 from inertia.lowering.call_argument_carrier_liveness import (
     CallArgumentCarrierLivenessVerdict8616,
     CallArgumentMaterializationVerdict8616,
@@ -34,7 +31,11 @@ from inertia.lowering.real_mode_linear import (
     prune_consumed_call_push_stack_assignments_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-from capstone.x86_const import X86_INS_PUSH
+from inertia.postprocess.decompiler_postprocess_calls import (
+    _bind_call_argument_rematerialization_classifier_8616,
+    _materialize_callsite_stack_arguments_8616,
+)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class _Codegen:

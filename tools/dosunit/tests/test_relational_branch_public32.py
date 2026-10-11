@@ -10,10 +10,10 @@ from argparse import Namespace
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 # Structurally ambiguous terminal arms have distinct effects; proposing the
 # wrong bijection must fail solver discharge before the alternate can prove.

@@ -1,6 +1,5 @@
 """Typed failed-return evidence must survive the loop report boundary."""
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane
 
 import tools.dosunit.compare.flat32_loop_calls as owner
 from tools.dosunit.compare.flat32_call_contracts import (
@@ -9,6 +8,7 @@ from tools.dosunit.compare.flat32_call_contracts import (
     ReturnTargetProofFailure,
 )
 from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane
 
 pytest_plugins = ["test_flat32_comparator_lane"]
 

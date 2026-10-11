@@ -2,9 +2,10 @@
 from dataclasses import replace
 
 import pytest
-import tests.ir.test_x86_16_declared_resize_boundary as native
+
 import inertia.ir.real16_edge_feasibility8616 as kb
 import inertia.ir.real16_invocation_domain as census
+import tests.ir.test_x86_16_declared_resize_boundary as native
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 
 

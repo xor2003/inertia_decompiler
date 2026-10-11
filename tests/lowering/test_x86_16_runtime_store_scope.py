@@ -26,12 +26,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import MemSpace
 from inertia.lowering.runtime_segment_access import (
     RuntimeSegmentAccessContext8616,
 )
-
 from inertia.widening.segmented_load_identity import (
     SegmentedLoadIdentity8616,
     segmented_load_identity_8616,

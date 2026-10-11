@@ -2,7 +2,13 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
+
+from inertia.alias.stack_memory_ssa import (
+    StackMemoryAliasFactKind8616,
+    StackMemoryAliasRefusalKind8616,
+    apply_x86_16_stack_memory_ssa_alias_artifact,
+    build_x86_16_stack_memory_ssa_alias_artifact,
+)
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -25,13 +31,7 @@ from inertia.ir.ssa_memory_contracts import (
     SSAMemoryStats8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.alias.stack_memory_ssa import (
-    StackMemoryAliasFactKind8616,
-    StackMemoryAliasRefusalKind8616,
-    apply_x86_16_stack_memory_ssa_alias_artifact,
-    build_x86_16_stack_memory_ssa_alias_artifact,
-)
+from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 
 
 def _bp_slot(offset: int, size: int, *, version: int | None = None) -> IRAddress:

@@ -4,12 +4,12 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
+from inertia.lowering.c_ast_utils import _iter_c_node_occurrences_8616
 from inertia.lowering.wide_call_condition_capture import (
     build_proven_wide_call_condition_8616,
     commit_wide_call_condition_captures_8616,
 )
-
-from inertia.lowering.c_ast_utils import _iter_c_node_occurrences_8616
 from tests.lowering.test_x86_16_call_output_stack_objects import _wide_condition_fixture
 
 

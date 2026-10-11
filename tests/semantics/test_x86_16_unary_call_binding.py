@@ -2,9 +2,10 @@
 from dataclasses import replace
 
 import pytest
+
+import inertia.semantics.direct_near_call_target_binding as binder
 import tests.semantics.test_direct_near_call_target_binding as native
 from inertia.ir.core import IRActiveUnary8616, IRValue, MemSpace
-import inertia.semantics.direct_near_call_target_binding as binder
 
 
 @pytest.fixture(scope="module")

@@ -6,12 +6,11 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent))
-from tools.dosunit.tests.test_binary_callee_intake import CALLEE_LINEAR, CALLER_OFFSET, _image, _lower, _request
-from tools.dosunit.tests.test_dosunit_tool import _edge_function
-
 from tools.dosunit.catalog.binary_callee_intake import IntakeRefusalReason
 from tools.dosunit.catalog.binary_callee_region_contracts import RegionScanBudget, RegionScanRefusalReason, ScanWindow
 from tools.dosunit.catalog.binary_callee_region_intake import RegionIntakeStatus, intake_uncatalogued_region_candidate
+from tools.dosunit.tests.test_binary_callee_intake import CALLEE_LINEAR, CALLER_OFFSET, _image, _lower, _request
+from tools.dosunit.tests.test_dosunit_tool import _edge_function
 
 _BUDGET = RegionScanBudget(8, 32, 64, 64)
 

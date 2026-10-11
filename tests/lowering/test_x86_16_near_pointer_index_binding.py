@@ -10,6 +10,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.lowering.authoritative_function_prototypes import (
     authoritative_function_prototype_8616,
     publish_authoritative_function_prototype_8616,

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+
 import inertia.ir.direct_evidence_deadline as deadline_owner
 import inertia.ir.entry_domain_call_preservation as resolver
 import inertia.ir.real16_invocation_domain as domain

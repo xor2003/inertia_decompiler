@@ -5,10 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 from tools.dosunit.catalog.flat32_catalog_admission import CatalogRangeStatus, check_function_extent
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 
 def _project(*spans: tuple[int, int, bool]) -> SimpleNamespace:

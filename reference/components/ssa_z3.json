@@ -5,7 +5,8 @@
     "tools/dosunit",
     "artifacts/bc5-z3cmp32",
     "artifacts/msc8-z3cmp32",
-    "tools/comparator"
+    "tools/comparator",
+    "inertia/ir/real16_dosbox_resize_effects.py"
   ],
   "public_api": [
     "tools.dosunit.compare.straightline_ssa.lower_straightline_ssa_document",
@@ -147,6 +148,9 @@
     "tools/dosunit/tests/test_real16_branch_regions.py",
     "tools/dosunit/tests/test_real16_call_admission.py",
     "tools/dosunit/tests/test_real16_call_composition.py",
+    "tools/dosunit/tests/test_real16_partial_write_liveness.py",
+    "tools/dosunit/tests/test_x86_flag_scan.py",
+    "tools/dosunit/tests/test_generated_bitfield_function.py",
     "tools/dosunit/tests/test_real16_concrete_replay.py",
     "tools/dosunit/tests/test_real16_control_boundary.py",
     "tools/dosunit/tests/test_real16_control_domain.py",
@@ -266,7 +270,10 @@
     "tools/comparator/tests/test_cfg_owner.py",
     "tools/comparator/tests/test_scratch_owner.py",
     "tools/dosunit/tests/test_frontend_source_layout.py",
-    "tools/dosunit/tests/test_ir_edges.py"
+    "tools/dosunit/tests/test_ir_edges.py",
+    "tests/ir/test_x86_16_dosbox_entry_effects.py",
+    "tests/ir/test_x86_16_dosbox_resize_effects.py",
+    "tests/ir/test_x86_16_dosbox_resize_boundary.py"
   ],
   "focus": [
     "tools/dosunit/tests/test_contract_boundaries.py",
@@ -287,12 +294,16 @@
     "tools/dosunit/contracts/comparison.py",
     "tools/dosunit/ssa/identity.py",
     "tools/dosunit/contracts/scanning.py",
-    "tools/comparator/compare_msc6_ssa_examples.py"
+    "tools/comparator/compare_msc6_ssa_examples.py",
+    "inertia/ir/real16_dosbox_resize_effects.py"
   ],
   "routine_tests": [
     "tools/dosunit/tests/test_contract_boundaries.py",
     "tools/dosunit/tests/test_comparison_policy.py",
-    "tools/dosunit/tests/test_ir_edges.py"
+    "tools/dosunit/tests/test_ir_edges.py",
+    "tests/ir/test_x86_16_dosbox_entry_effects.py",
+    "tests/ir/test_x86_16_dosbox_resize_effects.py",
+    "tests/ir/test_x86_16_dosbox_resize_boundary.py"
   ],
   "order": 3
 }

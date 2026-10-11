@@ -45,6 +45,7 @@ def _display_cache_policy() -> DisplayCatalogCachePolicy8616:
 
 
 def test_display_catalog_cache_isolated_by_sidecar_policy(monkeypatch, tmp_path):
+    monkeypatch.setenv("PYTHONHASHSEED", "0")
     binary = tmp_path / "sample.exe"
     binary.write_bytes(b"MZ")
     project = SimpleNamespace(entry=0x1100, arch=SimpleNamespace(name="86_16"))
@@ -172,7 +173,7 @@ def test_source_catalog_retries_only_failed_classified_entries(
         exact_regions[candidate_addr] = exact_region
         if candidate_addr == 0x1050 and attempts[candidate_addr] == 1:
             raise recoverable_error
-        function = SimpleNamespace(addr=candidate_addr)
+        function = SimpleNamespace(addr=candidate_addr, info={})
         recovered_functions[candidate_addr] = function
         return SimpleNamespace(), function
 
@@ -694,3 +695,408 @@ def test_stitched_graph_replaces_overlapped_cfg_when_unique_coverage_is_preserve
     }
 
     assert _should_replace_function_with_stitched_graph_8616(current, reachable, (0x1009, 0x1020)) is True
+
+
+@pytest.mark.parametrize("evidence", ["full", "prefix", "ambiguous", "none", "listing"])
+@pytest.mark.parametrize("include_libraries", [False, True])
+def test_ranked_seeds_consume_only_verified_signature_extents(monkeypatch, evidence, include_libraries):
+    """Unmatched bytes stay eligible; uniquely matched bodies obey the library policy."""
+    from tools.signatures.omf_pat import PatModule, PatPublicName, match_pat_modules
+
+    body = bytes(range(1, 41))
+    image = b"\x90" * 32 + body + b"\x90" * 64
+    if evidence == "ambiguous":
+        image += body
+    pattern = PatModule(
+        source_path="<test>", compiler_name="test", module_name="library",
+        pattern_bytes=tuple(body[:32]), module_length=len(body),
+        public_names=(PatPublicName(offset=0, name="library"),), referenced_names=(),
+        tail_bytes=() if evidence == "prefix" else tuple(body[32:]),
+    )
+    pat_match = match_pat_modules(image, 0x1000, [pattern], backend="python_regex")
+    labels, ranges = pat_match.code_labels, pat_match.code_ranges
+    if evidence in {"none", "listing"}:
+        labels, ranges = {}, {}
+    metadata = None if evidence == "none" else LSTMetadata(
+        data_labels={}, code_labels=labels,
+        code_ranges={0x1020: (0x1020, 0x1080)},
+        signature_code_ranges=ranges, signature_code_addrs=frozenset(labels),
+        source_format="signature_catalog",
+    )
+    candidates = {0x101F, 0x1020, 0x1024, 0x1047, 0x1048, 0x1050}
+    ctx = function_discovery._ExeSeedCtx8616(
+        binary_path=None, max_addr=0x1000 + len(image) - 1, linked_base=0x1000,
+        code=image, seed_windows=[(0x1000, 0x1000 + len(image))],
+        entry_window_targets=set(), source_region_start=None, metadata=metadata,
+        recovery_labels={}, signature_matched_addrs=frozenset(labels),
+        allow_signature_seed=include_libraries, lib_functions=include_libraries,
+        cache_key=None, cached_addrs=None,
+    )
+
+    def feed_candidates(project, context, bounds, consider):
+        for candidate in sorted(candidates):
+            consider(candidate, 1)
+
+    monkeypatch.setattr(function_discovery, "_consider_metadata_and_tracer_seeds_8616", feed_candidates)
+    monkeypatch.setattr(function_discovery, "trace_16bit_seed_candidates", lambda *args, **kwargs:
+                        function_discovery._SeedTrace16(frozenset(), frozenset()))
+    monkeypatch.setattr(function_discovery, "_scan_opcode_seed_targets_8616", lambda *args, **kwargs:
+                        (set(), set(), set()))
+    monkeypatch.setattr(function_discovery, "_relocation_seed_targets", lambda *args, **kwargs: (set(), set()))
+    monkeypatch.setattr(function_discovery, "_collect_neighbor_targets_for_seed_ranking", lambda *args: set())
+    monkeypatch.setattr(function_discovery, "_collect_terminal_next_targets_8616", lambda *args: set())
+    state = function_discovery._collect_ranked_seed_state_8616(SimpleNamespace(entry=0x1000), ctx)
+    excluded = set()
+    if not include_libraries:
+        if evidence == "full":
+            excluded = {0x1020, 0x1024, 0x1047}
+        elif evidence == "prefix":
+            excluded = {0x1020}
+    assert set(state.ranked) == candidates - excluded
+
+
+@pytest.mark.parametrize("lean", [False, True])
+def test_candidate_cfg_retains_its_original_function_manager_across_attempts(lean):
+    """A later real CFG must not replace a selected candidate's owning manager."""
+    import gc
+    import weakref
+
+    import angr
+
+    project = angr.load_shellcode(b"\x90\xc3", arch="x86", load_address=0x1000)
+    project_kb = project.kb
+    picker = function_discovery._pick_function_lean if lean else function_discovery._pick_function
+    options = {"extend_far_calls": False} if lean else {"force_smart_scan": False}
+    first_cfg, first_function = picker(
+        project, 0x1000, regions=[(0x1000, 0x1002)],
+        seed_calling_conventions_enabled=False, **options,
+    )
+    original_manager = weakref.ref(first_cfg.functions)
+    second_cfg, _ = picker(
+        project, 0x1000, regions=[(0x1000, 0x1002)],
+        seed_calling_conventions_enabled=False, **options,
+    )
+    gc.collect()
+
+    assert original_manager() is not None
+    assert first_cfg.functions is original_manager()
+    assert first_cfg.functions is not second_cfg.functions
+    assert first_cfg.functions[0x1000] is first_function
+    first_function.update_func_block_count()
+    assert project.kb is project_kb
+
+
+@pytest.mark.parametrize("far", [False, True])
+def test_extended_cfg_retains_independent_function_manager(monkeypatch, far):
+    """Real extension CFGs retain their managers across subsequent recovery."""
+    import gc
+
+    import angr
+
+    from inertia.lowering import analysis_helpers
+
+    project = angr.load_shellcode(b"\xe8\x01\x00\x00\x00\xc3\xc3", arch="x86", load_address=0x1000)
+    project_manager = project.kb.functions
+    original_cfg, function = function_discovery._pick_function_lean(
+        project, 0x1000, regions=[(0x1000, 0x1007)],
+        extend_far_calls=False, seed_calling_conventions_enabled=False,
+    )
+    monkeypatch.setattr(analysis_helpers, "seed_calling_conventions", lambda cfg: None)
+    monkeypatch.setattr(analysis_helpers, "patch_far_call_sites", lambda *args: None)
+    if far:
+        targets = [analysis_helpers.FarCallTarget(0x1000, 0x1006, 0x1005)]
+        monkeypatch.setattr(analysis_helpers, "collect_direct_far_call_targets", lambda fn: targets)
+        extend = analysis_helpers.extend_cfg_for_far_calls
+    else:
+        monkeypatch.setattr(analysis_helpers, "collect_direct_far_call_targets", lambda fn: [])
+        targets = [analysis_helpers.CallTargetSeed(
+            0x1000, 0x1006, 0x1005, analysis_helpers.CallTargetKind8616.DIRECT_NEAR_CALL,
+        )]
+        monkeypatch.setattr(analysis_helpers, "collect_neighbor_call_targets", lambda fn: targets)
+        extend = analysis_helpers.extend_cfg_for_neighbor_calls
+    first = extend(project, function, entry_window=6, callee_window=1)
+    recovered = first.functions[0x1000]
+    second = extend(project, recovered, entry_window=6, callee_window=1)
+    gc.collect()
+
+    assert first.kb is not original_cfg.kb
+    assert first.kb is not second.kb
+    assert first.functions[0x1000] is recovered
+    assert first.functions is first.kb.functions
+    assert {0x1000, 0x1006} <= set(first.functions)
+    # Seed-driven extension must not restart DOS gap scanning after its jobs.
+    assert first._force_smart_scan is False
+    assert second._force_smart_scan is False
+    recovered.update_func_block_count()
+    function.update_func_block_count()
+    assert project.kb.functions is project_manager
+
+
+def test_candidate_isolated_kb_preserves_project_hook_evidence():
+    """Per-attempt function storage still consumes project-owned procedures."""
+    import angr
+
+    project = angr.load_shellcode(b"\xe8\x01\x00\x00\x00\xc3\xc3", arch="x86", load_address=0x1000)
+    procedure = angr.SIM_PROCEDURES["stubs"]["ReturnUnconstrained"]()
+    project.hook(0x1006, procedure)
+    cfg, function = function_discovery._pick_function_lean(
+        project, 0x1000, regions=[(0x1000, 0x1007)],
+        extend_far_calls=False, seed_calling_conventions_enabled=False,
+    )
+
+    assert cfg.kb is not project.kb
+    assert cfg.project is project
+    assert cfg.functions[0x1000] is function
+    assert cfg.functions[0x1006].is_simprocedure
+    assert project.hooked_by(0x1006) is procedure
+
+
+def test_native_recovery_decompiler_and_calling_conventions_share_candidate_kb():
+    """An isolated recovered function remains visible through real Clinic CCA."""
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    apply_x86_16_bootstrap()
+    project = _project_from_bytes(b"\xb8\x02\x00\xc3")
+    project_kb = project.kb
+    cfg, function = function_discovery._pick_function(
+        project, 0x1000, regions=[(0x1000, 0x1004)],
+        force_smart_scan=False, seed_calling_conventions_enabled=False,
+    )
+    assert cfg.kb is not project_kb
+    assert function.addr not in project_kb.functions
+    dec = project.analyses.Decompiler(function, cfg=cfg, kb=cfg.kb, fail_fast=True, generate_code=False)
+
+    assert dec.kb is cfg.kb
+    assert dec.clinic.kb is cfg.kb
+    assert dec.clinic.function is function
+    assert cfg.functions[function.addr] is function
+    assert project.kb is project_kb
+    assert dec.codegen is None  # This regression covers analysis ownership before C emission.
+
+
+@pytest.mark.parametrize("options", [None, []])
+def test_cli_decompiler_attempt_consumes_recovered_cfg_kb(options, monkeypatch):
+    """Both CLI option branches pass the selected recovery KB into real Decompiler."""
+    from angr.analyses.decompiler.decompiler import Decompiler
+
+    from inertia.cli.cli_decompilation import _DecompileRun8616
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    apply_x86_16_bootstrap()
+    project = _project_from_bytes(b"\xb8\x02\x00\xc3")
+    cfg, function = function_discovery._pick_function(
+        project, 0x1000, regions=[(0x1000, 0x1004)],
+        force_smart_scan=False, seed_calling_conventions_enabled=False,
+    )
+    original_init = Decompiler.__init__
+
+    def analysis_only(self, *args, **kwargs):
+        kwargs["generate_code"] = False
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(Decompiler, "__init__", analysis_only)
+    run = _DecompileRun8616(project, cfg, function, timeout=30, api_style="dos")
+    run.current_func_addr = function.addr
+    run.block_count = 1
+    run.byte_count = 4
+    run.expr_collapse_depth = 3
+    run.decompiler_options = options
+    run.helper_guard_active = False
+    outcome = run._decompiler_attempt_8616()
+
+    assert outcome is not None and outcome[0] == "empty"
+    assert run.dec.codegen is None
+    assert run.dec.kb is cfg.kb
+    assert run.dec.clinic.kb is cfg.kb
+    assert run.dec.clinic.function is function
+    assert cfg.kb is not project.kb
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_optimization_pass_separates_function_and_variable_knowledge(native):
+    """Native optimization reads its function owner without replacing variable KB."""
+    import angr
+    from angr.ailment.manager import Manager
+    from angr.analyses.decompiler.optimization_passes.optimization_pass import OptimizationPass
+    from angr.analyses.decompiler.optimization_passes.switch_default_case_duplicator import SwitchDefaultCaseDuplicator
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
+    project = angr.load_shellcode(b"\xc3", arch=Arch86_16() if native else "x86", load_address=0x1000)
+    project_kb = project.kb
+    cfg, function = function_discovery._pick_function(
+        project, 0x1000, regions=[(0x1000, 0x1001)],
+        force_smart_scan=False, seed_calling_conventions_enabled=False,
+    )
+    variable_kb = angr.KnowledgeBase(project)
+    optimization = OptimizationPass(function, Manager(arch=project.arch), kb=variable_kb, graph=function.graph)
+    assert optimization._dvars_kb is variable_kb
+    assert optimization.kb is (cfg.kb if native else project_kb)
+    if native:
+        real_pass = SwitchDefaultCaseDuplicator(
+            function, Manager(arch=project.arch), kb=variable_kb, graph=function.graph,
+        )
+        assert real_pass.kb is cfg.kb
+        assert real_pass._dvars_kb is variable_kb
+    assert project.kb is project_kb
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_native_optimization_refuses_absent_or_foreign_function_manager(missing):
+    """A missing owner is not permission to use the project's default KB."""
+    import angr
+    from angr.ailment.manager import Manager
+    from angr.analyses.decompiler.optimization_passes.optimization_pass import BaseOptimizationPass
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
+    project = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
+    other = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
+    function = SimpleNamespace(project=project, _function_manager=None if missing else other.kb.functions)
+    optimization = BaseOptimizationPass(function, Manager(arch=project.arch))
+    with pytest.raises(ValueError, match="originating function manager" if missing else "different project"):
+        _ = optimization.kb
+
+
+def test_native_callsite_convention_recovers_from_candidate_caller_kb():
+    """A real near-call forces Clinic's callsite-only CallingConvention analysis."""
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    apply_x86_16_bootstrap()
+    project = _project_from_bytes(b"\xe8\x01\x00\xc3\xb8\x02\x00\xc3")
+    cfg, function = function_discovery._pick_function(
+        project, 0x1000, regions=[(0x1000, 0x1008)],
+        force_smart_scan=False, seed_calling_conventions_enabled=False,
+    )
+    assert function.addr not in project.kb.functions
+    assert 0x1004 in cfg.functions
+    dec = project.analyses.Decompiler(function, cfg=cfg, kb=cfg.kb, fail_fast=True, generate_code=False)
+    assert dec.clinic is not None
+    assert dec.clinic.kb is cfg.kb
+    assert dec.clinic.function is function
+    assert cfg.kb is not project.kb
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_stack_tracker_uses_native_function_owner_without_project_mutation(native):
+    """Real native call tracking resolves callees in the recovered function KB."""
+    import angr
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
+    code = b"\xe8\x01\x00\xc3\xc3" if native else b"\xc3"
+    project = angr.load_shellcode(code, arch=Arch86_16() if native else "x86", load_address=0x1000)
+    cfg, function = function_discovery._pick_function(
+        project, 0x1000, regions=[(0x1000, 0x1000 + len(code))],
+        force_smart_scan=False, seed_calling_conventions_enabled=False,
+    )
+    project_kb = project.kb
+    tracker = project.analyses.StackPointerTracker(function, {project.arch.sp_offset}, fail_fast=True)
+    assert tracker.kb is (cfg.kb if native else project_kb)
+    assert tracker.offset_before(0x1000, project.arch.sp_offset) is not None
+    assert project.kb is project_kb
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_native_stack_tracker_refuses_absent_or_foreign_function_owner(missing):
+    """Native tracker construction refuses inconsistent ownership before analysis."""
+    import angr
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
+    project = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
+    other = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
+    function = SimpleNamespace(_function_manager=None if missing else other.kb.functions)
+    with pytest.raises(ValueError, match="originating function manager" if missing else "different project"):
+        project.analyses.StackPointerTracker(function, {project.arch.sp_offset}, fail_fast=True)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_direct_call_stub_uses_caller_manager_and_retains_call_and_prototype(existing):
+    """Stub materialization must not create a competing default-project callee."""
+    from angr.knowledge_plugins.functions.function import PrototypeSource
+    from angr.sim_type import SimTypeFunction, SimTypeShort
+
+    from inertia.cli.cli_decompilation import _create_or_update_direct_call_stub_8616
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    apply_x86_16_bootstrap()
+    project = _project_from_bytes(b"\xe8\x01\x00\xc3\xb8\x02\x00\xc3")
+    cfg = function_discovery._recover_target_cfg_8616(
+        project, 0x1000, [(0x1000, 0x1008)], False, (False,),
+    )
+    function = cfg.functions[0x1000]
+    callee = cfg.functions[0x1004]
+    prototype = SimTypeFunction([], SimTypeShort()).with_arch(project.arch)
+    if existing:
+        callee.prototype = prototype
+        callee.prototype_source = PrototypeSource.USER
+    else:
+        del cfg.functions[0x1004]
+    old_graph = set(function.transition_graph.edges)
+    default_addrs = set(project.kb.functions)
+    created = _create_or_update_direct_call_stub_8616(
+        project=project, function=function, callsite_addr=0x1000, ret_addr=0x1003,
+        candidate=0x1004, preferred_candidate=0x1004,
+        fallback_call_name=None, debug_enabled=False,
+    )
+    assert created
+    assert 0x1004 in cfg.functions
+    assert set(project.kb.functions) == default_addrs
+    assert function.get_call_target(0x1000) == 0x1004
+    assert set(function.transition_graph.edges) == old_graph
+    if existing:
+        assert cfg.functions[0x1004] is callee
+        assert callee.prototype is prototype
+        assert callee.prototype_source is PrototypeSource.USER
+
+
+def test_interrupt_service_callee_is_registered_in_callers_recovered_kb():
+    """Binary interrupt evidence creates the service callee beside its caller."""
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+    from inertia.lowering.analysis_helpers import patch_interrupt_service_call_sites
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    apply_x86_16_bootstrap()
+    project = _project_from_bytes(b"\xb4\x09\xcd\x21\xc3")
+    cfg = function_discovery._recover_target_cfg_8616(
+        project, 0x1000, [(0x1000, 0x1005)], False, (False,),
+    )
+    function = cfg.functions[0x1000]
+    default_addrs = set(project.kb.functions)
+    assert patch_interrupt_service_call_sites(function)
+    target = function.get_call_target(0x1002)
+    assert target in cfg.functions
+    assert cfg.functions[target].is_simprocedure
+    assert project.hooked_by(target).guessed_prototype
+    assert cfg.functions[target].calling_convention is None  # No proven ABI was supplied by this hook.
+    assert set(project.kb.functions) == default_addrs
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_interrupt_service_registration_refuses_invalid_caller_owner(missing):
+    """Reject invalid ownership before changing the caller's call graph."""
+    import angr
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.lowering.analysis_helpers import patch_interrupt_service_call_sites
+
+    project = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
+    other = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
+    function = SimpleNamespace(project=project, _call_sites={},
+                               _function_manager=None if missing else other.kb.functions)
+    with pytest.raises(ValueError, match="originating function manager" if missing else "different project"):
+        patch_interrupt_service_call_sites(function)
+    assert function._call_sites == {}

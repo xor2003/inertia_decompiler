@@ -33,9 +33,9 @@ for _path in reversed(_import_roots()):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from inertia.cli.fork_timeout import ForkChildExitError
 import tools.dev.batch_decompile_procs as batch
 import tools.dev.batch_decompile_scheduler as scheduler
+from inertia.cli.fork_timeout import ForkChildExitError
 
 _BARRIER_SECONDS = 8.0
 _DEATH_POLL_SECONDS = 5.0

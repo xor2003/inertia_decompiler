@@ -10,9 +10,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_variable import SimMemoryVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from archinfo import ArchX86
 
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.validation.tail_validation import (
     refresh_x86_16_final_semantic_validation_8616,
 )

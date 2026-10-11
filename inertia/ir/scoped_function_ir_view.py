@@ -45,11 +45,17 @@ from .entry_jump_domain import (
     EntryJumpDomainApplication8616,
     EntryJumpDomainApplicationStatus8616,
     EntryJumpDomainProof8616,
-    _canonical_source_8616,
     apply_entry_jump_domain_8616,
 )
-from .ir_boundary_cfg import IRBoundaryCoverageResult8616
+from .ir_boundary_cfg import (
+    IRBoundaryCoverageResult8616,
+    _instruction_census_matches_8616,
+    _scoped_native_failure_8616,
+    closed_ir_boundary_cfg_8616,
+)
+from .real16_boot_entry_link import RawBootEntrySurface8616
 from .real16_invocation_domain import (
+    DeclaredFunctionEntryLink8616,
     Real16CallChainLink8616,
     Real16EnclosedEntryLink8616,
     Real16InvocationDomain8616,
@@ -58,6 +64,7 @@ from .real16_invocation_domain import (
 from .segment_call_preservation import (
     segment_call_dependency_traversal_scope_8616,
 )
+from .source_graph_binding import source_graphs_equal_8616
 from .vex_terminal_jump import TerminalJumpRefusalReason8616
 
 __all__ = [
@@ -97,7 +104,8 @@ def _scope_surface_bound_8616(
 
     The anchor rule mirrors the domain's own discharge owner: a
     coverage-bound entry consumes its registered ``artifact``/``boundary``
-    pair, while an in-flight chained or enclosed entry consumes the
+    pair; a raw boot or declared entry retains that same pair directly.
+    An in-flight chained or enclosed entry consumes the
     retained link's callee pair — never a re-derived look-alike and never
     the enclosing census surface. Selector or address coincidence is not
     evidence; the surface must be the identical objects the entry's census
@@ -118,6 +126,8 @@ def _scope_surface_bound_8616(
             and coverage.boundary is boundary
         )
     chain = scope.chain
+    if type(chain) in (RawBootEntrySurface8616, DeclaredFunctionEntryLink8616):
+        return chain.artifact is artifact and chain.boundary is boundary
     if isinstance(chain, (Real16CallChainLink8616, Real16EnclosedEntryLink8616)):
         return (
             chain.callee_artifact is artifact
@@ -260,13 +270,17 @@ def _application_authentic_8616(
     ``invocation_scope``, and each retained ``call_dependencies`` entry —
     is excluded from dataclass equality. Ordinary equality is therefore
     not evidence: an application only authenticates when its status is
-    ``APPLIED`` with an empty refusal surface, its admissions are the same
+    ``APPLIED`` with an empty refusal surface (or ``EMPTY`` with no pending
+    candidates, admissions or refusals), its admissions are the same
     ordered objects the proof retains (so a rebuilt or stripped look-alike
     fails on identity, not on a field-by-field comparison that ignores the
     excluded fields), and its recorded consuming entry is the identical
     ``proof.invocation_scope`` object.
     """
-    if application.status is not EntryJumpDomainApplicationStatus8616.APPLIED:
+    if application.status is EntryJumpDomainApplicationStatus8616.EMPTY:
+        if proof.source_binding.pending or proof.admitted or proof.refusals:
+            return False
+    elif application.status is not EntryJumpDomainApplicationStatus8616.APPLIED:
         return False
     if application.refusals != ():
         return False
@@ -280,6 +294,22 @@ def _application_authentic_8616(
     ):
         return False
     return application.invocation_scope is proof.invocation_scope
+
+
+def _identity_surface_complete_8616(
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+) -> bool:
+    """Authenticate a complete unchanged native leaf, never an unresolved transform."""
+    if any(instruction.op == "CALL" for block in artifact.blocks for instruction in block.instrs):
+        return False
+    if artifact.refusals or any(block.refusals for block in artifact.blocks):
+        return False
+    return (
+        closed_ir_boundary_cfg_8616(boundary, artifact)
+        and _instruction_census_matches_8616(boundary, artifact)
+        and _scoped_native_failure_8616(boundary.project, boundary, artifact) is None
+    )
 
 
 def _expected_view_counts_8616(
@@ -454,6 +484,10 @@ class ScopedFunctionIRView8616:
             return False
         if not _application_authentic_8616(retained, self.proof):
             return False
+        if retained.status is EntryJumpDomainApplicationStatus8616.EMPTY and not (
+            _identity_surface_complete_8616(self.source_artifact, self.boundary)
+        ):
+            return False
         counts = (
             self.raw_fact_count,
             self.normalized_fact_count,
@@ -503,11 +537,9 @@ class ScopedFunctionIRView8616:
             return None
         if (
             retained is None
-            or _canonical_source_8616(
-                self.source_artifact.function_addr, retained.blocks
-            )
-            != _canonical_source_8616(
-                self.source_artifact.function_addr, fresh.blocks
+            or not source_graphs_equal_8616(
+                self.source_artifact.function_addr, retained.blocks,
+                self.source_artifact.function_addr, fresh.blocks,
             )
         ):
             return None
@@ -776,7 +808,12 @@ def _view_evaluation_8616(
             detail,
             application,
         )
-    if application.status is not EntryJumpDomainApplicationStatus8616.APPLIED:
+    identity = (
+        application.status is EntryJumpDomainApplicationStatus8616.EMPTY
+        and _application_authentic_8616(application, proof)
+        and _identity_surface_complete_8616(source_artifact, boundary)
+    )
+    if application.status is not EntryJumpDomainApplicationStatus8616.APPLIED and not identity:
         return (
             ScopedFunctionIRViewFailure8616.APPLICATION_EMPTY,
             "the retained proof admitted no edge for the scope to carry",

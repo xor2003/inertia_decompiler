@@ -4,6 +4,7 @@ from copy import copy
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CUnaryOp, CVariable
 from angr.sim_type import SimTypeChar, SimTypeFixedSizeArray
+
 from inertia.lowering.stack_aggregate_objects import (
     StackAggregateObjectFact8616,
     _materialize_fact,

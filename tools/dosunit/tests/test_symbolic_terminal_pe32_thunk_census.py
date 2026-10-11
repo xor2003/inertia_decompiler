@@ -9,6 +9,8 @@ import struct
 from dataclasses import replace
 
 import pytest
+
+import tools.dosunit.compare.symbolic_terminal as ST
 from tools.dosunit.tests.test_pe32_import_service import (
     ENTRY,
     EXIT,
@@ -17,8 +19,6 @@ from tools.dosunit.tests.test_pe32_import_service import (
     pe32_import_bytes,
     pe_environment,
 )
-
-import tools.dosunit.compare.symbolic_terminal as ST
 
 
 def _thunk(prefix: bytes = b"") -> bytes:

@@ -1,8 +1,6 @@
 """Operand-size CALL/RET pairs prove only with full control and frame effects."""
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-from tools.dosunit.tests.test_real16_call_composition import _lower
 
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
@@ -16,6 +14,8 @@ from tools.dosunit.runtime.real16_replay_model import (
     Real16Vector,
     SegOffset,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 
 def _fixture(far, variant):

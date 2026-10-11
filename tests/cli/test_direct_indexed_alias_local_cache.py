@@ -6,18 +6,22 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import angr
-import inertia.ir.function_ssa_registry as function_ssa_registry
 import networkx as nx
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.ir.direct_evidence_deadline as deadline_owner
-import inertia.ir.entry_domain_call_preservation as resolution_owner
 
 import inertia.cli.cache as cache_module
 import inertia.cli.direct_indexed_alias_local_cache as local_cache
 import inertia.cli.indexed_alias_program_context as program_context
+import inertia.ir.direct_evidence_deadline as deadline_owner
+import inertia.ir.entry_domain_call_preservation as resolution_owner
+import inertia.ir.function_ssa_registry as function_ssa_registry
 from inertia.cli.direct_indexed_alias_local_cache import (
     build_cached_direct_indexed_alias_local_evidence_8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.global_object_program_requirement import (
+    GlobalObjectProgramRequirementEvidence8616,
+    GlobalObjectProgramRequirementVerdict8616,
 )
 
 _INDEXED_FUNCTION = bytes.fromhex(
@@ -287,3 +291,40 @@ def test_expired_local_evidence_stops_program_requirement_work(
     assert result.program is None and result.requirement is None
     assert requirement_calls == []
 
+
+@pytest.mark.parametrize("mock_collection", [False, True])
+def test_unknown_requirement_retains_refusal_without_cache_or_catalog_work(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_collection: bool,
+) -> None:
+    """Unavailable local evidence cannot become a catalog-not-required result."""
+    requirement = GlobalObjectProgramRequirementEvidence8616(
+        verdict=GlobalObjectProgramRequirementVerdict8616.UNKNOWN_REFUSE,
+        reasons=(), raw_fact_count=1, normalized_fact_count=0,
+        classified_fact_count=0, materialized_count=0, failure_count=1,
+        local_fact_count=0, global_pointer_source_count=0,
+        stack_pointer_source_count=0, pointer_target_addrs=(), callsite_addrs=(),
+    )
+    assert requirement.closed
+    local_program = local_cache._deadline_refusal_program_8616(_function())
+    monkeypatch.setattr(program_context, "build_cached_direct_indexed_alias_local_evidence_8616",
+                        lambda *args, **kwargs: local_program)
+    if mock_collection:
+        monkeypatch.setattr(program_context, "collect_global_object_program_requirement_8616",
+                            lambda *args: requirement)
+    work: list[str] = []
+
+    def unexpected_cache(*args: object, **kwargs: object) -> None:
+        work.append("cache")
+        raise AssertionError("unknown requirement must not consult the cache or discover a catalog")
+
+    monkeypatch.setattr(program_context, "direct_global_object_cache_key_8616", unexpected_cache)
+    target = SimpleNamespace()
+    result = program_context.prepare_direct_indexed_alias_program_context_8616(
+        SimpleNamespace(), target, _function(), timeout=60, window=16,
+    )
+    assert result.status is program_context.IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE
+    assert result.program is local_program
+    assert result.requirement == requirement
+    assert target._inertia_global_object_program_requirement_8616 is result.requirement
+    assert work == []

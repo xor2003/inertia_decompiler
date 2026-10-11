@@ -6,8 +6,8 @@ import pytest
 
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.memory_relation_proposals import MemoryProposalReason, propose_memory_permutation
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.compare.real16_call_contracts import materialize_function
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 
 
 def _constant(value: int, width: int = 32) -> dict[str, Any]:

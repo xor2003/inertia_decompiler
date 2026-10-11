@@ -21,15 +21,15 @@ from enum import Enum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact
-from inertia.pipeline.errors import PipelineHardError
 
 from inertia.alias.stack_coordinate_projection import (
     project_stack_offset_to_machine_bp_8616,
 )
 from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
+from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact
 from inertia.ir.core import IRAddress, MemSpace
 from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
+from inertia.pipeline.errors import PipelineHardError
 
 from .stack_memory_objects_contracts import (
     StackMemoryObjectWideningArtifact8616,

@@ -27,13 +27,14 @@ if TYPE_CHECKING:
     from .calling_convention_seed_cache import CallingConventionSeedRevision8616
 
 import claripy
-from angr import SimProcedure
+from angr import KnowledgeBase, SimProcedure
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction
 from capstone import CsInsn
 
 from inertia.frontend.x86_16.frontend_function_instructions import collect_function_instruction_inventory_8616
 from inertia.frontend.x86_16.frontend_instruction_reachability import collect_decoded_block_evidence_8616
+from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616
 from inertia.frontend.x86_16.interrupt_contract import (
     DOS_SERVICE_BASE_ADDR,
     INTERRUPT_CORE_VECTOR_BASE,
@@ -957,6 +958,7 @@ def patch_interrupt_service_call_sites(
     if project is None:
         return False
 
+    caller_kb = function_knowledge_base_8616(project, function)
     changed = False
     function_any = cast(Any, function)
     function_addr = _dynamic_analysis_getattr_8616(function, "addr", None)
@@ -987,7 +989,7 @@ def patch_interrupt_service_call_sites(
         if old != new:
             function_any._call_sites[call.insn_addr] = new
             changed = True
-        callee = cast(Any, project).kb.functions.function(addr=target_addr, create=True)
+        callee = caller_kb.functions.function(addr=target_addr, create=True)
         if callee is not None:
             callee.name = name
             callee._init_prototype_and_calling_convention()
@@ -2970,6 +2972,9 @@ def extend_cfg_for_far_calls(
 ) -> object | None:
     """Re-run CFG with direct far callees seeded as extra function starts.
 
+    The returned CFG owns an independent knowledge base, preserving earlier
+    candidate functions while later recovery attempts run.
+
     This keeps bounded DOS startup recovery focused on the functions actually
     reached by immediate far calls, instead of forcing a broad CFG window that
     quickly runs into unrelated unsupported instructions.
@@ -2988,11 +2993,13 @@ def extend_cfg_for_far_calls(
     regions.extend((target.target_addr, target.target_addr + callee_window) for target in far_targets)
 
     cfg = cast(Any, project).analyses.CFGFast(
+        kb=KnowledgeBase(cast(Any, project)),
         start_at_entry=False,
         function_starts=sorted(set(function_starts)),
         regions=regions,
         normalize=True,
         force_complete_scan=False,
+        force_smart_scan=False,
     )
     seed_calling_conventions(cfg)
     all_targets = list(far_targets)
@@ -3141,6 +3148,9 @@ def extend_cfg_for_neighbor_calls(
 ) -> object | None:
     """Re-run bounded CFG with nearby traced callees seeded as extra starts.
 
+    The returned CFG owns an independent knowledge base, preserving earlier
+    candidate functions while later recovery attempts run.
+
     This keeps 16-bit function recovery local: once we recover one function we
     immediately reuse its traced call neighbors instead of widening into a
     broader scan of unrelated code bytes.
@@ -3166,11 +3176,13 @@ def extend_cfg_for_neighbor_calls(
     regions.extend((target.target_addr, target.target_addr + callee_window) for target in unique_targets)
 
     cfg = cast(Any, project).analyses.CFGFast(
+        kb=KnowledgeBase(cast(Any, project)),
         start_at_entry=False,
         function_starts=sorted(set(function_starts)),
         regions=regions,
         normalize=True,
         force_complete_scan=False,
+        force_smart_scan=False,
     )
     seed_calling_conventions(cfg)
     _seed_recovered_cfg_8616(cfg, function_addr, unique_targets)

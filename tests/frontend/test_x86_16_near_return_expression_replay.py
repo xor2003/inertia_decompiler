@@ -2,9 +2,10 @@
 
 from dataclasses import replace
 
-import tests.lowering.test_x86_16_near_return_expression as fixture
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
+
+import tests.lowering.test_x86_16_near_return_expression as fixture
 
 
 def test_refusal_never_claims_unmaterialized_classification():

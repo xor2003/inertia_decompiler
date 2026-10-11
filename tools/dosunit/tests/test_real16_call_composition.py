@@ -155,13 +155,13 @@ def test_indirect_near_control_coordinates_match_independent_guest(
     """Indirect near control consumes an offset and projects its execution domain."""
     from types import SimpleNamespace
 
-    from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
-    from inertia.frontend.x86_16.regs import reg16_t, sgreg_t
     from unicorn import UC_ARCH_X86, UC_MODE_16, Uc
     from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_SP, UC_X86_REG_SS
 
+    from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
     from inertia.frontend.x86_16.instr16 import Instr16
     from inertia.frontend.x86_16.instr32 import Instr32
+    from inertia.frontend.x86_16.regs import reg16_t, sgreg_t
     from tests.frontend.test_x86_16_stack_helpers import _StackEmu
 
     guest = Uc(UC_ARCH_X86, UC_MODE_16)

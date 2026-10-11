@@ -7,16 +7,21 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
-from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
+from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.runtime.real16_program_memory import InitialMemoryRegion
-from tools.dosunit.runtime.real16_program_model import ProgramAgreement, ProgramEventKind, ProgramStatus, compare_programs
+from tools.dosunit.runtime.real16_program_model import (
+    ProgramAgreement,
+    ProgramEventKind,
+    ProgramStatus,
+    compare_programs,
+)
 from tools.dosunit.runtime.real16_program_replay import replay_program
 from tools.dosunit.runtime.real16_program_vectors import VectorPolicy, vector_bytes
 from tools.dosunit.runtime.real16_program_video import VideoQueryPolicy, video_policy_document
 from tools.dosunit.runtime.real16_replay_model import SegOffset
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 
 def video_environment(*, entry=None):

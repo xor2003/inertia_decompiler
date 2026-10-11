@@ -14,10 +14,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.function_ssa_registry import registered_function_ssa_artifact_8616
+from inertia.pipeline.errors import PipelineHardError
 
 from .loop_break_topology import collect_loop_break_topology_8616
 from .shared_loop_exit import (

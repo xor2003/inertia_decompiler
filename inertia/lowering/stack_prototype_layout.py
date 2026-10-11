@@ -90,12 +90,38 @@ def stack_prototype_argument_layout_8616(
     return tuple(layout)
 
 
+def _typed_value_byte_width_8616(value_type: object, arch: Arch) -> int | None:
+    """Return one type's byte width, or None without trustworthy size evidence."""
+    if not isinstance(value_type, SimType):
+        return None
+    try:
+        size_bits = value_type.size
+    except (AttributeError, TypeError, ValueError):
+        return None
+    byte_width = arch.byte_width
+    if (
+        not isinstance(size_bits, int)
+        or size_bits <= 0
+        or not isinstance(byte_width, int)
+        or byte_width <= 0
+        or size_bits % byte_width != 0
+    ):
+        return None
+    return size_bits // byte_width
+
+
 def stack_prototype_cvar_for_machine_bp_range_8616(
     codegen: object,
     bp_offset: int,
     size: int,
 ) -> structured_c.CVariable | None:
-    """Resolve one exact argument CVariable without mutating global coordinates."""
+    """Resolve one exact argument CVariable without mutating global coordinates.
+
+    ``size`` is the loaded byte range, not an allocation hint. The DOS ABI pads
+    a one-byte argument to a two-byte slot, so storage width alone cannot make
+    a wider read owned: the queried range must equal the argument's declared
+    value width and the candidate's own ``variable_type`` width.
+    """
     try:
         boundary = cast(_PrototypeCodegen8616, codegen)
         cfunc = boundary.cfunc
@@ -126,11 +152,13 @@ def stack_prototype_cvar_for_machine_bp_range_8616(
         for slot, candidate in zip(layout, arguments, strict=True)
         if slot.offset == bp_offset
         and slot.storage_width == size
+        and _typed_value_byte_width_8616(slot.argument_type, arch) == size
         and isinstance(candidate, structured_c.CVariable)
         and isinstance(candidate.variable, SimStackVariable)
         and candidate.variable.base == "bp"
         and candidate.variable.offset == slot.offset + delta
         and candidate.variable.size == slot.storage_width
+        and _typed_value_byte_width_8616(candidate.variable_type, arch) == size
     )
     return matches[0] if len(matches) == 1 else None
 

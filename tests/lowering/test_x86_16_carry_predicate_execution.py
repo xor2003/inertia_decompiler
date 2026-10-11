@@ -7,12 +7,12 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.carry_borrow_bit_predicate import (
     _canonical_addition_carry_predicate_8616,
 )
-
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 
 def test_rendered_word_carry_preserves_overflow_with_hidden_casts(tmp_path):

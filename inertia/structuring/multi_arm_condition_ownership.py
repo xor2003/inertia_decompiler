@@ -39,6 +39,10 @@ class MultiArmConditionOwnershipStatus8616(Enum):
     DUPLICATE_FACT = "duplicate_fact"
     CFG_EDGE_MISMATCH = "cfg_edge_mismatch"
     DISCONNECTED_FALLTHROUGH = "disconnected_fallthrough"
+    RETURN_BODY_UNPROVED = "return_body_unproved"
+    RETURN_LEAF_UNPROVED = "return_leaf_unproved"
+    RETURN_VALUE_MISMATCH = "return_value_mismatch"
+    AMBIGUOUS_RETURN = "ambiguous_return"
 
 
 @dataclass(frozen=True, slots=True)

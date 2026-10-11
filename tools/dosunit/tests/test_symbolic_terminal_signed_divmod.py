@@ -1,9 +1,9 @@
 """Negative IDIV divisors must retain architectural effects before a fault."""
 
 import pytest
-from tools.dosunit.tests.test_symbolic_terminal import compare_pe
 
 from tools.dosunit.compare.symbolic_terminal import TerminalComparisonStatus
+from tools.dosunit.tests.test_symbolic_terminal import compare_pe
 
 
 @pytest.mark.parametrize("corrupt", [False, True], ids=["equivalent", "corrupt"])

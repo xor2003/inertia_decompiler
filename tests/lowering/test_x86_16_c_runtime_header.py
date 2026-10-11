@@ -5,6 +5,8 @@ import signal
 import subprocess
 
 import pytest
+
+from inertia.lowering.analysis_helpers import InterruptCall, interrupt_service_name
 from inertia.lowering.c_runtime_header import (
     LOWERED_RUNTIME_HELPER_DECLARATIONS_8616,
     LOWERED_ZERO_ARG_RUNTIME_HELPER_DECLARATIONS_8616,
@@ -15,8 +17,6 @@ from inertia.lowering.c_runtime_header import (
     render_pointer_storage_macros_8616,
     runtime_helper_declaration_8616,
 )
-
-from inertia.lowering.analysis_helpers import InterruptCall, interrupt_service_name
 
 
 def test_x86_16_c_runtime_header_renders_portable_flat_helpers() -> None:

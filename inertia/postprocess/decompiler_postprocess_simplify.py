@@ -273,7 +273,13 @@ def _debug_c_repr_8616(node: object) -> str:
 
 
 def _pure_virtual_inline_rhs_8616(expr: object) -> bool:
-    if isinstance(expr, (CConstant, CVariable, CDirtyExpression)):
+    """Require a replayable tree; unversioned memory reads keep their capture."""
+    if isinstance(expr, CVariable):
+        # A global read has no side effect, but replaying it after a write can
+        # change the value. This includes architectural runtime-state globals.
+        # Without a reaching-memory-version proof, keep the original temporary.
+        return not isinstance(expr.variable, SimMemoryVariable)
+    if isinstance(expr, (CConstant, CDirtyExpression)):
         return True
     if isinstance(expr, CTypeCast):
         return _pure_virtual_inline_rhs_8616(expr.expr)

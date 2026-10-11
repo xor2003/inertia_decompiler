@@ -3,6 +3,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
+from inertia.alias.indexed_address_copy_contracts import (
+    IndexedAliasCopyFact8616,
+)
+from inertia.alias.indexed_address_range_contracts import (
+    IndexedLoopRangeAliasFailureKind8616,
+)
+from inertia.alias.indexed_address_range_projection import (
+    project_indexed_loop_ranges_to_alias_8616,
+)
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -24,6 +34,13 @@ from inertia.ir.indexed_address_range_contracts import (
 from inertia.ir.indexed_address_range_evidence import (
     collect_indexed_loop_range_evidence_8616,
 )
+from inertia.widening.global_object_layout import (
+    GlobalObjectLayout8616,
+    GlobalObjectLayoutEvidence8616,
+)
+from inertia.widening.indexed_global_object_ranges import (
+    BoundedGlobalObjectRangeFailureKind8616,
+)
 from tests.widening.x86_16_indexed_global_object_range_fixtures import (
     FUNCTION_ADDR,
 )
@@ -38,23 +55,6 @@ from tests.widening.x86_16_indexed_global_object_range_fixtures import (
 )
 from tests.widening.x86_16_indexed_global_object_range_fixtures import (
     widen_indexed_ranges_8616 as _widen,
-)
-
-from inertia.alias.indexed_address_copy_contracts import (
-    IndexedAliasCopyFact8616,
-)
-from inertia.alias.indexed_address_range_contracts import (
-    IndexedLoopRangeAliasFailureKind8616,
-)
-from inertia.alias.indexed_address_range_projection import (
-    project_indexed_loop_ranges_to_alias_8616,
-)
-from inertia.widening.global_object_layout import (
-    GlobalObjectLayout8616,
-    GlobalObjectLayoutEvidence8616,
-)
-from inertia.widening.indexed_global_object_ranges import (
-    BoundedGlobalObjectRangeFailureKind8616,
 )
 
 

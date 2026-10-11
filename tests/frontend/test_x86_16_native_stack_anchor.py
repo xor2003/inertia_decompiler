@@ -8,16 +8,16 @@ from angr.ailment.expression import StackBaseOffset, UnaryOp, VirtualVariable, V
 from angr.analyses.decompiler.ssailification.rewriting_engine import SimEngineSSARewriting
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
-from inertia.ir.native_stack_anchor import (
-    NATIVE_ENTRY_SP_ANCHOR_TAG8616,
-    native_stack_anchor_8616,
-)
-from inertia.lowering.stack_address_coordinates import machine_bp_offset_for_native_anchor_8616
 
 from inertia.frontend.x86_16.stack_anchor_compat import (
     apply_native_stack_anchor_compatibility_8616,
     publish_native_stack_anchor_8616,
 )
+from inertia.ir.native_stack_anchor import (
+    NATIVE_ENTRY_SP_ANCHOR_TAG8616,
+    native_stack_anchor_8616,
+)
+from inertia.lowering.stack_address_coordinates import machine_bp_offset_for_native_anchor_8616
 from tests.lowering.test_x86_16_stack_address_coordinates import _Codegen, _frame
 
 

@@ -11,16 +11,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_real16_binary_compare import LEAF, LEAF_CHANGED, _exe
 
 import tools.dosunit.compare.real16_binary_compare as real16_binary_compare
-import tools.dosunit.reporting.ssa_provenance as ssa_provenance
 import tools.dosunit.compare.straightline_ssa as straightline_ssa
+import tools.dosunit.reporting.ssa_provenance as ssa_provenance
 from tools.dosunit.compare.real16_binary_compare import (
     add_binary16_parser,
     cmd_compare_binary16,
     compare_binary16,
 )
+from tools.dosunit.tests.test_real16_binary_compare import LEAF, LEAF_CHANGED, _exe
 
 
 @pytest.mark.parametrize("same_path,same_catalog,expected_calls", [

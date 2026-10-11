@@ -4,8 +4,10 @@ Layer: dosunit concrete execution contracts.
 Responsibility: mint the frontend's typed ``DeclaredInterruptService8616``
 records only after authenticating a caller-declared ``ProgramEnvironment``
 through the canonical DOS owners — ``program_version_query`` for the
-AH=30/AL=00 selector admission and declared response, ``TailResizePolicy``
-for the AH=4A allocator declaration, ``vector_bytes`` plus the declared
+AH=30/AL=00 selector admission and declared response, the declared
+``TailResizePolicy``/``DosboxResizePolicy`` union for the AH=4A allocator
+declaration, the shared AH=35h/AH=25h selector constants for vector services,
+``vector_bytes`` plus the declared
 ``ProgramMemoryLayout`` for live-IVT evidence, and arena containment for
 the owned-handler refusal. This module performs no writes and invents no
 state: every field of each record is declared environment data projected
@@ -17,15 +19,25 @@ frontend never imports this adapter.
 
 from __future__ import annotations
 
+from inertia.frontend.real16_dosbox_resize import DosboxResizePolicy
+from inertia.frontend.real16_vector_response8616 import (
+    INT21_GET_VECTOR_8616,
+    INT21_SET_VECTOR_8616,
+)
 from inertia.ir.real16_declared_interrupt8616 import (
     INT_FRAME_BYTES_8616,
+    IVT_IMAGE_BYTES_8616,
     RESIZE_PRESERVED_LANES_8616,
+    VECTOR_GET_PRESERVED_LANES_8616,
+    VECTOR_SET_PRESERVED_LANES_8616,
     VERSION_PRESERVED_LANES_8616,
     DeclaredInterruptRefusal8616,
     DeclaredInterruptService8616,
     DeclaredResizeSurface8616,
+    DeclaredVectorSurface8616,
     declared_environment_digest_8616,
     declared_ivt_slot_bytes_8616,
+    declared_memory_span_8616,
     declared_service_arena_8616,
 )
 from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment
@@ -49,6 +61,7 @@ from tools.dosunit.runtime.real16_program_version import (
 
 __all__ = [
     "declared_int21_resize_service_8616",
+    "declared_int21_vector_service_8616",
     "declared_int21_version_service_8616",
 ]
 
@@ -166,6 +179,34 @@ def declared_int21_version_service_8616(
         ivt_entry_offset=vector_policy.dos_entry.offset,
         ivt_slot_bytes=slot,
         environment_sha256=digest,
+        dosbox_int21_entry_policy=environment.dosbox_int21_entry_policy,
+    )
+
+
+def _resize_surface_8616(
+    policy: TailResizePolicy | DosboxResizePolicy,
+) -> DeclaredResizeSurface8616:
+    """Project the declared resize policy into its canonical surface.
+
+    The profile is dispatched on the policy's type, never on a segment
+    value: the DOSBox surface projects the chain's final block and binds
+    the entire declared chain through ``dosbox``; the KvikDOS tail policy
+    keeps its four legacy fields authoritative.
+    """
+    if isinstance(policy, DosboxResizePolicy):
+        final = policy.final_entry
+        return DeclaredResizeSurface8616(
+            block_segment=final.data_segment,
+            metadata_linear=final.address,
+            metadata=final.image,
+            maximum=final.size,
+            dosbox=policy,
+        )
+    return DeclaredResizeSurface8616(
+        block_segment=policy.segment,
+        metadata_linear=policy.metadata_address,
+        metadata=policy.initial_mcb,
+        maximum=policy.maximum,
     )
 
 
@@ -180,8 +221,11 @@ def declared_int21_resize_service_8616(
     Authentication is canonical only:
 
     - ``environment`` must be a typed ``ProgramEnvironment`` carrying a
-      ``VectorPolicy`` and a ``TailResizePolicy`` — an absent resize
-      policy is an incomplete declaration, never a default allocator;
+      ``VectorPolicy`` and a declared ``TailResizePolicy`` or
+      ``DosboxResizePolicy`` — an absent resize policy is an incomplete
+      declaration, never a default allocator; a DOSBox chain policy
+      additionally requires the explicit same-backend
+      ``dosbox_int21_entry_policy`` premise;
     - the declared memory must contain the live 0x21 slot bytes equal to
       ``vector_bytes(dos_entry)`` — changed IVT bytes refuse;
     - ``dos_entry`` must lie outside every declared program-owned byte —
@@ -208,7 +252,14 @@ def declared_int21_resize_service_8616(
     if not isinstance(vector_policy, VectorPolicy):
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
     resize_policy = environment.resize_policy
-    if not isinstance(resize_policy, TailResizePolicy):
+    if not isinstance(resize_policy, (TailResizePolicy, DosboxResizePolicy)):
+        return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
+    if (
+        isinstance(resize_policy, DosboxResizePolicy)
+        and environment.dosbox_int21_entry_policy is None
+    ):
+        # The DOSBox allocator exists only under the explicitly declared
+        # same-backend INT21 entry premise — never an inferred default.
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
     digest = declared_environment_digest_8616(environment)
     if digest is None:
@@ -231,10 +282,86 @@ def declared_int21_resize_service_8616(
         ivt_entry_offset=vector_policy.dos_entry.offset,
         ivt_slot_bytes=slot,
         environment_sha256=digest,
-        resize=DeclaredResizeSurface8616(
-            block_segment=resize_policy.segment,
-            metadata_linear=resize_policy.metadata_address,
-            metadata=resize_policy.initial_mcb,
-            maximum=resize_policy.maximum,
+        dosbox_int21_entry_policy=environment.dosbox_int21_entry_policy,
+        resize=_resize_surface_8616(resize_policy),
+    )
+
+
+def declared_int21_vector_service_8616(
+    environment: object,
+    *,
+    caller_addr: int,
+    callsite_addr: int,
+    function: int,
+) -> DeclaredInterruptService8616 | DeclaredInterruptRefusal8616:
+    """Mint the declared INT21/AH=35h or AH=25h relation for one exact site.
+
+    Authentication is canonical only:
+
+    - ``environment`` must be a typed ``ProgramEnvironment`` carrying a
+      ``VectorPolicy`` — an absent policy is an incomplete declaration,
+      not a default table;
+    - ``function`` must be one of the two declared vector functions —
+      any other AH is ``RELATION_MALFORMED``, never an inferred service;
+    - the declared memory must contain the live 0x21 slot bytes equal to
+      ``vector_bytes(dos_entry)`` — changed dispatch bytes refuse;
+    - the declared memory must contain the complete 1024-byte IVT — the
+      surface binds the whole declared initial table so the census can
+      project *live* slot bytes through its path overlay at consumption;
+    - ``dos_entry`` must lie outside every declared program-owned byte —
+      a vector pointing into the loaded program is ``OWNED_HANDLER``.
+
+    The minted record declares no AL selector and no fixed answers —
+    AH=35h/AH=25h admit every proven AL vector number, and the ES:BX
+    projection or committed slot bytes derive at consumption from the
+    live path memory through the shared canonical owner
+    ``vector_response_8616``. ``vectors`` carries the declared initial
+    IVT image; the census re-derives it from the same environment digest.
+    Site identity binds the exact caller head and callsite the caller
+    supplies — never an address or name special case. No register values
+    or handler semantics are inferred from bytes, names, or opcodes here.
+    """
+    if not isinstance(environment, ProgramEnvironment):
+        return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
+    if type(caller_addr) is not int or type(callsite_addr) is not int:
+        return DeclaredInterruptRefusal8616.RELATION_MALFORMED
+    if not (0 <= caller_addr <= 0xFFFFF and 0 <= callsite_addr <= 0xFFFFF):
+        return DeclaredInterruptRefusal8616.RELATION_MALFORMED
+    if type(function) is not int or function not in (INT21_GET_VECTOR_8616, INT21_SET_VECTOR_8616):
+        return DeclaredInterruptRefusal8616.RELATION_MALFORMED
+    vector_policy = environment.vector_policy
+    if not isinstance(vector_policy, VectorPolicy):
+        return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
+    digest = declared_environment_digest_8616(environment)
+    if digest is None:
+        return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
+    slot = _declared_ivt_evidence_8616(environment)
+    if not isinstance(slot, bytes):
+        return slot
+    ivt = declared_memory_span_8616(environment, 0, IVT_IMAGE_BYTES_8616)
+    if ivt is None:
+        # A partial IVT declaration is an incomplete environment — the
+        # live table is never inferred slot by slot.
+        return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
+    return DeclaredInterruptService8616(
+        caller_addr=caller_addr,
+        callsite_addr=callsite_addr,
+        vector=DOS_VECTOR,
+        function=function,
+        selector=None,
+        answer_ax=None,
+        answer_bx=None,
+        answer_cx=None,
+        frame_bytes=INT_FRAME_BYTES_8616,
+        preserved=(
+            VECTOR_GET_PRESERVED_LANES_8616
+            if function == INT21_GET_VECTOR_8616
+            else VECTOR_SET_PRESERVED_LANES_8616
         ),
+        ivt_entry_segment=vector_policy.dos_entry.segment,
+        ivt_entry_offset=vector_policy.dos_entry.offset,
+        ivt_slot_bytes=slot,
+        environment_sha256=digest,
+        dosbox_int21_entry_policy=environment.dosbox_int21_entry_policy,
+        vectors=DeclaredVectorSurface8616(ivt=ivt),
     )

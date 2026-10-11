@@ -19,12 +19,21 @@ from functools import partial
 from pathlib import Path
 
 import angr
+
 import inertia.frontend.x86_16.frontend_function_boundary as boundary_mod
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.ir_boundary_cfg as ibc
 import inertia.ir.near_return_continuation_view as nrcv
 import inertia.ir.scoped_control_obligations as sco
 import inertia.ir.vex_import as vex_import
+from inertia.cli.project_loading import _build_project
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    build_boundary_direct_callsite_index_8616,
+)
+from inertia.frontend.x86_16.frontend_near_return_continuation import (
+    NearCallFramePremise8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir.entry_jump_domain import (
     EntryJumpDomainApplicationStatus8616,
 )
@@ -33,18 +42,9 @@ from inertia.ir.function_ir_registry import (
     publish_function_ir_artifact_8616,
     registered_function_ir_artifact_8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    build_boundary_direct_callsite_index_8616,
-)
-from inertia.frontend.x86_16.frontend_near_return_continuation import (
-    NearCallFramePremise8616,
-)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.project_loading import _build_project
 from tests.integration.test_x86_16_near_return_continuation import (
     _mz_boot_recompute,
     _mz_exe,

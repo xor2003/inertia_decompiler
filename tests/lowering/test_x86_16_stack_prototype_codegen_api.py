@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.lowering.stack_prototype_materialization as stack_prototype_materialization
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_projection_8616,

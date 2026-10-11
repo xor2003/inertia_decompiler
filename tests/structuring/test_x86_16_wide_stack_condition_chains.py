@@ -9,6 +9,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+
 from inertia.ir.condition_ir import (
     ConditionIR,
     ConditionRegisterBindingIR,
@@ -19,8 +21,6 @@ from inertia.lowering.wide_stack_pair_evidence import (
     materialize_proven_wide_stack_pair_variable_8616,
     proven_wide_stack_ir_pair_8616,
 )
-from archinfo import ArchX86
-
 from inertia.structuring.local_wide_stack_condition_chains import (
     recover_local_wide_stack_condition_chain_8616,
 )

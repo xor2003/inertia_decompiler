@@ -1,6 +1,5 @@
 """Independent 16/32-bit execution of additive loop fixtures and corruptions."""
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _mz_exe
 
 from tools.dosunit.runtime.flat32_replay import (
     MemoryRange,
@@ -16,6 +15,7 @@ from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.runtime.real16_replay import compare_executions
 from tools.dosunit.runtime.real16_replay import replay as replay16
 from tools.dosunit.runtime.real16_replay_model import CallerFrame, FrameKind, Real16Agreement, Real16Vector, SegOffset
+from tools.dosunit.tests.test_dosunit_tool import _mz_exe
 
 
 @pytest.mark.parametrize('count',[0,1,2,255])

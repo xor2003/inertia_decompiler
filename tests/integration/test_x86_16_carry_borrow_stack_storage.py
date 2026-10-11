@@ -8,32 +8,6 @@ import angr
 import pytest
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.ir.analysis.stack_frame_ir import (
-    BPFrameCoordinateEvidence8616,
-    FrameAccessArtifact,
-    FrameCoordinateStats8616,
-    FrameCoordinateStatus8616,
-)
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir import IRValue, MemSpace
-from inertia.ir.logical_memory_contracts import (
-    IRLogicalMemoryFailureKind8616,
-    IRLogicalMemoryRefusal8616,
-    IRLogicalMemoryStats8616,
-)
-from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-from inertia.lowering.carry_borrow_stack_storage import (
-    WideCarryBorrowStackFailure8616,
-)
-from inertia.lowering.stack_memory_ssa import (
-    StackMemoryObjectKind8616,
-    lower_x86_16_stack_memory_ssa_alias_artifact,
-)
-from inertia.lowering.stack_variable_coordinates import (
-    machine_bp_offset_for_stack_variable_8616,
-)
 
 from inertia.alias.carry_borrow_destinations import (
     CarryBorrowDestinationAliasFailure8616,
@@ -47,6 +21,32 @@ from inertia.alias.stack_memory_ssa import (
     build_x86_16_stack_memory_ssa_alias_artifact,
 )
 from inertia.alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.ir import IRValue, MemSpace
+from inertia.ir.analysis.stack_frame_ir import (
+    BPFrameCoordinateEvidence8616,
+    FrameAccessArtifact,
+    FrameCoordinateStats8616,
+    FrameCoordinateStatus8616,
+)
+from inertia.ir.logical_memory_contracts import (
+    IRLogicalMemoryFailureKind8616,
+    IRLogicalMemoryRefusal8616,
+    IRLogicalMemoryStats8616,
+)
+from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.lowering.carry_borrow_stack_storage import (
+    WideCarryBorrowStackFailure8616,
+)
+from inertia.lowering.stack_memory_ssa import (
+    StackMemoryObjectKind8616,
+    lower_x86_16_stack_memory_ssa_alias_artifact,
+)
+from inertia.lowering.stack_variable_coordinates import (
+    machine_bp_offset_for_stack_variable_8616,
+)
 from inertia.widening.carry_borrow_pipeline import (
     CarryBorrowWideningPipeline8616,
     build_carry_borrow_widening_pipeline_8616,

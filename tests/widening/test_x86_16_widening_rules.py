@@ -13,9 +13,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable, SimTemporaryVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.widening.widening_rules as widening_rules
 
+import inertia.widening.widening_rules as widening_rules
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.codegen_metadata import get_codegen_side_metadata
 from inertia.widening.widening_rules import (
     collect_bp_stack_access_widths_from_instructions_8616,

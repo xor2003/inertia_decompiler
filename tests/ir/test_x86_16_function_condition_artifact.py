@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pytest import MonkeyPatch
+
 from inertia.ir.condition_cache_relift import (
     ConditionCacheReliftArtifact8616,
     ConditionCacheReliftStats8616,
@@ -11,7 +13,6 @@ from inertia.ir.function_condition_artifact import (
     build_ir_function_condition_artifact_8616,
 )
 from inertia.ir.ssa_function import build_x86_16_function_ssa
-from pytest import MonkeyPatch
 
 
 def test_condition_artifact_clips_overlap_and_survives_ssa(

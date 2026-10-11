@@ -12,13 +12,13 @@ from types import FrameType
 from typing import TYPE_CHECKING
 
 import pytest
+
+import inertia.cli.fork_timeout as fork_timeout
 from tests.cli.test_batch_decompile_scheduler import (
     _assert_dead,
     _assert_descendant_dead,
     scheduler,
 )
-
-import inertia.cli.fork_timeout as fork_timeout
 
 if TYPE_CHECKING:
     from tools.dev.batch_decompile_scheduler import JobEnd

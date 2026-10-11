@@ -3,9 +3,9 @@
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_symbolic_terminal import compare_pe, exit_code
 
 import tools.dosunit.compare.symbolic_terminal as ST
+from tools.dosunit.tests.test_symbolic_terminal import compare_pe, exit_code
 
 
 @pytest.mark.parametrize('projection', ['omitted', 'skipped', 'duplicate'])

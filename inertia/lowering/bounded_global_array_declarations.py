@@ -17,7 +17,6 @@ from enum import StrEnum
 from typing import Protocol, cast
 
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.widening.indexed_global_object_program_ranges import (
     ProjectBoundedGlobalObjectRangeEvidence8616,
 )

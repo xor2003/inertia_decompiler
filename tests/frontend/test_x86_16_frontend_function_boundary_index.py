@@ -7,14 +7,9 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
 import inertia.frontend.x86_16.frontend_function_boundary_index as index_module
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary_program import (
-    build_callsite_summary_inventory_with_program_evidence_8616,
-)
-from inertia.ir import IRValue, MemSpace
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
 from inertia.frontend.x86_16.frontend_function_boundary import (
     ExactFunctionRangeBoundary8616,
     exact_function_range_boundary_8616,
@@ -23,8 +18,13 @@ from inertia.frontend.x86_16.frontend_function_boundary_index import (
     exact_function_entry_boundary_8616,
     exact_function_range_inventory_8616,
 )
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.ir import IRValue, MemSpace
 from inertia.semantics.call_stack_effect_pipeline import (
     build_semantic_function_ssa_8616,
+)
+from inertia.semantics.callsite_summary_program import (
+    build_callsite_summary_inventory_with_program_evidence_8616,
 )
 from inertia.semantics.direct_near_call_target_binding import (
     prove_direct_near_call_target_binding_8616,

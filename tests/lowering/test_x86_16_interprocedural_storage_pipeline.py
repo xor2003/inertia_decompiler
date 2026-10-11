@@ -4,18 +4,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import inertia.lowering.callsite_prototype_declarations as declaration_lowering
 import inertia.lowering.helper_call_interfaces as helper_lowering
 import inertia.lowering.interprocedural_storage_pipeline as storage_pipeline
 import inertia.lowering.interprocedural_storage_prototype_application as prototype_application
 import inertia.lowering.stack_prototype_materialization as stack_prototype_lowering
-import pytest
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
 from inertia.lowering.interprocedural_storage_collection_contracts import (
     FunctionInputStorageTrialCollection8616,
     StorageTrialCollectionVerdict8616,
@@ -38,6 +33,12 @@ from inertia.lowering.interprocedural_storage_transaction import (
     program_storage_resolution_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 
 
 def _trials(

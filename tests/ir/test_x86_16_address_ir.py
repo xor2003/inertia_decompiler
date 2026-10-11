@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from inertia.ir.address_ir_8616 import build_address_ir_8616, resolved_operand_to_address_ir_8616
 from inertia.frontend.x86_16.addressing_helpers import ResolvedMemoryOperand
 from inertia.frontend.x86_16.regs import sgreg_t
-
+from inertia.ir.address_ir_8616 import build_address_ir_8616, resolved_operand_to_address_ir_8616
 from inertia.ir.core import AddressStatus, MemSpace, SegmentOrigin
 
 

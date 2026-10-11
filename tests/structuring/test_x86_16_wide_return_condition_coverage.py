@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CStatements
 from angr.sim_type import SimTypeShort
-from tests.structuring.test_x86_16_wide_stack_condition_chains import _adjacent, _Codegen, _condition
 
 from inertia.structuring.condition_chain_provenance import (
     CONDITION_CHAIN_PROVENANCE_TAG_8616,
@@ -17,6 +16,7 @@ from inertia.structuring.wide_stack_return_predicates import (
     WideStackReturnPredicateStatus8616,
     materialize_wide_stack_return_predicate_8616,
 )
+from tests.structuring.test_x86_16_wide_stack_condition_chains import _adjacent, _Codegen, _condition
 
 
 def _fixture():

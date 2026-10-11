@@ -17,20 +17,20 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.rustylib.ailment import Tags
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
+from inertia.ir.condition_ir import ConditionIR
+from inertia.ir.core import IRValue, MemSpace
+from inertia.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
+)
+from inertia.postprocess.decompiler_postprocess_calls import _callsite_materialization_signature_8616
 from inertia.semantics.callsite_summary import (
     CallsiteReturnUseKind8616,
     CallsiteSummary8616,
     bind_structured_callsite_identity_8616,
     structured_callsite_addr_8616,
 )
-from inertia.postprocess.decompiler_postprocess_calls import _callsite_materialization_signature_8616
-from inertia.ir.condition_ir import ConditionIR
-from inertia.ir.core import IRValue, MemSpace
-from inertia.lowering.stack_variable_coordinates import (
-    record_stack_variable_coordinate_projection_8616,
-)
-from archinfo import ArchX86
-
 from inertia.structuring.call_return_conditions import (
     materialize_call_return_conditions_8616,
 )

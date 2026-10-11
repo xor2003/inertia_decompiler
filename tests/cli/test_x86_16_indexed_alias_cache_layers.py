@@ -6,12 +6,6 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.global_object_program_requirement import (
-    GlobalObjectProgramRequirementEvidence8616,
-    GlobalObjectProgramRequirementReason8616,
-    GlobalObjectProgramRequirementVerdict8616,
-)
 
 import inertia.cli.cache as cache_module
 import inertia.cli.indexed_alias_program_context as indexed_context
@@ -19,12 +13,6 @@ import inertia.cli.indexed_alias_program_recovery as indexed_recovery
 from inertia.alias.indexed_address_program import (
     IndexedAliasFunctionSelection8616,
     build_indexed_alias_program_evidence_8616,
-)
-from inertia.widening.indexed_global_object_layout import (
-    recover_global_object_layout_evidence_8616,
-)
-from inertia.widening.indexed_global_object_program_ranges import (
-    recover_program_bounded_global_object_ranges_8616,
 )
 from inertia.cli.cache_source_manifest import (
     FUNCTION_IR_SSA_CACHE_SOURCE_FILES,
@@ -45,6 +33,18 @@ from inertia.cli.indexed_global_object_cache import (
     PersistedIndexedGlobalObjectEvidence8616,
     indexed_global_object_cache_key_8616,
     store_indexed_global_object_cache_8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.global_object_program_requirement import (
+    GlobalObjectProgramRequirementEvidence8616,
+    GlobalObjectProgramRequirementReason8616,
+    GlobalObjectProgramRequirementVerdict8616,
+)
+from inertia.widening.indexed_global_object_layout import (
+    recover_global_object_layout_evidence_8616,
+)
+from inertia.widening.indexed_global_object_program_ranges import (
+    recover_program_bounded_global_object_ranges_8616,
 )
 
 _INDEXED_GLOBAL_CODE = bytes.fromhex(

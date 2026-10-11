@@ -8,15 +8,15 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CConstant, CStatements, CSwitchCase
 from angr.sim_type import SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.segment_stack_restore_carriers import (
-    prune_proven_segment_stack_restore_carriers_8616,
-)
 
 from inertia.alias.segment_stack_restore import (
     SegmentStackRestoreArtifact8616,
     SegmentStackRestoreFact8616,
     SegmentStackRestoreVerdict8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.segment_stack_restore_carriers import (
+    prune_proven_segment_stack_restore_carriers_8616,
 )
 
 

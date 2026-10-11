@@ -6,7 +6,13 @@ import io
 from dataclasses import replace
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -27,12 +33,6 @@ from inertia.ir.stack_argument_modular_use import (
     ModularArgumentUseFailure8616,
     ModularArgumentUseVerdict8616,
     prove_stack_argument_modular_return_use_8616,
-)
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
 )
 from inertia.semantics.call_stack_effect_pipeline import (
     build_semantic_function_ssa_8616,

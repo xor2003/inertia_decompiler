@@ -16,9 +16,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+from archinfo import ArchX86
+from capstone.x86_const import X86_OP_IMM
+
+import inertia.lowering.real_mode_linear as real_mode_linear
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
-import inertia.lowering.real_mode_linear as real_mode_linear
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
@@ -27,9 +30,6 @@ from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-from archinfo import ArchX86
-from capstone.x86_const import X86_OP_IMM
-
 from inertia.structuring.condition_replay import (
     StructuringConditionReplayFact8616,
 )

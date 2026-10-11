@@ -16,9 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from inertia.semantics.segment_program_layout_contract import SegmentProgramFunctionEvidence8616
-
     from inertia.cli.direct_addr_failure_family import FailureFamilySnapshot
+    from inertia.semantics.segment_program_layout_contract import SegmentProgramFunctionEvidence8616
 
 from inertia.cli.metadata_evidence import has_only_binary_signatures
 from inertia.cli.sidecar_cache import lst_metadata_content_digest_8616
@@ -35,6 +34,7 @@ class WorkItemStatus(StrEnum):
     """Typed status for a single decompiler work item."""
 
     OK = "ok"
+    CONDITIONAL = "conditional"
     ERROR = "error"
     VALIDATION_FAILED = "validation_failed"
     UNKNOWN = "unknown"
@@ -54,6 +54,7 @@ class TailValidationDisplayOutcome(StrEnum):
     """Typed display status normalized from tail-validation snapshots."""
 
     PASSED = "passed"
+    CONDITIONAL = "conditional"
     FAILED = "failed"
     CHANGED = "changed"
     STABLE = "stable"
@@ -84,6 +85,8 @@ def _tail_validation_to_item_status(
     raw_status: str | None,
 ) -> WorkItemStatus:
     status = normalize_tail_validation_status(raw_status)
+    if status is TailValidationDisplayOutcome.CONDITIONAL:
+        return WorkItemStatus.CONDITIONAL
     if status in (
         TailValidationDisplayOutcome.FAILED,
         TailValidationDisplayOutcome.CHANGED,

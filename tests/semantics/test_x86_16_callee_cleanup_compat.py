@@ -6,8 +6,8 @@ import angr
 import networkx as nx
 import pytest
 from angr import ailment
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.call_cleanup_compat import materialize_callee_cleanup_8616
 
 

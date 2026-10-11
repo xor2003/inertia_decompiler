@@ -8,7 +8,6 @@ from types import ModuleType
 
 import pytest
 import z3
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, make_inputs
 
 import tools.dosunit.reporting.ssa_provenance as ssa_provenance
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
@@ -23,6 +22,7 @@ from tools.dosunit.recursive_proofs.native_model_hash_snapshot import (
     native_model_hash_snapshot,
 )
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import BoundDomainReason, ImageBoundReal16Domain
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, make_inputs
 
 
 def test_operand_query_reuse_preserves_premise_and_occurrence(monkeypatch: pytest.MonkeyPatch) -> None:

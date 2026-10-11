@@ -4,10 +4,10 @@ from dataclasses import replace
 
 import pytest
 
+import tools.dosunit.runtime.real16_mz_load as real16_mz_load
 from inertia.frontend.x86_16.mz_image import UnpackedMZImage
 from inertia.frontend.x86_16.mz_invocation_source import MzInvocationSource8616, mz_invocation_source_8616
 from inertia.frontend.x86_16.mz_load_source import parse_mz, relocate_mz_load_module
-import tools.dosunit.runtime.real16_mz_load as real16_mz_load
 
 
 def _source(*, entry_cs: int = 0, entry_ip: int = 0x10) -> bytes:

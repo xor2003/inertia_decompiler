@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import networkx as nx
+
 from inertia.structuring.structuring_grouping_report import (
     build_x86_16_structuring_grouping_report,
     describe_x86_16_structuring_grouping_report_surface,

@@ -2,11 +2,9 @@
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-from tools.dosunit.tests.test_real16_call_composition import _lower
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_loop_calls import compare_real16_loop_calls
+from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.runtime.real16_replay import compare_executions, replay
 from tools.dosunit.runtime.real16_replay_model import (
@@ -16,6 +14,8 @@ from tools.dosunit.runtime.real16_replay_model import (
     Real16Vector,
     SegOffset,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 # MOV CX,AX; CMP CX,0; JZ RET; CALL FAR +10:0230; DEC CX; JMP CMP; RET.
 # The callee selector word at 0x20a is relocated by the actual MZ loader.

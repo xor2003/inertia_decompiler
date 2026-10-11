@@ -17,17 +17,17 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.vex_control_flow import terminal_ret_instruction_addrs_8616
-from inertia.lowering.far_return_boundary_carriers import (
-    FarReturnBoundaryRefusal8616,
-    consume_terminal_far_return_boundary_carriers_8616,
-)
 
 from inertia.alias.segment_stack_restore import (
     SegmentStackRestoreArtifact8616,
     SegmentStackRestoreFact8616,
     SegmentStackRestoreVerdict8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.vex_control_flow import terminal_ret_instruction_addrs_8616
+from inertia.lowering.far_return_boundary_carriers import (
+    FarReturnBoundaryRefusal8616,
+    consume_terminal_far_return_boundary_carriers_8616,
 )
 from inertia.semantics.terminal_return_contract import (
     TerminalReturnFrameKind8616,

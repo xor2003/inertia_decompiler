@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from angr.analyses.decompiler.structured_codegen.c import CConstant
 from angr.sim_type import SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.segment_contract import (

@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.analysis.stack_frame_ir import build_x86_16_ir_frame_access_artifact
 from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact
 

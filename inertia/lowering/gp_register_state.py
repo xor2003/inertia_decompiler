@@ -32,7 +32,7 @@ from .global_declarations import (
     record_global_declaration_spec_8616,
 )
 from .gp_register_versions import capture_gp_register_versions_8616
-from .gp_word_assignment import project_gp_word_assignment_8616
+from .gp_word_assignment import project_gp_word_assignment_8616, refresh_gp_word_pointer_projection_8616
 from .gp_word_runtime import initialize_gp_runtime_abi_8616
 from .stack_value_projection import project_pointer_storage_value_8616
 
@@ -783,6 +783,11 @@ def _transform_assignment_lhs_8616(
     if not isinstance(node, structured_c.CAssignment):
         return None
     lhs = node.lhs
+    refreshed = refresh_gp_word_pointer_projection_8616(node)
+    if refreshed is not None:
+        ctx.raw_ids.add(id(lhs))
+        ctx.materialized_ids.add(id(lhs))
+        return cast(object, refreshed)
     lhs_projection = _lhs_register_projection_8616(ctx.project, lhs)
     if lhs_projection is None:
         return None

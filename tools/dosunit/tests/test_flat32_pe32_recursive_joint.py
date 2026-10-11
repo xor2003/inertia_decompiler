@@ -12,6 +12,18 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.recursive_proofs.flat32_image_bound_domain import Flat32AccessDomain
+from tools.dosunit.recursive_proofs.flat32_image_bound_joint_proof import (
+    Flat32ModelRequirement,
+    check_image_bound_flat32_joint,
+)
+from tools.dosunit.recursive_proofs.flat32_pe_component import (
+    Flat32ProposalReason,
+    Flat32ProposalRefusal,
+)
+from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason, JointStepKind
 from tools.dosunit.tests.recursive_proof_fixtures.call_continuation_inputs import swap_declared_continuations
 from tools.dosunit.tests.recursive_proof_fixtures.flat32_pe_recursive_inputs import (
     BASE_CASE_FLIPPED,
@@ -25,18 +37,6 @@ from tools.dosunit.tests.recursive_proof_fixtures.flat32_pe_recursive_inputs imp
     make_flat32_pe_recursive_inputs,
 )
 from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
-
-from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.recursive_proofs.flat32_image_bound_domain import Flat32AccessDomain
-from tools.dosunit.recursive_proofs.flat32_image_bound_joint_proof import (
-    Flat32ModelRequirement,
-    check_image_bound_flat32_joint,
-)
-from tools.dosunit.recursive_proofs.flat32_pe_component import (
-    Flat32ProposalReason,
-    Flat32ProposalRefusal,
-)
-from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointReason, JointStepKind
 
 _DRIVERS: tuple[str, ...] = ("msc8", "bc5")
 _INPUTS: dict[str, Flat32PeRecursiveInputs] = {}

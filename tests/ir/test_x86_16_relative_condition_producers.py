@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import pytest
 import pyvex
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.relative_control_edge import RelativeEdgeForm, decode_relative_edge
 from inertia.ir.condition_ir import ConditionFailure, ConditionIR
 from inertia.ir.condition_lift_capture import isolated_condition_lift_session_8616
 from inertia.ir.condition_relative_edge import RelativeConditionReason, attach_relative_condition_edge
-
-from inertia.frontend.x86_16.relative_control_edge import RelativeEdgeForm, decode_relative_edge
 
 
 @pytest.mark.parametrize(("code", "branch_offset", "form"), [

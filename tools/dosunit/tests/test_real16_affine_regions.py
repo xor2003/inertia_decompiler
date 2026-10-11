@@ -1,11 +1,11 @@
 """Actual binary modular additive region proofs and mutation controls."""
 import pytest
+
+from tools.dosunit.compare.real16_region_proof import compare_real16_regions
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.contracts.register_affine_relations import RegisterAffineRelation
 from tools.dosunit.tests.test_real16_binary_compare import _compare, _exe, _verdict
 from tools.dosunit.tests.test_real16_region_proof import _document
-
-from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.compare.real16_region_proof import compare_real16_regions
-from tools.dosunit.contracts.register_affine_relations import RegisterAffineRelation
 
 ORIGINAL='e3058d5f01e2fbc3'
 CANDIDATE='8d5f07e3058d5f01e2fb8d5ff9c3'

@@ -13,7 +13,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
-from inertia.frontend.x86_16.frontend_repeated_store8616 import RepeatedStore8616, decoded_repeated_store_8616
+from inertia.frontend.x86_16.frontend_repeated_store8616 import (
+    RepeatedStore8616,
+)
+from inertia.frontend.x86_16.frontend_repeated_store8616 import (
+    decoded_repeated_store_8616 as decoded_repeated_store_8616,
+)
 
 from .core import IRBlock
 
@@ -39,6 +44,25 @@ class RepeatedStoreEffect8616:
 _MAX_REPEAT_BYTES_8616: int = 0x10000
 
 
+def repeated_store_candidate_shape_8616(block: IRBlock, encoded: bytes) -> bool:
+    """Whether the structural prerequisites for a repeat decode are met.
+
+    This is the single authoritative owner of the necessary conditions a
+    block must satisfy before ``native_repeated_store_8616`` can reach the
+    configured frontend decoder: no recorded refusals, at least one
+    instruction, every instruction rooted at the block address, and the sole
+    successor equal to the exact fall-through past ``encoded``. A ``False``
+    verdict proves the native consult returns ``None`` without touching
+    ``project`` or any decoder — a guaranteed pure non-candidate.
+    """
+    if block.refusals or not block.instrs:
+        return False
+    if any(row.addr != block.addr for row in block.instrs):
+        return False
+    continuation_differs: bool = block.successor_addrs != (block.addr + len(encoded),)
+    return not continuation_differs
+
+
 def native_repeated_store_8616(project: object, block: IRBlock, encoded: bytes) -> RepeatedStore8616 | None:
     """Decode a single-instruction repeat block with its exact continuation.
 
@@ -46,11 +70,7 @@ def native_repeated_store_8616(project: object, block: IRBlock, encoded: bytes) 
     before consuming this descriptor. Other prefix/width/control shapes keep
     the ordinary conservative nonterminal-exit refusal.
     """
-    if block.refusals or not block.instrs:
-        return None
-    if any(row.addr != block.addr for row in block.instrs):
-        return None
-    if block.successor_addrs != (block.addr + len(encoded),):
+    if not repeated_store_candidate_shape_8616(block, encoded):
         return None
     return decoded_repeated_store_8616(project, block.addr, encoded)
 

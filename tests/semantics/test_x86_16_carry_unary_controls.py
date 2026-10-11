@@ -10,8 +10,8 @@ evidence is corrupted and preservation only when the projection is exact.
 from dataclasses import replace
 
 import pytest
-from inertia.ir.core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
 
+from inertia.ir.core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
 from inertia.semantics.carry_borrow_contracts import (
     CarryBorrowConversion8616,
     CarryBorrowDefinitionSite8616,

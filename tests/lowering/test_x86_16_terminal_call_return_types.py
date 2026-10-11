@@ -5,13 +5,9 @@ from types import SimpleNamespace
 import pytest
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    record_caller_return_use_evidence_8616,
-)
+
 import inertia.lowering.terminal_call_return_types as terminal_call_return_types
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.authoritative_function_prototypes import (
     authoritative_function_prototype_8616,
     capture_authoritative_function_prototype_8616,
@@ -22,7 +18,11 @@ from inertia.lowering.terminal_call_return_types import (
     apply_terminal_call_return_type_evidence_8616,
     callee_result_contract_8616,
 )
-
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    record_caller_return_use_evidence_8616,
+)
 from inertia.semantics.terminal_call_paths import (
     TerminalCallPathStatus8616,
     angr_terminal_call_path_callbacks_8616,

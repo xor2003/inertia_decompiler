@@ -3,9 +3,10 @@ from functools import partial
 
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.ir.vex_import as imp
-from inertia.ir.core import MemSpace
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.core import AddressStatus, MemSpace, SegmentOrigin
 from inertia.ir.vex_addressing import expr_to_address
 from inertia.ir.vex_condition_demand import VexConditionDemand8616, VexConditionDemandStats8616
 
@@ -67,3 +68,33 @@ def test_unpinned_literal_arithmetic_remains_exact():
         pyvex.expr.Const(pyvex.const.U16(4))]), views, conditions,
         expr_to_value=convert, size=2, tmp_exprs=expressions)
     assert address.base == ("bx",) and address.offset == 4
+
+
+@pytest.mark.parametrize("register", ["bx", "bp"])
+@pytest.mark.parametrize("hinted", [False, True])
+def test_explicit_cs_never_defaults_to_data_or_stack(register, hinted):
+    """A native CS selector cannot become a default or hinted DS/SS alias."""
+    arch = Arch86_16()
+    convert, views, conditions, expressions = context(
+        pyvex.expr.Get(arch.registers[register][0], "Ity_I16")
+    )
+    expression = pyvex.expr.Binop("Iop_Add32", [
+        pyvex.expr.Binop("Iop_Shl32", [
+            pyvex.expr.Unop("Iop_16Uto32", [
+                pyvex.expr.Get(arch.registers["cs"][0], "Ity_I16")
+            ]),
+            pyvex.expr.Const(pyvex.const.U8(4)),
+        ]),
+        pyvex.expr.Unop("Iop_16Uto32", [
+            pyvex.expr.Get(arch.registers[register][0], "Ity_I16")
+        ]),
+    ])
+    hints = {(register,): (MemSpace.DS, AddressStatus.STABLE, SegmentOrigin.PROVEN)}
+    address = expr_to_address(expression, views, conditions,
+        expr_to_value=convert, size=2, tmp_exprs=expressions,
+        segment_hints=hints if hinted else None)
+    assert address.base == (register,)
+    assert address.expr == ("segmented_linear", "cs", register)
+    assert address.space is MemSpace.UNKNOWN
+    assert address.status is AddressStatus.UNKNOWN
+    assert address.segment_origin is SegmentOrigin.UNKNOWN

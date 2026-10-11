@@ -3,14 +3,20 @@ from types import SimpleNamespace
 
 import pytest
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.logical_stack_memory_projection import (
+    LogicalStackMemoryAliasFailure8616,
+    LogicalStackMemoryAliasRefusal8616,
+)
+from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
+from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasStats8616
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
     FrameCoordinateStats8616,
     FrameCoordinateStatus8616,
 )
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -30,13 +36,7 @@ from inertia.lowering.stack_memory_ssa_contracts import (
     StackMemorySSALoweringRefusalKind8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.alias.logical_stack_memory_projection import (
-    LogicalStackMemoryAliasFailure8616,
-    LogicalStackMemoryAliasRefusal8616,
-)
-from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
-from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasStats8616
+from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 from inertia.widening.stack_memory_objects import (
     apply_x86_16_stack_memory_object_widening_8616,
     build_x86_16_stack_memory_object_widening_artifact,

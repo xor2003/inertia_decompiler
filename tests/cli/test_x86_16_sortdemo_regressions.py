@@ -7,6 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from inertia.cli.acceptance_scorecard import build_acceptance_scorecard
+from inertia.cli.recompile_check import check_c_recompiles_8616
+from inertia.cli.source_sidecar import render_local_source_sidecar_function
 from tests.cli.x86_16_initmenu_execution import assert_initmenu_pause_guard_behavior
 from tests.cli.x86_16_runmenu_execution import assert_runmenu_behavior, assert_runmenu_oracle_rejects_corruption
 from tests.cli.x86_16_telemetry_support import diagnostic_payloads, telemetry_integer
@@ -16,10 +20,6 @@ from tests.fixtures.x86_16_reinitbars_execution import assert_reinitbars_loop_be
 from tests.fixtures.x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
 from tests.fixtures.x86_16_swapbars_behavior import assert_swapbars_behavior
 from tests.fixtures.x86_16_timeout_support import scaled_decompile_timeout as _scaled_timeout
-
-from inertia.cli.acceptance_scorecard import build_acceptance_scorecard
-from inertia.cli.recompile_check import check_c_recompiles_8616
-from inertia.cli.source_sidecar import render_local_source_sidecar_function
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

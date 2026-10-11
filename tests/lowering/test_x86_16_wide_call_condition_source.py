@@ -3,8 +3,8 @@
 from dataclasses import replace
 
 import pytest
-from inertia.lowering.call_output_stack_objects import lower_wide_call_return_condition_chain_8616
 
+from inertia.lowering.call_output_stack_objects import lower_wide_call_return_condition_chain_8616
 from tests.fixtures.x86_16_condition_definition_fixtures import install_condition_definition_block
 from tests.lowering.test_x86_16_call_output_stack_objects import _wide_condition_fixture
 

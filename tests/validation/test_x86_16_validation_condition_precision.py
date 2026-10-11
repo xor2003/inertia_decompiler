@@ -3,9 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.structuring.decompiler_structuring_stage as structuring_stage
 import inertia.validation.tail_validation as tail_validation_module
-
 from inertia.structuring.condition_evidence_closure import (
     ConditionEvidenceClosure8616,
 )

@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 import tools.dosunit.compare.straightline_ssa as S
+from tools.dosunit.compare.real16_call_contracts import materialize_function, prove_terms_equal
 from tools.dosunit.contracts.memory_state_relations import (
     IDENTITY_MEMORY_PERMUTATION,
     MemoryByteSwap,
@@ -25,7 +26,6 @@ from tools.dosunit.contracts.memory_state_relations import (
     MemoryRelationRefusal,
 )
 from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.compare.real16_call_contracts import materialize_function, prove_terms_equal
 
 MEM: dict[str, Any] = {"op": "mem_input", "name": "mem", "addr_width": 32, "value_width": 8}
 TIMEOUT_MS = 10_000

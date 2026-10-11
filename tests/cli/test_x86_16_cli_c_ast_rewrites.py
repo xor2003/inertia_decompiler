@@ -6,16 +6,16 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CStatements, CTypeCast, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.semantic_cast import CSemanticCast8616
 
-from inertia.lowering.c_ast_utils import _structured_slot_names_for_type_8616
 import inertia.cli.cli_c_ast_rewrites as cli_ast
 from inertia.cli.cli_c_ast_rewrites import (
     _get_or_seed_inertia_alias_state,
     _simplify_basic_algebraic_identities,
     _simplify_structured_c_expressions,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.c_ast_utils import _structured_slot_names_for_type_8616
+from inertia.lowering.semantic_cast import CSemanticCast8616
 
 
 class _DummyCodegen:

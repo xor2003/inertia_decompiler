@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from inertia.ir.segment_contract import SegmentFactVerdict
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.segment_function_summary import (

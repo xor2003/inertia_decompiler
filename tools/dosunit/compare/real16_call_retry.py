@@ -78,7 +78,6 @@ def retry_whole_function(
     io_model = io_model if io_model is not None else active_ordered_io()
     function_id = str(oracle_entry.get("id") or obligation.id.key)
     parts = _group_parts(oracle).get(function_id, [])
-    has_calls = any(part.get("source", {}).get("jumpkind") == "Ijk_Call" for part in parts)
     keys = _mapped_candidate_keys(obligation.id.key, oracle_entry, mapping)
     groups = _group_parts(candidate)
     candidates = {str(groups[key][0]["function"]["id"]) for key in keys if key in groups}
@@ -86,6 +85,14 @@ def retry_whole_function(
         return None
     deadline = time.monotonic() + timeout_ms / 1000
     candidate_id = next(iter(candidates))
+    candidate_parts = [
+        part for key in keys for part in groups.get(key, ())
+        if str(part.get("function", {}).get("id") or "") == candidate_id
+    ]
+    has_calls = any(
+        part.get("source", {}).get("jumpkind") == "Ijk_Call"
+        for part in (*parts, *candidate_parts)
+    )
     result: dict[str, Any] = compare_real16_with_calls(
         oracle, candidate, function_id, candidate_function=candidate_id,
         timeout_ms=timeout_ms, limits=limits, io_model=io_model,

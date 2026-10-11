@@ -4,6 +4,1074 @@
 
 # Progress
 
+## 2026-10-10 — Native branch-target restoration and modular-entry experiment
+
+VEX import now reconstructs native block splits within the recovered function's
+authenticated byte extents. A15-byte red regression captured a merged interior
+jump target;113 focused tests now pass. Ordinary BITNBR score still validates
+passed and emits the identical C hash. Lint and startup architecture pass;
+canonical MyPy has the same3 preimage diagnostics. Ownership checking reports
+two skip/xfail declarations in other files; no broad green claim.
+
+Devin's staged near-call selector-window projection has14 parent-verified tests
+and clean lint/MyPy after a parent typing correction. Native consumption and
+scope transport remain unimplemented. The private conditional main experiment
+now has23 blocks/6 jump admissions, then times out at60s. It is not ordinary
+main acceptance. Full case counts remain0/16 and0/118. Evidence:
+`.cache/native-interior-target/RESULT.md`, `.cache/call-entry-selector/REPORT.md`.
+No live worker, SORTDEMO run, budget increase or commit/push.
+
+## 2026-10-10 — Three ordinary application outputs; main refusal localized
+
+BITNBR ordinary CLI now emits3/4 selected application functions with
+validation=passed (sub_1ce2, sub_1d04, sub_1d12). New disarm unsigned-byte C
+compiles with GCC Werror and passes512/512 concrete native/host checks.
+Add-level payload exactly matches the already checked2048-case artifact.
+No whole-program acceptance follows;0/16 starter,0/118 matrix remains.
+
+Parent captured typed exceptions; Devin captured the jump-proof ledger. All
+six unresolved terminal jumps are blocked by CALL0x1d97 lacking preservation;
+all four call records report CALLEE_UNRESOLVED with no callee artifact. Root
+census is complete23blocks; this is not timeout. Existing on-demand callee
+intake/boundary is the next owner, not rewrite or solver budgets. Artifacts:
+`.cache/bitfield-ordinary-main/errors.jsonl`, `.cache/main-jump-domain/`,
+`.cache/bitfield-ordinary-leaves/RESULT.md`. No production semantic edit yet.
+
+Parent correction: all four retained direct-call bindings themselves refuse
+`selector_window_unproved`; the resolver therefore never attempts callee
+closure. CALLEE_UNRESOLVED is secondary. Standalone callee imports succeed,
+so do not fix the importer on that evidence. Inspect the existing ordinary
+MZ invocation-source/premise route next. Full typed bindings are in
+`.cache/main-binding-diagnostic/`. The bounded Devin investigation was
+interrupted (exit1); no production patch was made. All three accepted leaf
+payloads also compile together as one GCC Werror object; fresh disarm mutation
+control detects the changed mask at input2.
+
+Ordinary MZ intake is now verified INSTALLED/READY:14 boundaries, zero pending
+targets; main's caller is indexed at0x1b78. The actual registered boot-premise
+probe refuses `declared_service_unproven` at INT21h/AH=30h (0x1a2a), with26 raw
+facts and1 failure. The existing crossing needs proven AH/AL plus an explicit
+environment-bound service relation, absent from static-header intake. The
+raw-only `coverage_unbound` result is expected for a refusal-free surface and
+must not be mistaken for this ordinary-path blocker. Evidence and reproducible
+bounded probes: `.cache/main-intake-review/`. No timeout increase, semantic
+change, SORTDEMO run or new acceptance claimed. Local selector-proof review
+is separate from importing full DOS environment authority.
+
+## 2026-10-10 — Ordinary score function accepted by tail validation
+
+Fresh normal CLI selection of BITNBR sub_1d12 with explicit MZ load segment
+0x1a2 and no declared-input file exits0, `validation=passed`; both tail stages
+are stable. Accepted C hash4a0360e0…8bda897a matches the already compiled
+fresh candidate exactly (12288host/native,402DOS cases, scoped symbolic proof).
+The declaration option itself selected the earlier conditional domain. No
+validator/status edits were made. Devin's blanket "no bounded route" conclusion
+was rejected and contradicted by this actual run. A successful CALL_CHAINED
+premise would still be invocation-local; no new unconditional receipt was added.
+The initial run without an explicit load segment selected an unmapped address;
+the corrected ordinary command is recorded under `.cache/score-entry-next/`.
+Permanent fixture now carries the current233-byte candidate and all3 checked
+mutation offsets;4tests pass5.73s, old SSA liveness still failsAX privately.
+Source review: the unsigned-word arithmetic return and pointer argument match
+flags_score; original body has no required calls. This is one function output
+checkpoint, not full ABI proof or whole-program acceptance (still0/16,0/118).
+
+## 2026-10-10 — Frozen function regression and fresh score emission
+
+Parent verified hashes/slices/relocation non-overlap of the Devin-extracted
+`tools/dosunit/tests/data/bitfield_score/` fixture. Its permanent regression
+passes4 tests, including all9 scoped observations, both root CS/return-target
+checks, and3 actual instruction mutations. Restoring only the old partial-Put
+liveness function in an isolated process makes the positive AX proof fail.
+Scoped iteration lint passes; fixture regression is enrolled in the existing
+SSA component/pipeline. No full-case acceptance is claimed.
+
+Fresh normal CLI emission also completes (exit5, conditional). Payload hash
+`4a0360e081b2b5929b8aea4a2f172f7d0c1468b213b4c3c9eb6e85c88bda897a`
+differs from the frozen witness: it retains a temporary before changing the
+runtime AX lane. Fresh C compiles with GCC C11 Werror and agrees with original
+instructions on12288 scalar/input-preservation cases. Evidence lives in
+`.cache/score-fixture/fresh*`; the old symbolic proof does not automatically
+cover this new compiled payload. SORTDEMO was not run; no performance work.
+
+The fresh payload subsequently compiled/linked under frozen BC31 `-Od -ms`;
+DOSBox execution passed402/402 with guest exit0. Re-extracted candidate233bytes
+and helper33bytes were checked with the same scoped symbolic proof, now one
+actual inlined helper call: positive proof passed in3.41s pytest total,
+including root CS/return control. All private-storage/entry premises remain.
+Candidate SHA256 `d6a21a69b7d7d88e42f9f6c2985c3c6f655da61abb69e82f1af2600f1c8cfae8`.
+
+Devin's bounded contract review completed. Existing conditional transport
+explicitly cannot grant acceptance. Its proposed extra receipt/prover wrapper
+was not implemented: transporting another conditional result alone would not
+close actual ABI/private-storage or entry-premise obligations. Retain the
+concrete function focus and complete original-to-fresh-candidate evidence.
+
+## 2026-10-10 — Partial-register SSA liveness and isolated score proof
+
+Fixed a concrete VEX-to-SSA defect: `mov al,[...]; mov ah,0` discarded the
+live low-byte definition because backward Put liveness killed the entire
+word. Partial writes now preserve predecessor liveness for untouched bits.
+Old code fails17/18 new MZ controls; corrected partial-write/call cohort45/45
+passes. Static dosunit module211passed/5KVMdeselected. Regression ownership
+and routine-pipeline enrollment are updated; no default budgets increased.
+
+For unchanged BITNBR sub_1d12 C compiled by BC31, the native counterexample
+00010101 returns513 in both binaries and VEX, but old SSA returned257.
+Corrected SSA proves all9 selected symbolic observations under explicit
+fixed-entry/private-storage premises, including AX and framed memory. Final
+diagnostic runtime3.56seconds; receipt `.cache/score-abi-audit/symbolic.json`.
+This is not full ABI/flags validation or public-contract integration. C remains
+conditional and full corpus acceptance remains0/16,0/118. SORTDEMO was not run.
+
+Devin's separate refusal-diagnostic patch was reviewed; parent found and
+fixed a queued-sibling cycle omission before acceptance. Bounded flag scans
+now distinguish actual abstract helpers, complete absence and incomplete
+coverage. The old helper-free mismatch regression fails on its isolated
+preimage; new graph/cycle controls and real partial-write controls pass.
+Evidence lives in `.cache/flag-scan-fix/`; final combined checks are recorded
+there. No unused-state masking or observable projection was added to the
+public comparator. The next obligation remains an evidence-backed function
+input/output relation, not general optimization or main expansion.
+Final combined rerun239passed/5KVMdeselected in36.30seconds; the first run's
+single shifted-call refusal remains an unexplained intermittent result.
+
+## 2026-10-10 — DOS negative controls for isolated score output
+
+The frozen BC31-small/DOSBox adapter rebuilt the unchanged score payload four
+times: positive402/402; return corruption402/402detected; input-write
+corruption402/402detected; conditional-return corruption201/402detected.
+Guest exits match failure counts, and the positive EXE hash equals the earlier
+402-case DOS artifact. Sum of measured compile/run durations23.08seconds.
+Evidence: `.cache/score-dos-negative/result.json` and per-control receipts.
+Faults are injected in the harness around the identical generated body; these
+are neither symbolic acceptance nor both compiler lanes' mutation coverage.
+No production semantics changed for these controls. Whole-case0/16 remains.
+
+## 2026-10-10 — Candidate-only calls enter existing real16 composition
+
+Fixed `real16_call_retry` admission to inspect both selected roots, not only
+the oracle. Devin implemented the scoped patch; parent reviewed it and added
+both-call, conditional-status and actual-MZ controls. Two unit controls and
+the binary changed-return control fail on the preserved preimage; fixed tests
+pass. Parent cohort:39passed; public suite after adding the binary control:
+11passed. Iteration lint and scoped MyPy pass. The last public suite reports
+an unraisable Capstone-deallocator timeout warning on an existing direct-call
+test; it is retained, not classified as pre-existing or suppressed.
+
+On BITNBR score the actual production comparator now inlines2calls, proves
+2return targets and2CS-preservation obligations. It still refuses at46stores
+against unchanged default32. A process-local diagnostic with limit64 reaches
+BX/DI/memory differences under unrestricted full-machine-state comparison;
+this does not decide equivalence under declared C inputs/runtime correspondence.
+Evidence: `.cache/candidate-call-retry/`. Acceptance remains0/16 and0/118.
+No SORTDEMO, compiler-profile changes or broad pipeline ran.
+
+## 2026-10-10 — Isolated BITNBR function rebuilt in DOS; snapshot bug repaired
+
+Devin built unchanged generated `sub_1d12` with the pinned BC31-small/DOSBox
+profile: 402 native-derived cases passed, guest exit 0. Parent reviewed the
+harness, source/executable hashes and runtime mapping, then independently
+replayed the EXE with the same 402/402 result. Evidence:
+`.cache/score-dos-review/`, `.cache/score-dos-parent/result.json`. This is one
+isolated concrete DOS check; conditional remains conditional.
+
+Fresh `sub_1ce2` exposed 2000/2048 concrete memory mismatches. GP capture was
+correct; virtual-expression cleanup re-evaluated captured global reads after
+writes. It now keeps unversioned memory-read captures. Two compiled-C controls
+failed before the fix; 47 focused tests pass after it. Scoped lint and startup
+architecture pass; 17 scoped MyPy diagnostics reproduce on the preimage.
+New unchanged generated C compiles with GCC Werror and matches 2048/2048 native
+memory results, preserving ESI. Evidence: `.cache/add-level-replay/`.
+The regression is enrolled in routine component tests. Main/full BITNBR and
+all plan acceptance remain open (0/16, 0/118). No SORTDEMO or broad pipeline run.
+
+## 2026-10-10 — Final native freshness repaired and parent reviewed
+
+Devin task26903terminal0 delivered a reproducible stale-producer negative and
+charged post-callback rebind. Parent found and repaired same-address pair loss
+(exact-object identity keys) and reproduced native-callback live-module mutation
+after authentication; callback-free authority check now runs last. First full
+run99passed/3failed revealed stale8argument mocks; updated mocks to forward the
+new consumed ledger, without production catches. Final102passed/1warning15.02s,
+scoped lint exit0. Stable actual8consumed surfaces/57stores/151fetchspans/27control
+geometry rows,13968private/sharedunits,0.962s. Limits20000/25s untouched.
+Canonical current baseline separately refusesapplication_empty at20051work in
+3.170s with stable sources. No main/fullcase acceptance:0/16,0/118.
+Next canonical integration must retain existing exact root link and incoming
+selector state, scope every CALL premise, and preserve full GP/SP/memory/return
+proof. Receipts:`.cache/selector-final-producer/`,
+`.cache/selector-canonical-current/receipt.json`.
+
+## 2026-10-10 — Full instruction/control geometry wired; exact fetch census repaired
+
+Parent stage now checks all native instruction windows and27control geometry
+rows, retaining4ordinary return-state obligations. Full96passed/1warning7.45s,
+scoped lint exit0; stable actual57stores/4calls/151fetchspans,9765shared units,
+0.747s before final census repair. Independent review found decoded heads absent
+from IR escaped verification. Public negative reproduced1failure; exact charged
+per-block/global census repair gives61affected tests passed/1warning6.85s and
+scoped lint exit0. Full fresh cost pending. No canonical main or roundtrip claim:
+0/16starter,0/118matrix. Final producer freshness and conditional consumption
+remain critical path. Receipts:`.cache/selector-geometry-wire-parent/`.
+
+## 2026-10-10 — Final proof work charged and generic code-hull optimization checked
+
+Job5165 terminal124, no owned source delta; parent promoted the reviewed budget
+repair into private stage, scoped lint exit0 and78tests passed. Stable actual
+cost17835private/sharedunits,1.027s. Parent real negative at9600cap failed before
+optimization. Generic charged hull over ALL151fetchspans proves disjointness
+only outside it; exact overlap checks retained inside hull/gaps. Five boundary/
+overlap controls and incomplete-hull budget refusal added. Final85passed/1warning
+5.95s, scoped lint exit0; stable actual57stores/4calls/151fetchspans,9436private
+and sharedunits,0.685s. Source stability receipt now includes both helper modules.
+No claim of end-to-end speedup or main proof: allfetch/control integration remains
+next, then canonical conditional consumers. No known live external jobs.0/16,0/118.
+Evidence:`.cache/selector-fetch-hull-parent/{red.log,green.log,lint.log,actual.log}`.
+
+## 2026-10-10 — Final proof-work accounting red reproduced and isolated repair tested
+
+Parent public negative proves old staged proof at9228cap returnsconditional while
+performing8607uncharged final overlap comparisons. Saved preimage1failed5.50s.
+Private regular-copy repair charges comparisons, retains typed resource refusals,
+and moves final authentication after separation. Final scoped lint exit0 and
+78passed/1warning5.14s, including actual geometry and live callback mutation
+controls; an initial overlay-path skip was corrected before the final run. No change to Devin-owned stage yet; repair/report
+provided in its existing review path. Read-only consumer review specifies five
+canonical seams and prohibits missing-invocation→universal fallback. Contract:
+`.cache/selector-store-parent/CONDITIONAL-INTEGRATION-SPEC.md`.
+No accepted main/fullcase:0/16,0/118. Geometry job5165 confirmed live.
+Evidence:`.cache/selector-control-integration-parent/{budget-red.log,budget-green.log}`.
+
+## 2026-10-10 — Native selector effects and induction checked; geometry integration next
+
+Parent verified final private cohort77passed/1warning in4.47s. Native adapter
+has a separate29-test receipt. Full native census precedes sparse selector-only
+fixpoint; ordinary IR/call/store effects remain intact. Stable actual diagnostic
+reports57stores/4calls/151fetch spans,9228private/sharedwork,0.678s under unchanged
+20000/25s caps; accounted work was16183 before projection. This is not a full
+main proof or end-to-end speed claim. Parent geometry review found5 real negative
+failures (wrapped fallthrough, A20, empty fetch, LOCK) and fixed them; helper still
+needs integration and scoped complexity cleanup. All prior bounded jobs are
+terminal. Exact rain-modem resumed with owned staged geometry/public-proof
+integration, supervisor5165,8minute bound; static sandbox rootRO/repoRW/4GiB
+reverified. Canonical consumer design reviewed separately without edits.
+Parent follow-up found final STORE/fetch comparisons uncharged (57×151=8607
+on actual disjoint diagnostic);9228is selector-pass accounting, not full proof
+cost. Postauth also precedes that final phase. Review obligations retained in
+`.cache/selector-control-integration-parent/BUDGET-REVIEW.md`.
+No production semantic delta or accepted roundtrip:0/16starter,0/118matrix.
+Evidence:`.cache/selector-authority-parent/{final-private-tests.log,after-selector-projection.log}`,
+`.cache/selector-control-integration-parent/`, task log
+`.cache/devin-prompts/selector-control-integration.log`.
+
+
+## 2026-10-10 — Selector admission authenticity repaired; final callback order tested
+
+Bounded Devin authority job20831 ended124 after delivering canonical admission,
+source/module/environment revalidation before/after census and closed refusal
+cohorts. Parent independent44controls pass; forged digest now refuses. Parent
+negative found recompute callback ran after final live-module comparison. Saved
+preimage1failed; callback-before-final-authentication repair45passed in4.14s.
+Stable actual diagnostic still closes57store/10control/4surface cohorts across
+151fetch spans in0.632s. This is not production proof: complete native effects,
+all transfer coordinates, induction equations and shared cost still need closure.
+Parent retained callback regression in private staging. Native-effects worker
+34775 ended124 with REPORT only; claims of implemented/tested code rejected,
+exact sessionrain-modem resumed91214 to deliver adapter/real native controls.
+Exact sessionbrook-wineberry resumed38471 for convergence/shared budget and
+conditional-admission identity; ownership disjoint. No production semantic delta,
+no accepted roundtrip;0/16,0/118. Evidence:
+`.cache/selector-authority-parent/{green.log,callback-green.log,actual-after-fix.log}`,
+`.cache/selector-authority-red/red.log`.
+
+
+## 2026-10-10 — Staged selector decode repaired; independent proof blockers isolated
+
+Bounded Devin repair partitions native decode by authoritative block extent and
+binds complete instruction coverage to image/loader bytes. Parent isolated
+regular-file overlays: saved preimage2failed/42passed, corrected44passed in3.56s.
+Private diagnostic reports57 stores,4 calls,6 terminals and151 fetch spans.
+63→57 is same-selector helper dedup, valid only for conservative code-write
+exclusion; ordinary repeated call effects remain mandatory. Independent review
+rejects production use until live entry authority, complete implicit-segment
+effect classification, all control coordinates, final induction equations,
+shared budget charging and closed refusal accounting are repaired. Independent authority negative reproduces a forged declaration digest admitted
+as conditional despite admission.complete=False; this is a staged proof defect.
+Bounded decode job ended124; exact session resumed for typed authority repair.
+No production
+semantic change or roundtrip accepted;0/16 starter,0/118 matrix. Canonical plan
+shortened1176→616 lines before this receipt update; complete Objective And Limits
+and following requirement sections preserved byte-for-byte. Evidence:
+`.cache/selector-store-parent/INVARIANT-PARENT-REVIEW.md`,
+`.cache/selector-decode-parent/green.log`, `.cache/selector-decode-red/red.log`.
+
+
+## 2026-10-10 — Structural collector delivered; wrong boot seed repaired
+
+Resumed Devin job ended124 after delivering private collector/runner, no tests
+or completed lint report. Parent ran it independently:63STORErows/151fetch spans,
+3104privatework,stable,0.679s without fullprefixsimulation, honestlyREFUSED.
+Parent found startupSS676 replacing declared-functionSS631; realbootregressions
+show2failed, declaration-only numeric projection now2passed. Corrected actualrun
+uses631,stable,0.660s,stillREFUSED. All4call edges yield complete universal leaf
+closures (targets1d12,1ce2,1d04,1d12) preserving6segments; this does not prove
+the caller's conditional target selection. Rootdataflow loses segments after
+unprovedCALL; failures65/raw63 expose mixed counterdenominators. Staged complexity,
+ownedtype/access/layer and exception issues remain; no production integration.
+Next separately typed declared numeric segment invariant closes nearCALL/JCC/JMP
+by CFG induction, with fullSTORE/futurefetch separation; ordinaryGP/SP/memory and
+callchain returnstate remain mandatory. Same exact Devin context resumed for
+this8min slice; parent reviews authority and conditional consumers before use.
+Acceptance0/16,0/118. Evidence `.cache/selector-store-parent/STRUCTURAL-REVIEW.md`,
+`SEGMENT-INVARIANT-SPEC.md`, red/greenlogs and `.cache/selector-structural/out/receipt.json`.
+
+## 2026-10-10 — Independent structural imports and leaf closures verified
+
+Parent canonical raw import + universal segment solve takes0.480s with stable
+inputs, without fullprefixstateinterpretation. Main23blocks1808rows4CALLs has
+6near-jump selector refusals; two leaves330+262rows have none. Main loses
+segment identities after CALL without proof; direct rawIR registry coverage
+correctly refusesir_not_project_owned. Existing `_caller_premise_surface_8616`
+publishing owner instead yields complete universal leaf closures retaining all6
+segments in0.185s, without wholecallerprefixsimulation. Projection alone is not
+authority: its apparent identities must never be used when closure.complete=False.
+Next collector must close nearJCC/JMP as well as CALL, retain fresh declared-entry
+conditional provenance and structuralSTORE/code separation. Devin's first8min
+job exited124 after API research, no patch; exact sessionbrook-wineberry resumed
+with parent's working import/closure entrypoints and a6min delivery bound.
+No production semantic patch or acceptance;0/16,0/118. Evidence:
+`.cache/selector-store-parent/{structural_seed.py,structural_owned_closures.py}`,
+their receipt directories and `.cache/selector-structural-parent-evidence.md`.
+
+## 2026-10-10 — Staged write-envelope kernel reviewed; structural owner next
+
+Bounded Devin job completed0 with a private typed classification kernel,
+16controls and scoped lint/type checks. It classifies59captured STORE sites
+against98captured fetch spans as disjoint; this is explicitly NON-PROOF and
+saves no prefix work because its inputs still come from the full census.
+Independent parent controls exposed2geometry omissions: unknown-offset wide
+write tails and unproved A20 aliasing above1MiB. Private fixed copy passes4
+controls (original2failed/2passed), retaining the actual positive geometry.
+No production integration or compiler acceptance. Consumer audit also requires
+preserving declared-entry conditional provenance: selector-only evidence cannot
+turn caller proofs universal or authorize fullstate call-chain transport.
+Next implementation owns structural rawIR STORE/native/fetch enumeration and
+must-segment transport, then selector-only consumer wiring. Evidence:
+`.cache/selector-store-parent/{KERNEL-REVIEW.md,CONSUMERS.md,kernel-red.log,kernel-green.log}`,
+`.cache/selector-only-census/REPORT.md`. Acceptance0/16,0/118.
+
+## 2026-10-10 — Selector-only premise applicability measured and specified
+
+Bounded fresh Devin sandbox job exited0 with a passive probe and proposal;
+parent independently reproduced the canonical refusal at20051work with stable
+inputs.59context/store sites,134visits use DS/SS631 (base10096);98observed
+fetched spans lie inside[7394,7764). Full16bit offset envelopes are disjoint,
+so unknown offsets alone do not block cheaper target selection in this case.
+This is applicability evidence, not an exhaustive code-write proof. Parent
+rejected the proposed fabricated full invocation completeness: a selector-only
+premise needs its own typed contract and fresh structural/native/source census,
+including all prior-call segment proofs and future fetched spans. Ordinary
+GP/SP/memory effects remain mandatory. Private-transfer omission remains rejected
+for failure-priority/callback obligations. No production semantic patch or case
+acceptance;0/16,0/118. Next: staged selector-only census and exact consumer wiring.
+Evidence: `.cache/selector-store-parent/{SPEC.md,REVIEW.md,main/receipt.json}`,
+`.cache/selector-admission-feasibility/{REPORT.md,SPEC.md,stores.json}`.
+
+## 2026-10-10 — Selected CALL repetition isolated; ineffective extensions rejected
+
+Passive actual-main receipts retain stable sources and the20,000/25s budget.
+Hot callee0x1d12 runs six identical553-unit simulations;0x1ce2 runs411/411/147.
+Caller proofs are conditional declared-entry records; callee closures universal
+leaves. Four boot recomputations occur in premise construction, none in snapshot
+replay or callee simulation. Current consumption remains required, not removed.
+The Devin rejection-only interior CALL proposal cannot address this workload:
+expensive interior calls are selected, and unselected terminal calls already
+have exemptions. Its API-TypeError red control is not semantic evidence; no
+patch integrated. Separate decode profile:28 partitions,0excess instructions;
+reject bounded-decode expansion as a fix for this case. Next bounded Devin task
+examines omitting only private pure leaf transfer in discarded snapshots while
+preserving authentication/observable callbacks and mandatory ordinary effects.
+Preparation remains APPLICATION_EMPTY at20,051; acceptance0/16,0/118.
+Evidence: `.cache/call-snapshot-parent-review/REPORT.md`,
+`.cache/callee-proof-admission-review/`, `.cache/snapshot-inert-applicability/`,
+`.cache/machine-partition-profile/`.
+
+## 2026-10-10 — Detached terminal-prefix native copy integrated after review
+
+Devin's staged copy reduction is integrated in the existing native cache and
+invocation owners after parent repairs. Only the explicit root stop block can
+return a deeply detached prefix; native projection, source authentication and
+ordinary full selections remain intact. Parent red3→green3 closes suffix CALL
+admission and stale prefix markers on cached/uncached full selections. Whole
+REP consumers re-import full rows and keep missing/refused outcomes honest.
+Twenty focused controls and84 related controls pass (overlapping, not summed).
+Routine component/ownership enrollment, scoped lint and startup architecture
+pass; saved-preimage MyPy17→17,zero new diagnostics.
+Stable main removes442 copied rows at the first phase (2404→1962), progresses
+further, then still refuses at20,051 under unchanged20,000/25s limits. No edge
+or round trip admitted; acceptance0/16,0/118. Passive suffix-callee profiling
+found only one unproved suffix consultation,0charged work/~57microseconds;
+reject that avenue as an actual-main performance fix. Existing segment-only
+preservation does not replace the required GP/SP/memory callee effects.
+Evidence: `.cache/native-prefix-parent-review/`,
+`.cache/native-prefix-copy/REPORT.md` (Devin closure exit0,21staged controls).
+
+## 2026-10-10 — Current kvikdos generation admitted for original coverage builds
+
+Isolated the BC31 help/no-artifact failure to automatic host DPMI handling;
+`--force-dos` does not repair it, explicit `--dpmi=off` does. Typed per-profile
+AUTO/OFF policy reaches compile/link/runtime, validates matching probe evidence,
+and invalidates frozen-context fingerprints. DOSBox commands are unaffected.
+Four current MSC51/Borland31 small/large original probes reproduce their prior
+EXE hashes and runtime observations with all asset/runner hashes stable.
+Updated only current runner/probe pins; Borland OFF, Microsoft AUTO.
+Parent static profile/runner cohort:170passed,1 existing warning,18.15s,exit0.
+Worker scoped Ruff/type ratchet/MyPy and architecture checks pass. Actual
+typed original bitfield compile/link/run takes approximately0.10s, returns255,
+and matches DOSBox original SHA256d9b3548a… exactly. This establishes original
+execution, not decompiled-C equivalence; acceptance remains0/16,0/118.
+Evidence: `.cache/kvikdos-profile-mode/`,
+`.cache/native-runner-allprofiles-verified/`.
+
+Twelve static DPMI controls are now in a focused module, routine-enrolled through
+the canonical component declaration and an explicit ownership rule. The broader
+profile module retains its Linux-only process test outside fast ownership.
+Enrollment lint passes; its infrastructure cohort has164passed/2failed.
+Both failures reproduce after removing exactly this enrollment delta in an
+isolated interpreter: stale relational-lane expected inventory and the current
+manifest-check failure. No full repository green gate is claimed.
+
+Scratch native-row loan not integrated: rebound effect poisoning is reproduced
+in the Devin patch; its test loader mixed package/module owners. Factory-only
+sealed repair has9green controls but no actual-main gain (20,058work,
+APPLICATION_EMPTY,stable inputs). Keep ordinary detached-cache isolation.
+Evidence: `.cache/scratch-native-parent-review/`,
+`.cache/scratch-native-parent-fixed/runs/parent-main/`.
+
+## 2026-10-10 — Canonical prefix capture enrollment connected
+
+Guarded declared construction, root replay, forced parent replay and paired
+root replay retain source-bound prefix data in the existing bounded traversal.
+Ordinary verdicts remain authoritative; no continuation or callback reuse is
+enabled. Missing source authority preserves proof success without enrollment.
+Reviewer caught provisional-data retention after peer failure and incomplete
+terminal identity checks; both fixed, with seven new negative controls.
+Final construction/capture41passed; earlier larger cohort157passed, overlapping.
+Capture-disabled mutation correctly fails the canonical positive control.
+Lint/startup architecture pass; saved-preimage scoped MyPy82→82,NEW0.
+Actual unchanged25s main diagnostic recorded75enrollments at0x1d97/1dad/1dec,
+up to3source bindings, stable hashes, approximately483MiB peak RSS. Main still
+timed out; this availability probe predates final guard fixes and establishes
+no speedup. Bounded Devin terminal124 without report/patch; parent implemented
+and reviewed changes. Acceptance0/16,0/118. Evidence `.cache/prefix-enrollment/`.
+Next: fresh budgeted source/native/seed/callback authentication, then resume
+the dominating prefix and verify exact ordinary-replay effects and counters.
+
+## 2026-10-10 — Native source keys retained for prefix capture
+
+Private opt-in capture now retains the existing native import projection key
+and pinned authorities per function. Shared scratch metadata propagates missing
+authority; different key objects conservatively decline capture applicability
+without scanning nested keys. Freshness uses current producer inputs and checks
+the deadline after evaluating the key. Independent review found two resource
+defects; parent fixed both. No continuation or callback reuse is enabled yet.
+Parent focused cohort56passed; lint-iteration and startup architecture pass.
+Saved-preimage scoped MyPy85→85,NEW0. The bounded sandboxed Devin exited124
+without a patch; parent added eight independently reviewed controls. Removing
+the deadline safeguard makes its negative control fail as expected.
+Final evidence is in `.cache/prefix-source-binding/`.
+Compiler acceptance stays0/16 starter,0/118 matrix. Next: charged current
+admission and callback/seed/native-row authentication, then prefix extension
+and the unchanged25s/20000 case.
+
+## 2026-10-10 — Prefix capture reviewed and routine-enrolled
+
+Detached transcript capture preserves exact fact/row identities and detached
+register, direction, memory and continuation data; it grants no reuse authority.
+Parent capture/cut/write-footprint cohort:61passed in4.07s. Scoped lint and startup
+architecture/component catalog pass; the new ownership rule has0violations.
+Ownership tooling cohort:62passed/1failed; the same existing native-integer skip
+violation appears with the new rule removed. Full gate is not green.
+
+Measured1672-row detached capture costs10102units, exceeding the545-unit
+late-success margin. Keep it off the default path. Bounded Devin exited124 with
+spec only; parent implemented private opt-in successful-context ownership and
+terminal pre-CALL continuation retention. Single-use handoff adds1shared unit;
+optional resource misses preserve ordinary success. Independent review found no
+capture-only defect. Final cohort92passed/1warning; strengthened core8passed.
+Lint/startup architecture/catalog pass; saved-preimage MyPy86→86,NEW0. Both new
+ownership rules validate. Canonical enrollment, fresh post-callback authentication,
+replay/extension and native acceptance remain open;0/16,0/118. Evidence:
+`.cache/prefix-capture-core/`, `.cache/prefix-transcript-owner/`.
+
+## 2026-10-10 — Cold-copy branch rejected; prefix-extension scope established
+
+Private native-selection experiment keeps the original raw importer, fresh
+source/configuration checks and one detached selection, with no retained census
+projection. Actual main still exits3/31.881s,23hashes stable;0x1e3b remains23318
+work units and131fresh imports occur. Warm selections dominate this root, so
+removing cold projection setup cannot close it. No production change promoted.
+Read-only Devin hit its3minute cap without a report; no review claim follows.
+
+Measured producer inventory is128slots.11successful fusions in the first capped
+root charge1562identity units; even removing all leaves21756>20000. Existing
+binary/CFG flag-summary owners already implement interprocedural summaries.
+Neither seal-only optimization nor a duplicate flag-summary pipeline is selected.
+
+Fresh passive CFG receipt:23blocks,0external edges; all three preceding CALL
+blocks dominate the target and have no reentry. The geometric probe exits3 in
+31.833s with22stable hashes, and grants no effect-reuse authority. Plan now
+specifies current-prefix transcript extension with exact native reauthentication,
+fact identities, memory/write protection and ordinary callback/peer admission.
+No transcript implementation or compiler case is accepted yet;0/16 and0/118.
+Evidence: `.cache/native-fresh-experiment/`,
+`.cache/prefix-checkpoint-design/{SPEC.md,dominance.json,native/receipt.json}`.
+
+## 2026-10-10 — Advisory pool replay selection integrated
+
+Invocation records retain typed pool-consultation advice solely for scheduling.
+READ keeps independent replay; UNUSED avoids the static eligibility scan;
+UNKNOWN/foreign advice keeps that charged scan. Fresh derivation, both peer
+admissions and post-callback captures still authorize every shared result.
+Fresh READ/UNKNOWN must replay required independently. No completion authority
+or semantic replay field was removed.
+
+Two bounded Devin jobs timed out without patches; parent completed controls in
+the existing enrolled shared-chain test owner. Final93passed/2warnings in26.94s
+with2workers. Deliberately bypassing the fresh receipt causes the exact forged
+UNUSED/corrupted-required negative to fail, confirming the oracle rejects that
+false proof. Scoped lint passes; exact dirty-preimage MyPy85→85,NEW0.
+
+Same-input native pair retains22identical stable hashes and original25s/20000
+limits. Eligibility checks10→10, charged scan work21411→0. Both exit3,
+32.131→32.480s,505704→494572KiB peak: no established end-to-end speedup. First
+0x1e3b root still costs23318 and refuses; preceding0x1dec root costs19455 and
+passes. Nested prior-prefix authentication and native-copy work are the next
+bounded surface. Raw importer copies share frozen instruction DAGs, so they
+must not be treated as independently detached mutable rows. Main has no accepted
+export/round trip; acceptance remains0/16 and0/118. Plan/IR README updated.
+Evidence: `.cache/replay-advice-native/summary.json`,
+`.cache/replay-advice-controls/` and `.cache/replay-advice-types/delta.json`.
+
+## 2026-10-09 — Distinct protected spans and sparse overlap queries integrated
+
+Actual-main profile attributed198149charged units over39calls to code/write
+overlap protection. A short explicitly interrupted diagnostic found4113 span
+entries/527distinct spans/38union intervals/476protected bytes, with8known and
+2unknown path writes. These measurements selected producer deduplication and
+adaptive exact overlap, rather than removing proof authentication.
+
+The canonical footprint is a set of distinct(address,size) pairs. Fresh native
+decode/binding still runs on every fetch; a separate scalar preserves repeated
+admission counts and public replay equality. Scratch setup bills raw input
+traversal before compression. Sparse searches charge comparisons/containment;
+dense walks retain byte queries. Actual Devin reviewed the sparse candidate,
+identified missing selector-inspection cost, and that cost was added. Parent
+reviewed the later distinct-span producer. Native fixture guard work14700→4380
+with the same60positive checks; this is not full-request speedup.
+
+Canonical focused79passed/1obsolete appendmock failed; that mock was changed to
+set.add and the affected26controls pass. Ruff/type-doc-access ratchet passes.
+Exact Makefile MyPy private preimage comparison83→83diagnostics/NEW0; the earlier
+1→1measurement used a different follow-imports setting. New exhaustive overlap,
+exact-boundary/accounting and repeated-fetch/revocation controls are enrolled
+in the routine pipeline.
+
+Frozen main remains timeout: exit3,155.11s,505840KiB, sourcechanges0. Guard18calls
+21496units (~1194each), versus prior39calls198149units (~5081each); differing
+counts/preconditions and wall times prevent an end-to-end gain claim. First
+refusal1de6 at44.20s has main1dc3/instruction1dce and517/516/516/515/1ledger.
+16committed effects still all1dce; no callee-pruning events.0/16starter,0/118matrix.
+Next private experiment prepares caller protective geometry once per feasibility
+operation, still charging its input traversal and retaining fresh authentication.
+Evidence: `.cache/call-work-review/REPORT.md`, `type-make/delta.json` and
+`.cache/call-set-main/summary.json`.
+
+## 2026-10-09 — Native call effects measured on actual main
+
+The native speculative-authentication test observer now includes the canonical
+entry-record consumer. Independent read-only review confirms real early and
+late authentication remain. Combined focused run:61 passed/1 budget refusal
+in171.82s; isolated unchanged-budget retry:1 passed in22.02s (test17.94s).
+Scoped observer lint and startup architecture pass. The combined gate remains
+failed; isolated success does not erase its contention-sensitive refusal.
+
+Frozen actual main: exit3,147.74s process,496284KiB peak, unchanged semantic
+hashes.1140 ordinary-call attempts contain51 committed successes, all at0x1dce;
+zero callee-pruning events. First work refusal0x1de6 at27.55s has zero raw facts;
+no populated domain refusal was captured. Worker terminal receipt is absent,
+so supervising timing/exit and post-run hashes carry the available evidence.
+Main remains missing;0/16 starter and0/118 matrix. Next measure work deltas
+inside repeated first-call consumption before choosing reuse. Evidence:
+`.cache/call-effects-main/summary.json` and focused logs under
+`.cache/call-code-guard-union/`.
+
+## 2026-10-09 — Bounded optimization candidates rejected after measurement
+
+Three actual Devin jobs completed or stopped at their bounded checkpoints.
+The staged REP prefilter passes84 controls but has zero natural-fixture hits.
+A parent current-shared-work retry guard reproduces RED and passes50 controls,
+lint, independent review and scoped MyPy1→1; actual main has zero relevant hook
+hits. It is archived privately and removed from production; both source owners
+match their preimages. Callback-free callee simulation is not established, so
+late authentication remains. The library audit confirms signatures do not
+authorize effects; missing typed AH4Ch termination is a separate gap, not an
+established cause of the current work refusal.
+
+One unchanged120s main run exits3: request136.74s/process138.26s,
+peak509360KiB, semantic source changes0. First populated work refusal58.79s,
+main1dfd/prior CALL1de6, ledger718/718/718/717/1. No attributable speedup,
+main export or accepted case;0/16 starter,0/118 matrix remain. Reviewed evidence:
+`.cache/projection-work-next/CONTINUATION_REVIEW.md`.
+
+## 2026-10-09 — Single scoped authentication and conditional receipt transport
+
+Scoped segment solving now delegates fresh entry authentication once to the
+canonical view producer, retaining source/scope/census checks. Two/three-call
+derivations fall88→79/177→159. Parent22 scoped-state controls pass;12 new controls
+are enrolled only in the existing two-worker binary-budgeted lane. Four focused
+lane checks pass; the full tooling module remains104 pass/1 fail in the existing
+relational inventory assertion. No broad-suite pass is claimed.
+
+Reviewed focused receipt transport preserves source/entry/payload bindings while
+keeping exit5 and acceptance=false. Actual Devin's first patch failed ten parent
+integrity controls; corrected transport passes122 canonical tests. Source lint,
+startup architecture and scoped three-source MyPy pass. Batch/case composition
+remain pending. The additional read-only Devin lane audit was interrupted without
+a report; local review and parent tests supply enrollment evidence.
+
+Frozen actual main still exits3 at the unchanged120s recovery budget; supervisor
+140.82s/496376KiB, semantic hashes unchanged. Census-work refusal persists at
+callsite1dfd/earlier CALL1de6, ledger718/718/718/717/1. Main remains missing and
+acceptance0/16,0/118. Evidence: `.cache/main-solver-auth/`,
+`.cache/callee-state-projection/`, `.cache/case-premise-contract/stage/`.
+
+## 2026-10-09 — Raw callee entry transport
+
+An explicit native near-CALL target binding now transports a declared caller
+prefix into a separately authenticated raw callee scope. It proves entry only:
+the candidate's unfinished return record stays visible, explicit refused edge
+evidence still refuses, and callee coverage/return/effects remain independently
+required. Pending conditional artifacts stay out of the universal registry.
+One current canonical binding mint replaces three duplicate parent replays;
+strict retained field/type/accounting checks remain in place.
+
+The native six-case cohort passed in 85.01s with the original 20s request budget;
+the replay counter is 1, and 1236 shared source files stayed unchanged. Scoped
+lint and startup architecture passed. Standard combined MyPy matches the exact
+preimage: 110 diagnostics, zero added/removed. Evidence:
+`.cache/raw-callee-scoped-chain/`.
+
+The actual BC31 main diagnostic closes call 1dce→1ce2 and proves the next caller
+prefix 1de6 with 718/718 facts and no failures; the former block 1d01 native mismatch
+is gone. The second callee still refuses incomplete, later prefixes exceed the
+shared census work limit, and the unchanged 30s request expires. Final jump
+materialization remains 0/16 (59 raw, 16 normalized/classified, 16 failures), with
+`scope_unbound`; 1234 semantic source files stayed unchanged. No application or
+round-trip acceptance is claimed. Next capture the second callee's precise
+chain/census/work refusal before changing any proof budget or guard.
+
+## 2026-10-09 — Raw boot prefixes consume proven call effects
+
+Implemented a bounded retry of `CALL_BOUNDARY_UNPROVEN` using records for the
+actual CFG predecessor slice, excluding the target call and unrelated suffix.
+It retains the original artifact/instruction identities and never publishes
+raw or conditional evidence as universal coverage. A reentrant boot-head request
+can prove an independent earlier prefix only without recursive call records;
+deadline, depth and remaining-work limits remain enforced. Target binding now
+precedes callee traversal, so an unbound symbolic target does not start a
+potentially circular callee proof before the completed caller pool can retry it.
+
+Parent native-byte regressions were red before each change. Current focused
+cohort: 113 passed, scoped Ruff/ratchet and MyPy clean; startup architecture
+checks passed after the prefix integration. Both new test modules are enrolled
+in the routine catalog. Devin timed out after writing additional tests but no
+implementation; parent implemented and reviewed, correcting the worker tests'
+reference to an unused preliminary artifact rather than the consumed surface.
+
+The first two prefix implementations still timed out on real BC31 main. The
+first exact remaining refusal was startup CALL `0x1a45` while proving the path
+to `0x1b78`; its record reported `entry_domain_call_dependency_unproven`.
+Evidence: `.cache/raw-prefix-first-refusal/`. The source-frozen native run of
+the final binding-order change is in `.cache/raw-prefix-bind-first/`: exit 3,
+73.78 seconds. The later `.cache/raw-prefix-cycle-site/` probe finished in
+71.12 seconds with outer exit 0, but its authoritative `result.json` still
+reports `status=timeout` and `tail_validation_verdict=failed`. Process exit
+alone is not decompiler acceptance. Both probes retained unchanged sources;
+the first call dependency remains unproven. The cycle-guard observer did not
+capture a cycle at that site, so the dependency reason must not be described
+as an established recursion cycle.
+No whole-case acceptance or measured end-to-end speedup is claimed: 0/16 and
+0/118 remain the acceptance totals.
+
+The follow-up `.cache/raw-prefix-dependency-census/` diagnostic identifies the
+first exact dependency: callee `0x1bcc` requires proofs for five native INT21
+sites (four AH35, one AH25), but its ordinary-call proof list is empty. It
+stopped intentionally after 30.99 seconds on unchanged sources. Concrete replay
+already models these vector services; IR declared-service admission only models
+version/resize. The next slice is shared vector-service effects and their IR
+consumers, with no name-based bypass. Bounded Devin review and staged work live
+under `.cache/library-boundary-review/`; no new native acceptance is claimed.
+
+Parent promoted the reviewed minimal vector response owner and its real replay
+consumer. Existing dispatch/frame/code guards remain unchanged. The canonical
+module and tests are enrolled in the runtime component. The promoted vector,
+interrupt and version cohort passes 92 tests in 2.44 seconds; scoped lint and
+startup architecture pass. Scoped runtime MyPy finds `no-any-return` in the
+unchanged frame helper; the exact hash-matched pre-edit source reproduces it
+under the identical Make flags (`baseline-mypy-exact.log`). The new pure owner
+passes scoped MyPy. Evidence:
+`.cache/library-boundary-review/promoted-*.log`. IR adapter work remains staged
+under `.cache/vector-ir-adapter/`; the native acceptance totals remain 0/16,
+0/118.
+
+Also promoted the narrow callee-walk routing fix: native interrupts can reach
+the canonical declared-service checker when walking a callee. Ordinary nested
+CALLs remain refused. The native-fixture regression was red before the fix;
+39 promoted declared/scoped tests pass in 2.65 seconds, scoped lint passes.
+Evidence: `.cache/vector-ir-adapter/promoted-tests.log`. Scoped IR MyPy reports
+81 errors outside the edited branch; a same-config shadow-preimage check
+reproduces the identical diagnostic multiset (zero added/removed errors),
+recorded in `mypy-baseline-comparison.json`. No new vector declarations or call-chain transport
+are accepted yet, so this does not change the round-trip count.
+
+## 2026-10-08 — Verified library recognition; recursive proof boundary remains open
+
+The BC31 worker already enables the explicit small-model signature catalog.
+Both the raw matcher and the actual declared-input loader identify 30 library
+functions, including the termination/cleanup helpers consuming recovery time;
+main is not among the library labels. Receipts:
+`.cache/staged-proof-native/{signature-probe,loaded-signatures}.json`.
+CLI metadata/filtering receives the labels; the recursive IR call-preservation
+path still demands native callee coverage. The synthetic-stub external-call
+contract is not authority for real CRT code. The next slice is this boundary,
+not universal CRT recovery. The bounded Devin audit terminated at its 10-minute
+limit (exit 124) without a written report; no worker conclusion is accepted.
+Parent verification additionally exercised the actual library filter: all 30
+matches excluded, main retained. Two hot imported heads are inside the matched
+restorezero extent, whereas startup and the intermediate exit wrapper are not
+matched by this catalog. Next work must address semantic dependency traversal,
+not replace this already working filter.
+
+Reviewed optimizations: source DAG encoding and consumers pass 193 focused
+tests; staged call collection and neighbors pass 21. Scoped MyPy passes for
+both touched owners. The unchanged-source main probe still reports recovery
+timeout (exit 3, 94.61 seconds total including startup), so no end-to-end gain
+or new accepted round trip is claimed. Acceptance remains 0/16 and 0/118.
+
+## 2026-10-08 — Deadline handling reviewed; width optimization rejected
+
+Request deadlines now prevent late native imports, cached evidence returns and
+late invocation premises, including expiry inside cache validation or proof.
+Parent independently reproduced the expired ambient-premise defect against an
+isolated preimage. Final owned cache/budget/width cohort: 82 passed in 2.24s;
+scoped lint and MyPy pass. These are focused checks, not round-trip acceptance.
+
+The width specialization was rejected after alternating real-binary benchmarks:
+122,000 mixed-expression calls were 0.5% slower. Production code was restored;
+stock-width, mutable-environment and authoritative-override controls remain.
+
+The isolated Borland worker emitted partial C in seven seconds but lacked the
+parent evidence and KVM-backed validation. It does not explain the full-case
+timeout. A faithful parent diagnostic will preserve exact worker evidence and
+the verified compiler context. Acceptance remains 0/16 starter and 0/118 matrix.
+
+## 2026-10-08 — Bounded call discovery reviewed; first acceptance remains open
+
+Parent review of the Devin discovery patch passes 109 focused tests in 47.79s.
+Foreign callsite evidence refuses, arbitrary extension defects propagate,
+unique targets are capped at32 and callee windows at512bytes, and candidate
+Functions stay in the selected private KB. Recovered callee bodies are tracked
+separately from seeded entries. Parent removed a production fallback for
+incomplete mocks and fixed the mocks instead. New owner MyPy and scoped lint
+pass; legacy CLI has one existing lambda inference finding. The initial
+architecture check rejected concurrent source changes; the frozen-tree rerun
+passes.
+The new regression module is enrolled in the component catalog.
+
+Three bounded additional Devins own disjoint work: authenticated backward-call
+scope, complete guarded stack-allocation semantics, and the shortest existing
+starter acceptance route. None is acceptance evidence until reviewed.
+Acceptance remains0/16 starter and0/118 matrix. The next count requires a
+complete source-free original-to-C-to-DOS-executable behavioral round trip.
+
+Fresh selected starter attempt remains unaccepted: original compiles and exits
+255 as expected, one emitted function validates, but complete decompilation
+hits120.47seconds. Provenance reports environment_unchanged=true; original
+binary hash exactly matches the prior captured image. Receipt:
+`.cache/first-acceptance-route/parent-reviewed-discovery/case-000/coverage-result.json`.
+No further unchanged whole-case retry is justified.
+
+Parent rejected the new helper prototype despite13synthetic passes: actual
+four-block native IR refuses, and unproved failure targets plus partial AL
+clobbers were incorrectly certified complete. Its two new files are preserved
+privately in `.cache/guarded-stack-contract/`, outside production. Two resumed
+Devins now own private corrective evidence for helper effects and startup CALL
+proofs. Raw startup census to main refuses at the first CALL1e96 when no
+entry-call preservation records are supplied; this identifies the next required
+record, not by itself an unsupported callee behavior.
+
+## 2026-10-08 — Captured DOSBox startup contract closes MS C startup
+
+The explicit DOSBox resize profile now shares one typed allocator model across
+declaration parsing, invocation census and concrete replay. The authenticated
+MS C startup proof reaches its first call in 5.25 seconds: 851 raw, normalized,
+classified and materialized facts, zero failures, complete=true. This proof is
+conditional on the declared captured DOSBox environment, not whole-program
+equivalence. Parent checks pass 93 policy/memory/receipt tests, 21 IR
+staging/boundary tests and ten concrete replay tests. The policy tests are
+enrolled in routine coverage.
+
+The fresh exact-callsite diagnostic at 0x1a36 observes the existing bare
+near-call theorem prove target0x206a at captured load coordinates: one fact
+classified/materialized, zero failures, no invocation premise. Clinic replaces
+the symbolic target with that single CFG successor. The helper's private-KB
+prototype is explicitly guessed, so it supplies no complete guarded-effect
+certificate. A focused function run exits0 with `validation=passed`; generated
+C matches original bytes on8/8 boundary vectors, preserving BP/SP and full
+ESI/EDI under an explicit safe-stack premise. DS guards and the failure tail
+are not covered by that replay. The plumbing Devin audit exits0 with137 focused
+tests and no actionable defect; adversarial replay controls remain under way.
+Starter and full-matrix acceptance remain 0/16 and 0/118.
+
+The adversarial replay Devin reached its fifteen-minute timeout without a
+patch. Parent implemented the six missing replay controls: zero/shrink
+reserved-byte preservation, code/save-area/hardware-frame alias refusal and
+refusal of a second resize after chain mutation. The ten-test replay cohort
+passes in3.03 seconds; disabling preflight in an isolated process makes all
+three alias controls fail. These tests are enrolled in routine coverage.
+Scoped MyPy on eleven boundary owners exposed three new findings caused by
+reusing a loop variable for two write types; parent corrected the variable.
+Only the independently recorded pre-existing transfer-row argument-type
+finding remains. The21-test IR cohort still passes; scoped lint is clean.
+
+Native main remains unaccepted: the100-second outer run times out after its
+90-second analysis budget and reports missing application callees. The bounded
+discovery flag disables ordinary neighbor-call extension as well as far-call
+extension. Devin is implementing exact-proven bounded callee admission.
+Parent early review has already flagged blanket exception fallback and
+missing terminal-call identity checks; this draft is not accepted. The
+environment rejected a process-interruption request, so the owned20-minute
+timeout remains the stopping mechanism before parent edits.
+
+## 2026-10-08 — Reviewed polarity patch: concrete behavior repaired, validation open
+
+Devin's new Structuring polarity owner preserves inverse relational/equality
+arms in the legacy typed-condition consumer. Parent review found truncation was
+being erased by cast stripping; added red controls cover ordinary/semantic casts,
+byte views of word storage and hidden truncation followed by re-extension. The
+corrected patch passes 52 focused tests. New owner MyPy is clean; the legacy
+consumer's 23 direct MyPy findings exactly match its saved pre-change baseline
+apart from line numbers. No suppression or proof-budget change was introduced.
+
+The explicit compatibility import is limited to the Structuring-invoked legacy
+consumer. Two architecture controls pass and startup architecture passes; other
+postprocess imports remain forbidden. New width tests are enrolled in the
+component manifest, QA and routine pipeline.
+
+Adversarial review also exposed a storage-space collision: angr stack variables
+inherit memory variables and their numeric `addr` is a frame offset. The shared
+identity bridge now excludes stack variables from DS identities and delegates
+frame/base equality to the existing exact C-variable resolver. Two new red
+controls reject SS-vs-DS and BP-vs-SP collisions. The combined cohort passes
+107 tests; both focused Structuring owners pass MyPy.
+
+Parent independently reproduced additional unsafe admissions from the read-only
+Devin probe: asymmetric signed views, register storage narrower than its C value,
+and differing boolean compound inputs with equal result width. The polarity
+helper now requires matching integer interpretations and register extent/region;
+different compound operands need a separate value proof and conservatively
+refuse. The new red regressions preserve same-view positive controls. Exact
+constant signedness mismatches also conservatively refuse; the probe's specific
+constant example was not accepted as a demonstrated semantic counterexample.
+
+Fresh native CMP16 emits signed word arguments, correct LT/GT/equality arms and
+all four return outcomes. Exact generated-C GCC execution agrees with original
+42-byte Unicorn execution on 8/8 boundary vectors. Tail validation still refuses
+three missing branch surfaces (exit4); this is the next ownership projection to
+investigate. The polarity review ended at its 20-minute bound (exit124), with useful probes
+but no final report. The surface review was interrupted at its 15-minute
+checkpoint (exit1), without a concrete reproducer or conclusive owner diagnosis.
+Its inference that a passed Structuring stage proves markers existed is not
+established. Parent native instrumentation observes 22 surface checks with zero
+admitted guards; all three have origin addresses but no required owner marker.
+A fresh native run after the final adversarial hardening remains required. Acceptance stays
+0/16 starter and 0/118 matrix. Concrete replay is not proof or a round trip.
+
+Evidence: `.cache/condition-polarity-parent-{green,lint,mypy,mypy-baseline}.log`,
+`.cache/condition-polarity-helper-mypy.log`,
+`.cache/condition-polarity-parent-mypy-diff.json`,
+`.cache/condition-polarity-architecture-tests.log`,
+`.cache/coverage-environment-20261008/polarity-native.{log,jsonl}` and
+`polarity-word-replay.{log,json}`.
+
+
+## 2026-10-08 — Reviewed condition-owner fix; CFG ownership and polarity isolated
+
+Devin's condition-transfer fix now passes the authenticated retained Function
+to the native collector. Parent review caught and rejected a conflicting-request
+fallback into the default KB; its added regression fails on the worker patch and
+passes after loud rejection. The parent cohort has 44 passes; scoped lint,
+MyPy and startup architecture checks pass. The new native ownership tests are
+enrolled in the component manifest, QA and routine pipeline.
+
+A fresh CLI run transfers three native branch facts and emits signed word
+arguments. It also exposes an earlier typed consumer reversing a fallthrough
+guard from LT to GE. Validation refuses (exit4), and exact generated C with the
+canonical GP runtime fails all eight original-byte Unicorn replay vectors.
+The correct initial AX constructor remains unchanged. The same completed Devin
+session is resumed on a bounded polarity-proof fix with disjoint ownership.
+
+CFG orientation independently discarded private-KB edges. Three parent native
+regressions reproduce empty/stale default-KB and foreign-owner defects; consuming
+the existing authenticated resolver closes them. The focused CFG/materialization
+cohort passes 38 tests; lint and startup architecture pass. Scoped MyPy still has
+25 findings: the saved preimage reproduces all 25, with zero new/removed findings.
+No typing exclusions or proof budgets were relaxed. These tests are also enrolled
+in the routine pipeline. Acceptance remains 0/16 starter, 0/118 matrix.
+
+Evidence: `.cache/condition-transfer-parent-{red,green,lint,mypy}.log`,
+`.cache/condition-cfg-owner-{red,green,lint,mypy,mypy-baseline}.log`,
+`.cache/condition-cfg-owner-mypy-diff.json`,
+`.cache/coverage-environment-20261008/condition-owner-native.{log,jsonl}` and
+`condition-owner-word-replay.{log,json}`.
+
+## 2026-10-08 — Fresh return trace and concrete signedness counterexample
+
+A fresh nine-block native run verifies the Clinic AX operand and both SSA
+stages. Validation rejects a destructive DCE attempt; emitted C retains all
+four return values. This supersedes the earlier incorrect terminal-return
+diagnostic, but does not establish compiler roundtrip acceptance. The exact
+generated function compiled with host GCC agrees with original-byte Unicorn
+execution on only four of eight boundary vectors: negative-versus-positive
+word comparisons are reversed. Both code hashes and actual AX observations are
+recorded; this is concrete mismatch evidence, not a formal proof.
+
+The condition-transfer entry point drops its optional retained Function and
+looks up the default project knowledge base. Devin has reproduced zero
+transferred conditions for a native private-KB function and owns that bounded
+fix plus its native ownership controls. Parent review and fresh emitted-C
+execution remain required.
+
+An all-cold diagnostic exhausted its 120-second budget building optional library
+signature regexes before return analysis. The replacement bypasses only final
+decompilation caches and uses the existing signature-disable policy for this
+closed leaf diagnostic. Supporting caches are retained, stage hooks are verified,
+and no library-boundary corpus requirement is waived. Acceptance remains 0/16
+starter and 0/118 matrix.
+
+Evidence: `.cache/coverage-environment-20261008/return-stage-selective.{log,jsonl}`,
+`generated-word-replay.{log,json}`, `.cache/condition-transfer-owner-devin.log`.
+
+## 2026-10-08 — Private function ownership restores word arguments
+
+Positive-BP argument recovery used the default project knowledge base, while
+native recovery retained its Function in a private analysis knowledge base.
+The existing authenticated IR resolver now supplies that retained owner.
+Missing/stale default-owner and foreign-project regressions reproduce the defect
+(three failures before the fix); the focused argument cohort passes 18 tests.
+Scoped lint, MyPy and architecture checks pass.
+
+The native diagnostic recovers two word arguments with six raw facts, two
+classified/materialized facts and zero failures. Devin's fresh native CLI probe
+also emits two word parameters. Its internal validation passes, but emitted C
+still has unsigned comparisons and an incorrect terminal `return dx`, so this
+is not source-free roundtrip acceptance. Devin confirms Clinic initially emits
+an AX return operand; the corruption is later. Two bounded Devin jobs investigate
+that boundary and stack-coordinate fingerprint consistency. Acceptance remains
+0/16 starter and 0/118 matrix.
+
+The coordinate diagnostic narrowed a second defect: byte-pair validation read
+raw entry-SP offsets despite proven machine-BP projections. A parent regression
+reproduces BP+4 mislabeled BP+2. The consumer now uses the existing coordinate
+owner and preserves refusal; the focused fingerprint/coordinate cohort passes
+95 tests in 11.54s, with scoped lint and MyPy clean. This does not repair the
+remaining return/signedness semantics. The
+coordinate Devin job was stopped at its 15-minute checkpoint without a patch;
+the return job reached its 20-minute limit. Diagnostic findings are retained,
+not counted as accepted worker implementations. Its second return probe lacked
+stage events, so cached/worker execution must be excluded before interpreting it.
+
+Evidence: `.cache/positive-bp-owner-{red,green,architecture}.log`,
+`.cache/word-argument-native-owner.log`,
+`.cache/coverage-environment-20261008/ail-return-{events.jsonl,probe.log}`.
+Coordinate controls: `.cache/stack-word-coordinate-{red,green,lint,mypy}.log`.
+
+## 2026-10-08 — Native jump transport closes; word-value loss isolated
+
+The captured BC31 comparison leaf's two backward jumps now transport into Clinic
+before SSA, authenticated against the full native and converted context. The
+actual native run records two admissions, zero refusals and 0.375s transport.
+Rust AIL deepcopy changes statement indices; the snapshot binds original indices
+separately from cloned effects. Nine context mutation/unchanged controls pass,
+with scoped lint, MyPy and startup architecture checks clean.
+
+A fresh MS C5.1 small-model DOSBox compile/link/run ABI probe succeeds without
+KVM. Its frozen private context lets the native CLI finish with exit0 and an
+internal `validation=passed` report. This is not roundtrip acceptance: emitted C
+still exposes four byte parameters and returns DX for a signed-word comparison.
+The next obligation is emitted-C behavior against the original binary.
+
+Two red controls reproduced an actual lossy Lowering rule: a reconstructed
+16-bit word became a byte-typed CVariable because its storage had width2.
+Lowering now requires a full 16-bit C value for every owner-selection route;
+otherwise it retains the high-byte expression with a typed refusal. Missing and
+oversized value types are also rejected. The focused word/prototype cohort has
+88 passes; both touched production modules have clean scoped lint and MyPy.
+Devin's prototype-slot fix is parent-reviewed. The actual worker confirms that
+storage grows to two bytes while argument types remain `char`; retaining word
+expressions now exposes a typed structuring validation failure between entry-SP
+and machine-BP coordinates. This is the next concrete repair boundary, not an
+accepted function. Full source-free acceptance remains
+0/16 starter and 0/118 matrix.
+
+Evidence: `.cache/coverage-environment-20261008/`,
+`.cache/coverage-dosbox-20261008/`, `.cache/stack-word-value-{red,green,mypy,lint}.log`,
+`.cache/stack-word-prototype-cohort.log`.
+
+## 2026-10-08 — Repeated startup prerequisite work bounded
+
+Profiles identify the same request/source/boot retrying an undeclared DOS
+interrupt at 0x1000a. Failed domain completeness now rejects before creating a
+fresh census deadline. Request-local blocked-prefix reuse authenticates the
+unavoidable native prefix and rechecks source/image/architecture/index/registry;
+it preserves refusal, budget checks, changed-input and fresh-request recovery.
+
+Focused tests: 20 invocation/refusal plus 49 boot-link passed. Scoped lint and
+new-helper MyPy pass; existing module diagnostics remain unchanged (80/37).
+Architecture passes on frozen sources. Actual BC31 probe records four reuse
+hits at 0.21–0.30ms, with two genuine censuses still refusing the service. It
+returns the typed 60s recovery timeout after 105.26s total, rather than the prior
+120.93s outer kill. Peak RSS 286028 KiB (prior 290036 KiB); CPU share differed,
+so no controlled whole-request speedup is claimed. No round trip is accepted:
+0/16 starter and 0/118 matrix remain. Missing declared DOS environment/service
+inputs still block startup proof. Evidence: `.cache/coverage-blocked-prefix-20261008/`,
+`.cache/coverage-failed-domain-20261008/`, and
+`.cache/coverage-retry-parent-20261008/blocked-prefix-*`.
+
+## 2026-10-08 — Typed boot refusals stop redundant recovery
+
+Retained raw census failures now distinguish proven/refused/retryable outcomes.
+Boot-only missing-service refusals avoid universal re-import unless incoming
+caller evidence offers another premise. An expired current shared census budget
+also stops further native intake; fresh scopes keep their budgets. Deadline checks
+cover completeness replay. Reviewer found no remaining admission issue.
+
+Focused boot/service controls: 60 passed. Final Boolean-return typing cleanup
+also passes all 30 owning boot-module controls. Changed-file lint passes; scoped
+MyPy matches the saved preimage (37 diagnostics, no additions). A preimage control
+confirmed the adjacent service tests lacked DOS MZ registration; their fixture
+now imports the canonical loader and asserts the actual loaded backend.
+
+Frozen BC31: raw census reaches INT21/AH30 in 4.75s, reports 31 classified /
+30 materialized / one refusal, and skips its immediate universal boot-entry import. Later in the completed
+log a fresh census scope spends 20.72s, expires and re-enters boot intake.
+The full request still hits 120s: first-batch acceptance remains 0/16. The missing
+DOS environment/AL contract remains unresolved. No overall speedup or semantic
+acceptance is claimed. Captured stacks and before/after controls are retained in
+`.cache/coverage-refusal-20261008/`; source limits and memory cap are unchanged.
+
 ## 2026-10-07 — Compiler coverage resumed after execution-tool outage
 
 The finite matrix now has 35 existing sources and one retained Csmith source;
@@ -9177,3 +10245,2362 @@ architecture scan found only two stale documentation markers; both were
 corrected, with two focused checks passing and scoped lint clean. File
 reorganization is complete; the unrelated proof-budget limitation remains
 visible. Logs: `.cache/shim-removal/`.
+
+## 2026-10-07 — compiler-coverage startup and library admission
+
+The first16 plan remains active with 0/16 accepted round trips. Original-only
+fixture runs do not establish decompiler acceptance. Clean CLI workers now call
+the canonical frontend bootstrap explicitly; a read-only Devin review found no
+blocking defect, with eight focused tests passing and Ruff clean. Bootstrap
+failure propagates instead of substituting a default. Prototype updates use
+angr's public provenance field and preserve stronger return-use provenance.
+
+Library filtering now consumes binary-verified signature extents independently
+of optional listing bounds. Fully checked patterns may exclude internal seeds;
+partial prefixes retain labels only, ambiguous matches retain unknown code,
+and unsupported CRC records refuse. Removed fabricated startup body bounds.
+Producer/cache/rebase/consumer projections are coherent. Focused worker checks:
+76 passed; matcher baseline six failures and consumer baseline one failure both
+become green. Parent independently reran the ten consumer controls: ten passed.
+Devin supplied no signature patch and was stopped at its bounded checkpoint.
+Scoped lint and architecture checks passed; existing typing/legacy-import debt
+remains separate. Frozen evidence is under
+`.cache/compiler-coverage/compare16-signature-diagnosis-20261007/`.
+
+Three fixture compatibility repairs preserve intended source mechanisms and
+pass their six MS C 5.1/Borland original-build/runtime controls. The source/hash
+matrix records those controls separately from round trips. MS C signed-bitfield
+and automatic-array-initializer obligations remain open.
+
+## 2026-10-07 — complete first16 baseline
+
+All sixteen frozen rows were attempted through the existing runner, with two
+external jobs, in 1135.5 seconds of batch wall time. All sixteen originals
+compiled and satisfied their runtime contracts (fourteen exit255, two Csmith
+exit0). Every decompilation reached the unchanged 120-second stage limit;
+acceptance remains 0/16. Full accounting and unchanged-source identity are in
+`.cache/compiler-coverage/first16-independent-20261007/complete.json`.
+Peak aggregate RSS was not measured; timings and configured budgets are not
+memory measurements. Corruption controls and semantic acceptance remain open.
+
+The manual diagnostic at0x10000 included live padding instructions and
+conflicted with the native inventory caller root0x10010. Its callee-resolution
+fallback was rejected rather than weakening root/provenance agreement. The
+next diagnostic uses the authenticated application entry0x10010. A separate
+original-only `/Za` experiment retains unchanged array/signed-bitfield sources
+and does not change frozen compiler profiles.
+
+The private MS C 5.1 option probe is complete: default and `/Za` both reject
+unchanged automatic-array initializers with C2073; both compile unchanged signed
+bitfields with C4014 forcing unsigned and produce exit2, failing the required
+exit255 oracle. Exact per-cell argv/environment and hashes are retained in
+`.cache/compiler-coverage/msc51-ansi-option-probe-20261007/`. Neither source nor
+selected configuration was changed; both obligations remain open.
+
+The authenticated entry recovery probe completed in 9.39 seconds and recovered
+four blocks/28 bytes, versus one block/nine bytes in the lean pass. Neighbor
+rescanning consumed 6.62 seconds. This isolated probe did not reproduce the
+canonical timeout, and invoked no native direct-call resolver. Removing the
+richer scan would lose observed coverage, so no production optimization was
+accepted. Report: `.cache/devin-prompts/compare16-recovery-path-stage-20261007/`.
+The reuse investigation is complete without a patch: existing same-project
+caches reduce the scoped recovery from 9.181s cold to 3.117s warm, retaining
+the same four block heads and independently decoded 28-byte extent. This does
+not prove complete CFG/type/proof equivalence or improve the canonical timeout.
+Report: `.cache/devin-prompts/compare16-cfg-reuse-stage-20261007/parent-review-report.json`.
+Thirteen additional signature-policy/cache-neighbor controls passed.
+
+The normal CLI observation still times out at 120.348s. Clean workers disable
+fork execution; their main-thread process-alarm recovery also bypasses the
+existing thread sampler. Therefore its empty sampling output is explained by
+the observation path, not by idle recovery. The opt-in sampler now covers the
+process-alarm lane and cleans up on success, error and timeout. Independent
+preimage tests fail four controls; the final eight controls and scoped lint
+pass. MyPy retains 16 identical baseline diagnostics. Budgets and default
+execution remain unchanged.
+Report: `.cache/devin-prompts/compare16-canonical-timeout-20261007/REPORT.md`.
+
+The post-fix normal CLI run captures one complete recovery stack and two
+samples with invalid frames; it still times out at 120.316s. The complete
+sample reaches neighbor-call CFG expansion, generic jump-table resolution
+and Blade backward slicing/lifting. This proves that the path executes,
+not that it dominates the entire timeout. The next bounded probe identifies
+the exact control site and its native resolver refusal without disabling
+legitimate indirect-control coverage.
+Report: `.cache/devin-prompts/compare16-canonical-thread-20261007/REPORT.md`.
+
+The six-byte helper probe confirms AX survives VEX and initial AIL; its later
+loss is unresolved. Symbolic CS is retained correctly: valid fetch selectors
+produce different near-jump targets across 16-bit IP wrapping. The existing
+proof refuses with `SELECTOR_WINDOW_UNPROVED`; canceling CS or initializing its
+C local would hide missing evidence. No semantic fix or round trip is claimed.
+Report: `.cache/devin-prompts/compare16-control-coordinate-stage-20261007/diagnosis.md`.
+
+The corrected canonical-import native probe finishes in 2.716s. Native call
+resolvers are registered, timeless, and accept all three exact IRSBs; each
+binding honestly refuses `SELECTOR_WINDOW_UNPROVED` with no invocation premise
+(counters 1/1/1/0/1). Source and binary hashes are unchanged. The missing seam
+is authenticated caller-domain evidence, not Block-versus-IRSB adaptation.
+Report: `.cache/devin-prompts/compare16-native-canonical-imports-20261007/REPORT.md`.
+
+Independent Devin sampler review confirms eight focused tests pass (3.41s).
+Parent rejected its hypothetical broad-exception suppression recommendation
+and corrected the unsupported nested-timer/LIFO claim. No additional production
+change is justified. Two bounded diagnostic tasks now trace caller-domain
+premise transport and AX live-out loss; neither is round-trip acceptance.
+First-batch acceptance remains 0/16; full MS/Borland and final Watcom obligations
+remain active.
+Report: `.cache/devin-prompts/sampler-review-current/parent-review.md`.
+
+Unknown-tail native DCE now has a durable red witness: the exact six-byte
+AX-setting helper reproduced loss at angr AILSimplifier dead-assignment removal
+in a bounded blob-stage probe (not a full authentic-MZ acceptance run). The
+owned native segment live-out adapter publishes uses only at Return terminals;
+it publishes none at an unmodeled Jump. New generic tests fail for both symbolic
+and constant outside-region tails, while the internal-jump control and existing
+controls pass: 2 failed/15 passed after canonical test bootstrap (9.50s).
+The isolated module previously depended on another test registering the calling
+convention; its local fixture now explicitly bootstraps the frontend.
+A bounded implementation will extend the existing IR reaching-use seam, retaining
+unknown outgoing register effects without inventing CS values or suppressing
+validation. No first-batch round trip is accepted by this stage evidence.
+Receipt: `.cache/devin-prompts/unknown-tail-liveout-fix/red-bootstrapped.log`.
+
+Parent-reviewed unknown-tail reaching-use implementation now retains observed
+register outputs at unknown transfers, distinguishes same-address block indices,
+and treats empty successor sinks as incomplete regions. It uses real predecessor
+instruction observations and does not invent selectors or instruction tags.
+Final focused and neighboring cohort: 86 passed in 8.94s; scoped Ruff/type/doc
+ratchet, MyPy owner check and Pyright owner check passed. These are IR regression
+results, not function acceptance.
+
+The authentic first-batch CMP16 helper at 0x10644 was then checked through the
+normal CLI with validation enabled: terminal exit 4, retained uninitialized-CS
+carrier refusal, and emitted C still omits the AX write. The remaining downstream
+loss needs a real-pipeline reproducer; no function is claimed fixed. Evidence:
+`.cache/compiler-coverage/liveout-parent-check/run.log`. Full acceptance remains
+0/118 and first-batch acceptance remains 0/16.
+
+Exact-entry follow-up: raw MZ bytes (512-byte header) establish that the near
+call at 0x10180 targets 0x1064a, not the separate AX-setting stub at 0x10644.
+The normal CLI check of 0x1064a also terminates with exit 4: no generated code,
+Clinic reports that its AIL block was not found; the instruction probe reports
+no per-instruction lifting failure. Retain these distinct entry obligations.
+Evidence: `.cache/compiler-coverage/liveout-parent-check/call-target-1064a.log`.
+No ABI or successful validation is inferred from its signature-derived name.
+
+Existing CLI layer-dump diagnostics narrow the remaining 0x10644 AX loss:
+the first `post-structured-codegen` C snapshot already lacks the AX assignment;
+the following helper-format, optional annotation, and helper-signature snapshots
+are byte-identical. Thus these cleanup transitions do not explain this loss.
+The normal validated run still exits 4. Evidence is retained under
+`.cache/compiler-coverage/liveout-parent-check/layers/0x10644_sub_10644_01/`
+with per-stage hashes in its manifest; no new diagnostic framework was added.
+
+Source-trace qualification: the `post-structured-codegen` snapshot label is
+misleading as an ordering boundary: emission follows the CLI rewrite, late
+lowering, cleanup-finalize and render-refresh phases. Internal cleanup before
+that snapshot remains a possible cause. A fresh authentic-MZ direct Clinic and
+Decompiler probe retains AX through SRDA and codegen, so the remaining loss is
+in the normal wrapper path; the internal dead-local-assignment pass is now the
+focused regression candidate. Snapshot labels alone do not locate the loss.
+
+Both requested compiler/runtime lanes now have concrete corruption-harness
+evidence: MS C 5.1 small and Borland 3.1 small each compiled and ran two original
+controls (exit 255, `run_ok=true`) and three private return/branch/store mutants
+(exit 1, `run_ok=false`). Parent independently inspected all ten original-run
+JSON receipts. Every selected binary built successfully; setup errors are not
+counted as semantic rejection. This proves these runtime observations reject
+the chosen mutations, not decompiler round-trip acceptance or all-input proof.
+Receipts: `.cache/compiler-coverage/first16-dos-corruption-20261007/`.
+
+The actual helper's missing AIL was also resolved as an intentional boundary:
+canonical project startup hooks 0x1064a as a SimProcedure, producing a size-zero
+HookNode. Exact native VEX lifts all four sampled blocks successfully (7, 6, 4,
+and 5 bytes). Repair must preserve and authenticate helper effects at that
+boundary rather than inventing a C declaration or claiming a lifter defect.
+Receipt: `.cache/devin-prompts/compare16-target-native-boundary/events.jsonl`.
+
+CLI dead-local pruning now retains direct and unified register effects when
+architectural dead-effect proof is unavailable, including partial AX/AL views
+sharing a unified identity. Register overwrite deletion is left to native SSA;
+existing stack-local dead/overwritten-store controls remain active. Final scoped
+cohort: 32 passed in 7.77s; authentic-MZ direct-Decompiler-to-AST reproducer is
+green (AX assignment 1→1, previously 1→0). Lint/MyPy passed; one unchanged
+Pyright diagnostic remains in the owner. No function acceptance is claimed.
+
+Parent normal-CLI integration on frozen sources still lacks AX in its first
+snapshot and exits 4 on unknown-CS validation. The corrected AST pass is a real
+bug fix but not sufficient for the whole wrapper path: another deletion or cache
+path must be identified. Evidence: `.cache/compiler-coverage/liveout-parent-check/`
+`fixed-cli.log` and `fixed-layers/`. Round-trip acceptance remains 0/118.
+
+A fresh normal-wrapper probe now identifies that second loss: the AX register
+assignment survives the Decompiler and rewrite setup but is removed 1→0 by
+`_run_evidence_dce_pass` during the rewrite loop. Both function IR/SSA and
+function-decompile caches recorded misses. This diagnostic uses the existing
+in-process/thread observation switches to expose the actual wrapper stages;
+it is not normal-profile acceptance. Evidence:
+`.cache/devin-prompts/compare16-normal-wrapper-review/events.jsonl` and
+`cache-events.jsonl`. The evidence-DCE classifier is the next repair owner.
+
+### Compiler coverage: current integration checkpoint (2026-10-07)
+
+The evidence-DCE repair now preserves architectural register effects without
+dead-effect proof. The normal-wrapper AX assignment survives cleanup (1→1);
+the focused cohort passed 113 tests. This fixes the observed deletion but does
+not discharge unknown-CS validation or accept a round trip. Evidence:
+`.cache/devin-prompts/compare16-normal-wrapper-review/REPORT.md`.
+
+Compiler-helper hooks now delegate to native instructions using NoHook instead
+of modeling an unconditional return. Focused helper controls passed 21 tests.
+Parent neighbors passed 54 tests and failed two; the same two failures reproduce
+with the saved helper preimage while other current sources remain fixed.
+They remain visible integration debt, not historical-HEAD acceptance.
+
+Two fresh representative round trips (MS C 5.1 small and Borland 3.1 small)
+both still reach the unchanged 120-second decompilation limit. Borland exposes
+a separate prerequisite defect: tail recompilation selects the default MS C
+5.1/KvikDOS path rather than the frozen Borland/DOSBox profile. Its launcher
+probe failure was reported as a syntax failure although no compiler ran.
+The active repair forwards validated profile context and retains typed stage
+receipts distinguishing compiler errors, launcher failures and missing objects.
+Evidence: `.cache/compiler-coverage/critical-pair-20261007/`.
+
+An independent identity-only signature repair preserves authenticated OMF
+self-relative16 relocation provenance through the existing catalog/cache.
+Legacy references without that provenance remain insufficient; library identity
+does not prove executable CS, ABI or helper semantics.
+
+Execution order: focused prerequisites and scoped checks, parent patch review,
+freeze sources, then two representative round trips. Expand to the first sixteen
+only after representative acceptance. Full required scope stays 118 round trips;
+current acceptance remains 0/16 and 0/118. Broad gates are integration checkpoints,
+not substitutes for those round trips.
+
+The Borland recovery error now has a bounded single-function reproducer:
+`sub_103a3` terminates with exit 5. Candidate finalization repairs its graph,
+then angr `Function._register_node` dereferences an expired FunctionManager
+through `update_func_block_count`. This is a concrete ownership/lifetime defect,
+not evidence that the function has unsupported semantics. Repair must preserve
+the correct manager/project ownership through finalization, without catching
+ReferenceError as a fallback. Trace:
+`.cache/compiler-coverage/bc31-lifetime-diagnosis-20261007/single-function.log`.
+
+That lifetime repair is now frozen and parent-reviewed: normal/lean CFG attempts
+and far/neighbor extensions each own an independent knowledge base. Two real-CFG
+reds became green; the final affected cohort passed 12 tests. Saved source hashes
+match the current files. The authentic selected Borland function no longer raises
+ReferenceError, but still exhausts the unchanged 60-second recovery budget.
+This establishes the lifetime fix only, not function or round-trip acceptance.
+The remaining discovery display-cache failure and existing lint/type diagnostics
+are retained in `bc31-lifetime-diagnosis-20261007/REPORT.md`. Further native timing
+probes wait for signature source freeze; the interrupted parser-state probe
+yielded no valid timing evidence.
+
+Selected compiler routing is implemented and parent-smoked on both frozen
+DOSBox profiles: a function-only TU without main compiles, and invalid C fails
+with actual compiler syntax diagnostics. Context/evidence/root tampering refuses;
+stage receipts distinguish host failures from guest rejection. Scoped tests,
+lint, typing and architecture checks are recorded in
+`.cache/devin-prompts/selected-tail-compiler-handoff/REPORT.md`.
+
+Authenticated linker-reference matching passed 132 focused and four adapter
+tests. The regenerated MS library catalog contains 837 records and admits the
+six-byte runtime stub without labeling its application lookalikes. The eight
+first16 catalog pins now bind that regenerated artifact; sources, toolchains,
+behavior contracts and budgets remain unchanged. The updated manifest hash is
+`1ff8a1d05a1336433b7cb76362e65e11d674a7d181df2b97cac79dd4f5a33b38`.
+
+The selected MS original now produces C after function-owner propagation through
+Decompiler, Clinic calling-convention analysis, stack tracking, IR import and
+semantic/parity consumers. The first authentic rerun exits 4: final validation
+detects a missing DS:0002 two-byte callee write at instruction 0x10452. This is
+retained failure evidence, not acceptance. Subsequent owner fixes also register
+direct and interrupt callees in their caller's KB and preserve actual angr
+FunctionInfo mapping metadata. Focused evidence: 77 IR/semantic/parity tests and
+41 call-owner/recovery controls pass. Sources are frozen for the next authentic
+rerun; production gates and budgets remain unchanged. Logs:
+`.cache/compiler-coverage/recovery-kb-propagation-20261007/` and
+`.cache/devin-prompts/indexed-pipeline-admission-20261007/`.
+Current accepted round trips remain 0/16 and 0/118.
+
+A bounded parent profiling rerun now captures real recovery stacks. It exits124
+under the unchanged120-second limit: recovery consumes about61seconds before
+falling back to a nine-byte slice. A sample identifies neighbor-call CFG expansion
+through `extend_cfg_for_neighbor_calls` and native direct-call lifting; the later
+fallback times out in condition-materialization provenance. The separate Devin
+run's empty logs do not establish its proposed import-guard timing attribution.
+Parent review rejects that unsupported attribution and any deadline relaxation.
+Next bounded reviews inspect the measured CFG expansion and the earlier missing
+DS write, without another corpus run. Evidence:
+`.cache/compiler-coverage/startup-observation-20261007/` and
+`.cache/devin-prompts/coverage-recovery-hotspot-20261007/PARENT-REVIEW.md`.
+
+The missing DS:0002 write now has an exact-byte red regression: both absent and
+misleading same-address default-KB entries produce a store from unrelated startup
+instruction0x10452. The caller actually calls0x1064a;0x10452 is not its callee.
+The lowering consumer loses the retained function, fabricates an unknown extent,
+and the instruction fallback scans0x300bytes beyond the caller. This is evidence
+contamination, not established missing callee semantics. Three valid controls fail
+before repair. Companion structuring owner controls also reproduce three failures.
+The measured CFG extension separately omits the caller's disabled smart-scan
+policy, re-enabling angr gap scanning inside declared regions. Bounded fixes target
+these exact seams; no region/proof limits are raised. Full architecture audit
+passed before the source edits. Acceptance remains0/118 pending authentic reruns.
+
+The retained-owner and seed-scan slice is parent-reviewed. Both seeded CFGFast
+extensions now disable smart gap scanning; their real-CFG regression failed in
+both modes before repair. Combined scoped evidence:292 distinct passing tests
+across discovery, global loads, loop repair and IR ownership. The initial batch's
+15 failures identified incomplete test KBs; five byte fixtures also needed their
+explicit bounds. All original assertions remain. Lint/startup architecture pass;
+125 global-module MyPy diagnostics reproduce identically with the exact preimage.
+Two fresh MS5.1/Borland3.1 selected-profile round trips are running under unchanged
+limits. Evidence: `.cache/devin-prompts/coverage-seeded-scan-20261007/` and
+`.cache/compiler-coverage/retained-owners-seeded-scan-20261007/`.
+
+Both representative round trips terminated with typed `timed_out` outcomes.
+Original builds and runtime checks pass255 on both profiles. Their decompiler
+logs now report first MS function0x101b3 and Borland function0x102ec as
+`validation=passed`; the fabricated0x10452 store no longer appears. This is not
+whole-case acceptance or a complete call/output-shape audit. MS fallback0x10152
+also exposes an undeclared`chkstk` portable syntax failure. Installed angr's
+CallSiteMaker unconditionally assigns`project.kb` before prototype/argument
+recovery, independently of Clinic's owning KB. A bounded Devin task now tests
+and repairs this exact owner seam without adding guessed declarations or ABI
+semantics. The paired file sweeps each started four clean workers, so future
+integration sweeps must be scheduled sequentially to retain aggregate worker
+bounds. Acceptance remains0/16 and0/118; no time limits changed.
+Task evidence: `.cache/devin-prompts/coverage-callsite-owner-20261007/`.
+
+The clean-worker timeout transport fix is implemented and parent-reviewed.
+Explicit versioned terminal timeout records now retain `TIMEOUT` and disable
+heavy fallback retries, including when the child exits without a result file.
+Unstructured timeout prose stays an ordinary error; malformed terminal records
+stay protocol errors. Four controls failed before repair. Independent parent
+validation passes13 tests, including the existing fallback-suppression consumer
+(78.72seconds); iteration lint passes. Evidence:
+`.cache/timeout-transport-20261007/`. Startup architecture passes; both MyPy
+diagnostics reproduce against the exact preimage, with no new diagnostics.
+No authentic speedup or round-trip acceptance is claimed. The Devin
+callsite-owner job remains active on its separate lowering slice.
+
+The callsite-owner production delta is parent-reviewed: native Clinic callsite
+construction publishes its exact project/KB through the existing contextual
+scope; CallSiteMaker consumes that owner before its first callee/prototype
+lookup. No project-wide KB mutation or inferred signature is introduced.
+Independent mutation controls keep the new helper interfaces callable and
+remove only their binding behavior: two genuine KB/prototype regressions fail,
+while the nonnative control passes. Four corrected controls pass, including
+exception cleanup; source hashes remain unchanged. Devin reports17 focused
+tests, iteration lint and scoped MyPy passing. Parent full-file recheck passes17
+tests and startup architecture passes. The Microsoft frozen-manifest
+representative round trip is running; Borland will
+follow sequentially. Acceptance remains0/16 and0/118. Evidence:
+`.cache/worker-callsite-kb-8616/` and
+`.cache/compiler-coverage/callsite-timeout-reviewed-20261007/`.
+
+The Microsoft diagnostic rerun times out at the unchanged120-second stage
+limit; original compile/run255 still passes. This run is not acceptance evidence:
+Devin temporarily swapped its owned source to the preimage during an additional
+baseline check. More importantly, retained logs expose a second retry seam:
+`_known_nonopt_fallback_8616` runs before the caller checks
+`skip_heavy_fallbacks`, so even the corrected typed timeout triggers a fresh
+decompiler project. A bounded test-first repair now guards that exact helper;
+ordinary non-timeout retries remain available. Further native reruns wait for
+this slice and a frozen source tree. No acceptance count or budget changes.
+
+The known-function retry guard is now parent-reviewed. Its exact-boundary
+regression fails before repair (one failed/one passed), then the full cache-owner
+file passes14 tests independently (5.15seconds). Iteration lint passes; the same
+two existing CLI MyPy diagnostics remain. A single frozen-manifest suite now
+runs the Microsoft and Borland comparison representatives sequentially, retaining
+the120-second stage budgets and at most four decompiler workers. Evidence:
+`.cache/timeout-known-fallback-20261007/` and
+`.cache/compiler-coverage/timeout-callsite-frozen-20261007/`.
+
+The frozen Microsoft representative still times out:132.58seconds total,
+unchanged120-second decompile stage, original compile/run255 passing,
+environment identity unchanged. The suite correctly stops after its first
+failure and explicitly accounts for Borland as not attempted; a separate exact
+Borland case is now running sequentially in
+`.cache/compiler-coverage/timeout-callsite-bc31-frozen-20261007/`.
+Retained Microsoft diagnostics still show a fresh-project retry after a terminal
+timeout despite both reviewed guards. A read-only source/transport review is
+tracing the remaining admission seam before any further implementation. Sources
+remain frozen for the Borland probe; acceptance remains0/16 and0/118.
+
+The separate frozen Borland representative also times out (136.48seconds total,
+original compile/run255 passing, environment identity unchanged). Its first
+tiny application function0x102ec reports validationpassed, but the case is not
+accepted. Source review identifies the remaining timeout retry before both
+fallback guards: `_emit_retry_gate_candidate_8616` admits clean-process terminal
+results whenever sidecar metadata exists. Signature/library-only metadata still
+counts there despite ignored local hints. Test-first repair is scoped to both
+emission retry gates; partial evidence must survive terminal skip, and ordinary
+evidence-changing retries remain allowed. A separate one-function diagnostic
+targets Borland0x1009f's retained semantics-IR refusal and hot stack, with bounded
+direct-address execution and no production edits or acceptance claim.
+
+Both emission retry gates now respect the work item's terminal skip flag.
+Full-emission controls cover LST/COD availability and retained partial payloads;
+normal evidence-changing retries remain available. Five controls fail before
+repair and five normal controls pass. Independent parent recheck passes24 tests
+(26.37seconds); scoped lint passes and the same two previously verified CLI
+MyPy diagnostics remain. Exact delta and logs:
+`.cache/timeout-retry-gate-20261007/`. No budget changes or accepted round trips.
+The Borland direct diagnostic times out during recovery, before producing layers
+or retained-refusal records. Initial stack observers were defeated by runtime
+timer cancellation and captured `sys.stderr`. The private raw-FD observer now
+addresses both boundaries; function20s and outer75s limits remain unchanged.
+No refusal producer has been established.
+
+The raw-FD observer control passed and the original-worker-entry diagnostic now
+captures seven actual stack samples (exit3,35.84seconds, semantic hashes unchanged).
+An initial graph-repair lift is followed by nested entry-domain call proofs and
+reimports through `_caller_premise_surface_8616`, `_import_unregistered_callee_8616`
+and `build_x86_16_ir_function_artifact`. This locates recovery cost; it does not
+prove redundant identical inputs, infinite recursion, or a refusal producer.
+Two disjoint bounded Devin jobs are live: graph-repair exact-region/pre-lift
+budget contracts (CLI discovery+its graph tests), and measured IR import reuse
+(entry-domain call preservation+VEX import+hot-path tests). Both must preserve
+budgets/refusals, use test-first evidence and avoid live-source baseline swaps.
+Prompts/logs: `.cache/devin-prompts/coverage-graph-bounds-20261007.*` and
+`.cache/devin-prompts/coverage-ir-import-repeats-20261007.*`; parent review and
+authentic round trips remain required. Acceptance remains0/16 and0/118.
+
+### Compiler coverage: bounded graph repair, parent checkpoint (2026-10-07)
+
+Parent took over the scan task after the live Devin job reached its checkpoint
+without a delta. Graph repair now passes the remaining scan-window/byte-budget
+limit as angr `max_size` before lifting. Unlike `size`, this preserves VEX's
+actual branch extent. External successor edges remain recorded; mixed
+heuristic/exact-region window expansion is unchanged. Three new controls were
+red before the fix; final affected graph/discovery/extent cohort: **85 passed**
+in 5.60s, scoped iteration lint and MyPy passed. Tests explicitly initialize the
+required native lifter for synthetic projects. Review/preimages/logs:
+`.cache/coverage-graph-bounds-20261007/`.
+
+Parent review rejected the IR diagnostic: its global rebinding loop rewrote
+its own saved original callable, manufacturing **978 nested calls**. That trace
+does not prove production recursion or justify a new in-flight guard. Devin
+was stopped, its exact unsupported delta reversed (earlier edits preserved),
+and the diagnostic now excludes its own namespace. An isolated control proves
+the saved original survives while external consumers are rebound. Corrected
+measurement completed: **73 imports across 20 heads**, zero exceptions, and
+73 distinct recorded input/ambient contexts. Nine publication attempts were
+observed. Two in-progress imports had no completion record when the original
+20-second diagnostic deadline ended. No address-only cache or recursion guard
+is justified by this evidence. Original diagnostic and rejected patch remain
+retained alongside `corrected-receipt.json`; restored IR hot-path tests: 7 passed.
+Neither result establishes a round trip: acceptance remains **0/16, 0/118**.
+Current restricted-session kvikdos probe cannot open `/dev/kvm` (exit252);
+retain verified DOSBox profiles rather than changing the frozen runner.
+
+Authentic affected-case rerun completed with frozen implementation/environment:
+`word_comparisons@bc31-small` original builds/runs (exit255), but decompilation
+still times out at the unchanged stage limit (120.293s; total134.898s).
+0x102ec retains validation=passed; 0x102c2, 0x1009f and 0x103a3 are explicit
+terminal timeouts with fallback lanes closed. No completed rebuilt executable
+or round-trip proof. Evidence:
+`.cache/compiler-coverage/bounded-lift-reviewed-bc31-20261007/`.
+The bounded lift repair fixes adapter correctness/resource admission but does
+not establish an end-to-end speedup or increase accepted-case counts.
+
+A source-independent raw-FD probe of the affected comparison leaf0x102c2
+completed at its unchanged20-second diagnostic limit. Actual worker stacks show
+the direct fast-probe setup building indexed-alias program context, demanding
+SSA artifacts and nested entry-domain/caller proofs before reaching normal
+leaf decompilation. This is a narrower next performance target than a universal
+IR cache. Profile: `.cache/compiler-coverage/bc31-cmp-leaf-profile-20261007/`.
+Read-only owner review is checking the three indexed-alias context/cache/program
+owners for required-evidence admission. No permission to omit live alias facts,
+calls, validation, or selected application functions.
+Owner review confirms the local cache selects only the requested function:
+transitive proofs arise from universal SSA construction, not explicit catalog
+selection. `requirement.requires_program` is computed afterward. Parent read
+of `_phase_direct_fast_probe_8616` shows it is context setup, not a completed
+validated probe, so moving it behind a presumed successful probe has no proven
+contract yet. Next repair must separate a typed local requirement projection
+from transitive proof demand, or establish an existing safe exact-artifact reuse
+path; absence of recorded indexed facts or a refused artifact is not sufficient.
+
+### Compiler coverage: requirement accounting and measured serialization (2026-10-07)
+
+Devin fixed a concrete Lowering census omission: unavailable selected Alias
+functions now contribute retained raw/failure evidence, so refusal-only input
+is UNKNOWN_REFUSE rather than NOT_REQUIRED. Parent reviewed exact preimages and
+independently reproduced **2 red/4 existing green** controls in an isolated
+process. Parent CLI propagation keeps that unknown requirement and local census,
+returns DISCOVERY_INCOMPLETE and avoids cache/catalog work. Real collector-to-CLI
+control included: **15 passed** (3.38s); affected cache/Widening neighbors:
+**22 passed** (29.86s), iteration lint/scoped types and startup architecture pass.
+Review: `.cache/coverage-requirement-propagation-20261007/REVIEW.md`.
+
+An isolated single-binding timer measured canonical source serialization in the
+authentic comparison-leaf diagnostic: **101 completed calls, 3.360255s,
+74,498,647 characters**, under its unchanged20-second diagnostic limit. This is
+an actual bounded optimization target; a Devin now owns only Core/entry-jump
+serialization plus their tests, implementing explicit bounded per-call identity
+memoization with identical JSON bytes, no digest cache and independent application
+revalidation. Parent benchmark/review remains required. A separate read-only
+Devin is checking startup-object signature limitations using private artifacts;
+it cannot change catalog admission or frozen corpus selections. Acceptance stays
+**0/16 and0/118**, with no new end-to-end speedup claim.
+
+### Coverage startup-boundary review (2026-10-07)
+
+Reviewed the private C0S probe receipt in
+`.cache/coverage-startup-boundary-20261007/RECEIPT.md`. The startup object's
+unlabelled prefix has no PUBDEF anchor: the current matcher does not verify
+the timeout head at `0x1009f`. Four bare-object public matches and a successful
+literal-byte corruption control demonstrate existing matching behavior, but
+do not establish origin for that prefix. Private synthetic archive wrappers
+also match an application object; wrapping an object is therefore not proof
+that it is trusted runtime code. Do not publish these wrappers or exclude
+application functions using them. Catalog admission and frozen selections
+remain unchanged. A generic trusted-startup-object contract would be needed
+before admitting anonymous prefix evidence; map bounds and masked byte
+similarity remain diagnostic only.
+
+The serialization Devin remains live (session 20882): its red baseline is
+46 existing tests passed plus failing shared-node/memo controls. Implementation
+and parent byte-identity/performance review are pending; no speedup accepted.
+
+### Closed access-refusal accounting (2026-10-07)
+
+A real 16-bit `BX+SI` indexed-load regression proved that a closed local
+Alias artifact containing access refusals incorrectly yielded `NOT_REQUIRED`.
+The requirement census now counts access refusals exactly once; upstream
+address/copy/range projections are not counted again. It now yields
+`UNKNOWN_REFUSE`, preserving the existing CLI discovery-incomplete boundary.
+Before: 1 failed / 6 passed. After: requirement and CLI-cache cohort 16 passed
+in 8.33 seconds; scoped lint-iteration passed. Logs are in
+`.cache/coverage-requirement-propagation-20261007/access-{red,green,lint}.log`.
+This is evidence preservation, not a speedup or round-trip acceptance.
+
+Serialization checkpoint: Devin reports 52 owned tests passing after the
+identity-memo implementation; lint and parent performance review remain open.
+The first parent real-graph capture exited 124 at its outer 75-second deadline
+without producing a snapshot. It is not evidence of a speedup. The private
+capture now saves completed largest graphs immediately rather than relying on
+`finally`, and a new bounded capture is running. The exact-preimage benchmark
+is prepared under `.cache/coverage-source-serialization-20261007/`; it compares
+identical saved graphs and checks canonical SHA-256 on every measurement.
+
+Parent rejected the identity-memo optimization: sequential saved-graph medians
+were 0.205964 seconds before and 0.228339 seconds after (10.9% slower), with
+peak traced allocation increasing from 11,516,688 to 11,859,760 bytes. All
+canonical hashes matched. The exact four-file worker delta was saved and
+reversed; no existing edits were reset. Restored IR/entry-domain plus retained
+requirement/CLI-cache regressions: **59 passed in 14.20 seconds**. Review and
+measurements: `.cache/coverage-source-serialization-20261007/PARENT-REVIEW.md`.
+The follow-up phase measurement locates most serialization time in JSON
+encoding rather than dictionary projection; do not repeat the rejected memo.
+There is still no accepted end-to-end speedup or round-trip acceptance.
+
+Next bounded profiling task is live in Devin session 47923, private-artifact
+ownership only (`.cache/coverage-json-encoder-20261007/`). It tests installed
+msgspec against exact canonical bytes, including Unicode/surrogates, floats,
+unsupported types and type-validation overhead. No dependency or proof-source
+changes are authorized before review. Source inspection confirms the entry-domain
+call-preservation owner already skips callsite collection for artifacts without
+CALL instructions; adding another leaf shortcut there would duplicate existing
+behavior and does not explain the observed transitive imports.
+
+Captured-graph inspection clarifies the benchmark scope: its function is the
+startup entry `0x10000`, with 53 blocks, 3,903 instructions and 15 CALLs, rather
+than the requested comparison leaf. Completed canonical-call timing is spread
+across multiple transitive heads (including 20 calls for `0x10327` and 22 for
+`0x1019a`); the serializer experiment cannot alone establish a remedy for
+caller/domain proof traversal. Devin's encoder parity probe also found that
+msgspec emits DEL (`0x7f`) literally while stdlib escapes it, despite both being
+ASCII. Any candidate must preserve this distinction as well as Unicode,
+surrogates and unsupported-type behavior. Prototype and measurements remain
+private and pending; production sources remain unchanged.
+
+Parent JSON review found an untested circular-container hang (outer exit124).
+An independent cycle-safe prototype preserves that refusal and ordinary parity,
+but seven sequential end-to-end medians are 0.062732 seconds stdlib versus
+0.070217 seconds candidate (11.9% slower). No serializer/dependency change is
+admitted. Evidence: `.cache/coverage-json-encoder-20261007/PARENT-REVIEW.md`.
+The existing read-only reviewer now owns a bounded diagnosis of the exact
+joint-window/caller-domain obligation for leaf `0x102c2`, rather than repeating
+the previously rejected caching or serializer approaches. Native round trips
+are not rerun for this private rejected experiment.
+
+### Leaf invocation obligation pinned (2026-10-07)
+
+Static binary review found the exact `0x102d2: EB16` near-JMP obligation for
+leaf entry `0x102c2`: decoded target `0x102ea` is outside the joint selector
+window's common band ending `0x102df`. Admissible CS=`0x2e` wraps IP and reaches
+`0x2ea`; CS=`0x1000` reaches the decoded target. Therefore bypassing caller
+evidence merely because the leaf contains no CALL would be unsound.
+
+New fetch-window regression enumerates all 65,536 selectors independently,
+with an invariant control. Enrolled in component inventories and the existing
+pipeline cohort. Focused entry-domain cohort: 41 passed in 2.78 seconds; scoped
+lint passed. A process-local unsafe always-admit mutation produces 1 failed /
+1 passed. Logs: `.cache/coverage-json-encoder-20261007/fetch-window-*.log`.
+
+The current bounded invocation receipt records completed typed proof outcomes,
+without changing verdicts. Initial 50 outcomes are ordinary
+`entry_not_function_head` refusals; none reaches the bootroot proof yet. The
+read-only reviewer is tracing where source-bound boot recovery fails before
+that proof, rather than misclassifying these expected preliminary refusals.
+JSON Devin completed exit0 with no production edits; its report agrees that
+validation overhead removes meaningful encoder gains and raises peak memory.
+
+### Raw boot transport reviewed (2026-10-07)
+
+Devin `torch-nutria` implemented retained raw-boot parent transport over an exact
+decoded direct near-call edge, preserving parent replay, surface/index identity,
+executed target and captured register/memory state. Raw artifacts remain outside
+the proven registry; already registered boot heads keep ordinary coverage.
+Parent review caught a stale-decode byte-binding counterexample and rejected
+replacing it with an unreachable-call fixture. The fix now binds fetched bytes
+three ways: decoded evidence, authenticated relocated image and current loader
+memory. Both controls remain. An independent deadline regression was red on two
+cases; the new postcheck refuses late raw success and prevents expired ordinary
+retry. All 20 worker controls and 53 parent regressions pass; scoped lint and
+startup architecture checks pass. Scoped MyPy retains 70 diagnostics, adds none
+and removes the two new raw-surface union errors.
+
+Frozen BC31 leaf diagnostic `0x102c2` (function timeout60, outer cap120) exits3
+with terminal timeout and tail validation uncollected. It reaches raw boot
+census at `0x10000` for callsite `0x10158`, refusing `store_address_unproven`:
+23 raw/classified, 22 materialized, one failure. Two attempts take1.29s and4.44s;
+these are diagnostic timings, not an end-to-end speedup. All four semantic
+source hashes remain unchanged during the run. Next obligations are the typed
+store-address proof and repeated unchanged dependency attempts. No function-fix
+or round-trip acceptance claim; 0/16 and0/118 remain unchanged. Reports and logs:
+`.cache/coverage-boot-transport-20261007/`.
+
+### Native CS-store proof and selector safety (2026-10-08)
+
+Captured the exact refusal: startup `0x10003` writes CS:02BE, native address
+temporary11=0x102BE under CS=0x1000, while the typed storage space is UNKNOWN.
+The store checker previously required an absolute constant for UNKNOWN and
+discarded that native address proof. A second red control found indexed CS:[BX]
+misclassified as defaulted DS, allowing an actual code write to prove complete.
+
+IR address production now keeps unsupported explicit selectors UNKNOWN instead
+of applying defaults/hints. STORE-only census consumes authenticated block-local
+native captures, refuses contradiction with a known segmented span, and retains
+code-overlap and path-memory effects. LOAD modeling and proof budgets are
+unchanged. Producer red4failed/11passed →15passed; expanded proof cohort76passed
+in48.42s. Scoped lint passes; scoped MyPy remains70 diagnostics, adds/removes none.
+Read-only parent review found no soundness blocker. Devin productive-owner was
+stopped at the setup checkpoint without edits; parent implemented the fix.
+
+Frozen BC31 leaf diagnostic advances from22 to30 materialized facts, then refuses
+declared_service_unproven at0x1000A (INT21/AH30 version query), ledger31 raw/
+normalized/classified =30materialized+1failure. Terminal timeout/exit3, no accepted
+tail validation; wall103.19s, peakRSS301MiB, unchanged120s cap and4GiB process limit.
+Semantic source hashes stayed frozen. No end-to-end speedup or function-fix claim;
+round trips remain0/16 and0/118. Next prove the version query's AL/environment
+inputs through the existing declared-service contract. Evidence:
+`.cache/coverage-store-20261008/`.
+
+### Explicit startup environment and native entry capture (2026-10-08)
+
+The version-query refusal has a closed diagnostic: the original BC31 CMP16
+binary proves boot-to-first-call only with explicit entry state and the existing
+DOS version declaration. Without a service relation it reports31 collected/
+classified facts,30materialized and1failure at entry+0xA. With the relation it
+reports203 collected/classified/materialized,0failures and complete=True.
+This is conditional invocation proof, not tail validation or a round trip;
+0/16 starter and0/118 matrix remain unchanged. No proof limit was increased.
+
+Added the reusable explicit GDB/DOSBox entry capture/conversion tool and component
+usage documentation. It authenticates live guest memory, full-width registers,
+segments, loader/header coordinates, flags and source/tool hashes through the
+existing manifest/boot contracts. It never invents DOS policies. Parent native
+capture first exposed cached core.cseip matching a callback rather than target
+CS:EIP; GDB's Python stop hook acted before its condition filtered the event.
+The corrected hook checks all coordinates before any snapshot or quit. Actual
+capture now reports captured and produces the canonical environment manifest.
+Behavioral GDB mocks reject all3 wrong-coordinate controls; disabling the guard
+produces3failures. Parent final cohort28passed; worker scoped lint/MyPy clean;
+startup architecture check passes. Mandatory Cython lifter rebuild completed.
+
+Reviewed Devin's CLI-routing specification: a post-closed-inventory service
+minter has a bootstrap dependency and cannot be the sole route. A generic input
+manifest does not itself bind the observed binary hash. Normal CLI/clean-worker
+declaration routing remains the next implementation obligation; no automatic
+manifest consumption or full startup closure is claimed. Artifacts and logs:
+`.cache/coverage-environment-20261008/`; reviewed draft:
+`.cache/coverage-env-cli/spec.md`.
+
+The parent repeated the real proof using the capture tool's canonical manifest,
+with only the explicitly observed version/IVT policy added: unchanged refusal
+31/31/31→30+1 without services;203/203/203→203+0 with exactly1service consumption
+and complete=True. Proof times3.76s and6.44s respectively are diagnostic timings,
+not full-request speedup. The capture regression cohort is enrolled in the
+component's routine lane and its owners in scoped quality checks.
+
+### 2026-10-08 — shared-epilogue branch ownership closes native leaf refusal
+
+Reviewed CFG/native-return ownership materializes all three signed-comparison
+branch surfaces without rewriting bodies or relaxing validation. Fresh CLI0,
+validation=passed; exact emitted C/original42bytes agree8/8 boundaryvectors.
+Parent width32 and hidden byte-narrowing controls failed before hardening and
+now pass. Pure native Register/SSA selfXor becomes a wordzero before C lowering;
+variable-backed storage remains preserved. Focused119pass7.31s, startup
+architecture clean,3smallowners MyPy clean; legacyintegration36 identical
+preimage findings. Native sources stayed frozen through proofs and roundtrip.
+
+Full frozen MS C5.1 comparison case: originalbuild/run passes, one appfunction
+validationpasses, decompilation120.15s timeout; full roundtrip unaccepted.
+Explicit portable-flat failure: missing chkstk declaration. Do not add a
+name-based stub. Main101cd profiling locates Alias→IR→entry-domain callee
+proof→condition relift cost; callees actually belong to main. Warm0x80 diagnostic
+reaches caller segment/register initialization failures, but partial scope is
+not complete-function evidence. Acceptance0/16,0/118. Five-minute readonly
+Devin review timedout without report, not reviewer approval. Evidence in
+.cache/coverage-roundtrip-20261008-branch-owner and
+.cache/coverage-environment-20261008/return-arm-native.log.
+
+### 2026-10-08 — MS C CALL and startup blockers measured separately
+
+Native CALL10016 reaches Clinic with its source tag intact and target t48/32bits.
+Its helper1064a exists in the private KB but has no CC/prototype. Existing bare
+native target proof returns selector_window_unproved, ledger1/1/1→0+1. This
+requires a real invocation-CS premise; no absolute-target substitution was made.
+The initial private diagnostic had a stats serializer error; the corrected fresh
+namespace14 captured the typed refusal and terminated86 (diagnostic, not proof).
+
+Canonical DOSBox MS C entry capture exits0/captured. Actual source-bound startup
+surface:55blocks,1781bytes,entry1e22. Without services,7classified→6materialized+
+1failure at versionINT1e24. Explicit measured same-DOSBox version premise:
+585classified→584materialized+1failure at resizeINT1e7e,1.56s diagnostic time.
+The existing resize profile is KvikDOS-specific and cannot model this DOSBox MCB
+by changing only its segment. Helper effects and target identity remain separate
+obligations. Readonly Devin helper review terminated124/five-minute limit without
+a report; no reviewer approval or production changes.
+
+Broad pipeline terminal exit2:3/9phases passed,6failed. Main units168failed/
+11599passed/28skipped; isolated cohort40failed/3passed; comparator-related cohort
+68failed/1328passed/19skipped/78errors. Stale paths and incomplete mocks are
+visible, but all failures are not yet attributed. Acceptance remains0/16,0/118.
+KVM access differs across execution probes: direct device/API12 probe succeeds;
+KvikDOS release/debug checks SIGSEGV, ASan/GDB and verified transport launches
+report missing /dev/kvm. No working runner profile is claimed. Evidence:
+.cache/coverage-environment-20261008/msc-call-binding-receipt-14.jsonl,
+msc-entry-capture/,msc-startup-proof*.json,kvikdos-kvm-check*.log;
+.cache/shared-return-arm-pipeline.log.
+
+### 2026-10-08 — explicit DOSBox entry effects reviewed; allocator integration pending
+
+Optional PSP-bound DOSBox INT21 entry policy now projects into manifest,
+boot/service identity, authenticated census and concrete replay. Shared pure
+owner preserves native hardware-frame/PSP-pointer/register-save ordering;
+unknown words revoke stale byte facts. Policy absence keeps prior behavior.
+Worker cohort158passed/1warning; scoped lint and architecture pass. Seven-owner
+MyPy retains one existing invocation-domain argument-union diagnostic. Closed
+census ledger42/42/42/42,0failures,13checkedstores versus3without policy.
+
+Parent final frame/resize cohort71passed0.82s. Five native DOSBox captures agree
+with the resize model on AX/BX/CF and all modeled MCB writes: shrink, zero,
+equal size, overgrowth, free predecessor. A native free-predecessor control
+removed an unnecessary staged-model refusal. This is runtime-contract evidence,
+not whole-program proof. Allocator declaration plumbing is assigned to a bounded
+Devin task with six saved private preimages; census/replay consumption follows
+parent review. No startup or round-trip acceptance added:0/16,0/118.
+Evidence:.cache/dosbox-entry-ledger.json,.cache/dosbox-entry-*,
+.cache/dosbox-pure-parent-final.log,
+.cache/coverage-environment-20261008/dosbox-resize-native-model-check.json.
+
+Parent adversarial review found census accepted an unprovided runtime interrupt
+frame while all saved-register bytes remained covered. The shared frame owner
+now requires declared coverage of all six frame bytes for both policy modes;
+red2failures, green47passed21.43s, scoped lint passes. Complete native memory
+cross-check across all five captures explains1,048,570bytes/case with zero
+unexpected differences, excluding only six explicitly unknown architectural
+frame bytes. Checked preserved registers/segments match too; lazy native flags
+are not treated as a full flag-preservation proof. Pure owners/cache scope MyPy
+passes. Initial captured chain5headers equals all pre-resize headers exactly.
+Receipts:.cache/dosbox-entry-frame-*.log,
+.cache/coverage-environment-20261008/dosbox-resize-native-complete-memory-check.json,
+msc-dosbox-chain-binding.json. Counts remain0/16,0/118.
+### 2026-10-08 — declaration reaches full coverage runner; acceptance still zero
+
+Reviewed Devin follow-up: guarded helper-prefix identity cannot prove a returning
+call's allocation/BP effects. A preserved-prefix returning-tail counterexample
+violates both. Semantics now retains typed candidates and explicit refusal;
+frontend tracking keeps SP unknown. Final 62 focused checks, scoped lint/MyPy
+and architecture pass. Fourteen native CFG fixture failures are pre-existing
+and occur before this consumer. Cache records now pin identity authorities and
+refuse opaque registry snapshots (16 focused cache controls pass).
+
+The attempted completed-premise cache had zero native hits and was removed.
+Frozen first-CALL proof still budget-refuses at22.485s,14.898 CPU seconds,
+215228KiB peakRSS. Profile points to upfront VEX/IR import; completeness replay
+and memory expansion were not reached. Diagnostic-only duplicate import is not
+a production optimization justification. Measured width resolution is the next
+bounded implementation slice, alongside avoiding work after deadline expiry.
+
+Fresh BC31 profile compiled/linked/ran its real toolchain probe via DOSBox at
+both stages; expected255/PASS and all hashes were independently verified.
+Full word_comparisons original rebuilt byte-identically to declared4091c4c4…
+and ranexit255/emptystdout. Recovery selected11 functions but timed out120.32s;
+no rebuilt candidate or runtime equality. No unchanged full-case retry.
+Acceptance remains0/16 starter,0/118 matrix.
+
+Single-case declaration transport now reaches the decompiler through the suite,
+runner and compiler harness. Evidence is fingerprinted; replacement/deletion,
+multi-case use and unsupported modes refuse. Scoped compiler-toolchain checks
+passed 182 tests; final transport/memory-model controls passed 17 tests after
+repairing two obsolete stage-owner mocks. Three-owner MyPy and startup
+architecture checks passed.
+
+Native first-case attempt recovered the captured entry 0x1e22, compiled and ran
+the original, and validated two leaves (0x1b72, 0x1b9a). Whole recovery timed out
+at 120.31 seconds; there is no accepted DOS rebuild/runtime comparison.
+Request-local native-import reuse passes 59 focused tests and produces a real
+startup hit (5.84s miss, 1.11s hit). The bounded CALL proof still exhausts its
+budget; no whole-case speedup or proof conversion is claimed. Acceptance remains
+0/16 starter and 0/118 matrix. Next obligations: nested CALL closure and the
+complete guarded stack-helper success/failure contract.
+
+Evidence: .cache/first-acceptance-route/parent-declared-entry/case-000/;
+.cache/raw-boot-import-reuse/parent-native-reuse.jsonl.
+
+### 2026-10-08 — primary compiler/runtime profiles switched to kvikdos
+
+Live opened-device KVM API12 and kvikdos preflight pass. Fresh MS C5.1 and
+Borland3.1 compiler/linker/runtime probes pass for small and large models with
+exit255 and PASS failures0. Canonical `examples/compiler_coverage/toolchains.json`
+now selects kvikdos for all four profiles, with fresh runner/probe hash pins.
+New frozen contexts must use that updated registry; old contexts stay immutable.
+Original word_comparisons compile/link/run DOS commands take0.110s combined;
+EXE hash4091c4c4… exactly matches the declared original; runtime exit255,
+empty stdout. All128 compiler-profile tests and scoped lint-iteration pass.
+No production runner changes needed. Captured DOSBox environments stay bound
+to their measured runner; other compiler products need fresh probes.
+No rebuilt-C acceptance: still0/16,0/118.
+
+Recovery watchdog now locates the late delay in indexed-alias preparation and
+recursive entry-domain call proof/IR imports (10/15 and9/15 samples respectively).
+The comparison branch refuses at first publication because incoming-register
+return copies are unsupported; shared RET addresses cannot establish polarity.
+These remain separate implementation obligations.
+
+### 2026-10-08 — bottleneck-first review and fresh native checks
+
+Reviewed locally installed methodology-selector/find-skills/reverse-engineering
+guidance. Selected one bottleneck-first cycle with accepted round trips as the
+metric; general game-mod workflows add no useful proof shortcut here.
+
+Parent reviewed the current-route gate and canonical frontend fixture repair:
+70 combined tests pass; the original 14 native CFG fixture failures are resolved
+without changing their assertions. Register-copy capability passes 31 worker
+controls, 13 independent parent controls, scoped lint/types and startup
+architecture checks. Native `0x1d82` still reports validation_failed after
+29.27s, with zero source changes. Exact typed tracing establishes the remaining
+gap: native stack operands are proven, but syntax equality cannot equate the
+returned register temporaries with their typed word-reconstruction definitions.
+The guard remains strict. The genuine `0x1abf` recovery worker still exceeds
+95s; no route-gate performance improvement is claimed. Next observation must
+identify exact repeated demand heads/routes rather than repeat a blind retry.
+
+Frozen kvikdos generation871a3a8a passed four fresh compiler/linker/runtime
+transactions and independent dependency/context review. Canonical pins refreshed
+only after unchanged preimages and matching live/snapshot hashes were verified;
+four new contexts resolve and 128 parent profile tests pass in14.55s. Native
+probes use the frozen generation to avoid external installation rebuild races.
+Plan acceptance remains0/16 starter and0/118 matrix.
+
+### 2026-10-08 — word-shift semantics and exact SSA endpoint
+
+Typed native arithmetic now preserves scalar16 Shl with literal counts0..15:
+unsignedword conversion precedes DOS promotions and the result is truncated
+back to16bits. No reads changed; mixed widths/counts/vector/floating/mismatched
+native operations refuse. Nine corrected saved-preimage feature controls fail;
+current controls, GCC UBSan vectors, live codegenhook ledger, lint and scoped
+MyPy pass. Parent combined scope initially found seven unrelated remainder
+setup failures, reproduced against saved productionpreimage. Explicitcanonical
+frontendbootstrap fixes the fixture while preserving all assertions; parent
+combined cohort now36passed in5.17s.
+
+Fresh real1d82 diagnostic remains validation_failed,sourcehashesunchanged.
+The complete observer proves the protected operation executes, but native
+implicit-cast cleanup removes its required casts; no function-fix claim.
+Typed trace now confirms C SSAvarids9/10. Existingcodegen
+backmaps/currentAIL graph can identify precisedefinitions; fullnativeorigins
+and retainedscalar/byte-version validation are stillrequired, not names/tags.
+No unsoundflatLoad16 or unusedcertificateframework was published.
+Completeacceptance remains0/16 and0/118; nextprobe combines requiredmetadata
+instead of adding fields through repeatednative runs.
+
+### 2026-10-08 — narrow SS origin dispatch and bounded execution work
+
+The segmented-load origin owner now admits proven SS byte loads only when the
+existing SS matcher verifies the exact current BP displacement and byte width.
+A stock byte-pointer cast is transparent only with coherent 32-bit source,
+destination and current expression types. Narrowing pointers, changed offsets,
+missing frame evidence and wrong pointees refuse. Worker origin controls pass
+28 tests; lint and scoped MyPy pass. Parent checked the saved red regression;
+47 combined controls passed, with the pointer positive failing against its
+old 16-bit-pointer fixture during concurrent edits. All five final pointer
+controls pass independently after the physical-32-bit fixture correction.
+
+One actual-function diagnostic takes 14.67 seconds with both semantic sources
+and observer unchanged. It still materializes zero loads and fails branch
+validation at `0x1d8d`; no function fix or speedup is claimed. Receipt:
+`.cache/bc31-branch-guard/pointer-origin-native/`. Next isolate the remaining
+typed dispatch boundary from these retained observations. Separately, a bounded
+worker is implementing deadline checks between block lifts using the existing
+typed refusal contract, to prevent work after budget expiry. That optimization
+does not establish proof acceptance. Complete acceptance stays 0/16 and 0/118.
+
+Followup: complete dispatch observation takes 11.14 seconds with source and
+observer hashes unchanged. Eight exact SS projections exist, but the live
+materialization tree has zero dereference candidates. Historical construction
+snapshots do not prove current retained-read presence. Redirect the next fix
+to current return-value binding at branch orientation; do not weaken the
+pointer width gate or repeat that disproved hypothesis.
+
+Reviewed two-guard IR importer delta: check the existing deadline before each
+block lift; raw bundles return the existing typed deadline-refused partial
+artifact before normalization. Collected blocks and terminal evidence survive.
+Three regression controls fail on the preimage; the live-budget control already
+passes. Worker four controls pass; parent hot-path/CFG-successor cohort passes
+24 tests in 3.08 seconds. Scoped lint passes; direct MyPy has the same two
+diagnostics on preimage/current, with no new diagnostics. Deterministic tests
+show the second lift is skipped after first-block expiry. No end-to-end speedup
+or newly accepted round trip is claimed.
+
+### 2026-10-08 — preserve semantic casts through native cleanup
+
+Fixed the existing native implicit-cast boundary to preserve required
+`CSemanticCast8616` conversions before stock contextual simplification.
+Ordinary cosmetic casts keep their previous behavior. Two saved-preimage
+regressions fail before the fix; the cosmetic control passes on both versions.
+Worker arithmetic and related cast cohorts pass 102 tests; scoped lint and
+MyPy pass. Parent arithmetic/remainder cohort passes 39 tests in 21.14 seconds
+(includes canonical frontend initialization; no full-suite claim).
+
+One changed-code actual-function probe completes in 19.52 seconds with source
+hashes unchanged. The branch guard still fails honestly. The private observer
+now captures Rust-backed AIL tags, unique current definitions of return SSA
+variables 9/10, and exact byte-load origins. Next work consumes that retained
+evidence to prove return-value equivalence; no additional discovery run is
+needed. A timing comparison with earlier diagnostic variants is not an
+end-to-end speedup. Acceptance remains 0/16 starter and 0/118 matrix.
+
+### 2026-10-08 — current copy binding closes the BC31 clamp branch
+
+The current C tree already contains exact word assignments from the same stack
+variable objects recovered from the binary; old construction snapshots were
+not the live projection surface. A bounded Types/Lowering query now proves a
+unique dominating current copy and supplies that value to return-arm
+orientation. It checks current SSA/Alias ownership, exact variable and unified
+identity, the coordinate registry, integer width/signedness and volatility.
+Control bypasses, duplicates and intervening calls/storage writes refuse.
+The query is capped at 128 nodes and depth 16, with no additional SMT work.
+
+Parent review caught an additional clobber hazard: another SSA ID can write
+the same rendered variable owner. Two negative regressions fail before that
+repair and pass after it. Final worker branch/return-scaling cohort: 37 passed;
+scoped lint, MyPy and architecture check pass. Parent branch cohort passed 30
+tests before the additional clobber repair; both final clobber controls pass
+independently. The earlier attempted `-k overwrite` selected zero tests and is
+not evidence; the exact test node was subsequently executed.
+
+Frozen actual-function run `.cache/bc31-branch-guard/current-copy-native/`
+returns `status=ok`, validated payload SHA
+`69118f3f9b82ff7fc14a79781475f0a0875d91150b7cbabb593eb6e030f3efd3`.
+Both semantic source and observer hashes stayed unchanged. Recovery/decompilation
+took 4.77 seconds; total diagnostic wall time was 34.99 seconds with concurrent
+tests. Generated `sub_1d82` has the unsigned `value <= limit` comparison and
+two value returns of source `clamp_u16`; there are no required calls to lose.
+This is one newly validated function, not a full-program proof or a performance
+claim. Four BC31 functions now have individual validated receipts. Complete
+acceptance remains 0/16 starter and 0/118 matrix; recovery of `0x1abf`/`0x1dc3`
+and the guarded startup path remain the next blockers. The broad pipeline gate
+has not been rerun or declared green.
+
+### 2026-10-08 — reuse native facts without semantic registry serialization
+
+Reviewed request-local raw lift reuse now authenticates native byte/CFG,
+architecture, engine and producer facts without serializing the semantic
+function registry. The separate finished-artifact cache still checks registry
+contents and boundary identity. Equivalent reconstructed boundaries may share
+raw lifting; semantic finishing/proofs consume each current boundary again.
+Mutable captures remain isolated, failed/expired lifts are not retained, and
+the four-record/256-block bounds remain unchanged. A 32-record experiment left
+lift counts unchanged and was reverted.
+
+Red/green controls demonstrate redundant relifting after registry updates and
+equivalent boundary reconstruction. Negative controls retain byte, CFG, extent,
+metadata, producer, deadline, registry-artifact and mutable-capture invalidation.
+Final focused cohort: 81 passed in 4.02 seconds. Scoped lint and direct MyPy of
+both cache owners pass. Direct MyPy required an explicit checked Capstone-row
+cast in the previously unpromoted raw-boot owner; Make alone had skipped it.
+Independent source review found no registry or boundary-identity dependency in
+the cached raw producer. Broad semantic gates were not rerun or claimed green.
+
+Frozen actual-main probe now completes recovery and reaches decompilation,
+which still times out with two seconds remaining. Worker exit 0 is transport
+success only: result.json explicitly reports status=timeout and failed tail
+validation. Native lifts fall 45 -> 23; startup lifts 7 -> 2; completed IR import
+requests rise 66 -> 124 within the same request limit. Total diagnostic time is
+75.07s versus 75.15s; there is no end-to-end latency or acceptance claim. Source
+and observer hashes remained unchanged. Full evidence:
+`.cache/native-surface-reuse/comparison.json` and `after-boundary-key/`.
+Acceptance remains 0/16 and 0/118. Residual samples show native all-field term
+comparison, source serialization and recursive evidence replay; target those
+measured costs next instead of adding more cache capacity or full-corpus runs.
+
+### 2026-10-08 — skip startup routes with an unavoidable missing call premise
+
+The initial raw startup route supplies no call-preservation records. A fresh
+bounded linear decode may therefore decline that route after a prior ordinary
+CALL, retaining ordinary resolution and the later retry with actual records.
+No proof/refusal result is cached, no unreachable-code claim is made, and no
+source/signature names participate. Branches, unknown decoding, requested
+calls and continuation premises keep the existing attempt; INT remains a
+possible fallthrough. Scan limits are 512 bytes/16 blocks. Independent review
+checked the CALL/declared-service boundary, including call-to-next and far calls.
+
+Real startup capture finds the first ordinary call at 0x1a45 before requested
+site 0x1b78. The old-attempt process-local control fails at the forbidden raw
+import; production controls pass. Startup/route/deadline cohort: 95 passed;
+two added admission-expiry cases pass independently. Seven initial failures
+were incomplete budget-only mocks; those fixtures now stub eligibility while
+real-byte tests retain its semantics. Lint, direct new-owner MyPy and startup
+architecture pass; the new test is in the routine component inventory.
+
+Frozen BC31 main evidence `.cache/raw-route-admission/native/` retains unchanged
+source and observer hashes. First main IR import: 60.394s -> 33.261s; raw boot
+census imports: 33 -> 0. Decompilation now gets 29s rather than 2s but still
+times out, with tail validation failed. Total diagnostic wall87.37s includes
+startup/transport and is not an end-to-end speedup claim. No newly accepted case.
+
+Devin's separate comparison-memo task completed its patch and focused checks
+before the supervising20minute timeout (exit124); reporting was interrupted.
+It memoizes typed immutable node pairs within one comparison, preserving the
+depth limit and all-field equality. Parent review added a2048pair cap, unique
+identity pins and a saturation-negative control; ordinary comparison continues
+when retention fills. No proof or comparison survives into the next request.
+Worker40focused tests and22preimage/current agreement cases pass; parent41test
+cohort passes with the cap. Scoped lint passes. Direct MyPy reports81diagnostics
+on both saved baseline and current owner, with identical normalized messages
+and no new diagnostics. The new regression is in the routine inventory.
+
+Final combined native probe `.cache/native-binding-speed/native/` has unchanged
+source/observer hashes. First main IR import20.461s (previous60.394s); second
+main import23.212s. Decompilation receives43s rather than2s, still reports
+status=timeout and tail-validation failed; total wall74.39s. No accepted-case or
+end-to-end latency claim. The profile now reaches another whole-function import
+from Structuring validation priming (`apply_x86_16_vex_ir_artifact`); next inspect
+existing scoped artifact ownership/transfer between Clinic and codegen, keeping
+refused artifacts out of the universal registry. Acceptance remains0/16,0/118.
+
+Flag CFG performance checkpoint (2026-10-08): exact caller traces correct the
+previous ownership hypothesis. The three full imports belong to indexed-alias
+preparation, status-flag projection and validation priming, not Clinic. The
+second precedes flag-context activation; the third runs with that context active,
+so blindly sharing their VEX/IR would be unsound. Flag projection now imports
+raw native facts without recursive caller/entry-domain proofs. Any raw function
+or block refusal forces full exit flag liveness; incomplete callee CFGs cannot
+claim definite overwrites. Independent parent/agent review agrees. Two new
+controls fail before the change; all28 focused flag projection/lift-context tests
+pass afterward (8.05s). Scoped lint, MyPy and startup architecture pass.
+
+Native timing is inconclusive: `.cache/flag-cfg-fast/native/` times out after
+the unchanged first import consumes52.03s, before the changed flag projection.
+The retry `native-isolated/` exits3 with a terminal timeout and no worker result,
+also still in the first import. Both retain unchanged source/observer hashes;
+CPU pressure and an active repository indexer were observed. These are neither
+acceptance nor evidence of a speedup/regression in the changed path. Do not rerun
+the full corpus. Next resolve repeated dependency proof work in the initial
+indexed-alias preparation; preserve semantic refusal and deadline boundaries.
+Acceptance remains0/16,0/118.
+
+Library-boundary checkpoint (2026-10-09): promoted the reviewed declared
+AH25/AH35 adapter, live-IVT effects and receipt serialization. Canonical focused
+tests: 86 passed; scoped lint, startup architecture and catalog checks passed.
+Standard scoped MyPy: 83 diagnostics in both exact pre-edit shadow baseline and
+current sources, zero added/removed. Evidence: `.cache/vector-ir-adapter/PROMOTED.json`.
+The retained BC31 environment admits all five declared vector-service sites;
+this is declaration admission only, not whole-callee or main proof.
+
+The existing signature filter already excludes 30 library functions and retains
+main. Current intake has no arbitrary-function entry-state declaration: MZ boot
+conditions cannot be silently reinterpreted as main conditions. The active plan
+now separates conditional application-entry validation from boot-derived CRT
+proof and final original/rebuilt execution. Next implement an explicit bound
+function-entry assumption through existing scoped consumers, preserving honest
+conditional reporting and rejecting stale or unconditional publication.
+Review: `.cache/library-contract-route/report.md`. Full round-trip acceptance
+remains 0/16 starter and 0/118 matrix; no end-to-end speedup is claimed.
+
+### Conditional local transformation acceptance — 2026-10-09
+
+Structuring and Postprocess now retain unchanged conditional tail comparisons
+instead of treating them as mismatches and rolling back. The shared validation
+predicate checks retained premise integrity and rejects semantic/premise failures;
+unconditional acceptance predicates and compiler-coverage acceptance are unchanged.
+Focused stage controls: two reproduced failures before the fix; 133 tests passed
+afterward, including changed/refused/damaged-receipt controls. Scoped iteration
+lint passed. Scoped MyPy reports seven no-any-return findings outside the new
+helper; its full check is not green.
+
+The actual declared-entry leaf CLI rerun has no false transformation rollback,
+but still exits 4 and does not export C: the CLI classifies conditional stages as
+validation_failed. This is the next integration defect, not a completed round
+trip. Logs: `.cache/declared-entry-tail/stage-policy-{red,green}.log` and
+`.cache/declared-entry-cli/smoke/cli-local-preservation.log`.
+Declared-entry loader controls (19 passing tests) and its index owner are now
+enrolled in the component manifests. Corpus acceptance remains 0/16 and 0/118.
+
+CLI conditional export is now connected: 37 focused checks pass, including
+same-premise integrity, recompilation/hash failures, conditional batch accounting
+and receipt serialization before C emission. The actual four-byte leaf MZ CLI
+completed with exit 5 and emitted C plus JSON under `generated/conditional/`;
+the file, validation and compiler payload SHA-256 all agree. Status stays
+conditional and merge gate hold. Evidence:
+`.cache/declared-entry-cli/smoke/cli-kvm-export-success.log` and its generated
+artifacts. The first command lacked KVM inside its process; the supported
+`workspace_sandbox.py --with-kvm` direct invocation completed all compilation
+checks. Do not disable compilation on the unavailable-device path.
+
+The read-only Devin stage review reached its six-minute outer timeout (exit124)
+without a report; it is not accepted review evidence. Parent inspected the changed
+consumers and mutation controls. Six real BC31 leaf-entry declarations are prepared
+and frontend-admitted under `.cache/declared-entry-cli/bc31/`; they grant no
+unconditional proof. Whole-case counts remain unchanged.
+
+Actual BC31 `add_wrap_u16` (`0x1db6`, 13 bytes) now completes the normal CLI
+without startup recovery: exit5, conditional C and receipt emitted, all three
+payload hashes verified equal. C body is `return arg_4 + arg_6` with two recovered
+unsigned-short parameters; current recovered return type is short. This proves
+conditional export/recompilation works on a real corpus function, not that its
+whole case or all-input original/rebuilt execution has passed. Output:
+`.cache/declared-entry-cli/bc31/generated-add/conditional/00001db6-sub_1db6.c`.
+Next run the five other prepared leaf probes, then integrate main and perform
+the required original/generated/rebuilt boundary-vector checks.
+
+Two real branching leaves (`cmp_i16`42bytes and `rel_i16`59bytes) hit the
+unchanged30s limit in Structuring. Serial cmp rerun also timed out, so contention
+alone does not explain it. An actual in-process worker profile records repeated
+canonical IR graph serialization/replay through scoped-call authentication and
+tail collection (`.cache/declared-entry-cli/bc31/cmp-stacks.log`). Next optimize
+duplicate authentication within one consumption while retaining fresh source,
+memory/declaration and mutation checks; do not raise budgets or cache proofs
+globally. Startup architecture checks pass on the CLI integration tree.
+
+The current external kvikdos no longer matches the pinned compiler profile.
+Requalification against the existing probes passes MS C5.1 small/large, while
+BC31-small compiler/linker print usage and create no output. Evidence owner is
+running an exact old/new runner differential; registry pins remain unchanged.
+This prevents claiming Borland recompilation acceptance from the default MS C
+smoke checks. Whole-case counts remain0/16 and0/118.
+
+Scoped authentication now consumes one fresh IR coverage/projection result:
+view replays3→1, native censuses2→1; measured focused operation180→43ms.
+Retained coverage.complete_for still replays;57 tests include separate-call and
+source/native/declaration mutation refusals. Scoped lint/MyPy and startup
+architecture pass. The real cmp CLI still times out30s at structuring codegen,
+so no end-to-end improvement or new accepted function is claimed. Saved log:
+`.cache/declared-entry-cli/bc31/cmp-optimized.log`; a bounded remaining-cost
+profile is underway.
+
+Old frozen BC31 runner has now passed fresh compiler/link/runtime requalification
+(DOS exit255, failures0). Exact unchanged exported add function also compiles with
+that original Borland profile, exit0. Receipt:
+`.cache/declared-entry-cli/bc31/add-borland-recompile.json`; explicit context:
+`.cache/declared-entry-cli/bc31/compiler-context.json`. New-runner differential
+remains a demonstrated regression; tracked profile pins have not been changed.
+
+Finite native behavior check now closes the add function's concrete evidence
+loop: unchanged exported C compiled/linked with frozen BC31; original and rebuilt
+Unicorn real16 executions agree on31 boundary pairs in full AX, SS:SP, CS:IP,
+BP and memory writes. ADD→SUB native negative control differs on21pairs.
+Parent reviewed the byte/source binding and independently reran the replay.
+Artifacts: `.cache/declared-entry-cli/bc31/add-runtime/`. This is not exhaustive
+equivalence or a full selected-case acceptance.
+
+Quantitative cmp profiling records283 canonical graph serializations (13.68s
+exclusive),113 scope checks (7.57s), and only0.68s rebuilding Semantics.
+That instrumented run reached GCC and exposed lost shared-return control:
+equality updates AX but C falls through without returning. Next changes are
+separate: reduce per-node JSON interning with exactly unchanged canonical bytes,
+and locate the earliest native-IR/AIL return-edge loss. No rendered-C repair or
+invented return value is authorized. Whole-case counts remain0/16 and0/118.
+
+The real `rel_u16` leaf (0x1d47, 59 bytes) now completes the normal CLI in
+about25s at the unchanged30s inner limit using the verified frozen BC31
+compiler context. Exit5 publishes conditional C with all six unsigned
+comparisons and an explicit GP-register model. Parent checked that exported,
+compiled and validated payload hashes agree; both tail stages remain
+conditional and the merge gate remains held. Artifact:
+`.cache/declared-entry-cli/bc31/generated-rel-u16/conditional/`.
+The unchanged C compiled/linked with original BC31; parent independently
+replayed62 inputs (31pairs with two initial upper-register patterns). AX masks,
+modeled EDX including upper bits, return CS:IP, SS:SP and restored BP agree.
+Physical scratch-register and other modeled-register states differ and remain
+recorded in `.cache/declared-entry-cli/bc31/rel-u16-runtime/runtime.json`.
+No full-state equivalence, caller composition or case acceptance is claimed.
+The parent also reran the decoder-checked branch mutation: candidate module
+offset0x2e3 `73 2c` (JAE) to `72 2c` (JB), exactly one byte in a private
+copy. All62 vectors detect both return-mask and modeled-EDX divergence;
+generated C and the original candidate executable remain unchanged.
+The independent `cmp_i16` blocker is missing private Clinic graph edges to its
+shared return, despite canonical scoped IR retaining those edges. The repair
+must consume authenticated scoped control evidence, not modify rendered C or
+publish conditional edges into the universal function graph.
+
+The scoped Clinic transport now binds certified terminal operands and CFG
+edges atomically on private copies before SSA/structuring. Parent review
+required fresh projection consumption, explicit project/artifact identity,
+and a red test failing on an actually missing successor (not object identity).
+Five focused controls pass; scoped lint/MyPy and architecture checks pass.
+The real `cmp_i16` CLI now finishes in about21s at the unchanged30s limit,
+exit5, with all four native return arms (-1,1,0,2) present in conditional C.
+Artifact: `.cache/cmp-shared-return/generated-fixed/conditional/`.
+The original Function graph and execution VEX remain unchanged. Native
+original/rebuilt replay and parent neighboring tests now complete:45 tests pass
+in11.37s; unchanged `cmp_i16` C compiled with BC31 and29/29 signed boundary
+pairs agree in AX, GP registers, return/stack state, BP and memory writes.
+The parent independently reran replay; branch inversion is detected29/29.
+Neither conditional export nor finite replay adds a completed case yet.
+`clamp_u16` also emits conditional C in18s; rebuilt AX/frame/GP state matches
+27/27 vectors, with extra candidate local-stack writes explicitly retained.
+Its branch negative differs on22/27 (equal inputs are unaffected).
+`in_window_i16` currently refuses at the scoped Clinic block census rather
+than emitting C. Exact projected/native block-boundary alignment is the next
+investigation; do not weaken the census. A bounded main probe is separate.
+
+The next bounded observer resolved both conflicts without source changes:
+`in_window_i16` Clinic has a4-byte block at0x1da4; canonical scoped control
+splits it into2-byte blocks at0x1da4 and0x1da6 because0x1daf branches to the
+interior jump. Prepare the private native partition before conversion instead
+of accepting unequal censuses. Main's retained/incoming callsite indexes have
+identical59blocks,220instructions and78edges; only admission-window size
+(3449vs467) and lower bound (0x1a20vs0x1dc3) differ. Preserve admission
+provenance while comparing immutable decoded facts; changed native bytes or
+actual call facts must still refuse. Observer artifacts:
+`.cache/cmp-shared-return/next-observer/`; both failures are deterministic,
+not loop-invariant or runtime-library proof failures.
+The final frozen-tree cmp rerun remains conditional and emits byte-identical
+C to the independently replayed version. `rel_i16` still hits30s: one bounded
+profile records361 source-graph serializations (14.48s exclusive),27 semantic
+authentications,49 scoped-view replays. Investigate redundant work within one
+fresh authentication; do not cache proofs across mutations or increase budgets.
+Profile: `.cache/rel-i16-profile/`. Actual Devin is assigned the bounded
+callsite-window contract; the private Clinic partition has separate ownership.
+
+The partition and retainer fixes are now implemented and reviewed. Window's
+unchanged generated C matches125/125 signed triples in native BC31 replay;
+the inverted branch differs on75/125. Retainer checks pass24 focused controls,
+with12 neighboring failures reproduced on the exact preimage. Fresh graph
+equality uses5 encoder traversals instead of9 per measured authentication;
+97 structural and68 native/pipeline controls pass. None establishes a completed
+case: starter remains0/16, matrix0/118.
+
+Main's lightweight worker samples locate repeated authentication inside call
+collection (eight of nine worker samples), rather than callee simulation.
+Evidence: `.cache/main-coverage-profile/`. The rel_i16 passive pass capture
+exited3 after37.51s with only a terminal event; its hooks supplied no stage
+evidence. Use the actual worker stack sampler next, without raising budgets.
+The library filter already excludes30 matched functions; remaining proof
+dependencies must be handled through authenticated effects, not another
+selection filter or indiscriminate CRT decompilation.
+
+The first same-baseline preparation duplicate is removed:44 focused controls
+pass, including a genuine native comparison showing five producers2→1.
+Seven request-local premise-reuse controls pass; every hit still freshly
+replays its authorities, and ambient memoized verdicts cannot authorize reuse.
+Lint passes; scoped MyPy adds no diagnostics (one existing structuring issue,
+37 identical before/current call-preservation diagnostics).
+
+Actual frozen-source CLI checks remain incomplete. Rel_i16 returns timeout
+(exit3,56.06s total) and runs preparation twice. A following receipt observer
+proves the first local reuse succeeds; the remaining full preparation is
+inside the same baseline's lowering replay after condition materialization.
+Main also times out (exit3,97.08s total):21 reuse requests, zero hits. Shared
+host load reached29, so these wall timings are not a controlled speed comparison.
+No budget was increased and no case accepted. Next patches must target the
+observed second baseline replay and establish why main's reuse does not hit.
+
+Actual Devin session thread-wrist prepared the private whole-case integration
+driver. Parent review fixed identical-failed-run comparison and refreshed-input
+guards; independent10 tests plus6 subtests pass. Preflight accounts for five
+valid conditional exports and refuses the two missing exports. No whole-case
+compile/run occurred; the existing acceptance pipeline remains authoritative.
+
+The same local preparation receipt now spans the baseline's final lowering
+replay.31 focused checks pass. Actual rel_i16 v2 confirms one preparation,
+unchanged source hashes, but still times out at30s (45.76s total).
+The main cache experiment is rejected and removed: a second diagnostic has
+33 lookups with zero hits; all retained candidates differ by callsite and
+record members. Its two successful fresh derivations contain99 and718 facts;
+20 early declarations refuse with zero facts and10 later requests exhaust
+census work. Restored owner matches its exact dirty pre-experiment preimage;
+18 existing controls and scoped lint pass. No unrelated work was reverted.
+The next bounded Devin tasks target rel's remaining worker cost and main's
+fresh-result replay/shared-prefix computation. Starter remains0/16.
+
+Fresh declared-entry evidence consumption is now promoted after parent review.
+Exact preimage regression fails (two derivations); production29 tests pass
+(17.79s), scoped lint passes. Immediate derivations2→1; later public replay
+still rejects source/declaration/environment mutations. Routine regression
+enrollment added. Actual source-frozen main remains timeout30s, exit3,40.89s
+total;85 native derivations and39 retained-domain replays remain. No corpus
+acceptance or wall-time speedup claimed; starter0/16, matrix0/118. Evidence:
+`.cache/main-derivation-devin/parent-{red,production-tests,lint}.log`,
+`.cache/main-derivation-devin/native-main/`. Next target is shared caller-prefix
+work and synchronous scoped consumption, without identity-only authentication.
+
+Reviewed immediate-consumption/early-reuse slice: shared-tree108 tests pass
+(22.63s), scoped lint and startup architecture pass. Malformed callee coverage
+control exposed premature dereference during review; corrected authenticated
+projection guard preserves typed refusal and post-simulation checks. Repeated
+Semantics passes avoid new scoped-input construction but fully authenticate
+outputs. Scoped MyPy110 diagnostics unchanged against exact saved preimage.
+Native main120s outer diagnostic and later60s diagnostic still do not close;
+relv3 also times out. No speed or case acceptance claimed. Serial frozen relv4
+ends exit3 at the30s diagnostic deadline (56.82s total), one preparation,
+zero changed sources. Starter0/16, matrix0/118.
+
+Systemic prevention is now recorded in compiler-coverage-plan: fresh synchronous
+consumption, bounded caller-prefix sharing, first typed refusal preservation,
+contract-correct test doubles, measured single-change optimizations, and
+signature recognition kept separate from effect proofs. Reviewed test-only
+mock repairs reproduce17 failures before; final canonical87 tests pass5.72s
+and lint-iteration exits0. Budget assertions/limits remain unchanged; admission
+expiry now explicitly tests the record-free route. No production exception
+catch or relaxed validation was introduced. Evidence:
+`.cache/premise-mock-repair/{review.diff,parent-green.log,parent-lint.log}`.
+The mixed-benefit graph-encoder experiment remains private and unpromoted.
+
+Actual passive main observer identifies repeated census-work exhaustion at
+callsite0x1de6 after a successful callee0x1ce2 closure, beginning20.62s.
+Terminal exit3,80.51s total, zero changed sources; no PipelineHardError emitted.
+Promoted reviewed fresh chained consumption (immediate derivation2→1, later
+replay retained) and early strict-over-limit shared-budget refusal. Equal-limit
+admission, deadline precedence, changed native/parent/call-state/row and
+malformed chain controls remain. Final combined canonical cohort51 passed
+67.10s; lint-iteration and architecture-check-fast exit0. Chained scoped MyPy
+matches110 exact preimage diagnostics after line normalization. Tests extend
+existing routine-enrolled owners. No post-change full native round trip or
+end-to-end speedup claimed; starter0/16, matrix0/118. Evidence:
+`.cache/main-refusal-root/final-{tests,lint,architecture}.log`,
+`.cache/fresh-chained-consumption/REPORT.md`.
+
+BC31 `rel_i16` is recovered/exported and compiled unchanged using the explicit
+original BC31 DOSBox context (same compiler, `-Od -ms`, libraries and original
+EXE). Finite native replay passes62/62 signed-boundary/upper-register vectors
+for declared AX/frame and modeled EDX observations; decoder-confirmed JGE→JL
+mutants in both private binaries are detected62/62. Raw/model GP differences
+remain recorded; no full flags/memory/state equivalence is claimed. Integration
+preflight now has6 valid conditional exports and1 missing main. Evidence:
+`.cache/rel-i16-runtime/REPORT.md`. Starter remains0/16, matrix0/118.
+
+Systemic prevention scope now explicitly includes active recursion admission
+during synchronous replay, coherent source/module/environment binding across
+integration artifacts, malformed phase refusal, and explicit pinned backend
+selection. The next native run waits for reviewed cycle/budget/mutation controls
+on main's parent capture; focused tests alone do not close the case.
+
+Reviewed private BC31 integration preparer now rejects cross-image/environment
+artifacts and malformed phase records, accepts an explicit frozen compiler
+context, and records the selected compile/run backends and runners. Context
+bytes are rechecked before build. Parent18 tests pass2.314s; real preflight
+using the unchanged rel export and explicit DOSBox context confirms6 valid,
+1 missing main with no environment problems. No native whole-case build ran.
+Evidence: `.cache/bc31-case-integration-review/CONTEXT_REVIEW.md`,
+`parent-context-tests.log`, `parent-six-preflight.json` in that directory.
+
+Sound synchronous parent capture is promoted in the canonical IR/Semantics
+owners. Final shared-tree cohort:55 passed initially;9 new controls failed due
+to parent test-alias integration, corrected without production changes and
+rerun9 passed59.70s. All64 selected tests now have passing evidence (two runs,
+not a single clean full-suite run). Scoped lint and startup architecture pass.
+Control work drops645→398 and parent derivations2→1; recursive active admission,
+remaining-domain/depth bounds, cached-positive fresh replay and changed inputs
+remain checked. Two-module scoped MyPy follow-imports=skip84/84 unchanged; no
+whole-repository typing claim. One frozen actual main60s diagnostic is started;
+no whole-case acceptance or native wall-time speedup is claimed yet. Evidence:
+`.cache/main-capture-final/`, `.cache/main-prefix-work/consume-stage/REVIEW.md`.
+
+The actual main diagnostic exits3/timeout with unchanged post-run source hashes.
+First expensive refusal remains callsite0x1de6 `census_work_exceeded`19.46s;
+the scoped-view `APPLICATION_EMPTY` hard error follows36.97s. Thus the fixture
+work reduction has not closed the actual blocker. The worker's finally receipt
+was absent; external post-exit capture records exit/source hashes separately
+and deliberately leaves elapsed_s unknown. Read-only follow-up now checks the
+actual retained-edge path and repeated common-prefix work rather than launching
+another full probe or raising budgets. Evidence:
+`.cache/main-capture-final/actual/{causes.jsonl,external-terminal.json,cli.log}`.
+
+Read-only follow-up confirms the optimized entry-binding route applies in the
+actual collector. Residual multiplication comes from scope minting followed by
+closure's `same_real16_entry_scope_8616(scope,scope)` authentication and each
+later caller-prefix census reauthenticating earlier callees. The real collector
+accumulates all phases in one shared budget. Next measure successful pre-cap
+charges byphase, then share operation-local common-prefix facts with distinct
+callsite states and mutation/branch/budget controls; do not add a same-object
+positive cache or raise limits. Plan's next action is updated accordingly.
+
+
+## 2026-10-09: bounded native census projection
+
+Reviewed and integrated three IR owners plus nine routine projection regressions. Final focused tree38passed; iteration lint/startup architecture pass; exact scoped MyPy84baseline/84final (no additions). Shared two/three-call work2224→2062/4735→4315, distinct states and fresh store/callee checks retained. Actual BC31 main still times out at original120s recovery budget: exit3, total142.35s, peak496296KiB, source hashes unchanged. Three successful callee closures recorded; prior census-work refusal absent in this trace. No main export; acceptance0/16 and0/118. Evidence `.cache/main-census-projection/REPORT.md`.
+
+Devin review exposed ignored failed tail phases lacking premises and an original-input consumption gap. Reviewed private preparer guards now check every stage and authenticate the staged original immediately before execution. Parent24tests/33subtests pass3.41s; no native acceptance added. Evidence `.cache/bc31-case-integration/parent-stage-guards.log`.
+
+Guarded declared construction is promoted in the canonical IR owner. Construction
+acquires ordinary replay's active/depth/domain/work/deadline guard before its
+body; recreated wrappers retain the same project/function/callsite active key.
+No provisional domain or proof registry is introduced. Parent36 construction/
+declared controls pass22.80s; nine related controls pass67.99s. Scoped lint and
+startup architecture pass; exact scoped MyPy78→78 unchanged. Sixteen construction
+controls are routine-enrolled. Native acceptance remains0/16 and0/118. The next
+private slice targets measured duplicate caller capture (baseline2derivations)
+while keeping current byte/environment/state checks and resolved retained chains.
+
+Deferred caller construction is integrated in IR and the canonical Semantics
+binding owner. Callee boot/native binding callbacks now precede the sole guarded
+caller capture; pure state transport follows it. Authentic control derives2→1.
+Canonical chain identity/depth checks and the original pre-callback state snapshot
+remain enforced; retained domains contain resolved chains, never pending requests.
+Thirteen new routine controls cover input mutations and forged identities/depth.
+Parent combined run66passed/13fixture-errors203.58s; explicit fixture re-export
+corrected test packaging, rerun13passed4.80s. All79 selected controls have passing
+evidence across two runs, not one clean full suite. Scoped lint and startup
+architecture pass; MyPy114→114 with no added/removed diagnostics. Both bounded
+actual Devin reviews timed out reading without a usable report; parent direct
+review and regression evidence support this integration. One unchanged120s native
+main diagnostic was then run; acceptance remains0/16 and0/118.
+
+Frozen deferred-capture main diagnostic: exit3/timeout, wall141.30s, peak496196KiB,
+all semantic source hashes unchanged. Callee closures advance at12.54/28.36/83.57s
+versus20.67/41.25/130.62s before. Recovery remains incomplete. First populated
+refusal at118.00s is census_work_exceeded for main callsite0x1dfd, at earlier
+CALL0x1de6 (718raw/normalized/classified,717materialized,1failure). Next measure
+repeated earlier-call authentication on the existing two/three-call fixtures
+before another native run. Evidence `.cache/main-deferred-capture/REPORT.md`.
+
+Earlier-call profile distinguishes natural collection from an added ambient
+traversal. Natural two/three-call controls take4.02/14.47s,88/177 derivations,
+56/114 domain replays and95/385 call-proof completeness checks; all records are
+positive and caller AX states remain distinct. Added ambient traversal gives
+0.51/1.07s and zero parent replays, which is not ordinary collection and is not
+grounds to extend positive-verdict lifetime. Source hashes unchanged. Next
+private slice removes immediately repeated validations while retaining fresh
+post-simulation authentication; missing post-simulation CS must refuse. Evidence
+`.cache/earlier-call-auth-profile/{natural-result.json,result.json}`.
+
+Immediate call-authentication optimization is integrated in the IR owners.
+Entry proofs authenticate once per manifest and pre-simulation projection;
+post-simulation projection remains fresh and refuses revoked CS evidence before
+transporting register or memory effects. Chained/enclosed scopes retain callback
+and authentication ordering; universal/scoped registry fallback remains unchanged.
+Five new routine regressions and strengthened existing mutation controls are
+installed. Parent final canonical cohort:29 passed,1 third-party warning in14.10s;
+related staged cohort:50 passed95.10s; lint and startup architecture pass.
+Pinned scoped MyPy1→1 retains the same existing owner diagnostic.
+Natural two/three-call timing4.02/14.47→2.91/10.11s; completeness95/385→57/231.
+Derivations88/177 and aggregate work22,156/61,834 remain unchanged, so this is
+local speed/safety evidence, not a census-budget fix or accepted round trip.
+Next reduce actual prior-prefix derivation without extending positive-proof
+lifetime or publishing provisional domains. No repeat native main run solely
+for this unchanged budget blocker. Acceptance remains0/16 starter and0/118 matrix.
+Evidence `.cache/call-consumption-once/` and `.cache/postcall-admission-review/`.
+
+Final canonical timing verification retained successful records, distinct AX
+states and unchanged source hashes:two/three calls4.47/18.21s, with the same
+57/231 authentication checks,88/177 derivations and22,156/61,834 aggregate units.
+Earlier staged timing2.91/10.11s is not a reliable canonical wall-time speedup;
+claim only measured authentication-count reduction and tested safety/fallback
+behavior. Independent review reproduced the proposed prefix-cache regression as
+already green(parent captures1→1 within traversal,2 in the next). Reject the
+unimplemented activation-token/byte-rehash design:byte freshness alone does not
+cover mutable environment,IR,registry and binding evidence. Its predicted gains
+are unmeasured. Next require a genuinely failing natural-prefix regression and
+full freshness contract before implementing further reuse.
+
+### 2026-10-09 — callee preparation and batch evidence transport
+
+Reviewed and integrated coverage-free callee surface preparation through the
+canonical scoped-view authentication gate. Natural two/three-call derivations
+79→70/159→141 and work19,874→17,592/55,480→49,126; distinct AX states retained.
+Coverage-bound and retained-hit authentication remain. Parent callback-revocation
+controls pass; scoped MyPy with follow-imports=silent reports zero errors;
+iteration lint passes. Existing two-worker binary-budgeted lane26passed92.16s.
+
+One frozen main diagnostic at unchanged120s recovery budget still exits3:
+request143.05s, process wall144.98s, peak496088KiB, unchanged semantic source
+hashes. Third callee closure56.06s versus63.39s previously; populated
+census_work_exceeded80.58s versus86.38s, same callsite0x1dfd/prior CALL0x1de6
+and718/718/718/717/1 ledger. No end-to-end speedup or main export established.
+Starter0/16, matrix0/118. Evidence `.cache/census-work-next/actual-main/`.
+
+Batch conditional receipt transport is integrated with fresh per-job directories,
+binary/payload bindings and duplicate-result refusal; BOUND remains evidence on
+hold, never acceptance. Integration/tooling/catalog244passed. Runtime12passed
+after a test subprocess's historical scripts import was corrected to tools.dev;
+iteration lint clean. Private integration preparer pins original observation
+bytes and binds declaration coordinates to selected entries; independent actual
+Devin40185 reviewed the delta,26static tests pass. This authenticates artifact
+identity only; real preflight still admits6/7 exports and refuses missing main.
+No production acceptance classifier or proof budgets changed.
+
+### 2026-10-09 — preserve source-bound callee return values
+
+Reproduced a concrete native two-call defect: a helper computes AX=0, but
+the next call's entry state loses AX because post-call transport retained
+only SP. Integrated the reviewed generic correction in the invocation IR
+owner. Every general-purpose register lane is must-met over all return
+exits using canonical lane reads and writes; unknown/missing/disagreeing
+lanes remain unknown. Return IP, flags and segment registers are not
+introduced as data effects. Late proof authentication remains mandatory.
+
+Parent regression failed before the fix; private overlay passed21 controls.
+Final shared-tree return/consumption/authentication/scoped-chain cohort:
+65 passed149.53s, including changed native bytes, environment, declarations,
+proof revocation and recursion/budget controls. Iteration lint and startup
+architecture pass. Worker scoped MyPy1→1 retains the same pre-existing
+argument-type diagnostic. The new regression is enrolled in the existing
+routine lane. Actual Devin93385 stopped at its five-minute checkpoint with
+no patch; the worker completed the settled private fix and the parent
+reviewed and promoted it. Evidence `.cache/return-value-transport/`.
+
+Integrated the optional ordinary-call edge-feasibility hook after independent
+red/green review. Exact authenticated success transports fully known effects;
+missing/refused/malformed effects discard scratch state and retain the edges.
+Interrupts retain their existing service route. Existing consumers default to
+no hook, so this interface alone changes no native admission policy. Final
+shared return/hook/legacy edge cohort35passed11.61s; iteration lint and startup
+architecture pass. New controls are enrolled in the existing routine lane.
+The native consumer and callee-local branch refinement remain private.
+No new frozen-main run, speedup, native round trip or function acceptance is
+claimed: starter0/16, matrix0/118. Evidence `.cache/ordinary-call-feasibility/`.
+
+### 2026-10-09 — native call effects and callee-local branch refinement
+
+Integrated the source-bound ordinary-call consumer after a real native diamond
+regression failed before the fix and passed afterward. Speculative simulation
+owns detached ledgers, native bindings and memory; it charges the unchanged
+shared allowance and authenticates current caller CALL bytes and callee proof
+after callbacks. Possible caller/callee code writes refuse. Only successful
+authentication publishes register/memory effects for edge feasibility.
+
+Parent review exposed a typed admission error: native near-call targets are
+dword temporary expressions, not only word constants/registers. Three target
+controls failed before correction; the final edge cohort passed28 tests. Typed
+shape grants no target authority. The actual source-bound consumer remains the
+required proof boundary. Eight canonical native safety controls pass, including
+missing proof, changed caller/callee bytes, exhausted work/deadline and code
+writes. The old authentication-count regression now distinguishes ordinary
+consumption (three checks) from speculative consumption (two checks); both
+strict equalities pass. Source/test lint and startup architecture pass.
+
+Integrated callee-local feasibility for branches with a shared return. Known
+native AX and live caller-memory inputs prune paths and preserve result values;
+unknown seeds and multiple-return closures keep their complete scope. Every
+required return remains available. Straight-line callees do not add a walk;
+expired/exhausted requests refuse before setup, with deadline precedence.
+Parent red2/green11 verification preceded promotion; after the extra deadline
+control,61 combined controls pass17.51s. Twelve final local controls also verify
+fewer simulated blocks on known inputs and a closed row ledger. New regressions
+are enrolled in the existing routine lane. A redundant cast was removed;
+otherwise worker scoped type diagnostics remain pre-existing.
+
+Actual Devin audits ended at their bounds without completed findings; they do
+not supply acceptance evidence. The code-byte guard's proposed adaptive-query
+optimization was rejected: the real fixture still performs27,660 queries in
+both versions, with identical60 outcomes. No speedup or main export claimed.
+Evidence `.cache/callee-local-feasibility/`,
+`.cache/native-call-feasibility-consumer/`, `.cache/call-code-guard-cost/`.
+Starter0/16 and matrix0/118 remain unchanged pending the frozen main diagnostic.
+
+Independent batch review and its bounded Devin follow-up exposed standalone
+jobs sharing generated-C directories. Promoted a reviewed collision guard;
+parent corrected first-option parsing to preserve last-wins, equals-form and
+separator semantics. Canonical aliases/symlinks collide; distinct/absent outputs
+and existing name refusal remain. Red3basic collisions and6option controls
+reproduced. Final canonical batch/conditional cohort65passed,54deselected in
+28.30s; iteration lint and scoped follow-imports=silent MyPy pass. No new native
+or semantic proof claim. Evidence `.cache/batch-receipt-independent-review/collision/`.
+
+### 2026-10-09: operation-local caller protection integrated
+
+The feasibility callback captures/charges caller geometry once per operation,
+retains exact selected row/block identities and includes current fetched spans
+on every crossing. Proof/native authentication and detached scratch effects
+remain fresh. Two new routine regressions cover admission, locality and native
+post-capture mutation refusal; three existing observers now follow the scratch
+consumer. Parent group47passed/2failed near20s; unchanged-budget isolated retry
+2passed27.61s. Lint/startup architecture pass; exact scoped MyPy83existing
+diagnostics matches the staged final hash and baseline (no new errors).
+
+Frozen main still exits3:140.33s,496724KiB,sourcechanges0,111effects/52successes
+all1dce,no callee pruning/main export.73preparations charge288460units;
+cross-call stage107calls/51.33s/302057ambientunits. First work refusal1de6 at
+19.18s has zero rawfacts; no populated refusal ledger. No attributable
+end-to-end gain or round-trip acceptance claimed:0/16starter,0/118matrix.
+Next investigate this measured cross-call work before another main run.
+Evidence: `.cache/caller-footprint-once/integrated-tests.log`, isolated retry
+log and `.cache/caller-once-main/summary.json`.
+
+### 2026-10-09: current obligations revalidated before further delegation
+
+The retained rel_i16 export/compiled source and all conditional payload hashes
+match current files; original/candidate images match62/62 finite runtime vectors
+and both branch mutants. Removed obsolete plan instructions to investigate
+its already-resolved return/signedness defect. This is static revalidation,
+not a fresh native run, fullstate theorem or whole-case acceptance. Evidence:
+`.cache/rel-i16-next/verification.json`.
+
+The next preparation optimization has an explicit SDD contract: authenticate
+the closed native boundary and each native block extent, then conservatively
+protect its interval without scanning expanded IR rows. Frontend partition
+requires positive contiguous instruction extents entirely within the region.
+Shrunk/foreign boundary and post-capture mutation controls remain mandatory;
+implementation remains private pending review/tests. No additional main run
+or acceptance increment.
+
+### 2026-10-09: current plan shortened without changing acceptance
+
+Reviewed489-line draft against1392-line baseline. Objective/matrix/starter/
+roundtrip acceptance/finalWatcom sections are byte-identical; execution changes
+only remove a stale dated status paragraph. Current conditional/source-bound
+contracts remain, with one main blocking snapshot. Removed obsolete nextsteps
+and chronological experiments; required16/118matrix/Watcom/negativecontrols
+and budgets remain. Fresh actual Devin original-only MS C5.10 probes confirm
+C2073automaticarrayinitializers and C4014signedbitfields/exit2; no source/flag
+changes, compatible spelling or acceptance. Evidence: private plan CHECKLIST
+and `.cache/msc51-original-obligation/compile-receipt.json`.
+
+### 2026-10-09: measured native-binding scalar comparison optimization
+
+The20s cProfile diagnostic attributes12.38s cumulative to canonical DAG
+encoding and2.71s to native term equality. Operation-local native range
+protection alone did not remove the deadline: saved pre/post factory probes
+both exhausted20s. Exact scalar sequence children now avoid recursive
+comparison calls while retaining their child-depth charge, exact kind and
+ordinary fallback for enums/subclasses/owned or opaque nodes. Parent review
+found metaclass equality could spoof tuple membership; reproduced the red
+opaque-node control, replaced membership with exact identity checks, then
+19 comparison controls passed. Lint-iteration exit0; scoped MyPy83→83 errors,
+none in the changed helper. The broader unary cohort has two native-import
+failures, both reproduced with the saved pre-edit comparator; not fixed here.
+
+Two alternating same-interpreter native collection pairs preserve both
+positive records with stable source hashes:11.919→11.224s and19.387→18.826s.
+This is a modest3–6% bounded diagnostic gain, not full main recovery. Initial
+separate-process measurements were inconsistent and are retained rather than
+used as an acceptance claim. Native proof controls remain pending at this
+entry. Actual Devin serialization optimization job launched with repository-only
+sandbox/4GiB limit; remote inference disconnected and retried, no patch yet.
+Evidence: `.cache/native-equality-opt/` and `.cache/graph-key-opt/devin.log`.
+Acceptance remains0/16 starter,0/118matrix; Watcom remains required.
+
+### 2026-10-09: canonical record-key optimization clears native positive gate
+
+Actual Devin job exited130 after an owned supervisor interrupt; its inference
+stream had disconnected/retried and it produced no patch. The PTY input
+interrupt was rejected by the tool's approval policy, so the parent identified
+the exact task's timeout supervisor in the same command namespace and sent
+SIGINT there, then verified the original handle's terminal status. Serializer
+changes are parent-authored and independently reviewed, not Devin work.
+
+Canonical interning keys retain sorted field-name and normalized-value tuples,
+avoiding per-field pair allocation. A fresh encoder-private field-order map
+derives solely from actual records; values revalidate every time and no source
+or proof data survives an encoding.98 source-graph controls pass;4 key controls
+were rerun after fixing one introduced typing diagnostic. Scoped typing16→16
+pre-existing errors; lint-iteration exit0. JSON-reference canonical bytes,
+malformed-value refusals, shared/deep-copied DAGs and fresh-process determinism
+remain covered. Independent review found no additional soundness defect.
+
+The previously failing native branch-pruning control passes in12.39s under
+the unchanged20s cap; four caller-protection/native-mutation controls also
+pass (positive10.09s). The earlier pre-serializer cohort was25pass/1fail and
+is retained. One frozen full-main diagnostic is launched under the unchanged
+120s recovery cap with passive effect/work/refusal observers, source-hash
+receipts and supervisor time/RSS. Its completion and full-case acceptance
+remain pending. Evidence: `.cache/graph-key-opt/`, `.cache/native-range-main/`.
+
+### 2026-10-09: frozen main measurement after bounded optimizations
+
+Main0x1dc3 still times out under the unchanged120s recovery cap: supervisor
+exit3,145.86s process,507504KiB peak; terminal semantic source changes0.
+Preparation is now66calls/8091charged units versus73/288460 in the previous
+snapshot (about97% fewer preparation units). But129effects/101successes remain
+confined to first CALL0x1dce; there are no callee-pruning events or main export.
+Cross-call authentication consumes90.60s across147calls; callee simulation
+11.25s and late reconciliation27.41s (nested stage times are not additive).
+First work refusal remains0x1de6, now56.45s; no populated typed refusal ledger.
+No attributable full-program speedup or acceptance increase is claimed.
+The next bounded review targets repeated authentication/dependency work while
+retaining early/late mutation and native-byte checks, not new proof budgets.
+Evidence: `.cache/native-range-main/summary.json`, source/terminal receipts,
+effects/work/causes JSONL and supervisor log. Acceptance0/16,0/118 remains.
+
+Final frozen static cohort:117 passed (source graph98 + native comparison19),
+4.97s pytest execution. Read-only crossing review identifies repeated scope
+matching and standalone completeness before segment projection in chained/
+enclosed paths. Direct scope-then-projection consumption is a candidate only;
+no such change is integrated. Preserve callback mutation/refusal ordering,
+late reconciliation and native chain binding; count actual forced derivations
+and demonstrate the full relevant mutation/fallback/budget controls before
+another main run. Review does not establish a speedup or acceptance.
+
+## CMP16 known-write transport and exact caller bounds (2026-10-09)
+
+Passive actual-call observation found AX missing after successful first-call
+crossing. The callee simulation met all four result arms; stack LOADs could
+not read main's proven writes because the baseline-disabled entry declared only
+the return-frame bytes. Initialized contents now remain separate from freshly
+authenticated write-read ranges. Ranges grant no original values; unknown,
+tainted, unwritten and outside-range bytes refuse. Descendant stack regression
+was1failed/3passed before this change. Integrated cohort73passed/1third-party
+warning in36.81s, lint-iteration and startup architecture pass, memory-owner
+MyPy clean; invocation-domain typing remains83existing errors.
+
+The actual fresh30s CLI attempt did not reach that effect: caller discovery
+selected3449bytes instead of the declaration's467bytes, even with an explicit
+exact-region-end. Passive seed evidence confirms matching source/environment
+and object identities. Exact-range admission correctly refuses this mismatch.
+The boundary producer must select declared exact-head ranges before broad
+registry/mapped discovery, retaining matching index identity and refusing
+conflicts. No function acceptance or whole-program speedup is claimed.
+
+Evidence: `.cache/main-return-probe/` (before/after register and exit snapshots,
+seed-binding observations, red/green logs, lint/type/architecture logs).
+Private memory controls20pass; integration includes those controls and real
+native descendant/LOAD/callee tests. Actual Devin diagnostic ended timeout124;
+its unfinished report grants no acceptance. Acceptance remains0/16,0/118.
+
+Declaration-first caller selection integrated with8passing focused controls,
+lint clean and37pre-existing scoped MyPy diagnostics outside changed functions.
+Full intake16pass/1fail; the stale-declaration selection control also fails
+with the pre-edit lookup (coverage-free selection defers proof to consumers).
+No fully green intake claim. The actual120s CMP16 run now transportsAX=FFFF
+and prunes3callee edges.146 call effects include100 successes at firstCALL;
+113pruning events are repeated analyses. Subsequent-call census-work exhaustion
+and main timeout remain. Supervisor exit3; the hard exit bypassed the terminal
+receipt. Parent before/after semantic source hashes agree, but this collector
+does not establish full process elapsed/peak memory. No speedup or acceptance
+claim. Evidence `.cache/main-return-probe/declared-boundary/summary.json`.
+Next bounded private Devin prototype: `.cache/feasibility-snapshot-once/`,
+collect CJMP facts during converged transfers to eliminate duplicate callback
+execution by the separate snapshot walk without new proof caching or bounds.
+
+Independent four-block callback-revocation review rejects that private prototype:
+production retains every edge, staging removes (0,20) using stale CALL100 evidence
+after CALL200 revokes its authority. Kept production replay unchanged; added the
+same obligation to the existing invocation-edge-refinement regression owner.
+Evidence: `.cache/feasibility-snapshot-once/review-counterexample.log`.
+Actual Devin session sticky-efraasia resumed privately with this counterexample;
+no staged optimization has been promoted.
+
+The broad pipeline precheck passed305 controls and budgeted admission26; the
+later unit lane reported failures and was interrupted at37% (supervisor130).
+No full-suite result is claimed. One verified failure was a migrated model-seal
+dependency still reading runtime files from compare/. Replaced the constructed
+locations in real16_entry_domain with direct canonical module imports, without
+discovery or compatibility shims. Existing final-seal regression fails before
+the fix and its whole owner passes12 afterward; three direct stability/runtime
+mutation controls pass. Scoped iteration lint and MyPy pass. Logs retained in
+`.cache/entry-domain-owner-path-fix/`. Other observed pipeline failures remain
+unresolved; this repair does not establish corpus acceptance.
+
+Saved actual-call work events identify608 contexts as owned
+DeclaredFunctionEntryLink8616, so a registry-only immediate-auth deduplication
+cannot improve this measured path. The already integrated entry-record path
+authenticates once at selection and again after native callbacks; the second
+check must remain fresh. Starter/matrix acceptance remains0/16 and0/118.
+
+Permanent callback-revocation regression passes on production and fails against
+the private snapshot-once code at the no-dead-edge assertion. The entire existing
+edge-refinement owner passes14 controls with two workers in8.22s; scoped lint
+passes. These are model regressions, not a new native-case acceptance.
+
+Intake regression contract corrected at the consuming boundary: raw retained
+surface selection is identity selection, not declaration authentication. A
+matching surface may be selected after a declaration digest is corrupted, but
+the domain must become incomplete and the actual scoped-view producer must
+return SCOPE_UNBOUND. Added that exact digest corruption to native scoped-view
+controls; foreign callee/project selection controls remain. Both intake/view
+owners pass24 controls with two workers in17.62s, iteration lint passes. No
+production freshness gate was weakened. Logs `.cache/declared-intake-contract/`.
+The owner-path repair's architecture-check-fast job completed successfully.
+
+Snapshot Devin revision ended124 without completed controls and remains private.
+A separate bounded Devin job now profiles fresh source-graph computation; its
+first profiler-enabled collection exhausted the existing call deadline on the
+second record. Profiling overhead/refusal is diagnostic only, not acceptance or
+a comparable positive A/B run. Stable native evidence is required before any
+performance patch is promoted. Starter/matrix acceptance remains0/16,0/118.
+
+Independent review also rejects revised snapshot reuse based only on forward
+CFG callback dependency: downstream CALL and NOT_APPLICABLE repeat hooks can
+mutate earlier pure IR. Production retains the current branch; staging marks
+both successors dead. Added both controls to the existing edge-refinement owner:
+16passed with two workers in25.50s, iteration lint clean. Direct staged replay
+rejects both cases. Kept the entire optimization private; a callback-free
+whole-region path would not address this call-heavy main. Evidence
+`.cache/feasibility-snapshot-once/review-v2-counterexample.log` and
+`permanent-v2-red.log`. No native acceptance or speedup follows.
+
+Fresh source-graph scalar-loop prototype reviewed and rejected for performance.
+Devin produced a private delta and exact-output controls before its job ended124;
+parent completed the checks and alternating native collection.98source-graph
+tests pass and explicit malformed/cycle/mutation equivalence checks pass. Four
+native runs retain both positive records each,873encoder calls per run, and
+unchanged before/after source hashes. Mean process14.070/16.511 baseline versus
+16.787/15.828 staged:15.291s versus16.307s (staged6.65% slower on this sequence).
+No runtime benefit established; production serializer remains unchanged.
+Evidence `.cache/source-graph-fresh-speed/bench-results.json`. This experiment
+also leaves charged census-work counts unchanged, so it cannot by itself remove
+the shared-work blocker. Do not repeat either rejected snapshot reuse or this
+explicit scalar-loop shortcut. Acceptance remains0/16,0/118.
+
+
+## 2026-10-09: discard only unobserved snapshot exits
+
+Actual passive profile fixed the next action: first cap at callee feasibility,
+18660+1357=20017, limit20000. Root already selected dangerous native blocks.
+A focused budget30 diamond failed before the change; after it,18 edge-refinement
+and12 local-callee controls pass (30 total), including fresh CALL/repeat mutation
+and branchless LOAD-hook replay. Scoped iteration lint passes. Independent
+read-only review found no blocker under the owned typed IR contract.
+
+The first local opcode-list version increased native cost1357→1368 and was
+replaced: use the existing scalar-effect classifier, no duplicate opcode owner.
+Final guard preserves CJMP/CALL/hooked LOAD, UNKNOWN effects and every repeat
+hook; no retained snapshots/classification. Block selection costs1unit; omitted
+pure exit states were discarded, while fixpoint and raw-effect census stay full.
+Frozen native v2 costs1334 per measured callee (23 fewer,1.69%). The first cap
+now occurs in path simulation at19856+151=20007. Main still times out: exit3,
+33.93s process,499280KiB peak, no semantic-source changes. No end-to-end speedup
+or round-trip acceptance claimed;0/16starter,0/118matrix.
+
+Real Devin independently verified service scratch accounting can double bill
+if a crossing charges/checks work, but the current real crossing charges zero.
+Kept its correction private: it does not address this actual main blocker.
+Evidence: .cache/service-work-accounting/REPORT.md; snapshot-discarded red/green/
+lint logs; .cache/snapshot-discarded-native-v2/summary.json and snapshot-shapes.json.
+Next reduce fresh simulation work without omitting row-ledger obligations.
+
+
+## 2026-10-09: fresh native binding to the consumed prefix
+
+Scope binding now compares identical native/retained cutoff prefixes and exact
+block metadata at original comparator depth. Full-block default and independent
+REP authentication remain unchanged. Genuine native budget regression was1fail/
+1pass before;51 comparator/callee/edge controls pass afterward. Additional
+prefix deletion/mutation/suffix-authority and native REP/code-write/root-prefix
+cohort62pass; cohorts overlap, not113 unique controls. Iteration lint passes.
+Independent read-only review found no lost-obligation blocker.
+
+Frozen25s actual CMP16: callsite0x1ce2 binding191→61 (130 fewer units);
+0x1dce stays298, disproving the apparent198-row saving inferred from partial
+simulation receipts. Subsequent callsites0x1e2a/0x1e41/0x1e58 are now observed,
+but this is neither proof completion nor comparable throughput evidence.
+First cap is instruction simulation at20000→20001; exit3,35.16s process,
+506020KiB peak, semantic source changes0.0/16starter,0/118matrix remain.
+Evidence .cache/native-prefix-main/summary.json and binding-comparison.json;
+native-prefix red/green/boundary/lint logs.
+
+Real Devin acyclic ordering task ended124 after10minutes, no private patch or
+report. Read-only investigation is not accepted implementation. Next use the
+existing detached actual-callee witness directly to bound join-order experiment,
+rather than asking another worker to rediscover CLI loading.
+
+## 2026-10-09: fresh acyclic callee dependency order
+
+One bounded predecessor projection is charged and reused across callee
+feasibility and path simulation. Ordinary/root schedules remain sorted; cycles
+fall back to the existing fixpoint. No effect or snapshot cache is introduced.
+Independent review found an API-boundary defect: extra proposal addresses were
+silently filtered. New control is red (1failed/2passed) before validation against
+the original scope, green afterward. Missing/duplicate proposals also refuse.
+Entry-meet extraction retains seed/backedge and predecessor-wait semantics.
+Final four-owner focused cohort60passed in4.29s; iteration lint passes.
+
+Frozen actual main at unchanged25s request: per-callee feasibility1334→1276,
+preparation40, net1316 (18 fewer,1.35%). First cap remains instruction simulation
+at20000→20001. Exit3,34.51s process,509384KiB peak; semantic-source changes0.
+Visited later callsites do not prove completion or comparable throughput.
+Acceptance remains0/16starter,0/118matrix. Evidence `.cache/callee-order-main/`.
+Next review discarded branchless LOAD snapshot replay under the existing owned
+read-only callee reader, retaining generic mutable-hook controls and full census.
+
+## 2026-10-09: owned read-only LOAD snapshot policy
+
+Added typed OBSERVABLE(default)/READ_ONLY_OWNED admission for discarded snapshot
+transfers. Only the callee's callback-free native row/path-memory reader admits
+read-only replay with exact owned initial-memory type orNone. All fixpointLOAD,
+branch/CALL/UNKNOWN/repeat observations and full simulation row ledgers remain.
+Independent review confirms this scope. Genuine native budget840 regression is
+red before (baseline841), green afterward; full exit-state and all four ledger
+sets match observable-policy replay and failures stay0. Final five-owner cohort
+82passed; scoped iteration lint passes. Generic mutable LOAD hooks retain replay.
+
+Devin wrote21 ordering controls before its5min job exited124 on ownership setup.
+Parent reviewed them, added required component marker, and verified21pass/lint;
+those21are included in the82, not additional acceptance. No completed job claim.
+
+Frozen actual main: feasibility1276→1182 plus40prep, net1222 versus original1334
+(112fewer,8.4%). First cap is prep at19962+40=20002. Exit3 after36.47swall/
+28.09sCPU,509664KiBpeak; semantic-source changes0. Host contention means no
+end-to-end speedup established.0/16starter,0/118matrix unchanged.
+Evidence `.cache/pure-load-main/`, pure-load red/green/lint logs.
+PureCALL snapshot shortcut independently rejected: early/late proof and native
+loader/source callbacks remain observable. Do not equate scratch isolation with
+purity or remove those replays. Next use retained trace for remaining fresh work.
+
+## 2026-10-09: reject REP shortcut; fresh bitfield round-trip preparation
+
+Real Devin REP-shape controls completed, parent reviewed mutations and ran81
+focused controls. Actual unchanged25s main showed no gain: first work cap19971
++40=20011,49.94swall/40.14sCPU,509356KiB peak, source changes0. Reverted every
+experimental production change and its new tests; existing98-test cohort and
+iteration lint pass. Private evidence `.cache/repeat-shape-rejected/` remains.
+
+Selected existing `bitfield_neighbors@bc31-small`, without source/flag/matrix
+changes. Real kvikdos compiler execution fails opening `/dev/kvm`; its preliminary
+check was insufficient. Explicit DOSBox probe and unchanged original compile,
+link and run succeed, exit255, compiler/library hashes unchanged. This replaced
+profile still needs verified FrozenCompilerContext before tail recompilation.
+Native libdosbox capture initially aborted due missing default shader; explicit
+output=texture resolves it. Canonical capture authenticates BITNBR relocated
+bytes, registers, segments, flags and memory before first instruction. Evidence
+`.cache/bitfield-route/{probe,original-dosbox,entry-texture}/`. No decompilation,
+rebuilt binary or accepted round trip yet:0/16 starter,0/118 matrix unchanged.
+
+2026-10-09 compiler coverage: bitfield_neighbors@bc31-small remains 0/16 starter,0/118 matrix. Frozen compiler context verified; first-instruction libdosbox input authenticates original relocated image. Parent GP restore addressed-byte lowering changed native counts from classified1/materialized0 to classified1/materialized1/failure0. Native short-function run still exits4: portable-flat gcc rejects pointer&integer. Soundness review added real red controls for narrowed reference, narrowed physical pointer, signed selector, word reference and pointer-cast stride; final GP cohort147passed, iteration lint and scoped MyPy/Pyright clean. Pointer observation shows register input is uint16 byte recomposition; subsequent stack-word materialization replaces it with raw pointer owner. Existing PTR_U16 storage bridge is the required consumer; Devin is implementing that bounded change in word-load owner/tests. No complete round trip, no whole-plan acceptance or wall-speedup claim. Evidence .cache/bitfield-gp-restore/ and .cache/bitfield-pointer-fix/.
+
+2026-10-09 compiler coverage pointer checkpoint: Devin completed the exact word-load owner/test task, parent reviewed all five returns and tightened type/docs. Parent isolated preimage reproduces2failures; final scoped cohort39passed and lowering anchors59passed. Actual frozen BITNBR function0x1d04 now exports conditional C+JSON (exit5), PTR_U16(arg_4), no portable syntax failure; GP restoration remains1materialized/0failures.22.08s wall,20.30s CPU,495136KiB; unchanged hashes verified for owned sources/original/input/context. This is conditional generation, not MS/Borland round-trip acceptance. Required test-pipeline in progress; live failures include existing layer-admission inventory expectations and bare-object mocks in call_collection_staging/raw_boot_prefix_scope; no terminal result or broad-pass claim yet. Scoped MyPy passes; Pyright3 errors at unchanged pre-existing owner-narrowing calls. Next diagnose raw callee-route refusals from main with passive derivation sites/counts; no production proof relaxation. Evidence .cache/bitfield-pointer-fix/.
+
+2026-10-09 parent checkpoint: pointer/address final35 controls pass; explicit stack-word owner guards yield scoped Pyright0errors and iteration lint passes. Full test-pipeline terminal2:3/9lanes passed, unit12492passed/167failed/28skipped; attribution incomplete, no broad-pass claim. Passive frozen main-route diagnostics expose census_work_exceeded before callee census; current first-call profile4.814s includes2.383s private-cache deepcopy, whose isolation must remain. Python3.15 compatibility delegated privately: interpreter3.15.0,63packages installed, parent angr/PyVEX imports and Z3 UNSAT control pass with JIT available/enabled; lifter ABI and focused regressions still pending. Production venv remains3.14.7. Evidence .cache/bitfield-pointer-fix/ and .cache/python315-compat/.
+
+2026-10-09 Python3.15 private compatibility probe complete, migration not accepted: pinned63packages installed; parent imports/Z3UNSAT and separately rebuilt sealed cp315 lifter smoke pass; six compiled IR hashes match cp314. Selected86tests:80pass/6fail on315Python backend, same6fail on314bothbackends; source attribution unresolved. Full315native regression/pipeline remains open. Parent alternating300lift loops314/315/315/314:0.462/0.451/0.422/0.513s, RSS~65MiB; differingJIT (314off,315on) andcompiler(gcc/clang) prevent version-only speedup claim. Mainvenv stays314.7. Reviewed .cache/python315-compat/report.md; worker complete, parent corrected overbroad green/attribution claims.
+
+2026-10-09 shared replay review/measurement: initial Devin replay shortcut rejected for cached-required refusal bypass, omitted active-domain admission and uncaptured transported-link mutation. Corrected root-only route retains both guarded admissions and exact pre/post inputs; final67 focused controls pass, scoped lint0, no added scoped typing findings (owner debt remains). Independent review accepts this narrow fix. Frozen actual main25s run terminal3/35.69s supervisorwall, same first/late site work3349/11506/26083/28651; no main work reduction. Sources/input/compiler hashes match before/after. Admission observer12pairs all declared roots, different entry pools; shorter15s element observer shows all4record identities differ at firstcall; later pools share some earlier records. Ordered tuple identity relaxation would not help. Next Devin slice instruments typed observed entry-pool consultation, including failed lookups and scratch paths; early/no-census unknown, no shared admission change authorized in this slice. Evidence .cache/census-replay-cost/{local-fix,reviewed-native,eligibility-native,pool-native}/ and .cache/entry-pool-reads/. Acceptance0/16starter,0/118matrix unchanged; no broad-pass claim.
+
+2026-10-09 entry-pool dependency receipt: Devin12min jobterminal124 left enum/context/post-census/scratch delta and5red/green candidates; parent reviewed exact savedpreimage, localworker finalized9controls(allpassed) andlint0. Scopedtyping no addedfindings(owner86MyPy/1Pyright baseline debtunchanged). Both scratch finallypaths propagate consulted state on refusal/exception. EarlyresultsUNKNOWN, canonicalattemptsREAD/UNUSED; successfulfreshresult required beforeanyreuse. Frozen actual15s probe51completed derivations:1d9733UNUSED,1dad12READ,1dec/1e3b2READ each,1d432READ; terminal3/24.46swall, source/input/contexthashesunchanged. No performance/proofconversion yet; this confirms unusedfirst-call pools onactualcase. Receipt9tests enrolledcanonicalcomponent/routineinventory. Localworker next implements boundedrootcall-freecandidate+UNUSEDconfirmedsharedreplay; no budgets changed. Evidence .cache/entry-pool-reads/{local-final,native}/. Acceptance0/16,0/118unchanged.
+
+## 2026-10-09 — charged eligibility scan reduction, main still refused
+
+The entry-call unused-pool eligibility gate now performs one instruction-row
+walk and one canonical predecessor closure. Independent review accepted frozen
+owner d389736e887741680997433f73d5bd8e7f9526cb20af1b7a76dcd23a132a45a1.
+Copy/edge walks are charged; fresh UNUSED evidence, admission, callback mutation
+checks and20,000 cap remain. Scoped lint0; affected cohort25passed52deselected
+16.42s. Authentic gate measurement6792→2514units for23blocks/2209rows; expanded
+artifact gate2716. Frozen native CLI exit3,50.06s process wall,505320KiB RSS; all
+source/input/context hashes match. No CPU speedup or whole-case success follows:
+late outer costs11506/26083/28651 remain. Next diagnosis is why those canonical
+paths do not consume the measured savings and where later native-effect proof
+fails. Evidence: .cache/entry-pool-gate/report.md and native/{receipt.json,events.jsonl,native.log}.
+Acceptance remains0/16 starter,0/118 matrix; Watcom remains required.
+
+Retained trace resolves the missing end-to-end gain: critical root derivatives
+contain zero eligibility gates; identical-domain scope checks authenticate
+`proof.required_scope` itself. Exact sums are8157+3349=11506,
+14577+3349+8157=26083,17145+11506=28651. External-pair optimization is real
+but outside these scopes. Next bounded owners split local-cost accounting from
+exact native-binding refusal diagnosis. A sandboxed6minute read-only Devin job
+is live for native binding; no production writes authorized for that job.
+MyPy changed owner exit2:86findings, same message multiset as saved preimage,
+no additions (.cache/entry-pool-gate/mypy-delta.json).
+
+Bounded Devin native-boundary job1588 terminated124 after6minutes, with no
+reviewable report/patch. No claims accepted; log retained at
+.cache/native-effect-boundary/devin.log. Local reviewer prepares a passive
+all-field-binding observer. New cost probe terminal3/35.53s, frozen hashesmatch;
+root-context attribution closes local work exactly: firstfailedlateprefix14577
+= native1345+machine55+scratch7097+call2+simulation665+residual5413; last17145
+= native2002+machine81+scratch6362+call3+simulation665+residual8032. Cross-context
+scratch copies must not be summed twice; process-local derive IDs may repeat
+after CLI forks, so later aggregated IDs require process identity. Evidence:
+.cache/entry-pool-next/native/{events.jsonl,receipt.json,native.log}.
+
+Passive per-process native binding observer terminal3/38.18s, frozen hashes
+match. All36 failed binds are block0x1d12 fresh850rows versus retained285, same
+successor0x1d40. Firstdiffrow86: fresh0x1d1d Iop_And8(cl,31), retained0x1d1f
+MOV(ax), temp t75width1vs2 and origin93vs94. No native-import failure event.
+This precisely locates later native-effect refusal; cause still unproved.
+Both importer branches explicitly requestopt0, so optlevel mismatch is not
+established. Do not drop row/provenance fields to hide discrepancy. Earliest
+owner investigation continues. Full logs+summary in .cache/native-effect-boundary/native/.
+
+Exact local native-byte regression reproduces285→850 from ambient foreign flag
+liveness: same46-byte helper1d12..1d40/sourcehash/opt0/successor, no-session285
+versus StatusFlagLiftSession(owner1d43,candidatesempty)850. Focused1expectedfail
+plus1owned-missing-candidate pass/2.20s. Source inspection shows active
+dead-write NONE bypasses valid local decoder fallback; native cache keys omit
+ambient policy. Fix spec: complete typed instruction/source ownership, conservative
+ownedmissingcandidate, foreignlocaldecoder fallback, flagpolicy bound into caches.
+No production fix accepted yet. .cache/native-effect-boundary/{flag-counts.json,flag-red.log,test_flag_context.py}.
+Durable limited-budget eligibility control now RED on oldgate/GREEN on newgate
+with200remainingunits; focused1passed, lint0, source d389 unchanged. Testhash
+ffd49499926fd541cb1fef3f156e80092515a1569cac5d94e8874622952aec81.
+
+Final flag-ownership/cache-policy fix independently reviewed: typed project and
+complete instruction ownership, owned missing-candidate conservatism, foreign
+local fallback, policy-bound caches, actual-engine invalidation and source-bound
+artifact resolution.64 focused controls pass; scoped lint/Pyright and architecture
+checks pass. Actual frozen rerun39.49s exits3 but records zero failed native
+bindings and zero native_effect_unproven results (previously36). All9 before/after
+hashes match. Main now reaches later work caps26885/29511; acceptance remains
+0/16 and0/118. Evidence: .cache/flag-owner-fix/REPORT.md and native/receipt.json.
+Fresh per-row snapshot eligibility has no demonstrated charged-work saving;
+no speculative shortcut integrated. .cache/flag-owner-next/DESIGN.md.
+
+2026-10-09 fused native-row/scalar-transfer checkpoint:18 focused controls and4
+independent STORE/provenance controls pass; scoped lint and final architecture/
+catalog gates pass. New owner MyPy/Pyright clean; invocation owner retains83
+unchanged MyPy findings and1 unchanged Pyright finding. A frozen native run
+exits3/37.54s with all16 source/input/context hashes unchanged.65 fused transfers
+finish;285-row blocks cost465 including eligibility/factory versus571 ordinary,
+311-row blocks491 versus623. Primary late roots26032/28651 remain above20,000;
+expanded lane26824/29511 also refuses. No main proof/roundtrip or controlled timing
+gain. Factory/builder, scalar/KB dispatch, unexpectedCALL, nonrepeat witness,
+foreign initialmemory and deadline controls are closed. Acceptance remains0/16,
+0/118. Evidence: .cache/flag-owner-next/fused-native-final/, FUSED_REPORT.md,
+parent-controls-freeze2.log, parent-architecture-freeze2.log.
+
+Caller-range scratch trial:27 focused affected controls and3 independent
+byte-union/refusal controls pass; architecture/catalog pass. Actual frozen
+native exit3/36.24s, all17 hashes match. Primary late cost26032→26208 regresses,
+because upfront preparation also charges early unknown-call proofs. Placement
+is not accepted; correction folds selection into the existing queried interval
+walk. Root query/bytes/proofs/caps remain mandatory. Evidence:
+.cache/flag-owner-next/caller-range-native/, CALLER_RANGE_SPEC.md.
+Read-only snapshot-collection review found no sealed pure-call phase; entry
+equality alone cannot replace fresh replay. No snapshot shortcut integrated.
+Five-minute sandboxed Devin next-budget diagnostic timed out without a report;
+its suggestions are not counted as evidence. Parent continues from actual costs.
+
+2026-10-09 deferred caller-interval checkpoint:50 focused controls plus3
+independent parent controls pass; architecture/catalog pass (13owners,
+1543test modules). Actual unchanged25s native run exits3/35.03s,17hashes stable.
+Repeated1dad proofs save66units (11191→11125); the capped later scope reaches
+255materializations versus123 at the same20001 stop. Primary late totals
+26272/28687 and expanded26835/29511 still refuse; changed explored paths prevent
+a simple total-cost comparison. No controlled wall-speedup or roundtrip claim;
+acceptance remains0/16 starter,0/118matrix. Initial wrapper test failure is
+unclassified: isolated current and private original-union baseline both pass;
+no inferred contention cause. Evidence .cache/flag-owner-next/
+caller-range-native-deferred/ and CALLER_RANGE_REPORT.md. Next bounded slice
+measures eager detached state copies before failed fresh call authentication;
+all original admission/protection/native/late replay guards remain required.
+
+Scratch-copy experiment closed without a production refactor: passive frozen
+native run exits3/36.24s,17hashes stable. Phase-matched calls failing before
+simulation expose only31/117 copy units at the primary late roots and0/78 on
+the expanded roots; no empty memory overlays. These savings cannot address
+the thousands-of-units gap. Next diagnostic targets residual census5413/8032
+work, rather than accumulating minor refactors. Evidence:
+.cache/flag-owner-next/scratch-copy-native/copy-summary.json. Acceptance remains
+0/16 and0/118; no limit or proof guard changed.
+
+Residual KB diagnosis: passive consumer-only25s native run terminal3/35.07s,
+17stablehashes. Primary roots each run2fixpoints+2snapshot passes:2674/2674
+and3978/3978 work; expanded2974/2974 and4382/4382. The664row mainentry block
+is transferred4times=2656units. These measured duplicate transfers are a
+material target, unlike copy-delay. Next design considers owned pure scalar
+prefix summaries with fresh observer/call/native/protection checks; whole
+post-call snapshot reuse remains forbidden. No implementation or acceptance
+claimed. Evidence .cache/flag-owner-next/kb-phase-native/kb-summary.json.
+
+Selected next implementation: early IR dead-total-TMP normalization. Exact
+main664/716row exports admit a diagnostic backwards dead set449/501; anchoring
+one retained row per original instruction address still offers434/486 removed
+and230remaining with identical address inventories/no unresolved pins. Purity
+and external metadata admission remain unproven; no rows deleted in production.
+Typed spec .cache/flag-owner-next/DEAD_TMP_SPEC.md preserves every unknown,
+LOAD/call/store/control/architectural effect and keeps full native byte guards.
+Devin owns new normalizer/tests, separate worker metadata payload selection,
+parent integration/review/measurement. Source baseline hashes recorded; original
+compiler/input/source/limits unchanged. Acceptance remains0/16,0/118.
+
+Dead-TMP metadata selection reviewed and enrolled: producer ownership uses
+original instruction coordinates, never pending successor keys. Condition
+operands/bindings/semantics and logical address payloads preserve their identities;
+malformed or unbounded evidence retains affected blocks or the whole surface.
+Boundary regressions demonstrated15fail/13pass before correction; final worker
+and independent parent runs each pass28controls (parent1.97s). Scoped lint/MyPy
+pass; canonical component/routine inventory validates13owners/1544test modules.
+No deletion is authorized by metadata COMPLETE alone. The separate Devin
+normalizer job62520 remains live on polling; its implementation and actual
+unchanged-budget native measurement are pending. Acceptance stays0/16,0/118.
+
+Parent startup architecture gate exits0. Devin62520 subsequently terminates
+with124 at its original720s outer limit: no normalizer module, tests or report
+were created, so its investigation yields no accepted implementation. Do not
+restart the same broad task. The existing metadata worker now owns only the
+two new normalizer/test files with the unchanged deletion/dependency contract;
+parent retains integration and authentic native-case acceptance. No proof
+budget changed, and no full compiler case is accepted.
+
+Dead-TMP common-import implementation now present: pure-total block normalizer,
+retained capture roots and first-row-per-instruction anchors feed both ordinary
+and raw native paths. Aggregate closed counters retained in imported surfaces
+and ordinary summaries. Parent added4malformed-origin controls (red4fail/5pass)
+and exact source-coordinate validation; final affected cohort115passes8.49s.
+Startup architecture passes. Project-scoped all3owner MyPy exposed52narrowing
+errors missed by isolated checks; exact-type guards kept, typed locals corrected,
+same project command now exit0. No broadened exception or deletion admission.
+
+First frozen actual native experiment terminal3/39.48s,20source/input/context
+hashes unchanged, no outer kill. Main remains664/716rows, so no end-to-end gain
+or case acceptance. Serialized exact block diagnosis finds100unpinned TMP value
+views, all with explicit typed active_unary and pinned operands; no unstructured
+unpinned views or missing/forward input/origin pins. Current reader refuses the
+outer computed view before reading its operand. Worker now adds the bounded
+typed unary-view contract and red/green controls; unpinned definitions and
+name/expr-only values remain refusals. Native rerun waits source freeze.
+Evidence .cache/flag-owner-next/dead-tmp-native/ and dead-tmp-final-controls.log.
+Acceptance stays0/16starter,0/118matrix.
+
+Unary follow-up66focused controls and exact project typing pass. Second native
+diagnostic reaches the unchanged55s outer cap and is killed, with20hashes stable;
+main still664rows. Treat as interrupted diagnostics, not a proof or speed result.
+Faithful serialized operand replay (block.to_dict JSON exact) identifies first
+dependency refusal atrow25: explicit Iop_1Uto16 view over a pinned Boolean.
+Bounded contract review separates dependency enumeration from pure-totality:
+IRActiveUnary owns its operand even if conversion proof lacks one-bit provenance.
+The reader may collect those exact pins, but unsupported/unproved computation
+rows and their backwards closure remain nonremovable. Worker implements only
+this split and its corruption controls; local replay must close before another
+expensive native attempt. No new opcode semantics or guessed bit provenance.
+
+Dependency/totality split independently exercised: serialized exact664row main
+normalizes to482rows with COMPLETE dependencies; actual frozen native consumer
+also sees482rows (182fewer,27.4%). Final affected cohort126passes22.23s; scoped
+lint/project typing and startup architecture pass. Native diagnostic terminal3
+in51.34s,20hashes stable; no outer kill. Work-cap refusal remains and2new
+native_effect_unproven results need causal classification, so no case accepted
+or end-to-end speedup claimed. A representative actual-angr warm-cache capture
+control passes, leaving missing sidecars unconfirmed. Passive comparator wrapping
+changes fused eligibility and only reaches work caps; it cannot classify the
+new failures. Keep guards intact; next observation must wrap consumers, not
+comparator/purity authorities. Acceptance remains0/16,0/118.
+
+Low-overhead consumer-only observation completes exit3/35.69s,20stable hashes,
+no outer kill. It reports work-cap failures only, no native-effect import failure;
+the2failures from the heavier51s profile are not a reproduced row-binding defect.
+Keep them unclassified rather than redesigning native equality on that inference.
+Next local action measures which retained TMP operator families fail existing
+totality authorities; preserve nonremovable effects and original proof caps.
+
+BOOLEAN_WIDTH_WORKER: scalar_boolean_result_bits_8616 lands in
+inertia/ir/scalar_instruction_effects.py (public, exported). Returns 1 only via
+owning comparison/boolean classifiers' CLOSED_DESTINATION; None otherwise.
+New tests/ir/test_scalar_boolean_result_bits.py: 60 pass. lint-iteration clean;
+mypy promoted cohort clean (test-file decorator notes are baseline).
+Report: .cache/flag-owner-next/BOOLEAN_WIDTH_WORKER.md.
+
+Predicate-width parent integration: owning Boolean classifiers and authenticated one-bit conversions feed unique preceding TMP widths to totality checks. Negative controls retain ordinary literal0/1 bytes, unrelated pins, mismatched storage and live chains; red missing-width control2fails, final affected cohort278passes6.29s. Faithful main replay664→462rows; frozen consumer-only native final exit3/35.84s,20stable hashes, terminal timeout plus census_work_exceeded at1dec/1e3b, no native-effect failures. No whole-case proof/speedup; acceptance0/16,0/118. Scoped lint/MyPy clean; new normalization owners registered in architecture promotion with required layer descriptions, broad unrelated architecture debt remains. Next bounded consumer-only profiling delegated to sandboxed Devin, session14192, log .cache/flag-owner-next/devin-post-normalization.log; ownership .cache/post-normalization-cost/ only.
+
+Dispatch-seal experiment rejected and reverted after independent review: MappingProxyType overloaded equality/union exposes the mutable backing dict, so handler changes can evade identity-only sealing. Actual reproduction changed MOV and fresh seal still accepted. Retain flattened handler checks;49unit transfer savings are rejected evidence. Fresh post-convergence profile reaches actual effect simulation; main still unproved and acceptance0/16,0/118. Evidence .cache/registry-cost-review/. All unrelated changes preserved.
+
+Tuple-based dispatch replacement is reviewed and implemented: sole authoritative immutable entry tuples, direct typed lookup, fresh helper/table identities, ordinary foreign-dict instrumentation. Cache review exposed mutable foreign-handler identity gap; red1fail control now passes through scalar-owned key/handler producer capture. Final230focused tests/8.89s and scoped lint/startup architecture pass; five-file MyPy117before/117after0delta. Devin independently53pass/4.23s and no defects; local reviewer confirms cache correction. Native unchanged25s/20000work run exit3/33.33s with21stablehashes,486.5MiBpeakRSS. Matched262rows439→393units; first late scope1287→1525facts. Main/late closure still unproved and no controlled wall-time speedup/round trip; acceptance0/16,0/118. Evidence .cache/tuple-dispatch/. Next remaining effect binding/callee refusal, not more registry tuning.
+
+Feasibility resource handoff corrected: account final branch-feasibility work
+before callee authentication, refuse at existing shared work/deadline limits.
+Native-fixture red2fail; final affected25pass/45.87s, scoped lint/startup
+architecture pass. Exact delta MyPy86before/86after/no new messages; existing
+typing debt is not clean. Selective-anchor diagnostic leaves main462rows and
+is rejected as irrelevant. Native conversion still pending; no compiler case
+accepted. Sandboxed Devin diagnostic owns only .cache/call-boundary-next/,
+supervisor9min, main budgets25s/20000 unchanged. Parent implementation/spec:
+.cache/feasibility-budget-spec.md and feasibility-budget logs.
+
+Parent closed the CALL-authentication resource seam too: red3fail controls for
+local/shared work and elapsed deadline; final affected28pass/44.56s, lint and
+architecture pass, exact-preimage MyPy86before/86after/no new messages.
+Devin9min supervisor interrupted its unfinished analysis; actual native child
+receipt33.33s/21stablehashes independently reviewed. Parent final observer has
+no repeated scope probes/catch-all. Frozen native exit3/35.835s,
+21stablehashes/RSS494532KiB: six observed derivation failures all typed
+census_work_exceeded, no call_boundary_unproven. Main remains terminal timeout;
+no speedup/proof conversion/case acceptance. Next design targets caller
+binding+scalar-prefix duplication before CALL callbacks, with exact positional
+binding/rollback and all budgets intact: .cache/caller-prefix-fusion-spec.md.
+
+2026-10-10: parent implemented caller-prefix fusion with full native suffix
+binding before CALL callbacks, resumable TMP/dirty/instruction-entry state and
+late-mismatch ledger rollback.30 fusion controls and36 native-call/protection
+controls pass; scoped lint, new-module typing, architecture and catalog pass.
+Final same-input pair:22identical stable hashes; matched462-row caller925→608
+work (34.27%). Root derivation at0x1dec converts20,022/refused→19,455/success
+with counts[1672,1672,1672,1672,0], unchanged20,000/25s caps. Main still exit3
+timeout; no robust end-to-end speedup or accepted case (0/16,0/118). Remaining
+late root contexts still exhaust work. Evidence: .cache/caller-prefix-report.md
+and .cache/caller-prefix-native/summary.json. Both bounded Devin jobs ended
+without a patch/review; parent supplied implementation and refusal controls.
+
+2026-10-10 terminal CALL continuation checkpoint: existing core interpreter now
+has a native-bound, resource-accounted continuation seam that does not repeat
+CALL push rows and freshly executes ordinary callee proof/effects. Independent
+review exposed backward-address cutoff and pre-admission ownership-scan defects;
+red2fail→green3pass. Final focused cohort84pass/14.59s, lint-iteration exit0.
+Scoped exact-preimage MyPy86→86 before final lending change (existing debt,
+not full typing acceptance). Read-only scalar lending under pinned producers
+reduces long340-row continuation606→365charged work; ordinary486, identical
+result. No end-to-end speedup/public skipping/accepted case:0/16,0/118.
+Devin review ended124/300s without report; collaboration reviewer supplied
+findings. Next prerequisite worker owns optional CURRENT pre-CALL must-state
+capture from existing converged feasibility snapshots, without extra replay.
+Evidence .cache/prefix-resume-current/{SPEC.md,PARENT_REVIEW.md,logs}.
+
+2026-10-10 CURRENT CALL-cut prerequisite: feasibility now publishes optional
+detached pre-CALL register/memory/DF data from its already-running converged
+snapshot walk, without an added interpreter pass or effect callback. Default
+transfers do not invoke the observer. Selection, reachability, projection and
+sorting charge existing resources; provisional refinement and late expiry
+publish no witness. Complete-state comparison against ordinary census now
+checks exact owners, registers, known/unknown bytes and continuation DF, with
+resource checks before/after comparison. Review exposed terminal-DF and late
+deadline gaps; focused regressions failed before fixes. Authentic native
+CALL-frame/state differential control passes. Final combined80pass/9.21s,
+lint-iteration exit0; exact-preimage scoped MyPy86→86,NEW0 (existing debt).
+DATA ONLY: no public prefix skipping, native admission or fact-ledger reuse
+enabled. Seed/source/callback/prefix-ledger authentication and successor
+integration remain next; accepted round trips remain0/16,0/118. Evidence:
+.cache/feasibility-call-cut/ and .cache/prefix-resume-current/cut-match-*.
+The20 new cut-state controls are now enrolled in routine test_pipeline and an
+explicit ownership rule. Tooling lint and component catalog pass. Sandboxed
+Devin review exited124/300s without report/patch; no acceptance attributed to it.
+Ownership tooling tests60pass/1fail: existing native-integer fast rule contains
+pytest.skip at tests/frontend/test_x86_16_native_integer_operations.py:163.
+Process-local removal of only the new rule retains the identical violation;
+new cut rule alone has zero violations. This gate is not claimed green.
+
+2026-10-10 — operation-current prefix extension integrated, applicability still
+open. New real16_census_fact_ownership owner preserves four separate stage sets
+and replaces repeated set-equality scans with canonical-transition/version
+receipts. Tests cover partial and nested rows, duplicate completion, destructive
+and bulk operations, same-cardinality mutation, producer replacement and
+constructor reentry; new cohort routine/ownership/quality enrolled. This is an
+owned-producer contract, not hostile-Python isolation; direct builtin base
+descriptor mutation lies outside it. Source/native/callback validation remains.
+Core worker integrated optional receipts and resumed CALL/suffix path; reviewed
+gain guards prevent slower extensions. Authentic three-CALL declared MZ yields
+three complete captured prefixes but no transfer: simulation274/645 against
+135/317rows cannot beat2N native/member plus guards. Ordinary stage counts and
+CALL behavior stay intact. Focused110passed/9.86s; new module scopedMyPy clean,
+lint-iteration exit0. Actual main frozen25s request remains timeout/exit3,
+outer31.27s, source/input hashes stable. No speedup or round-trip completion
+claimed; acceptance0/16,0/118. Next remove demonstrably redundant verification
+work through current authority, and close typed raw selector obligations rather
+than clearing refusals. Prior Devin read-only extension review terminal124 with
+only placeholder report; no acceptance attributed to it. New small fact-owner
+review running separately. Evidence:.cache/prefix-extension-current/.
+
+Final checkpoint: redundant row-membership/full-native-union scan removed;
+guarded canonical success and unchanged owned ledgers bind retained membership,
+while fresh native/source/root-IR/callback checks remain. Added four unsupported
+in-place-operand controls preserving builtin NotImplemented.114focusedpassed
+9.98s; new ownerMyPy/Pyright0; scopedRuff/lint clean. Pure fact tests run in
+unit-focused, not expensive binary-relational. Sandboxed fact-owner Devin ended
+124/180s with only initial report; no reviewed findings. Final stable-source
+real main stilltimeout/exit3,31.08s outer, nine recorded hashes unchanged.
+Three-call second prefix621work/306rows passesN+136cheap guard but still not
+consumed: positive extension and actual round-trip acceptance remain open.
+Tooling164pass2fail; process-local removal of the new test retains relational
+inventory failure, native-integer ownership violation remains previously
+confirmed. No broad gate or speedup claim. Parent review and full logs retained
+in.cache/prefix-extension-current/; accepted0/16,0/118.
+
+2026-10-10: parent integrated native prefix differential and three authentic
+corruption controls. Bound cuts opt into fresh branchless CALL rows; ordinary
+requests keep the shortcut. Second prefix is actually consumed; full domain,
+five counters, consultation and AX13/SP0x7e match ordinary. Mutation omission
+produces3expected failures, so negatives are non-vacuous. Seven affected modules
+147passed48.92s; scoped enrollment lint0; controls enrolled relational/ownership.
+Small resumed fixture9597work versus ordinary5883: applicability, not speedup.
+Frozen real main exit3/31.19s, nine stable hashes, timeout/uncollected validation.
+Return-only diagnostic finds five1d97→1dad rejections at whole positional proof
+pool identity before any structuralcut/continuation; root/seed/callback guards
+pass. Next authenticate genuinely consumed earlier CALL proofs against the
+current pool without waiving provenance. Diagnostic38.60s includes tracing and
+is not a timing comparison. Evidence:.cache/prefix-main-guards/summary.md.
+Compiler acceptance remains0/16starter,0/118matrix plus later Watcom.
+
+Python315 side-check refreshed on current prefix/fact controls:72passed9.89s
+with authentic copied-package finder/manifest and compiledcp315 backend,
+stable lifter sourcehash. Production remains314; no whole-pipeline/mypyc or
+end-to-end speedup claim. Prior isolated dependency/build/flat32/SSA evidence
+found in.cache/python315-compat/ and.cache/python315-parent-review/; do not
+repeat setup unnecessarily. Current evidence:.cache/python315-current-review/.
+
+Consumed-CALL pool slice reviewed/integrated: exact task-start preimagehash
+4cdc57313039d2004432781c8c7a16728bff1d586d90b275ddbee2005136fc5e verified;
+206line scoped diff, not historical dirtygitdelta. Retain exact successfulroot
+CALL authority only, fresh scratch histories, strict registry/services and
+conservative nonleaf rejection. Fresh authentication selects sameusedproof,
+scope/projection; changedunusedentry/order now admitted. Six native controls,
+two genuine red applicability cases; missingproof red harness corrected to
+honest None refusal. Final parent affectedcohort153passed47.48s; scopedlint0,
+MyPy86→86 NEW0. Routine relational and ownedfocus enrollment updated. Frozen
+actualmain rerun pending; do not infer caseacceptance from controls.
+Evidence:.cache/prefix-pool-binding/ (SPEC.md,core.patch,logs).
+
+Frozenmain after poolbinding terminal3/32.15s, nine stable hashes, timeout and
+tailvalidation uncollected;83enrollments/80captures, observedconsumedprefixmax0.
+No realcase conversion or speedup claimed. Newguardtrace delegated after this
+productiondelta to identify the next rejection, not repeatunchangedbaseline.
+Acceptance remains0/16,0/118+laterWatcom. Evidence:.cache/prefix-pool-binding/main/.
+
+Newactualguardtrace confirms poolfixconversion at its intendedlayer:10pool
+checksTrue, fiveprefixselections and five CURRENT KBcutcaptures/publisheddata.
+All5then refuse PrefixCutFailure.INCOMPLETE_CFG at795chargedunits before
+suffix/fact/statechecks. Root/seed/callback/terminal/enrollmentauth passes.
+Trace36.08s/exit3,9stablehashes; notperformanceacceptance. Focusedstructural
+ownerreplay next to distinguish currentIR/nativeboundary mismatch from actual
+openedge, without clearingrefusals or rerunning unchanged25sCLI.
+
+Exactfocused canonical importer replay,1.81s, stablehashes: authoredcurrent
+domainartifact reproduces INCOMPLETE_CFG/work795 atblock1dc1 selector-dependent
+JMP→1da3. closedIR/nativeCFG True, zeroedge/blockdifferences. Sixblockselector
+obligations remain; raw contrastingartifact work1 is not the actualscopedinput.
+No refusal removal. Next typedsourcebound nearIP/CS/wrap discharge at canonical
+controlowner with relevantCALL preservation/reentry evidence; fullgraphcycle
+admission still independentlyrequired. Evidence:.cache/prefix-structural-next/.
+Python315 newDevin job terminal124/15min with initialcommentsonly, no newverified
+results or observedratelimit. Do notattribute Oct9 reports or parent72controls
+to this newjob. No identicalrestart; production314 unchanged.
+
+2026-10-10 scoped prefix closure: BEFORE_LATER_CALL structural witness retains future refusals and requires actual live/suffix containment. Parent90focused tests pass18.27s; scoped lint clean; shadow-fileMyPy16→16 NEW0. Exact authored native artifact: strict INCOMPLETE_CFG795, optional admitted3567. Stable actual main exit3/timeout31.406s,9hashes stable; no acceptance/speedup. Return-only trace passes structural/suffix/facts/cutstate and resumes CALL, then fresh postcallback validation refuses census_work_exceeded atlocal15271/14666 under shared20000cap. New Devin review session30145 terminal124, no report/acceptance evidence. Next remove only identical immutable-block duplicate nativecomparison; retain independent different-block and postcallback checks. Evidence .cache/prefix-absorbing-implementation/ and .cache/prefix-absorbing-parent/. Acceptance0/16,0/118; Watcom remains.
+
+2026-10-10 identical native rebind review: redundant second comparison removed only for exact retained/root block identity after first authentication; zero-extra-unit deadline/resource recheck preserved. Parent9controls passed1.81s; worker10including native differential passed; scoped lint0. Native measured savings0units: detached copies differ by identity. No speedupclaim. Later actualCLI shows declared-entry scopedCFG hard refusal but final receipt missing after terminalfallback; no stable attribution. Profiled native-repeat35.145s exit3 timeout,6source/inputhashstable, no capturedview. Next bounded canonical declared-entry owner probe under unchanged25s/20000budget avoids CLI/fallback overhead to capture typedfailure. Acceptance0/16,0/118 unchanged. Evidence .cache/prefix-identical-native-rebind/ and .cache/prefix-absorbing-parent/.
+
+2026-10-10 owned snapshot integration: reviewed root LOAD/repeat/terminal-CALL omission entered the three canonical IR owners after exact pre-run hash verification. Real-census baseline red5102==5102; production95focused controls pass, scoped lint iteration passes, and two permanent tests are routine-enrolled. Stable canonical main reproduces matched-phase19413→18806, but still APPLICATION_EMPTY at20058 under unchanged20000/25s;0/16 and0/118 acceptance. Adjacent91pass/1fail: unrelated manifest skip in native integer operations; broader quality-dev running. Private bounded Devin investigates existing native-request validation owner, no production edits. Evidence .cache/parent-root-load-final/{SPEC.md,REPORT.md,production-main/receipt.json}.
+
+
+## Compiler coverage: canonical selector consumption integration (2026-10-10)
+
+Canonical selector/control/fetch owners and conditional CALL collector/runtime consumers now exist. Parent cohort:135 passed,1warning/31.41s; scoped lint and startup architecture passed. Parent reproduced three false admissions (post-native module mutation, exhausted work, expired deadline) and fixed them. Real main remains refused at21414shared units/1.55s, stable sources; acceptance0/16starter,0/118matrix. Phase-cost receipt identifies repeated whole-certificate scans; derived identity indexing and removal of duplicate synchronous binding consumption are in progress. New engine typing repaired with direct MyPy0issues. Focused tests are not full decompiler acceptance. Evidence: .cache/selector-parent-integrated-tests.log, .cache/selector-canonical-current/phase-cost.log.
+
+Final selector slice:142passed/1warning46.84s, existing call regressions17passed/1warning16.18s. Immutable derived identity index enrolled with six controls; all consumers retain live native/source authentication. Stable actual main refuses20579units/11.55s. Phasecost:16574producer plus1832pernativeconsume; constructor and record each revalidate firstcall, exhausting budget. Next critical action belongs to existing native-fact import/copy owner, not increasedprooflimits. Acceptance remains0/16starter,0/118matrix.
+
+Posttyping-rename authority/invariant/index cohort29passed/1warning39.81s; scopedlint0 and directMyPy4owners0. New bounded native-rebind-budget Devin launched with exactpreimages and production source ownership limited to nativefact import/copy/rebind seams. Parent review pending.
+
+CALL-only selector retention: red corpus identity regression reproduced unused
+non-CALL snapshots; parent removed only their retention, preserving complete
+fetch/control/STORE/induction replay. Conflicting CALL and changed-CS non-CALL
+fetch negatives are enrolled. Read-only consumer review accepted. Scoped lint
+and direct MyPy passed; five-file cohort52passed/1warning14.56s. Stable main
+still refused20082units/4.68s at unchanged20000/25s. Phase costs:
+invariant13981(4snapshots/8pairs), firstCALL13985→17983 accepted, second
+CALL17983→20080 budget-refused, lasttwo refused. No full invocation or case
+acceptance:0/16starter,0/118matrix. Devin native-rebind investigation ended124
+after20min, no ownedproductionhash changes; four real lifts already cached.
+Next seam: synchronous final CALL binding/consumption batching; persistent
+identity shortcuts are rejected because detached native rows and deliberate
+same-object mutations require fresh whole-graph checks. Evidence:
+.cache/selector-canonical-current/call-only-{red,green,lint,mypy,main,phases}.log.

@@ -4,10 +4,38 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 from tools.dosunit.tests.test_real16_call_composition import _caller_bytes, _caller_catalog, _lower
 
-from tools.dosunit.compare.real16_binary_compare import compare_binary16
+
+def test_candidate_only_call_reaches_native_counterexample(tmp_path: Path) -> None:
+    """A compiler-added call must expose a changed return rather than be skipped."""
+    oracle, candidate = tmp_path / "oracle.exe", tmp_path / "candidate.exe"
+    oracle_image, candidate_image = bytearray(0x240), bytearray(0x240)
+    oracle_image[0x200:0x204] = bytes.fromhex("b80100c3")
+    candidate_image[0x200:0x204] = bytes.fromhex("e82d00c3")
+    candidate_image[0x230:0x234] = bytes.fromhex("b80200c3")
+    oracle.write_bytes(_mz_exe(bytes(oracle_image)))
+    candidate.write_bytes(_mz_exe(bytes(candidate_image)))
+    caller = _edge_function("demo.exe:caller", "caller", offset=0x200, size=4)
+    oracle_catalog = {
+        "schema": "dosunit.functions.v1", "module": "demo.exe",
+        "program_kind": "mz_exe", "diagnostics": [], "functions": [caller],
+    }
+    candidate_catalog = {**oracle_catalog, "functions": [
+        caller, _edge_function("demo.exe:callee", "callee", offset=0x230, size=4),
+    ]}
+    report = compare_binary16(
+        oracle, candidate, oracle_catalog, candidate_catalog,
+        selected=("caller",), solver_timeout_ms=5000,
+    )
+    assert report["status"] == "counterexample", report["proof"]
+    calls = report["backend"]["direct_calls"]["demo.exe:caller"]
+    assert calls["calls"]["inlined_calls"] == 1
+    assert calls["calls"]["return_targets_proved"] == 1
+    assert any(row.get("reg") == "ax" for row in calls["mismatches"])
 
 
 @pytest.mark.parametrize("candidate_argument,expected", [(1, "proved"), (2, "counterexample")])

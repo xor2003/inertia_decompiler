@@ -145,14 +145,13 @@ def _drop_unproved_call_boundary_identities(
             del state[register]
 
 
-def call_preservation_at_instruction_8616(
+def bound_call_preservation_at_instruction_8616(
     artifact: IRFunctionArtifact | None,
     block: IRBlock,
     instruction: IRInstr,
     proofs: tuple[SegmentCallPreservationResult8616, ...],
-    invocation_scope: Real16InvocationDomain8616 | None = None,
 ) -> SegmentCallPreservationResult8616 | None:
-    """Select one complete exact-call proof bound to this identical raw body."""
+    """Select one identical raw-body candidate without authenticating evidence."""
     candidates = tuple(
         proof for proof in proofs
         if proof.caller.artifact is artifact and proof.callsite_addr == instruction.addr
@@ -161,8 +160,21 @@ def call_preservation_at_instruction_8616(
         return None
     if instruction.op != "CALL" or not any(candidate is block for candidate in artifact.blocks):
         return None
-    proof = candidates[0]
-    return proof if proof.complete_for(invocation_scope) else None
+    return candidates[0]
+
+
+def call_preservation_at_instruction_8616(
+    artifact: IRFunctionArtifact | None,
+    block: IRBlock,
+    instruction: IRInstr,
+    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+) -> SegmentCallPreservationResult8616 | None:
+    """Select one complete exact-call proof bound to this identical raw body."""
+    proof = bound_call_preservation_at_instruction_8616(
+        artifact, block, instruction, proofs,
+    )
+    return proof if proof is not None and proof.complete_for(invocation_scope) else None
 
 
 class _LoaderMemorySurface8616(Protocol):

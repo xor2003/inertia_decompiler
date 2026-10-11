@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -20,6 +21,7 @@ from inertia.lowering.bounded_global_array_declarations import (
     BoundedGlobalArrayLoweringStatus8616,
     materialize_project_bounded_global_arrays_8616,
 )
+from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
 from inertia.lowering.global_declaration_extents import (
     GlobalDeclarationExtentApplicationStatus8616,
 )
@@ -27,8 +29,6 @@ from inertia.lowering.indexed_global_evidence import (
     IndexedSegmentedGlobalEvidence8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,
     GlobalObjectLayoutEvidence8616,

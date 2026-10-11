@@ -5,23 +5,23 @@ from dataclasses import replace
 from hashlib import sha256
 
 import pytest
-from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain, ControlWidth
-from inertia.ir.condition_ir import (
-    ConditionIR,
-    build_condition_from_cmp_8616,
-    build_condition_from_test_8616,
-    deduplicate_conditions_8616,
-)
 from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_16
 from unicorn.x86_const import UC_X86_REG_CS, UC_X86_REG_EFLAGS, UC_X86_REG_EIP, UC_X86_REG_IP
 
 from inertia.alias.condition_register_liveness import _condition_by_block_8616
+from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain, ControlWidth
 from inertia.frontend.x86_16.relative_control_edge import (
     DecodedRelativeEdge,
     RelativeEdgeForm,
     RelativeEdgeRefusal,
     RelativeEdgeRefusalReason,
     decode_relative_edge,
+)
+from inertia.ir.condition_ir import (
+    ConditionIR,
+    build_condition_from_cmp_8616,
+    build_condition_from_test_8616,
+    deduplicate_conditions_8616,
 )
 from tools.dosunit.runtime.unicorn_engine import make_guest
 

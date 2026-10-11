@@ -8,7 +8,10 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+
 import inertia.lowering.real_mode_linear as real_mode_linear
+from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.segmented_memory_lowering import (
     materialize_runtime_helper_segment_carriers_8616,
 )
@@ -20,9 +23,6 @@ from inertia.lowering.semantic_cast import (
 from inertia.lowering.stack_lowering import (
     _canonicalize_stack_cvar_expr,
 )
-from archinfo import ArchX86
-
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 
 def _codegen() -> SimpleNamespace:

@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
+
 from inertia.lowering.gp_word_assignment import CGPWordAssignment8616
 from inertia.lowering.near_return_body_preflight import (
     NearReturnBodyFailure8616,

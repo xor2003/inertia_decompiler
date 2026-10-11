@@ -15,13 +15,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.rustylib.ailment import Tags
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.frame_register_carriers import (
-    collect_frame_register_carriers_8616,
-)
-from inertia.lowering.real_mode_linear import (
-    prune_frame_prologue_stack_assignments_8616,
-)
 from capstone.x86_const import (
     X86_INS_MOV,
     X86_INS_POP,
@@ -32,6 +25,13 @@ from capstone.x86_const import (
     X86_REG_SP,
 )
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.frame_register_carriers import (
+    collect_frame_register_carriers_8616,
+)
+from inertia.lowering.real_mode_linear import (
+    prune_frame_prologue_stack_assignments_8616,
+)
 from inertia.validation.validation_dataflow import validate_structured_def_use_8616
 
 

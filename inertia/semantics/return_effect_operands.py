@@ -30,6 +30,7 @@ class BranchTargetReturnEffectKind8616(Enum):
     MOV_REG_IMM = "mov_reg_imm"
     MOV_REG_STACK = "mov_reg_stack"
     MOV_REG_DIRECT_GLOBAL = "mov_reg_direct_global"
+    MOV_REG_REG = "mov_reg_reg"
     AX_ALU_IMM = "ax_alu_imm"
     AX_INCDEC = "ax_incdec"
     JUMP = "jump"
@@ -77,6 +78,7 @@ class BranchTargetReturnEffect8616:
     mem_disp: int | None = None
     mem_size: int | None = None
     jump_target: int | None = None
+    src_reg: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

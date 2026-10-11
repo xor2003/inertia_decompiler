@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from pyvex.lifting.util.syntax_wrapper import VexValue
 from pyvex.lifting.util.vex_helper import IRSBCustomizer, Type
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.cr import CR
 from inertia.frontend.x86_16.emulator import Emulator
 

@@ -2,13 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from inertia.ir.segment_contract import SegmentFunctionContract
-from inertia.semantics.segment_function_summary import SegmentFunctionSummary8616
-from inertia.semantics.segment_program_layout_contract import (
-    SegmentProgramLayoutAspect8616,
-    SegmentProgramLayoutVerdict8616,
-)
-
 from inertia.cli.discovery_cache_contract import SourceRegionCatalogEvidence8616
 from inertia.cli.segment_program_layout_reporting import (
     attach_segment_program_layout_8616,
@@ -16,6 +9,12 @@ from inertia.cli.segment_program_layout_reporting import (
     with_segment_program_function_evidence_8616,
 )
 from inertia.cli.work_items import FunctionWorkItem, FunctionWorkResult
+from inertia.ir.segment_contract import SegmentFunctionContract
+from inertia.semantics.segment_function_summary import SegmentFunctionSummary8616
+from inertia.semantics.segment_program_layout_contract import (
+    SegmentProgramLayoutAspect8616,
+    SegmentProgramLayoutVerdict8616,
+)
 
 _CLOSED_COUNTS = {
     "raw_fact_count": 0,

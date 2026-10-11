@@ -2,12 +2,12 @@
 
 from dataclasses import replace
 
-import angr
 import pytest
-import inertia.frontend.x86_16.stack_tracker_return_segment as native_adapter
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir import IRValue, MemSpace
 
+import inertia.frontend.x86_16.stack_tracker_return_segment as native_adapter
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+from inertia.ir import IRValue, MemSpace
 from inertia.semantics.compiler_helpers import hook_x86_16_compiler_helper_at_8616
 from tests.integration.test_x86_16_call_stack_allocation_proof import PROBE
 
@@ -17,12 +17,13 @@ _AFTER_CALL = 0x1009
 
 
 def _track(prefix, helper=PROBE):
+    apply_x86_16_bootstrap()
     displacement = _HELPER - (_ENTRY + len(prefix) + 3)
     code = prefix + b"\xe8" + displacement.to_bytes(2, "little")
     after_call = _ENTRY + len(code)
     code += bytes.fromhex("57 5f 8b e5 5d c3")
     code = code.ljust(_HELPER - _ENTRY, b"\x90") + helper
-    project = angr.load_shellcode(code, arch=Arch86_16(), load_address=_ENTRY)
+    project = _build_project_from_bytes(code, base_addr=_ENTRY, entry_point=_ENTRY)
     hook_x86_16_compiler_helper_at_8616(project, _HELPER)
     cfg = project.analyses.CFGFast(normalize=True, function_starts=[_ENTRY])
     function = cfg.kb.functions[_ENTRY]
@@ -31,14 +32,12 @@ def _track(prefix, helper=PROBE):
 
 
 @pytest.mark.parametrize("allocation", [0, 2, 18])
-def test_native_tracker_consumes_proven_allocation_before_following_pushes(allocation):
+def test_native_tracker_refuses_guarded_identity_without_domain_proof(allocation):
     # PUSH BP; MOV BP,SP; MOV AX,n; CALL helper; PUSH/POP DI; restore BP; RET.
     prefix = bytes.fromhex("55 8b ec b8") + allocation.to_bytes(2, "little")
 
-    # angr's stack-offset domain uses the register width, including ESP's
-    # preserved upper word. Compare its exact modular representation.
-    expected = (-2 - allocation) & 0xffffffff
-    assert _track(prefix) == expected
+    # Prefix identity leaves the guard-failure continuation unproved.
+    assert _track(prefix) is None
 
 
 @pytest.mark.parametrize("clobber", ["b0 04", "b4 00", "8b c2", "66 b8 02 00 00 00"])
@@ -127,3 +126,12 @@ def test_native_tracker_never_consumes_an_unproven_call_operand(monkeypatch, mut
     result = _track(bytes.fromhex("55 8b ec b8 12 00"))
     assert seen
     assert result == (-2) & 0xffffffff
+
+
+@pytest.mark.parametrize("allocation", [0, 18, 32])
+def test_native_tracker_rejects_returning_failure_tail_with_same_identity(allocation):
+    """The failure tail can return with changed BP and no requested allocation."""
+    prefix = bytes.fromhex("55 8b ec b8") + allocation.to_bytes(2, "little")
+    actual_prefix = bytes.fromhex("59 8b dc 2b d8 72 0a 3b 1e ec 00 72 04 8b e3 ff e1")
+    returning_failure = bytes.fromhex("bd ef be ff e1")
+    assert _track(prefix, helper=actual_prefix + returning_failure) is None

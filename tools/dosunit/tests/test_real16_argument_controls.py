@@ -8,11 +8,11 @@ import json
 from pathlib import Path
 
 import pytest
+
+from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.tests.test_dosunit_tool import _edge_function
 from tools.dosunit.tests.test_real16_call_composition import _lower
-
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
-from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
 
 # Caller CALL sites/continuations are identical across each pair; differing
 # callee encodings cannot change the saved return bytes by shifting the caller.

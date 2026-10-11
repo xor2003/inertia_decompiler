@@ -807,6 +807,18 @@ def test_architecture_check_rejects_new_postprocess_protected_import(tmp_path):
     assert any(item.rule == "postprocess-protected-import" for item in violations)
 
 
+def test_condition_polarity_delegate_is_limited_to_structuring_consumer(tmp_path):
+    """Permit the legacy Structuring consumer, keeping rewrite imports forbidden."""
+    root, _cli = _write_minimal_tree(tmp_path)
+    for filename in ("decompiler_postprocess_typed_conditions.py", "decompiler_postprocess_new.py"):
+        path = root / filename
+        path.write_text("from inertia.structuring.condition_comparison_polarity import "
+                        "condition_comparison_polarity_8616\n", encoding="utf-8")
+        violations = arch_check._check_postprocess_file_imports(root, path)
+        rejected = any(item.rule == "postprocess-protected-import" for item in violations)
+        assert rejected is (filename == "decompiler_postprocess_new.py")
+
+
 def test_architecture_check_admits_typed_lowering_consumers_only_from_stage(tmp_path):
     root, _cli = _write_minimal_tree(tmp_path)
     (root / "decompiler_postprocess_stage.py").write_text(

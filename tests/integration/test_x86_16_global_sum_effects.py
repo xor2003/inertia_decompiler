@@ -7,6 +7,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CFunctionCall, CReturn, CStatements, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+
 import inertia.postprocess.decompiler_postprocess_stage as stage
 from tests.structuring.test_x86_16_structuring_return_chains import _const, _DummyCodegen
 

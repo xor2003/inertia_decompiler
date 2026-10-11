@@ -15,12 +15,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from inertia.semantics.caller_return_use_contracts import CallerReturnUseFact8616
-
 from inertia.alias.domains import AX, DomainKey
 from inertia.ir.core import IRValue
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact, SSAPhiNode
+from inertia.semantics.caller_return_use_contracts import CallerReturnUseFact8616
 from inertia.widening.stack_word_register_transfers import StackWordStorageVersion8616
 
 from .interprocedural_storage_return_pointer_block import (

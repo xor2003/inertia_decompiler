@@ -20,6 +20,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFixedSizeArray, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+from archinfo import ArchX86
+
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -33,8 +35,6 @@ from inertia.lowering.real_mode_linear import (
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
-from archinfo import ArchX86
-
 from inertia.semantics.call_contracts import (
     CallContractEvidenceKind8616,
     IntegerValueRange8616,

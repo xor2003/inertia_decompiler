@@ -16,6 +16,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+
 from inertia.lowering.indexed_global_evidence import (
     IndexedSegmentedGlobalEvidence8616,
 )
@@ -28,8 +30,6 @@ from inertia.pipeline.structured_ast_query_index import (
     StructuredAstQueryIndex8616,
     StructuredAstQuerySession8616,
 )
-from archinfo import ArchX86
-
 from inertia.validation.control_flow_ast_index import ControlFlowAstIndex8616
 
 

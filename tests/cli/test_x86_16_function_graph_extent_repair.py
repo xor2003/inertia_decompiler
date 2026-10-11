@@ -9,12 +9,9 @@ import angr
 import pytest
 from angr.codenode import BlockNode
 from angr.knowledge_plugins.functions.function import Function
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.ssa_function import build_x86_16_function_ssa
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 
-import inertia.cli.function_graph_extent_repair as extent_repair
 import inertia.cli.cli_function_discovery as discovery
+import inertia.cli.function_graph_extent_repair as extent_repair
 from inertia.cli.function_graph_extent_repair import (
     FunctionGraphExtentRefusalReason8616,
     FunctionGraphExtentRepairError,
@@ -22,6 +19,10 @@ from inertia.cli.function_graph_extent_repair import (
     enforce_covered_transition_sources_8616,
     repair_undercovered_transition_sources_8616,
 )
+from inertia.frontend.x86_16 import lift_86_16  # noqa: F401 -- register the native lifter for shellcode projects
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.ssa_function import build_x86_16_function_ssa
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 
 
 def _function_with_transition(

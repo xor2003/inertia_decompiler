@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import inertia.postprocess.decompiler_postprocess_stage as post_stage
 from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
     CConstant,
@@ -16,7 +15,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
+import inertia.postprocess.decompiler_postprocess_stage as post_stage
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.cod_extract import CODGlobalRef
+from inertia.lowering.real_mode_linear import DirectStackMoveSourceKind8616
 from inertia.postprocess.decompiler_postprocess_stage import (
     _canonical_cod_global_name_8616,
     _classify_postprocess_validation_delta_8616,
@@ -51,9 +54,6 @@ from inertia.postprocess.decompiler_postprocess_stage import (
     _snapshot_codegen_inertia_metadata_8616,
     _try_accept_failed_postprocess_validation_8616,
 )
-from inertia.lowering.real_mode_linear import DirectStackMoveSourceKind8616
-
-from inertia.frontend.x86_16.cod_extract import CODGlobalRef
 from inertia.postprocess.pass_validation_policy import (
     LOCAL_PROOF_REQUIRED_POSTPROCESS_PASS_NAMES_8616,
     MANDATORY_VALIDATION_PASS_NAMES_8616,
@@ -391,7 +391,7 @@ def test_unchanged_postprocess_pass_skips_validation_summary_collection(monkeypa
 
     monkeypatch.setattr(post_stage, "collect_x86_16_tail_validation_summary", collect_summary)
     monkeypatch.setattr(post_stage, "compare_x86_16_tail_validation_summaries", compare_summary)
-    monkeypatch.setattr(post_stage, "x86_16_tail_validation_result_passed", lambda _validation: True)
+    monkeypatch.setattr(post_stage, "x86_16_tail_validation_result_preserves_behavior", lambda _validation: True)
     monkeypatch.setattr(post_stage, "_regenerate_text_safely", regenerate)
     monkeypatch.setattr(post_stage, "_dump_postprocess_trace_text_8616", lambda *_args, **_kwargs: None)
 

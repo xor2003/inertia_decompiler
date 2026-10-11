@@ -8,6 +8,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable
+
 from inertia.ir import SegmentOrigin
 from inertia.ir.segment_call_preservation import (
     SegmentCallPreservationResult8616,

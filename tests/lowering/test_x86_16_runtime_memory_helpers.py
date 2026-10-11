@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CFunctionCall, CUnaryOp
 from angr.sim_type import SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.real_mode_linear import (
     _pure_consumed_push_carrier_expression_8616,
@@ -66,6 +67,9 @@ def test_consumed_push_purity_keeps_ordinary_calls() -> None:
 ])
 def test_indexed_prefix_survives_only_proven_read_helper(tag, nested_call, expected):
     """A generated read preserves bounds, but its unknown argument call does not."""
+    from inertia.structuring.indexed_stack_ranges import (
+        collect_indexed_stack_read_proofs_8616,
+    )
     from tests.structuring.test_x86_16_indexed_stack_ranges import (
         _Codegen as RangeCodegen,
     )
@@ -73,10 +77,6 @@ def test_indexed_prefix_survives_only_proven_read_helper(tag, nested_call, expec
         _const,
         _signed_remainder_fact,
         _two_loop_fixture,
-    )
-
-    from inertia.structuring.indexed_stack_ranges import (
-        collect_indexed_stack_read_proofs_8616,
     )
 
     root, random_read, high_read = _two_loop_fixture()

@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import inertia.structuring.decompiler_structuring_stage as stage
-
 from inertia.structuring.direct_stack_move_branches import (
     DirectStackMoveBranchArm8616,
     DirectStackMoveBranchFact8616,

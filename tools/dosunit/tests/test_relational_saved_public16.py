@@ -4,11 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_real16_binary_compare import _exe, _verdict
 
+from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.contracts.binary_initial_state import InitialImageReason
 from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.compare.real16_binary_compare import compare_binary16
+from tools.dosunit.tests.test_real16_binary_compare import _exe, _verdict
 
 ORIGINAL = "5589e550515152e30c8d5f01678d49ff894efaebf283c40459585dc3"
 SWAPPED = "5589e550515251e30c8d5f01678d49ff894ef8ebf28b46f88946fa8956f883c40459585dc3"

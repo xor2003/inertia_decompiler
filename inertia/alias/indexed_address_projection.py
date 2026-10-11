@@ -15,11 +15,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.indexed_address_contracts import IndexedAddressEvidence8616, IndexedAddressFact8616
 from inertia.ir.indexed_address_copy_contracts import IndexedAddressCopyEvidence8616
 from inertia.ir.indexed_address_range_contracts import IndexedLoopRangeEvidence8616
+from inertia.pipeline.errors import PipelineHardError
 
 from .alias_model_impl import AliasFailure, AliasStorageFacts, alias_facts_for_ir_address_8616
 from .indexed_address_access_classification import classify_indexed_alias_accesses_8616

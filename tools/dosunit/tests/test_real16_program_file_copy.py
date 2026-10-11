@@ -14,11 +14,10 @@ the exact machine instructions below and the declared manifest contract.
 from dataclasses import replace
 
 import pytest
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
+from tools.dosunit.reporting.real16_program_manifest import ProgramManifest, parse_program_manifest
 from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.runtime.real16_program_file_receipts import FileOperation, FileReceipt
-from tools.dosunit.reporting.real16_program_manifest import ProgramManifest, parse_program_manifest
 from tools.dosunit.runtime.real16_program_model import (
     ProgramAgreement,
     ProgramEventKind,
@@ -27,6 +26,7 @@ from tools.dosunit.runtime.real16_program_model import (
     compare_programs,
 )
 from tools.dosunit.runtime.real16_program_replay import replay_program
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 # Declared input contract: one preopened immutable file on handle 5. The four
 # byte "HEAD" prefix is never read; AH=42 seeks past it and AH=3F serves only

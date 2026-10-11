@@ -10,10 +10,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-import inertia.postprocess.decompiler_postprocess as postprocess
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+import inertia.postprocess.decompiler_postprocess as postprocess
 from inertia.cli import cli_decompilation
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.pipeline.contracts import assert_pipeline_contracts_8616
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.compiler_helpers import CompilerHelperEvidenceKind8616

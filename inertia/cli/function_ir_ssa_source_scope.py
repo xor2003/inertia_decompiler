@@ -97,7 +97,12 @@ def frontend_cache_source_files_8616(root: Path) -> tuple[Path, ...]:
     than compatibility shims.
     """
     from inertia import frontend, semantics
-    from inertia.frontend import x86_16
+    from inertia.frontend import (
+        real16_dosbox_entry_policy,
+        real16_dosbox_int21_frame,
+        real16_dosbox_resize,
+        x86_16,
+    )
     from inertia.frontend.x86_16 import (
         arch_86_16,
         control_coordinates,
@@ -124,7 +129,8 @@ def frontend_cache_source_files_8616(root: Path) -> tuple[Path, ...]:
     )
 
     modules = (
-        frontend, x86_16, arch_86_16, control_coordinates, interrupt_contract,
+        frontend, real16_dosbox_entry_policy, real16_dosbox_int21_frame,
+        real16_dosbox_resize, x86_16, arch_86_16, control_coordinates, interrupt_contract,
         lifter_backend, lifter_import, load_dos_mz, load_dos_ne, ne_resources, simos_86_16,
         direction_step, vex_value_contract, vex_bit_source, address_ir_8616,
         semantics, alu_semantics, callee_name_normalization, compiler_helpers,

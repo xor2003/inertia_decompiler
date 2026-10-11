@@ -11,10 +11,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
 )
 from angr.sim_type import SimTypeShort
+from archinfo import ArchX86
+
 from inertia.lowering.real_mode_linear import _replace_tagged_assignment_8616
 from inertia.lowering.stack_update_scope_guard import require_stack_update_scope_8616
 from inertia.pipeline.errors import PipelineHardError
-from archinfo import ArchX86
 
 
 def _surface(*, same_instruction=True, else_arm=False, guarded=True):

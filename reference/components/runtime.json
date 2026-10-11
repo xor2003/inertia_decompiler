@@ -3,7 +3,12 @@
   "description": "concrete execution, replay and modeled DOS/PE services",
   "sources": [
     "inertia/frontend/x86_16/interrupt_contract.py",
-    "inertia/frontend/x86_16/simos_86_16.py"
+    "inertia/frontend/x86_16/simos_86_16.py",
+    "inertia/frontend/real16_dosbox_int21_frame.py",
+    "inertia/frontend/real16_dosbox_resize.py",
+    "inertia/frontend/real16_dosbox_entry_policy.py",
+    "tools/dosunit/runtime/real16_dosbox_resize_receipt.py",
+    "inertia/frontend/real16_vector_response8616.py"
   ],
   "public_api": [
     "inertia.frontend.x86_16.interrupt_contract.SoftwareInterruptServiceTargetRegistry8616",
@@ -113,7 +118,10 @@
     "tests/frontend/test_x86_16_structuring_condition_replay.py",
     "tests/frontend/test_x86_16_structuring_replay_generation.py",
     "tests/frontend/test_interrupt_contract.py",
-    "tests/frontend/test_namespace.py"
+    "tests/frontend/test_namespace.py",
+    "tests/frontend/test_real16_dosbox_int21_frame.py",
+    "tests/frontend/test_real16_dosbox_resize.py",
+    "tests/frontend/test_real16_vector_response.py"
   ],
   "focus": [
     "tests/frontend/test_interrupt_contract.py"
@@ -121,8 +129,17 @@
   "consumers": [],
   "quality_sources": [
     "inertia/frontend/x86_16/interrupt_contract.py",
-    "inertia/frontend/x86_16/simos_86_16.py"
+    "inertia/frontend/x86_16/simos_86_16.py",
+    "inertia/frontend/real16_dosbox_int21_frame.py",
+    "inertia/frontend/real16_dosbox_resize.py",
+    "inertia/frontend/real16_dosbox_entry_policy.py",
+    "tools/dosunit/runtime/real16_dosbox_resize_receipt.py",
+    "inertia/frontend/real16_vector_response8616.py"
   ],
-  "routine_tests": [],
+  "routine_tests": [
+    "tests/frontend/test_real16_dosbox_int21_frame.py",
+    "tests/frontend/test_real16_dosbox_resize.py",
+    "tests/frontend/test_real16_vector_response.py"
+  ],
   "order": 9
 }

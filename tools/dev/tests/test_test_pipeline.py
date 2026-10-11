@@ -237,7 +237,12 @@ def test_migrated_component_targets_are_in_routine_lane() -> None:
     targets = routine_test_targets()
     assert "tools/compiler_id/tests/test_flags.py" in targets
     assert "tools/dev/tests/test_component_catalog.py" in targets
-    assert all(test_pipeline.FOCUSED_PYTEST_TARGETS.count(target) == 1 for target in targets)
+    inventories = (
+        *test_pipeline.FOCUSED_PYTEST_TARGETS,
+        *test_pipeline.BUDGETED_BINARY_PYTEST_TARGETS,
+        *test_pipeline.RELATIONAL_BINARY_PYTEST_TARGETS,
+    )
+    assert all(inventories.count(target) == 1 for target in targets)
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert "include reference/components.mk" in makefile
 
@@ -336,11 +341,12 @@ def test_budgeted_binary_lane_caps_concurrency_without_losing_coverage(monkeypat
 
     monkeypatch.setattr(test_pipeline, "_run_command", capture)
     result = test_pipeline._budgeted_binary_lane(workers)
-    target = "tools/dosunit/tests/test_dosunit_transitive_callees.py"
     assert result.status is test_pipeline.LaneStatus.PASSED
     assert commands[0][commands[0].index("-n") + 1] == str(expected)
-    assert commands[0].count(target) == 1
-    assert target not in test_pipeline.FOCUSED_PYTEST_TARGETS
+    for target in test_pipeline.BUDGETED_BINARY_PYTEST_TARGETS:
+        assert commands[0].count(target) == 1
+        assert target not in test_pipeline.FOCUSED_PYTEST_TARGETS
+        assert target not in test_pipeline.RELATIONAL_BINARY_PYTEST_TARGETS
     for lanes in test_pipeline.PIPELINE_TIERS.values():
         assert lanes.count("binary-budgeted") == 1
         assert lanes.index("binary-budgeted") < lanes.index("unit-focused")
@@ -1145,6 +1151,8 @@ def test_relational_binary_lane_keeps_expensive_proofs_in_default_pipeline(monke
         "tools/dosunit/tests/test_real16_direct_jmp_coordinates.py",
         "tests/semantics/test_direct_near_call_target_binding.py",
         "tests/ir/test_x86_16_declared_call_consumption.py",
+        "tests/ir/test_fresh_declared_entry.py",
+        "tests/ir/test_invocation_call_consumption.py",
         "tests/cli/test_declared_call_transport.py",
         "tests/semantics/test_projected_call_consumption.py",
         "tests/integration/test_declared_call_admission.py",

@@ -16,8 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
-from tools.dosunit.tests.test_flat32_conditional_boundaries import _scan_region
 
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.flat32_call_contracts import (
@@ -25,6 +23,8 @@ from tools.dosunit.compare.flat32_call_contracts import (
     _TERM_EDGE_FACTOR,
     _term_nodes,
 )
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
+from tools.dosunit.tests.test_flat32_conditional_boundaries import _scan_region
 
 LIMIT = 12000  # CallCompositionLimits.max_term_nodes default.
 

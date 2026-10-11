@@ -18,6 +18,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -34,6 +35,10 @@ from .no_effect_instructions import (
     BoundNoEffectBlock8616,
     bound_no_effect_block_8616,
     bound_no_effect_instr_8616,
+)
+from .source_graph_binding import (
+    ImmutableSourceGraphFacts8616,
+    capture_immutable_source_graph_facts_8616,
 )
 
 if TYPE_CHECKING:
@@ -321,22 +326,63 @@ def _scoped_projection_census_failure_8616(
     return None
 
 
-def _scoped_native_failure_8616(
+def _native_boundary_facts_8616(
+    boundary: ExactFunctionRangeBoundary8616,
+) -> tuple[object, ...]:
+    """Detach all owned boundary coordinates without invoking loader callbacks."""
+    return (id(boundary.project), boundary.addr, boundary.size, boundary.block_addrs_set,
+            boundary.reachable_instruction_addrs, boundary.successor_edges,
+            tuple(id(block) for block in boundary.blocks), deepcopy(boundary.info),
+            deepcopy(boundary.near_return_continuations), boundary.decode_lower_bound)
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedNativeSurfaceSnapshot8616:
+    """Pre-callback immutable graph facts and detached boundary coordinates.
+
+    ``graph`` is the deeply immutable canonical record set captured before
+    the first producer or authority callback, so equality replays the full
+    field surface and post-callback mutation through live IR aliases cannot
+    rewrite it; no graph objects are retained. ``boundary_facts`` keeps the
+    prior detached behavior — exact deep copies of the owned coordinates —
+    so its ``==`` compares live container types verbatim.
+    """
+
+    graph: ImmutableSourceGraphFacts8616
+    boundary_facts: tuple[object, ...]
+
+
+def _capture_scoped_native_surface_8616(
+    boundary: ExactFunctionRangeBoundary8616, artifact: IRFunctionArtifact,
+) -> ScopedNativeSurfaceSnapshot8616:
+    """Capture immutable facts before any producer or authority callback runs."""
+    return ScopedNativeSurfaceSnapshot8616(
+        capture_immutable_source_graph_facts_8616(
+            artifact.function_addr, artifact.blocks, artifact.refusals),
+        _native_boundary_facts_8616(boundary),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedNativeRebindFacts8616:
+    """Detached immutable native facts and authenticated no-effect census.
+
+    ``graph`` carries the canonical record set of the freshly imported
+    artifact — never the live objects — so the pure seal can compare exact
+    fields without touching native or loader callbacks again.
+    """
+
+    boundary: ExactFunctionRangeBoundary8616
+    graph: ImmutableSourceGraphFacts8616 | None
+    reachable: frozenset[int]
+    failure: IRBoundaryCoverageFailure8616 | None
+
+
+def _prepare_scoped_native_rebind_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
-    artifact: IRFunctionArtifact,
-) -> IRBoundaryCoverageFailure8616 | None:
-    """Independently re-derive the raw native surface and compare it whole.
-
-    A view verdict alone is transport admission, never native coverage:
-    the guarded census importer re-imports the raw artifact under the
-    current boundary, and the comparison covers the full canonical
-    source — every IR field including compare-excluded provenance — so
-    changed bytes, metadata, ordering, or a ``None``/foreign import
-    result all refuse. The retained artifact's instruction census must
-    still equal the boundary's current reachable census.
-    """
-    from .entry_jump_domain import _canonical_source_8616
+) -> ScopedNativeRebindFacts8616:
+    """Complete native import/no-effect callbacks and detach facts for a pure seal."""
     from .real16_invocation_domain import real16_native_census_import_8616
 
     rederived = real16_native_census_import_8616(project, boundary)
@@ -344,27 +390,90 @@ def _scoped_native_failure_8616(
         type(rederived) is not IRFunctionArtifact
         or rederived.function_addr != boundary.addr
     ):
+        return ScopedNativeRebindFacts8616(
+            boundary, None, boundary.reachable_instruction_addrs,
+            IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH,
+        )
+    failure = (None if _instruction_census_matches_8616(boundary, rederived)
+               else IRBoundaryCoverageFailure8616.SCOPED_CENSUS_MISMATCH)
+    return ScopedNativeRebindFacts8616(
+        boundary,
+        capture_immutable_source_graph_facts_8616(
+            rederived.function_addr, rederived.blocks, rederived.refusals),
+        boundary.reachable_instruction_addrs, failure,
+    )
+
+
+def _scoped_native_rebind_failure_8616(
+    boundary: ExactFunctionRangeBoundary8616,
+    artifact: IRFunctionArtifact,
+    facts: ScopedNativeRebindFacts8616,
+    before: ScopedNativeSurfaceSnapshot8616 | None = None,
+) -> IRBoundaryCoverageFailure8616 | None:
+    """Seal current whole IR against detached facts without native/loader callbacks.
+
+    The current graph is encoded exactly once into the same immutable
+    canonical facts, then compared against the pre-callback capture and the
+    freshly detached native facts; detached graphs are never re-walked.
+    """
+    if facts.failure is not None:
+        return facts.failure
+    native = facts.graph
+    if (facts.boundary is not boundary or native is None
+            or boundary.reachable_instruction_addrs != facts.reachable
+            or artifact.function_addr != boundary.addr):
+        return IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
+    current = capture_immutable_source_graph_facts_8616(
+        artifact.function_addr, artifact.blocks, artifact.refusals)
+    if before is not None and (
+        before.graph.function_addr != current.function_addr
+        or before.graph.function_refusals != current.function_refusals
+        or before.boundary_facts != _native_boundary_facts_8616(boundary)
+    ):
         return IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
     # Importers mirror block refusals at function level. Only those already
     # reconciled by the scoped projection may be discharged; unrelated
     # function-only failures are absent from the canonical block digest.
     if any(
-        Counter(source.refusals) - Counter(
-            refusal for block in source.blocks for refusal in block.refusals
-        )
-        for source in (artifact, rederived)
+        Counter(graph.function_refusals) - Counter(graph.block_refusals)
+        for graph in (current, native)
     ):
         return IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
-    if _canonical_source_8616(
-        rederived.function_addr, rederived.blocks
-    ) != _canonical_source_8616(artifact.function_addr, artifact.blocks):
+    if current != native or (before is not None and before.graph != current):
         return IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
-    if not _instruction_census_matches_8616(boundary, artifact):
+    addresses = frozenset(
+        instruction.addr
+        for block in artifact.blocks for instruction in block.instrs
+    )
+    if not addresses or addresses != facts.reachable:
         return IRBoundaryCoverageFailure8616.SCOPED_CENSUS_MISMATCH
     return None
 
 
+def _scoped_native_failure_8616(
+    project: object,
+    boundary: ExactFunctionRangeBoundary8616,
+    artifact: IRFunctionArtifact,
+) -> IRBoundaryCoverageFailure8616 | None:
+    """Re-derive native facts and seal every retained IR field and census freshly."""
+    before = _capture_scoped_native_surface_8616(boundary, artifact)
+    facts = _prepare_scoped_native_rebind_8616(project, boundary)
+    return _scoped_native_rebind_failure_8616(boundary, artifact, facts, before)
+
+
 def _scoped_evidence_failure_8616(
+    project: object, boundary: ExactFunctionRangeBoundary8616, artifact: IRFunctionArtifact,
+    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    consuming_scope: Real16InvocationDomain8616 | None,
+) -> IRBoundaryCoverageFailure8616 | None:
+    """Recheck scoped evidence while discarding its ephemeral CFG projection."""
+    failure, _projection = _scoped_evidence_projection_8616(
+        project, boundary, artifact, scoped_view, consuming_scope,
+    )
+    return failure
+
+
+def _scoped_evidence_projection_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
@@ -372,7 +481,7 @@ def _scoped_evidence_failure_8616(
         ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
     ),
     consuming_scope: Real16InvocationDomain8616 | None,
-) -> IRBoundaryCoverageFailure8616 | None:
+) -> tuple[IRBoundaryCoverageFailure8616 | None, ScopedFunctionCFGProjection8616 | None]:
     """Authenticate the full scoped evidence chain under one entry.
 
     Scoped evidence never reuses the universal registry branch: the raw
@@ -392,36 +501,37 @@ def _scoped_evidence_failure_8616(
 
     view = _typed_scoped_view_8616(scoped_view)
     if view is None or view.failure is not None:
-        return IRBoundaryCoverageFailure8616.SCOPED_VIEW_REFUSED
+        return IRBoundaryCoverageFailure8616.SCOPED_VIEW_REFUSED, None
     scoped_view = view
     if (
         scoped_view.source_artifact is not artifact
         or scoped_view.boundary is not boundary
     ):
-        return IRBoundaryCoverageFailure8616.SCOPED_SURFACE_MISMATCH
+        return IRBoundaryCoverageFailure8616.SCOPED_SURFACE_MISMATCH, None
     if (
         consuming_scope is None
         or type(consuming_scope) is not Real16InvocationDomain8616
         or consuming_scope.project is not project
     ):
-        return IRBoundaryCoverageFailure8616.SCOPED_SCOPE_UNBOUND
+        return IRBoundaryCoverageFailure8616.SCOPED_SCOPE_UNBOUND, None
     projection = scoped_view.cfg_projection_for(consuming_scope)
     if type(projection) is not ScopedFunctionCFGProjection8616:
-        return IRBoundaryCoverageFailure8616.SCOPED_VIEW_REFUSED
+        return IRBoundaryCoverageFailure8616.SCOPED_VIEW_REFUSED, None
     if (
         projection.source_artifact is not artifact
         or projection.scope is not consuming_scope
         or projection.function_addr != artifact.function_addr
     ):
-        return IRBoundaryCoverageFailure8616.SCOPED_SURFACE_MISMATCH
+        return IRBoundaryCoverageFailure8616.SCOPED_SURFACE_MISMATCH, None
     if any(projection.pending.values()):
-        return IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
+        return IRBoundaryCoverageFailure8616.SCOPED_REFUSAL, None
     census_failure = _scoped_projection_census_failure_8616(
         boundary, artifact, projection
     )
     if census_failure is not None:
-        return census_failure
-    return _scoped_native_failure_8616(project, boundary, artifact)
+        return census_failure, None
+    native_failure = _scoped_native_failure_8616(project, boundary, artifact)
+    return native_failure, projection if native_failure is None else None
 
 
 def _scoped_coverage_failure_8616(
@@ -513,3 +623,41 @@ def prove_scoped_ir_boundary_coverage_8616(
         artifact, boundary, failure, 1, 1, accepted, accepted, 1 - accepted,
         scoped_view=scoped_view,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedIRBoundaryConsumption8616:
+    """Fresh coverage ledger and CFG projection for one synchronous consumption.
+
+    Neither field authorizes later reuse. A later operation must call the
+    producer again; retained coverage.complete_for keeps its full replay.
+    """
+
+    coverage: IRBoundaryCoverageResult8616
+    projection: ScopedFunctionCFGProjection8616 | None
+
+
+def consume_scoped_ir_boundary_projection_8616(
+    project: object, boundary: ExactFunctionRangeBoundary8616, artifact: IRFunctionArtifact,
+    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    consuming_scope: Real16InvocationDomain8616 | None,
+) -> ScopedIRBoundaryConsumption8616:
+    """Authenticate one live surface once and return its corresponding projection.
+
+    The exact same source, scope, refusal, instruction census and native-byte
+    checks used by retained coverage run here. No proof is cached or published.
+    """
+    failure: IRBoundaryCoverageFailure8616 | None
+    projection: ScopedFunctionCFGProjection8616 | None
+    if boundary.project is not project:
+        failure, projection = IRBoundaryCoverageFailure8616.PROJECT_MISMATCH, None
+    else:
+        failure, projection = _scoped_evidence_projection_8616(
+            project, boundary, artifact, scoped_view, consuming_scope,
+        )
+    accepted = int(failure is None)
+    coverage = IRBoundaryCoverageResult8616(
+        artifact, boundary, failure, 1, 1, accepted, accepted, 1 - accepted,
+        scoped_view=scoped_view,
+    )
+    return ScopedIRBoundaryConsumption8616(coverage, projection)

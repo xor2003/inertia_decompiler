@@ -5,6 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
 import tests.ir.test_x86_16_scoped_ir_view as fixtures
 from tests.ir.test_x86_16_scoped_ir_view import world  # noqa: F401
 

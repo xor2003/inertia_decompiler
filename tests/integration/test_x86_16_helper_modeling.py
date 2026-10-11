@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from angr.sim_type import SimStruct, SimTypeShort
 
-from inertia.lowering.analysis_helpers import _operand_expr, interrupt_service_declarations
 import inertia.cli.cli_helper_modeling as cli_helper_modeling
+from inertia.lowering.analysis_helpers import _operand_expr, interrupt_service_declarations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DECOMPILE_PATH = REPO_ROOT / "decompile.py"
@@ -914,6 +914,10 @@ def test_patch_interrupt_service_call_sites_handles_bios_vectors(monkeypatch):
         lambda _project, _call: (0xFE012, "bios_memsize"),
     )
 
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
+
     changed = _decompile.patch_interrupt_service_call_sites(function, None)
 
     assert changed
@@ -969,6 +973,10 @@ def test_patch_interrupt_service_call_sites_removes_only_proven_terminate_return
         "ensure_interrupt_service_hook",
         lambda _project, call: (_decompile.interrupt_service_addr(call), "service"),
     )
+
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
 
     assert _decompile.patch_interrupt_service_call_sites(function, None)
     assert function._call_sites[0x1234] == (0xFE04C, None)

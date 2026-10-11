@@ -12,11 +12,11 @@ from typing import cast
 import capstone
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from pyvex.types import Arch
 
 import tools.dosunit.catalog.binary_callee_region_scan as scanner
 import tools.dosunit.compare.straightline_ssa as S
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from tools.dosunit.catalog.binary_callee_control_target import proven_terminal_target
 from tools.dosunit.catalog.binary_callee_region_contracts import (
     EdgeKind,

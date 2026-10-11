@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests.fixtures.x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
 
+from tests.fixtures.x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

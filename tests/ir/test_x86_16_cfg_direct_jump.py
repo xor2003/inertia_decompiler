@@ -10,16 +10,16 @@ import pytest
 import pyvex
 from angr.analyses.cfg.cfg_fast import CFGFast
 from angr.analyses.cfg.indirect_jump_resolvers.default_resolvers import DEFAULT_RESOLVERS
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 
 from inertia.alias.register_reaching_source import RegisterReachingSourceVerdict8616
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_cfg_direct_jobs import register_native_direct_job_adapter_8616
 from inertia.frontend.x86_16.frontend_cfg_direct_jump import (
     NativeDirectJumpResolver8616,
     register_native_direct_jump_resolver_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 
 
 def test_forward_jump_discovers_native_condition_block() -> None:

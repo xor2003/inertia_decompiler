@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen import c
+
 import inertia.lowering.c_ast_utils as ast
 
 CODEGEN = SimpleNamespace(next_ident=lambda name: name, next_node_idx=count().__next__)

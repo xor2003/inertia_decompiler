@@ -97,51 +97,30 @@ result, not a complete-suite audit.
 Step 9 additionally retains its full-suite and global quality acceptance. None
 of these remaining obligations is closed by this guard.
 
-## Positive Allocation Proof
+## Guarded Allocation Candidates
 
-Follow-up checkpoint: approximately 06:54-07:21 +02:00, about 27 minutes elapsed
-including probes and gates; active engineering time was not separately measured.
-The new Semantics owner is
-`semantics/call_stack_allocation.py`. It combines frontend binary helper evidence
-with a complete AX constant assignment in the caller's IR. Architectural AX
-aliases come from the existing register-family inventory. Partial/full AX
-clobbers, intervening calls, missing values and incompatible summaries refuse.
-The summary's requested size is checked for conflict, never used as the value
-proof. No named-probe classification is required when binary evidence exists.
+The owner is `inertia/semantics/call_stack_allocation.py`. Binary helper identity
+and a reaching AX constant describe a `CallStackAllocationCandidate8616`; they
+do not prove allocation or BP preservation. Unknown AX requests remain explicit
+candidates too, preventing an unmarked helper from falling through to the
+balanced-call ABI. Call identity uses the existing target-equivalence owner.
 
-Two pre-Alias integration controls failed before implementation. Alias also
-discarded every nonzero call delta; two controls failed before that repair.
-Alias now applies a complete, non-escaping delta relative to machine-call entry
-SP, excluding the already-executed return-frame push. Unknown entry SP stays
-unknown. Tests also check saves made after allocation use adjusted coordinates.
+The helper's carry and DS-limit guards can reach a failure continuation outside
+the matched prefix. A returning-tail counterexample preserves that prefix but
+changes BP and returns without the requested allocation. Therefore candidates
+produce `STACK_ALLOCATION_UNPROVEN`, retain the CALL and its failure path, and
+leave the native stack coordinate unknown. No positive allocation authority is
+currently published by this owner.
 
-The first live integration probe exposed a coordinate mismatch: slice IR calls
-0x21c2 while its summary retains original target 0x11222. The binary helper
-evidence was present. The repair consumes the existing
-`call_target_identity.x86_16_call_targets_equivalent_8616` mapping instead of
-inventing a relocation rule or accepting different targets by helper name.
-The corrected test fixture supplies the linked-image bounds that mapping needs.
+To admit allocation, prove the guard conditions at the authenticated invocation
+frontier, or prove complete effects for every returning continuation. Preserve
+register, flag, memory and control effects too. A size, helper name, matched
+prefix or future status flag cannot replace that certificate. Alias may consume
+an independently complete stack effect; it must not promote a candidate.
 
-The fresh live probe subsequently collected
-`CallStackAllocationProof8616(callsite_addr=4102, target_addr=70178,
-value_instruction_addr=4099, allocation_size=18)`.
-This proves runtime collection, not successful final C: the function still
-fails its existing uninitialized saved-register stack-local guard.
-Logs and typed inputs are in `/home/xor/.cache/initmenu-allocation-source.jsonl`
-and `initmenu-allocation-source-after.log`.
-
-The expanded focused run has 179 passes in 7.71s. MyPy passes all four changed
-production owners; Pyright passes the new Semantics module. Full architecture
-checks pass. New-module Ruff is clean; existing Ruff debt remains in the older
-Alias transfer, semantic publication and architecture-check owners. Global
-quality-fast remains red. The new source and tests are enrolled in Make,
-routine tests, ownership and architecture promotion lists. Raw IR/SSA caching
-is unchanged; semantic source changes already enter the downstream cache scope.
-
-The final routine lane has 4,505 passes and the same three SORTD failures in
-208.89s. All seven MS C tiny round trips still pass; QuickC remains three of
-four. The unmarked-probe positive control is included in this routine result.
-No stable complete-suite audit was run. Step 9 remains open.
+Controls: `tests/semantics/test_guarded_stack_allocation_authority.py` and
+`tests/frontend/test_guarded_stack_allocation_consumer.py`. Concrete returning
+counterexamples are retained under `.cache/guarded-stack-contract/`.
 
 For the next BP repair, `semantics/call_register_effects.py` is specifically a
 synthetic-stub contract; its callee-saved set covers BX/DI/SI, not BP. Do not

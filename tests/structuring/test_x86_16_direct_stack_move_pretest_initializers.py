@@ -16,15 +16,15 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+from capstone import CS_GRP_JUMP
+from capstone.x86_const import X86_INS_JLE, X86_INS_JMP, X86_OP_IMM
+
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
 )
 from inertia.lowering.semantic_cast import CSemanticCast8616
-from archinfo import ArchX86
-from capstone import CS_GRP_JUMP
-from capstone.x86_const import X86_INS_JLE, X86_INS_JMP, X86_OP_IMM
-
 from inertia.structuring.direct_stack_move_pretest_initializers import (
     materialize_direct_stack_move_pretest_initializers_8616,
     place_direct_stack_move_pretest_initializer_assignment_8616,

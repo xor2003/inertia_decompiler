@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import Protocol, cast
 
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.structuring.structuring_cfg_ownership import CFGOwnershipArtifact
 from inertia.widening.carry_borrow_pipeline import CarryBorrowWideningPipeline8616
 

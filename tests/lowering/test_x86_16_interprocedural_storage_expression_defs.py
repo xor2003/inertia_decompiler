@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from inertia.semantics.callsite_summary import (
-    CallsitePushExprOp8616,
-    CallsitePushSourceKind8616,
-)
+
 from inertia.ir import SSAFunctionArtifact
 from inertia.lowering.interprocedural_storage_expression_defs import (
     resolve_expression_argument_definitions_8616,
@@ -12,6 +9,10 @@ from inertia.lowering.interprocedural_storage_expression_defs import (
 from inertia.lowering.interprocedural_storage_reaching_contracts import (
     CallArgumentDefinitionFailure8616,
     PhysicalCallArgumentPiece8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsitePushExprOp8616,
+    CallsitePushSourceKind8616,
 )
 
 BP_VALUE = CallsitePushSourceKind8616.BP_VALUE.value

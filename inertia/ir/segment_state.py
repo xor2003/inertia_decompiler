@@ -56,9 +56,10 @@ class _SegmentStateCodegenBoundary(Protocol):
     _inertia_vex_ir_artifact: object
     _inertia_vex_ir_function_ssa: object
     _inertia_segment_stack_restore_artifact: object
-    _inertia_segment_state_artifact: SegmentStateArtifact
+    _inertia_segment_state_artifact: object
     _inertia_segment_call_preservations_8616: tuple[SegmentCallPreservationResult8616, ...]
     _inertia_segment_function_summary_8616: object
+    _inertia_call_semantic_projection_8616: object
 
 
 class _SegmentStateProjectBoundary(Protocol):
@@ -85,8 +86,8 @@ class SegmentStateArtifact:
     premise-derived near-return continuation view — alongside the
     still-raw ``source_artifact`` and the supplied ``invocation_scope``
     consuming entry. Its presence marks the state as scoped evidence for
-    that entry only — never universal function proof — and the default
-    builder/codegen paths never attach one.
+    that entry only — never universal function proof. Builder/codegen paths
+    attach one only when the consuming caller supplies it explicitly.
     """
 
     entry_states: dict[int, dict[str, SegmentRegisterState]]
@@ -206,8 +207,8 @@ def build_x86_16_segment_state_artifact(
     authenticated effective CFG while keeping ``artifact`` — the identical
     raw source — as the call/write accounting and instruction-identity
     surface; the solver owns the binding checks and refuses unbound
-    combinations. The default codegen apply path never supplies a view, so
-    state it publishes stays universal.
+    combinations. The default codegen apply path remains unscoped; callers
+    can explicitly retain authenticated conditional scope and view inputs.
 
     ``declared_call_effects`` carries only already-admitted frontend
     declarations bound to this identical artifact's function address; each
@@ -321,14 +322,99 @@ def build_x86_16_segment_state_artifact(
     )
 
 
-def apply_x86_16_segment_state_artifact(project: object, codegen: object) -> bool:
-    """Attach the segment-state artifact to codegen for later IR consumers."""
+def _retained_refresh_context_8616(
+    boundary: _SegmentStateCodegenBoundary,
+    project: object,
+    artifact: object,
+) -> tuple[
+    Real16InvocationDomain8616 | None,
+    ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+]:
+    """Retain a consumed scoped context; never infer one from the project."""
+    try:
+        previous = boundary._inertia_segment_state_artifact
+    except AttributeError:
+        return None, None
+    if previous is None:
+        return None, None
+    if not isinstance(previous, SegmentStateArtifact):
+        raise TypeError("retained segment state must be a SegmentStateArtifact or None")
+    scope, view = previous.invocation_scope, previous.scoped_view
+    if scope is None and view is None and not previous.summary.get("scoped_view_bound"):
+        return None, None
+    if (
+        scope is None or view is None or scope.project is not project
+        or previous.source_artifact is not artifact
+    ):
+        raise ValueError("retained conditional segment state no longer binds the codegen source")
+    # The canonical builder below reauthenticates these retained inputs and
+    # recomputes state with the current restore/call preservation evidence.
+    return scope, view
+
+
+def _scoped_semantic_source_8616(
+    boundary: _SegmentStateCodegenBoundary, project: object, artifact: object,
+    scope: Real16InvocationDomain8616 | None,
+    view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+) -> object:
+    """Authenticate a retained conditional Semantics projection back to raw IR."""
+    from inertia.semantics.call_stack_effect_pipeline import CallSemanticProjection8616
+
+    try:
+        projection = boundary._inertia_call_semantic_projection_8616
+    except AttributeError:
+        return artifact
+    if not isinstance(projection, CallSemanticProjection8616) or projection.scoped_input is None:
+        return artifact
+    if scope is None and view is None:
+        try:
+            previous = boundary._inertia_segment_state_artifact
+        except AttributeError:
+            previous = None
+        if isinstance(previous, SegmentStateArtifact):
+            scope, view = previous.invocation_scope, previous.scoped_view
+    context = projection.scoped_input
+    if context.project is not project or context.scope is not scope or context.view is not view:
+        raise ValueError("conditional Semantics requires its explicitly consumed entry")
+    try:
+        function_ssa = boundary._inertia_vex_ir_function_ssa
+    except AttributeError:
+        function_ssa = None
+    if not isinstance(artifact, IRFunctionArtifact) or not isinstance(function_ssa, SSAFunctionArtifact):
+        raise ValueError("conditional Semantics requires its typed IR and SSA outputs")
+    if not projection.matches_codegen(artifact, function_ssa) or not projection.complete:
+        raise ValueError("conditional Semantics source projection is stale or detached")
+    return projection.source_ir
+
+
+def apply_x86_16_segment_state_artifact(
+    project: object,
+    codegen: object,
+    *,
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+    scoped_view: (
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+    ) = None,
+) -> bool:
+    """Attach state retaining the consuming caller's explicit conditional inputs.
+
+    The existing builder/solver authenticates a supplied scope and view against
+    the identical codegen IR before attachment. Invalid supplied evidence
+    raises its binding failure; it never retries an unscoped solve. With no
+    explicit inputs, a previously consumed conditional scope is retained and
+    reauthenticated over the identical source. Fresh codegen remains unscoped.
+    """
     boundary = cast(_SegmentStateCodegenBoundary, codegen)
     try:
         artifact = boundary._inertia_vex_ir_artifact
     except AttributeError:
-        return False
+        artifact = None
+    artifact = _scoped_semantic_source_8616(boundary, project, artifact, invocation_scope, scoped_view)
+    if invocation_scope is None and scoped_view is None:
+        invocation_scope, scoped_view = _retained_refresh_context_8616(boundary, project, artifact)
     if not isinstance(artifact, IRFunctionArtifact):
+        if invocation_scope is not None or scoped_view is not None:
+            raise ValueError("conditional segment state requires its identical source artifact")
         return False
     try:
         candidate_function_ssa = boundary._inertia_vex_ir_function_ssa
@@ -365,6 +451,8 @@ def apply_x86_16_segment_state_artifact(project: object, codegen: object) -> boo
         restore_sources=restore_sources,
         call_preservations=call_preservations,
         declared_call_effects=declared_call_effects,
+        invocation_scope=invocation_scope,
+        scoped_view=scoped_view,
     )
     boundary._inertia_segment_state_artifact = segment_artifact
     _publish_declared_consumption_receipts_8616(

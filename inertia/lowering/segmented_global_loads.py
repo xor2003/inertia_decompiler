@@ -20,7 +20,6 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from types import SimpleNamespace
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
@@ -14349,21 +14348,11 @@ def _codegen_function_addr_8616(codegen: CodegenBoundary8616) -> int | None:
 
 
 def _active_function_8616(project: ProjectBoundary8616, codegen: CodegenBoundary8616) -> object | None:
-    """Return the active function through a dynamic boundary: angr codegen/project metadata."""
+    """Use codegen's retained owner; absent metadata cannot prove a byte extent."""
+    from inertia.ir.vex_import import codegen_function_8616
 
-    cfunc = _codegen_cfunc_optional_8616(codegen)
-    addr = getattr(cfunc, "addr", None)
-    if not isinstance(addr, int):
-        return None
-    functions = getattr(getattr(project, "kb", None), "functions", None)
-    if functions is not None:
-        try:
-            function = functions.function(addr=addr, create=False)
-        except Exception:
-            function = None
-        if function is not None:
-            return cast(object, function)
-    return SimpleNamespace(addr=addr, size=getattr(cfunc, "size", None), name=getattr(cfunc, "name", None))
+    resolved = codegen_function_8616(project, codegen)
+    return resolved[0] if resolved is not None else None
 
 
 def _segment_load_helper_8616(node: object) -> SegmentLoadHelper8616 | None:

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
+
 from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_projection_8616,

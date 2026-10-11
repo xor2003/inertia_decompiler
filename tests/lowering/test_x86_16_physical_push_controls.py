@@ -2,6 +2,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import IRActiveUnary8616, IRValue, MemSpace
 from inertia.lowering.interprocedural_storage_physical_defs import (
     _logical_source_slice_8616,

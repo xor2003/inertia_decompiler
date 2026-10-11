@@ -5,13 +5,15 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-import inertia.frontend.x86_16.public_api as x8616
 import pytest
 from angr.analyses.calling_convention import calling_convention as _cc_analysis
 from angr.analyses.calling_convention import fact_collector as _cc_fact_collector
 from angr.analyses.calling_convention import utils as _cc_utils
 from angr.analyses.decompiler.decompiler import Decompiler
+
 import inertia.frontend.x86_16.bootstrap as bootstrap
+import inertia.frontend.x86_16.public_api as x8616
+import inertia.lowering.segment_global_materialization as segment_global_materialization
 import inertia.postprocess.decompiler_postprocess_inventory as decompiler_postprocess_inventory
 import inertia.postprocess.decompiler_postprocess_stage as decompiler_postprocess_stage
 import inertia.structuring.decompiler_structuring_stage as decompiler_structuring_stage
@@ -19,7 +21,6 @@ import inertia.validation.recovery_confidence as recovery_confidence
 import inertia.validation.tail_validation as tail_validation
 import inertia.widening as widening
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.segment_global_materialization as segment_global_materialization
 from inertia.pipeline.errors import PipelineHardError
 
 

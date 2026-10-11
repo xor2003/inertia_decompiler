@@ -3,18 +3,18 @@
 from types import SimpleNamespace
 
 import pytest
-from inertia.semantics.callsite_register_instruction_facts import instruction_writes_register_8616
-from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 from capstone import CS_ARCH_X86, CS_MODE_16, Cs
 
 from inertia.alias.register_reaching_source import RegisterReachingSourceVerdict8616
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.semantics.callsite_register_instruction_facts import instruction_writes_register_8616
+from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 from inertia.semantics.register_value_preservation import (
     decoded_instruction_self_clears_register_8616,
     decoded_register_bit_effects_8616,
     register_value_family_8616,
     register_value_projection_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 def decode(code):

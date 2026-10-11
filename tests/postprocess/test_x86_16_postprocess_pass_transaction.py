@@ -6,7 +6,6 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import inertia.postprocess.decompiler_postprocess_stage as stage
-
 from inertia.postprocess.pass_transaction import (
     PostprocessMutationGeneration8616,
     PostprocessMutationWitnessCache8616,

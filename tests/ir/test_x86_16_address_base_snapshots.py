@@ -1,6 +1,7 @@
 """Keep address bases tied to the register read used by their VEX expression."""
 
 import pytest
+
 from inertia.ir.core import IRAddress, MemSpace
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact

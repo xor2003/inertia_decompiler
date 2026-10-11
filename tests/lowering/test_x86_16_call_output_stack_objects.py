@@ -17,12 +17,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeArray, SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallsiteReturnShape8616,
-    CallsiteReturnUseKind8616,
-    CallsiteSummary8616,
-)
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 from inertia.lowering.call_output_stack_object_replay import (
@@ -42,6 +38,11 @@ from inertia.lowering.condition_stack_operands import (
 from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteReturnShape8616,
+    CallsiteReturnUseKind8616,
+    CallsiteSummary8616,
 )
 
 

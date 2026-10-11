@@ -14,14 +14,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from inertia.semantics.caller_return_use_contracts import (
-    AxValueView8616,
-    ByteReturnExtensionKind8616,
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
-
 from inertia.alias.domains import (
     AX,
     DomainKey,
@@ -33,6 +25,13 @@ from inertia.alias.domains import (
 )
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
+from inertia.semantics.caller_return_use_contracts import (
+    AxValueView8616,
+    ByteReturnExtensionKind8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 
 from .interprocedural_storage_contracts import (
     StorageIdentity8616,

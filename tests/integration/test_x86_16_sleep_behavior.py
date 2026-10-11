@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
 
 _PREFIX = "typedef long clock_t; clock_t clock(void);\nvoid Sleep(long wait) {"

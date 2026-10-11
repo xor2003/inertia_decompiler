@@ -12,8 +12,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
     CWhileLoop,
 )
-import inertia.structuring.decompiler_structuring_stage as decompiler_structuring_stage
 
+import inertia.structuring.decompiler_structuring_stage as decompiler_structuring_stage
 from inertia.structuring.switch_loop_tail_breaks import (
     SwitchLoopTailBreakDecision8616,
     SwitchLoopTailBreakMaterialization8616,

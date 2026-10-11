@@ -15,6 +15,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from capstone.x86_const import X86_INS_MOV, X86_INS_PUSH, X86_REG_BP, X86_REG_SP
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.frame_carrier_liveness import (
     FrameCarrierUseVerdict8616,
@@ -22,7 +24,6 @@ from inertia.lowering.frame_carrier_liveness import (
 )
 from inertia.lowering.gp_register_state import runtime_gp_state_expr_8616
 from inertia.lowering.real_mode_linear import prune_frame_prologue_stack_assignments_8616
-from capstone.x86_const import X86_INS_MOV, X86_INS_PUSH, X86_REG_BP, X86_REG_SP
 from tests.lowering.test_x86_16_canonical_frame_carriers import _Codegen, _instruction
 
 

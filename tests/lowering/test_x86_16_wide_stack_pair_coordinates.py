@@ -4,6 +4,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CVariable
 from angr.sim_type import SimTypeLong
 from angr.sim_variable import SimStackVariable
+
 from inertia.lowering.stack_variable_coordinates import record_stack_variable_coordinate_projection_8616
 from inertia.lowering.wide_stack_pair_evidence import proven_wide_stack_ir_pair_8616
 from tests.structuring.test_x86_16_wide_stack_condition_chains import _Codegen, _word

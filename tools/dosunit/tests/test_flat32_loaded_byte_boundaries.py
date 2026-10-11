@@ -8,10 +8,10 @@ from pathlib import Path
 
 import angr
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 import tools.dosunit.architectures.flat32_pe_loader as flat32_pe_loader
 from tools.dosunit.architectures.flat32_pe_loader import InclusivePE
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 
 def pe32_bytes(code: bytes) -> bytes:

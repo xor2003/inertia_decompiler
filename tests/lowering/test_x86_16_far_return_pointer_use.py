@@ -6,15 +6,11 @@ import io
 from dataclasses import replace
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
-from inertia.semantics.callsite_summary import collect_caller_return_use_evidence_8616
-from inertia.ir import IRValue
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.ir import IRValue
 from inertia.lowering.far_return_pointer_census import (
     FarReturnPointerCensusFailure8616,
     join_far_return_pointer_census_8616,
@@ -30,11 +26,15 @@ from inertia.lowering.interprocedural_storage_contracts import (
 from inertia.lowering.interprocedural_storage_return_defs import (
     resolve_storage_call_output_definitions_8616,
 )
-
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.semantics.call_stack_effect_pipeline import (
     build_semantic_function_ssa_8616,
 )
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
+from inertia.semantics.callsite_summary import collect_caller_return_use_evidence_8616
 
 _CODE = bytes.fromhex("9a 13 00 00 01 8e c2 89 c3 26 83 3f 0e c3")
 

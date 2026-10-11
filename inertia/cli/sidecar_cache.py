@@ -103,6 +103,7 @@ class CachedSidecarMetadata:
 
 
 def _maybe_rebase_stale_absolute_metadata(metadata: LSTMetadata, project: _ProjectLike) -> LSTMetadata:
+    """Rebase every address projection together, retaining signature provenance."""
     def _impl() -> LSTMetadata:
         # Dynamic angr boundary: loader/main_object are supplied by the third-party Project.
         main_object = getattr(getattr(project, "loader", None), "main_object", None)
@@ -131,6 +132,8 @@ def _maybe_rebase_stale_absolute_metadata(metadata: LSTMetadata, project: _Proje
             },
             function_entry_addrs=frozenset(addr + shift for addr in metadata.function_entry_addrs),
             signature_code_addrs=frozenset(addr + shift for addr in metadata.signature_code_addrs),
+            signature_code_ranges={addr + shift: (start + shift, end + shift)
+                                   for addr, (start, end) in metadata.signature_code_ranges.items()},
             absolute_addrs=True,
             source_format=metadata.source_format,
             struct_names=metadata.struct_names,
@@ -283,12 +286,14 @@ def emit_sidecar_metadata_debug(project: _ProjectLike, metadata: LSTMetadata) ->
 
 
 def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
+    """Persist optional bounds and verified signature extents independently."""
     return {
         "data_labels": sorted(metadata.data_labels.items()),
         "code_labels": sorted(metadata.code_labels.items()),
         "code_ranges": sorted((addr, start, end) for addr, (start, end) in metadata.code_ranges.items()),
         "function_entry_addrs": sorted(metadata.function_entry_addrs),
         "signature_code_addrs": sorted(metadata.signature_code_addrs),
+        "signature_code_ranges": sorted((addr, start, end) for addr, (start, end) in metadata.signature_code_ranges.items()),
         "absolute_addrs": bool(metadata.absolute_addrs),
         "source_format": metadata.source_format,
         "struct_names": list(metadata.struct_names),
@@ -417,12 +422,17 @@ def _coerce_cache_int(value: object) -> int:
 
 
 def _deserialize_lst_metadata(payload: dict[str, object]) -> LSTMetadata | None:
+    """Restore typed evidence; older caches cannot invent verified extents."""
     try:
         data_labels = {_coerce_cache_int(addr): str(name) for addr, name in _payload_pairs(payload, "data_labels")}
         code_labels = {_coerce_cache_int(addr): str(name) for addr, name in _payload_pairs(payload, "code_labels")}
         code_ranges = {
             _coerce_cache_int(addr): (_coerce_cache_int(start), _coerce_cache_int(end))
             for addr, start, end in _payload_triples(payload, "code_ranges")
+        }
+        signature_code_ranges = {
+            _coerce_cache_int(addr): (_coerce_cache_int(start), _coerce_cache_int(end))
+            for addr, start, end in _payload_triples(payload, "signature_code_ranges")
         }
         signature_code_addrs = frozenset(_payload_ints(payload, "signature_code_addrs"))
         function_entry_addrs = frozenset(_payload_ints(payload, "function_entry_addrs"))
@@ -449,6 +459,7 @@ def _deserialize_lst_metadata(payload: dict[str, object]) -> LSTMetadata | None:
             code_ranges=code_ranges,
             function_entry_addrs=function_entry_addrs,
             signature_code_addrs=signature_code_addrs,
+            signature_code_ranges=signature_code_ranges,
             absolute_addrs=bool(payload.get("absolute_addrs", False)),
             source_format=_normalize_source_format(str(payload.get("source_format", "sidecars"))),
             struct_names=struct_names,

@@ -1,8 +1,8 @@
-"""Prove fixed call allocations from binary effects and reaching IR values.
+"""Retain guarded allocation identity and requests without effect authority.
 
 Layer: Semantics.
-Responsibility: combine frontend-proven stack allocation behavior with an exact
-unclobbered allocation operand, before Alias assigns stack storage identities.
+Responsibility: retain binary helper identity and reaching allocation operands,
+then refuse unproved guard continuations before Alias assigns storage identities.
 Owns instruction effects, flags, branch meaning, and expression interpretation.
 Do not perform alias-state ownership, widening, lowering/materialization,
 structuring, rewrite, postprocess, or CLI/reporting work here.
@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from inertia.ir.core import IRAddress, IRCallStackEffect8616, IRFunctionArtifact, IRInstr, IRValue, MemSpace
+from inertia.ir.core import IRCallStackEffect8616, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.semantics.call_target_identity import (
     normalize_x86_16_call_target_addr_8616,
     x86_16_call_targets_equivalent_8616,
@@ -22,7 +22,6 @@ from inertia.semantics.call_target_identity import (
 from inertia.semantics.callsite_summary import (
     CallsiteMachineFrameKind8616,
     CallsiteSummary8616,
-    callsite_machine_frame_kind_8616,
 )
 from inertia.semantics.compiler_helpers import (
     CompilerHelperEvidenceKind8616,
@@ -38,45 +37,37 @@ _AX_FAMILY = register_value_family_8616("ax")
 
 
 @dataclass(frozen=True, slots=True)
-class CallStackAllocationProof8616:
-    """A binary-backed allocation with its operand origin and exact return frame.
+class CallStackAllocationCandidate8616:
+    """A guarded probe call's known request provenance, frame and identity.
 
-    The call frame must agree with this binary return-frame evidence before
-    consumers may apply the allocation to their caller stack coordinate.
+    STACK_PROBE pattern identity is labeling evidence only: the helper's carry
+    and DS-limit guards are conditional failure exits that native executions
+    reach, so identity alone never authorizes an unconditional allocation.
+    Candidates exist so consumers refuse the call explicitly instead of
+    falling through to the balanced zero-argument ABI. The request fields are
+    None when no unclobbered constant AX write reaches the site.
     """
 
     callsite_addr: int
     target_addr: int
-    value_instruction_addr: int
-    allocation_size: int
+    value_instruction_addr: int | None
+    allocation_size: int | None
     frame_kind: CallsiteMachineFrameKind8616
-
-    def matches(self, summary: CallsiteSummary8616) -> bool:
-        """Reject conflicting call identity, argument frame or requested size."""
-        same_site = self.callsite_addr == summary.callsite_addr and self.target_addr == summary.target_addr
-        same_frame = callsite_machine_frame_kind_8616(summary) is self.frame_kind
-        no_arguments = (
-            summary.arg_count == 0 and not summary.arg_widths
-            and not summary.push_arg_sources and summary.stack_cleanup in {None, 0}
-        )
-        request_agrees = summary.stack_probe_allocation_size in {None, self.allocation_size}
-        valid_allocation = 0 <= self.allocation_size < _WORD_LIMIT
-        return bool(same_site and same_frame and no_arguments and request_agrees
-                    and valid_allocation and summary.return_addr is not None)
 
 
 def resolve_call_stack_allocation_8616(
     summary: CallsiteSummary8616,
-    ranges: tuple[IRAddress, ...],
-    proof: CallStackAllocationProof8616 | None,
+    candidate: CallStackAllocationCandidate8616 | None,
 ) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None] | None:
-    """Resolve allocating calls without confusing requested and proven effects."""
-    if proof is not None and proof.matches(summary):
-        return IRCallStackEffect8616(
-            net_stack_delta=-proof.allocation_size, preserved_ranges=ranges,
-            complete=True, bp_preserved=True,
-        ), None
-    allocation_expected = proof is not None or summary.stack_probe_helper or summary.stack_probe_allocation_size is not None
+    """Refuse guarded allocation candidates; ordinary calls keep normal handling.
+
+    No authenticated owner discharges the probe's failure guards, so every
+    binary-backed candidate resolves as STACK_ALLOCATION_UNPROVEN.
+    """
+    allocation_expected = (
+        candidate is not None or summary.stack_probe_helper
+        or summary.stack_probe_allocation_size is not None
+    )
     if allocation_expected:
         return IRCallStackEffect8616(complete=False), CallStackEffectFailure8616.STACK_ALLOCATION_UNPROVEN
     return None
@@ -98,7 +89,7 @@ def _constant_ax_write(instruction: IRInstr) -> int | None:
 def _binary_stack_allocation_target_frame_8616(
     project: object, instruction: IRInstr, summary: CallsiteSummary8616 | None = None,
 ) -> tuple[int, CallsiteMachineFrameKind8616] | None:
-    """Prove the target and return frame from the same binary helper evidence."""
+    """Identify the target and near/far frame; this does not prove effects."""
     target = instruction.args[0] if instruction.args else None
     if not isinstance(target, IRValue) or target.space is not MemSpace.CONST:
         return None
@@ -131,20 +122,23 @@ def binary_stack_allocation_target_8616(
     return None if evidence is None else evidence[0]
 
 
-def collect_call_stack_allocation_proofs_8616(
+def collect_call_stack_allocation_candidates_8616(
     project: object,
     artifact: IRFunctionArtifact,
     summaries: Mapping[int, CallsiteSummary8616] | None = None,
-) -> dict[int, CallStackAllocationProof8616]:
-    """Prove block-local fixed allocations; unknown paths retain normal refusal.
+) -> dict[int, CallStackAllocationCandidate8616]:
+    """Collect guarded probe candidates; unknown paths retain normal refusal.
 
     The immediate is recovered from IR, never the summary's requested size.
     Any write to architectural AX storage or intervening CALL kills the value.
     Values are deliberately not propagated across unproven predecessor joins.
     Native pre-variable-recovery consumers can omit summaries: the binary and
-    reaching IR operand remain mandatory, without relying on C call metadata.
+    request provenance is retained when available, without relying on C metadata.
+    Guarded identity candidates stay recorded even when the reaching request
+    is unknown or the summary is unmarked, so the consumer refuses explicitly
+    instead of falling through to the balanced zero-argument ABI.
     """
-    proofs: dict[int, CallStackAllocationProof8616] = {}
+    candidates: dict[int, CallStackAllocationCandidate8616] = {}
     for block in artifact.blocks:
         allocation: int | None = None
         origin: int | None = None
@@ -152,21 +146,21 @@ def collect_call_stack_allocation_proofs_8616(
             destination = instruction.dst
             if isinstance(destination, IRValue) and destination.space is MemSpace.REG and destination.name in _AX_FAMILY:
                 allocation = _constant_ax_write(instruction)
-                origin = instruction.addr
+                origin = instruction.addr if allocation is not None else None
             if instruction.op != "CALL":
                 continue
             site = instruction.addr
             summary = summaries.get(site) if summaries is not None and site is not None else None
             candidate_present = summaries is None or summary is not None
-            if candidate_present and allocation is not None and origin is not None and site is not None:
+            if candidate_present and site is not None:
                 target_frame = _binary_stack_allocation_target_frame_8616(project, instruction, summary)
                 if target_frame is not None:
                     target, frame_kind = target_frame
-                    # Keep conflicting binary evidence so the consumer refuses
+                    # Keep guarded identity candidates so the consumer refuses
                     # the call instead of falling back to a zero-allocation ABI.
-                    proofs[site] = CallStackAllocationProof8616(
+                    candidates[site] = CallStackAllocationCandidate8616(
                         site, target, origin, allocation, frame_kind,
                     )
             allocation = None
             origin = None
-    return proofs
+    return candidates

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import itertools
 
-import inertia.frontend.x86_16.public_api  # noqa: F401
 import pyvex.block
 import pyvex.const as pyvex_const
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from pyvex.lifting.util import vex_helper
 
+import inertia.frontend.x86_16.public_api  # noqa: F401
 from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 
 def test_pyvex_runtime_compatibility_is_applied() -> None:

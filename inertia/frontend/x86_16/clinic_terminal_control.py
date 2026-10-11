@@ -29,12 +29,15 @@ from inertia.ir.vex_terminal_jump import (
 )
 
 from .control_coordinates import ControlWidth
+from .relative_control_edge import DecodedRelativeEdge
 
 __all__ = (
     "CLINIC_TERMINAL_TRANSPORT_ATTR_8616",
+    "ClinicTerminalBinding8616",
     "ClinicTerminalControlRefusal8616",
     "ClinicTerminalControlStats8616",
     "ClinicTerminalTransport8616",
+    "rebind_terminal_jump_8616",
     "record_clinic_terminal_transport_8616",
     "transport_terminal_direct_jump_8616",
 )
@@ -283,15 +286,115 @@ def _bound_next_operand_8616(
     return None
 
 
-def _decoded_target_8616(evidence: TerminalJumpEvidence8616) -> int | None:
+def _decoded_edge_target_8616(decoded: DecodedRelativeEdge) -> int:
     """Recompute the proven destination from the retained exact bytes."""
-    decoded = evidence.decoded
-    if decoded is None:
-        return None
-    target: int = decoded.next_head + decoded.displacement
+    target = decoded.next_head + decoded.displacement
     if decoded.width is ControlWidth.DWORD:
         target &= 0xFFFFFFFF
     return target
+
+
+@dataclass(frozen=True, slots=True)
+class ClinicTerminalBinding8616:
+    """Shared AIL terminal rebinding outcome for both transport owners.
+
+    ``applied`` is True only when the exact terminal ``Jump`` carrying the
+    block's own ``next`` operand was re-pointed at the supplied
+    loader-linear constant; ``refusal`` is the typed reason the operand
+    stayed symbolic and ``detail`` carries its human-readable form.
+    """
+
+    applied: bool
+    refusal: ClinicTerminalControlRefusal8616 | None
+    detail: str
+
+
+def rebind_terminal_jump_8616(
+    converted: object,
+    vex: object,
+    decoded: DecodedRelativeEdge | None,
+    target: int,
+    *,
+    next_atom: Callable[[], int],
+) -> ClinicTerminalBinding8616:
+    """Repoint the exact ``next``-carrying terminal Jump at ``target``.
+
+    Shared binding core for the per-block and function-entry transports.
+    Every check is a binding obligation, not a proof obligation: the
+    caller supplies the loader-linear ``target`` its own proof owner
+    published and the retained ``decoded`` carrier it was proved under. A
+    terminal that is not this block's ``next`` operand, a mismatched
+    instruction site, a missing decoded edge, or a destination that does
+    not recompute from the retained bytes keeps the symbolic operand
+    under a typed refusal.
+    """
+    if not isinstance(converted, ailment.Block):
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.TERMINAL_STATEMENT_NOT_JUMP,
+            detail="converted terminal statement is not a Jump",
+        )
+    statements = list(converted.statements)
+    terminal = statements[-1] if statements else None
+    if not isinstance(terminal, ailment.Stmt.Jump):
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.TERMINAL_STATEMENT_NOT_JUMP,
+            detail="converted terminal statement is not a Jump",
+        )
+    jump = cast(ailment.Stmt.Jump, terminal)
+    bound = _bound_next_operand_8616(
+        jump, cast(_VexExitBoundary8616, vex).next,
+        cast(_VexExitBoundary8616, vex).tyenv,
+    )
+    if bound is None:
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.NEXT_OPERAND_UNBOUND,
+            detail="next operand kind carries no bindable AIL identity",
+        )
+    if not bound:
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.AIL_TARGET_MISMATCH,
+            detail="AIL terminal operand is not this block's next expression",
+        )
+    mark = _terminal_instruction_mark_8616(vex)
+    if (
+        converted.addr != cast(_VexExitBoundary8616, vex).addr
+        or mark is None
+        or jump.tags.get("ins_addr") != mark[0]
+    ):
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.AIL_SOURCE_MISMATCH,
+            detail="AIL block or terminal instruction differs from source VEX",
+        )
+    if decoded is None:
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.MISSING_DECODED_EDGE,
+            detail="proven target lacks the retained decoded edge",
+        )
+    decoded_target = _decoded_edge_target_8616(decoded)
+    if target != decoded_target:
+        return ClinicTerminalBinding8616(
+            applied=False,
+            refusal=ClinicTerminalControlRefusal8616.DECODED_TARGET_MISMATCH,
+            detail=(
+                f"proven target 0x{target:x} disagrees with "
+                f"the decoded edge destination 0x{decoded_target:x}"
+            ),
+        )
+    bits = cast(int, jump.target.bits)
+    statements[-1] = ailment.Stmt.Jump(
+        jump.idx,
+        ailment.Expr.Const(next_atom(), target, bits),
+        target_idx=cast(int | None, jump.target_idx),
+        **dict(jump.tags),
+    )
+    converted.statements = statements
+    return ClinicTerminalBinding8616(applied=True, refusal=None, detail="")
 
 
 def transport_terminal_direct_jump_8616(
@@ -363,69 +466,21 @@ def _bind_proven_terminal_8616(
     destination that does not recompute from the retained decoded edge,
     keeps the symbolic operand under a typed refusal.
     """
-    statements = list(converted.statements)
-    terminal = statements[-1] if statements else None
-    if not isinstance(terminal, ailment.Stmt.Jump):
-        return _result_8616(
-            applied=False, proven_target=None, evidence=evidence,
-            refusal=ClinicTerminalControlRefusal8616.TERMINAL_STATEMENT_NOT_JUMP,
-            detail="converted terminal statement is not a Jump",
-        )
-    jump = cast(ailment.Stmt.Jump, terminal)
-    bound = _bound_next_operand_8616(
-        jump, cast(_VexExitBoundary8616, vex).next,
-        cast(_VexExitBoundary8616, vex).tyenv,
+    binding = rebind_terminal_jump_8616(
+        converted,
+        vex,
+        evidence.decoded,
+        cast(int, evidence.proven_target),
+        next_atom=next_atom,
     )
-    if bound is None:
-        return _result_8616(
-            applied=False, proven_target=None, evidence=evidence,
-            refusal=ClinicTerminalControlRefusal8616.NEXT_OPERAND_UNBOUND,
-            detail="next operand kind carries no bindable AIL identity",
-        )
-    if not bound:
-        return _result_8616(
-            applied=False, proven_target=None, evidence=evidence,
-            refusal=ClinicTerminalControlRefusal8616.AIL_TARGET_MISMATCH,
-            detail="AIL terminal operand is not this block's next expression",
-        )
-    mark = _terminal_instruction_mark_8616(vex)
-    if (
-        converted.addr != cast(_VexExitBoundary8616, vex).addr
-        or mark is None
-        or jump.tags.get("ins_addr") != mark[0]
-    ):
-        return _result_8616(
-            applied=False, proven_target=None, evidence=evidence,
-            refusal=ClinicTerminalControlRefusal8616.AIL_SOURCE_MISMATCH,
-            detail="AIL block or terminal instruction differs from source VEX",
-        )
-    decoded_target = _decoded_target_8616(evidence)
-    if decoded_target is None:
-        return _result_8616(
-            applied=False, proven_target=None, evidence=evidence,
-            refusal=ClinicTerminalControlRefusal8616.MISSING_DECODED_EDGE,
-            detail="proven target lacks the retained decoded edge",
-        )
-    if evidence.proven_target != decoded_target:
-        return _result_8616(
-            applied=False, proven_target=None, evidence=evidence,
-            refusal=ClinicTerminalControlRefusal8616.DECODED_TARGET_MISMATCH,
-            detail=(
-                f"proven target 0x{evidence.proven_target:x} disagrees with "
-                f"the decoded edge destination 0x{decoded_target:x}"
-            ),
-        )
-    bits = cast(int, jump.target.bits)
-    statements[-1] = ailment.Stmt.Jump(
-        jump.idx,
-        ailment.Expr.Const(next_atom(), evidence.proven_target, bits),
-        target_idx=cast(int | None, jump.target_idx),
-        **dict(jump.tags),
-    )
-    converted.statements = statements
     return _result_8616(
-        applied=True, proven_target=evidence.proven_target, evidence=evidence,
-        refusal=None, detail="",
+        applied=binding.applied,
+        proven_target=(
+            evidence.proven_target if binding.applied else None
+        ),
+        evidence=evidence,
+        refusal=binding.refusal,
+        detail=binding.detail,
     )
 
 

@@ -3,15 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from tools.dosunit.tests.flat32_replay_test_support import (
-    ELF_CODE,
-    ELF_RDATA,
-    ESP,
-    SCRATCH,
-    _elf_image,
-    _grant,
-    _vector,
-)
 
 from tools.dosunit.runtime.flat32_memory_permissions import (
     MAX_MAPPED_PAGES,
@@ -28,6 +19,15 @@ from tools.dosunit.runtime.flat32_replay import (
     ReplayStatus,
     ReplayVector,
     replay,
+)
+from tools.dosunit.tests.flat32_replay_test_support import (
+    ELF_CODE,
+    ELF_RDATA,
+    ESP,
+    SCRATCH,
+    _elf_image,
+    _grant,
+    _vector,
 )
 
 

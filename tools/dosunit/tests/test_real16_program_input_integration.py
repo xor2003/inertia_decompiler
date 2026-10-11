@@ -1,12 +1,16 @@
 """Actual initialized MZ file-input controls; agreement is concrete only."""
 
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
-
-from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.reporting.real16_program_manifest import parse_program_manifest
-from tools.dosunit.runtime.real16_program_model import ProgramAgreement, ProgramObservation, ProgramStatus, compare_programs
+from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
+from tools.dosunit.runtime.real16_program_model import (
+    ProgramAgreement,
+    ProgramObservation,
+    ProgramStatus,
+    compare_programs,
+)
 from tools.dosunit.runtime.real16_program_replay import replay_program
 from tools.dosunit.runtime.real16_replay_model import LinearRange
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 
 def input_environment(*, data="41424344", cursor=0, cap=32):
@@ -195,9 +199,9 @@ def test_public_file_declaration_and_receipts_validate_against_schemas(tmp_path)
     from pathlib import Path
 
     from jsonschema import Draft202012Validator
-    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
+    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     args = arguments(tmp_path)
     args.oracle_exe.write_bytes(mz(bytes.fromhex(READ_FOUR)))
@@ -225,10 +229,10 @@ def test_malformed_input_declaration_prevents_binary_reads(tmp_path):
     import json
 
     import pytest
-    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     from tools.dosunit.contracts.model import DosUnitError
     from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
+    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     args = arguments(tmp_path)
     declared = document()

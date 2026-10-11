@@ -5,12 +5,12 @@ from dataclasses import replace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CGoto, CStatements
 from angr.sim_type import SimTypeShort
+
+import inertia.structuring.condition_exit_normalization as normalization
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRInstr, IRRefusal, IRValue, MemSpace
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.structuring.condition_exit_normalization as normalization
-
 from inertia.structuring.condition_exit_normalization import transparent_condition_exit_8616
 from tests.postprocess.test_x86_16_typed_condition_side_effect_preservation import _codegen
 

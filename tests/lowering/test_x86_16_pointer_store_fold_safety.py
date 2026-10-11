@@ -6,6 +6,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as c
 from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.near_pointer_argument import NearPointerArgumentFact8616
 from inertia.lowering.pointer_store_consumption import (

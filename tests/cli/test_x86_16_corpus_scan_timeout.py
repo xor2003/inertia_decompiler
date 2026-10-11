@@ -4,6 +4,7 @@ import inspect
 import signal
 
 import pytest
+
 import inertia.cli.corpus_scan as corpus_scan
 
 

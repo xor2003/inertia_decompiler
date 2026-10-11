@@ -17,13 +17,12 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-from tools.dosunit.tests.test_real16_call_composition import _lower
-
 import tools.dosunit.compare.real16_call_indirect as real16_call_indirect
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
 from tools.dosunit.compare.real16_call_contracts import Real16CallLimits
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 # _load_lifter_project uses linear base_addr=0x1000, hence selector 0x0100.
 # Captured native function entries independently confirm base + image offset.

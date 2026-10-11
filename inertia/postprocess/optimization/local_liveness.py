@@ -17,6 +17,7 @@ type LocalLivenessKey8616 = tuple[str, Hashable]
 
 __all__ = [
     "LocalLivenessKey8616",
+    "has_architectural_register_storage_8616",
     "local_liveness_key_8616",
     "stack_storage_liveness_key_8616",
 ]
@@ -63,4 +64,16 @@ def local_liveness_key_8616(
     return (
         "register_storage",
         (variable.region, variable.reg, variable.size),
+    )
+
+
+def has_architectural_register_storage_8616(node: object) -> bool:
+    """Identify direct or unified register storage, without claiming deadness.
+
+    A register-backed C local can carry an architectural boundary effect.
+    Absence of C expression reads does not prove that effect unobservable.
+    """
+    return isinstance(node, structured_c.CVariable) and (
+        isinstance(node.variable, SimRegisterVariable)
+        or isinstance(node.unified_variable, SimRegisterVariable)
     )

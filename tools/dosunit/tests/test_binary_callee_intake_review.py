@@ -5,14 +5,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from tools.dosunit.tests.test_binary_callee_intake import _image, _lower, _request
-from tools.dosunit.tests.test_dosunit_tool import _edge_function
 
 import tools.dosunit.catalog.binary_callee_intake as I
 import tools.dosunit.compare.straightline_ssa as S
-from tools.dosunit.catalog.binary_callee_discovery import DiscoveryBudget, DiscoveryRefusal, discover_uncatalogued_leaves
-from tools.dosunit.reporting.flat32_proof_report import loaded_image_identity
+from tools.dosunit.catalog.binary_callee_discovery import (
+    DiscoveryBudget,
+    DiscoveryRefusal,
+    discover_uncatalogued_leaves,
+)
 from tools.dosunit.compare.real16_call_frames import CallFrameKind
+from tools.dosunit.reporting.flat32_proof_report import loaded_image_identity
+from tools.dosunit.tests.test_binary_callee_intake import _image, _lower, _request
+from tools.dosunit.tests.test_dosunit_tool import _edge_function
 
 
 def _fixture(tmp_path):

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from inertia.lowering.gp_word_runtime import GPRegisterRuntimeABI8616
 from tests.fixtures.x86_16_swapbars_behavior import assert_swapbars_behavior
 

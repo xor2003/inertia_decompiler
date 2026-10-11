@@ -3,8 +3,8 @@
 from dataclasses import replace
 
 import pytest
-from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRRefusal, IRValue, MemSpace
 
+from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRRefusal, IRValue, MemSpace
 from inertia.semantics.register_definition_return import (
     unchanged_register_return_path_8616,
     unchanged_register_return_site_8616,

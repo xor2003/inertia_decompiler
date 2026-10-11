@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from inertia.alias.alias_model_impl import (
+    AliasStorageFacts,
+    alias_facts_for_ir_address_8616,
+)
+from inertia.alias.storage_fact_join import (
+    build_segmented_alias_range_8616,
+)
+from inertia.alias.terminal_memory_outputs import (
+    TerminalMemoryAliasFact8616,
+    classify_terminal_memory_output_aliases_8616,
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -34,18 +45,6 @@ from inertia.lowering.interprocedural_storage_live_out_contracts import (
 )
 from inertia.lowering.interprocedural_storage_solver import (
     resolve_program_storage_trials_8616,
-)
-
-from inertia.alias.alias_model_impl import (
-    AliasStorageFacts,
-    alias_facts_for_ir_address_8616,
-)
-from inertia.alias.storage_fact_join import (
-    build_segmented_alias_range_8616,
-)
-from inertia.alias.terminal_memory_outputs import (
-    TerminalMemoryAliasFact8616,
-    classify_terminal_memory_output_aliases_8616,
 )
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,

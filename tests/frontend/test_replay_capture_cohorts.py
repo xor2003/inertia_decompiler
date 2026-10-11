@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 import tests.fixtures.replay_capture_test_support as m6
 
 pytestmark = pytest.mark.xdist_group("replay_capture_cohorts")

@@ -9,10 +9,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
 )
 from angr.sim_type import SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
-
 from inertia.lowering.c_ast_utils import _same_c_expression_8616
 from inertia.structuring.wide_call_return_guard_chains import (
     WideCallReturnGuardCollapseStatus8616,

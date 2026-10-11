@@ -8,6 +8,7 @@ import pytest
 from angr import ailment
 from angr.ailment.manager import Manager
 from angr.analyses.decompiler.condition_processor import ConditionProcessor
+
 from inertia.structuring.decompiler_structuring_stage import (
     _guard_condition_processor_multibit_bool_predicates_8616,
 )

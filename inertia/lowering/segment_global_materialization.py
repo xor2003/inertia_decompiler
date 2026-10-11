@@ -20,7 +20,6 @@ from inertia.pipeline.structured_ast_query_index import (
     StructuredAstQuerySession8616,
     StructuredAstQuerySessionStats8616,
 )
-
 from inertia.widening.segmented_load_widening import apply_segmented_load_widening_8616
 
 from .cod_global_identity import reconcile_recorded_cod_global_storage_identities_8616

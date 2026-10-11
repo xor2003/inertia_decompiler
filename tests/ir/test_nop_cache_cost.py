@@ -5,6 +5,7 @@ stale bytes or mutable artifact provenance.
 """
 
 import pytest
+
 import inertia.ir.no_effect_instructions as effects
 from tests.ir.test_nop_census_8616 import _BASE, _built
 

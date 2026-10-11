@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.postprocess.decompiler_postprocess_jcc as jcc
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 

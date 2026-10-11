@@ -7,18 +7,123 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeShort
-from angr.sim_variable import SimRegisterVariable
+from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeNum, SimTypePointer, SimTypeShort
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
+import inertia.lowering.segmented_load_origins as owner
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+from inertia.ir import build_x86_16_ir_function_artifact
 from inertia.ir.core import SEGMENTED_LOAD_ADDRESS_TAG_8616, AddressStatus
 from inertia.ir.function_ir_registry import FunctionIRArtifactVerdict8616
-import inertia.lowering.segmented_load_origins as owner
 from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
-from tests.alias.test_x86_16_segment_stack_restore import _lift_function
-from tests.ir.test_x86_16_ir_segmented_load_carriers import _Codegen
-
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 from inertia.widening.segmented_load_widening import apply_segmented_load_widening_8616
+from tests.ir.test_x86_16_ir_segmented_load_carriers import _Codegen
+
+
+def _lift_function(code):
+    apply_x86_16_bootstrap()
+    project = _build_project_from_bytes(code, base_addr=0x1000, entry_point=0x1000)
+    cfg = project.analyses.CFGFast(normalize=True, function_starts=[0x1000])
+    return build_x86_16_ir_function_artifact(project, cfg.kb.functions[0x1000])
+
+
+def _ss_fixture(monkeypatch):
+    from inertia.lowering.segment_register_state import runtime_segment_state_cvar_8616
+    from tests.lowering.test_x86_16_segmented_stack_alias import _codegen
+
+    artifact = _lift_function(bytes.fromhex("55 8b ec 8b 56 04 c3"))
+    block = artifact.blocks[0]
+    definitions = {item.dst.source_tmp: item for item in block.instrs if item.dst is not None}
+    load = next(item for item in block.instrs if item.op == "LOAD" and item.addr == 0x1003
+                and item.args[0].offset == 5)
+    root = definitions[load.origin.address_tmp]
+    scale = definitions[root.args[0].source_tmp]
+    _, codegen = _codegen([], standard_bp_coordinate=True)
+    codegen.cfunc.addr = artifact.function_addr
+    selector = runtime_segment_state_cvar_8616("ss", codegen=codegen,
+                                             variable_type=SimTypeShort(False), function_addr=artifact.function_addr)
+    anchor = structured_c.CUnaryOp("Reference", structured_c.CVariable(
+        SimStackVariable(-2, 1, base="bp", name="native_anchor"),
+        variable_type=SimTypeChar(False), codegen=codegen), codegen=codegen,
+        tags={"inertia_native_entry_sp_anchor_8616": -2})
+    displacement = structured_c.CConstant(5, SimTypeInt(False), codegen=codegen)
+    offset = structured_c.CBinaryOp("Add", anchor, displacement, codegen=codegen)
+
+    def tags(instruction):
+        return {"ins_addr": instruction.addr, "vex_block_addr": instruction.origin.block_addr,
+                "vex_stmt_idx": instruction.origin.statement_index}
+
+    shifted = structured_c.CBinaryOp("Shl", selector, structured_c.CConstant(
+        4, SimTypeInt(False), codegen=codegen), codegen=codegen, tags=tags(scale))
+    address = structured_c.CBinaryOp("Add", shifted, offset, codegen=codegen, tags=tags(root))
+    address.set_type(SimTypeNum(32, False))
+    dereference = structured_c.CUnaryOp("Dereference", address, codegen=codegen)
+    dereference.set_type(SimTypeChar(True))
+    destination = structured_c.CVariable(SimRegisterVariable(8, 2),
+                                        variable_type=SimTypeShort(False), codegen=codegen)
+    assignment = structured_c.CAssignment(destination, dereference, codegen=codegen)
+    codegen.cfunc.statements = structured_c.CStatements([assignment], codegen=codegen)
+    resolution = SimpleNamespace(verdict=FunctionIRArtifactVerdict8616.PROVEN, artifact=artifact)
+    monkeypatch.setattr(owner, "registered_function_ir_artifact_8616", lambda *_args: resolution)
+    return codegen, assignment, displacement, (load.dst.source_tmp, load.addr)
+
+
+def test_ss_byte_origin_requires_matching_current_bp_address(monkeypatch):
+    codegen, assignment, _, key = _ss_fixture(monkeypatch)
+    assert owner.materialize_segmented_load_origins_8616(codegen, frozenset({key})) == frozenset({key})
+    assert isinstance(assignment.rhs, structured_c.CFunctionCall)
+    assert assignment.rhs.tags[SEGMENTED_LOAD_ADDRESS_TAG_8616].offset == 5
+
+
+def test_ss_pointer_address_cast_preserves_exact_origin_dispatch(monkeypatch):
+    codegen, assignment, _, key = _ss_fixture(monkeypatch)
+    codegen.project.arch = ArchX86()
+    read = assignment.rhs
+    read.operand = structured_c.CTypeCast(
+        read.operand.type, SimTypePointer(SimTypeChar(True)).with_arch(codegen.project.arch),
+        read.operand, codegen=codegen)
+    assert owner._retained_address_root_8616(read) is read.operand.expr
+    assert owner.materialize_segmented_load_origins_8616(codegen, frozenset({key})) == frozenset({key})
+    assert isinstance(assignment.rhs, structured_c.CFunctionCall)
+
+
+@pytest.mark.parametrize("corruption", ["narrow", "narrow_pointer", "wide_pointee", "offset"])
+def test_ss_pointer_cast_cannot_hide_changed_address(monkeypatch, corruption):
+    codegen, assignment, displacement, key = _ss_fixture(monkeypatch)
+    if corruption != "narrow_pointer":
+        codegen.project.arch = ArchX86()
+    read = assignment.rhs
+    pointer = SimTypePointer(SimTypeChar(True)).with_arch(codegen.project.arch)
+    source_type = read.operand.type
+    if corruption == "narrow":
+        source_type = SimTypeShort(False)
+    elif corruption == "wide_pointee":
+        pointer = SimTypePointer(SimTypeShort(False)).with_arch(codegen.project.arch)
+    else:
+        displacement.value = 6
+    read.operand = structured_c.CTypeCast(source_type, pointer, read.operand, codegen=codegen)
+    assert owner.materialize_segmented_load_origins_8616(codegen, frozenset({key})) == frozenset()
+    assert assignment.rhs is read
+
+
+@pytest.mark.parametrize("corruption", ["offset", "anchor", "frame", "scale"])
+def test_ss_retained_address_corruption_refuses(monkeypatch, corruption):
+    codegen, assignment, displacement, key = _ss_fixture(monkeypatch)
+    original = assignment.rhs
+    if corruption == "offset":
+        displacement.value = 6
+    elif corruption == "anchor":
+        original.operand.rhs.lhs.tags["inertia_native_entry_sp_anchor_8616"] = -1
+    elif corruption == "frame":
+        del codegen._inertia_vex_ir_frame
+    else:
+        original.operand.lhs.rhs.value = 5
+    assert owner.materialize_segmented_load_origins_8616(codegen, frozenset({key})) == frozenset()
+    assert assignment.rhs is original
 
 
 def _fixture(monkeypatch):

@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import bind_real16_mz
@@ -14,6 +13,7 @@ from tools.dosunit.recursive_proofs.real16_fetched_code_invariant import (
     check_fetched_code_invariant,
 )
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import prove_image_bound_real16_domain
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 @pytest.fixture(scope="module")

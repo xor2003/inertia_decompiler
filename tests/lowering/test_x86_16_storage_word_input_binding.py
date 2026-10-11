@@ -4,6 +4,7 @@ import importlib
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir import MemSpace
 from inertia.lowering.interprocedural_storage_contracts import (
     StorageIdentity8616,

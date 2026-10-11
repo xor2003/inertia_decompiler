@@ -4,16 +4,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.semantics.callsite_summary_program import (
-    program_callsite_summary_evidence_8616,
-)
-from inertia.semantics.callsite_target_inventory import (
-    CallsiteTargetInventory8616,
-)
+
 import inertia.lowering.callee_callsite_census as callee_callsite_census
 import inertia.lowering.callee_range_callsite_facts as range_facts
 import inertia.lowering.project_callee_callsite_collection as collection
+from inertia.lowering.analysis_helpers import (
+    CallTargetKind8616,
+    CallTargetSeed,
+)
 from inertia.lowering.callee_callsite_codec import (
     callee_callsite_census_map_from_record_8616,
     callee_callsite_census_map_record_8616,
@@ -24,14 +22,16 @@ from inertia.lowering.callee_callsite_contracts import (
     attach_callee_callsite_censuses_8616,
     callee_callsite_censuses_by_addr_8616,
 )
-
-from inertia.lowering.analysis_helpers import (
-    CallTargetKind8616,
-    CallTargetSeed,
+from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.semantics.callsite_summary_program import (
+    program_callsite_summary_evidence_8616,
 )
 from inertia.semantics.callsite_summary_request import (
     CallsiteCleanupProjectRole8616,
     CallsiteSummaryRequestCache8616,
+)
+from inertia.semantics.callsite_target_inventory import (
+    CallsiteTargetInventory8616,
 )
 from inertia.semantics.terminal_stack_cleanup import (
     TerminalStackCleanupEvidence8616,

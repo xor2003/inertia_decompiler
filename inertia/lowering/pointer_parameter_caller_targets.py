@@ -13,17 +13,16 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
     FunctionSSAArtifactVerdict8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .callee_callsite_census import (
     CalleeCallsiteCensus8616,

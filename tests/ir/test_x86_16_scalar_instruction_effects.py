@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from pyvex.lifting.util.vex_helper import make_format_op_generator
+
 from inertia.ir.core import IRAddress, IRCondition, IRInstr, IRValue, MemSpace
 from inertia.ir.scalar_instruction_effects import (
     ScalarInstructionClobber8616 as Clobber,
@@ -18,7 +20,6 @@ from inertia.ir.scalar_instruction_effects import (
     ScalarInstructionEffectKind8616 as Kind,
 )
 from inertia.ir.scalar_instruction_effects import scalar_instruction_effect_8616 as _effect
-from pyvex.lifting.util.vex_helper import make_format_op_generator
 from tests.fixtures.entry_stack_byte_test_support import ENTRY_8616, _const, _mov, _reg, _tmp
 
 

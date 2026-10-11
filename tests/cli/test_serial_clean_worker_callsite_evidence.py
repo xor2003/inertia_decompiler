@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from inertia.semantics.callsite_summary_program import (
-    ProgramCallsiteSummaryFact8616,
-    attach_program_callsite_summary_evidence_8616,
-    program_callsite_summary_evidence_8616,
-    program_callsite_summary_evidence_from_facts_8616,
-)
+import inertia.cli.cli_core as cli_core
 from inertia.lowering.callee_callsite_contracts import (
     CalleeCallsiteCensus8616,
     CalleeCallsiteFact8616,
     attach_callee_callsite_censuses_8616,
     callee_callsite_censuses_by_addr_8616,
 )
-
-import inertia.cli.cli_core as cli_core
+from inertia.semantics.callsite_summary_program import (
+    ProgramCallsiteSummaryFact8616,
+    attach_program_callsite_summary_evidence_8616,
+    program_callsite_summary_evidence_8616,
+    program_callsite_summary_evidence_from_facts_8616,
+)
 
 
 def test_serial_worker_round_trip_rebinds_callsite_evidence_owner(

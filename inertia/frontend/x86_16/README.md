@@ -6,6 +6,22 @@ architectural offsets versus loader-linear control destinations and their
 explicit word/dword widths. These are frontend contracts, not decompiler type,
 alias, structuring or rewrite recovery.
 
+`clinic_terminal_control.py` transports source-bound per-block jump proofs at
+VEX-to-AIL conversion. `clinic_entry_jump_transport.py` transports the native
+function-entry proof after all blocks convert and before SSA. Its
+`clinic_conversion_source.py` snapshots bind the complete graph, live source
+bytes, VEX effects/temporary widths and converted AIL effects. Changed context
+refuses transport; allocation indices copied by Rust AIL are not source indices.
+Execution VEX remains unchanged and no caller proof is inferred from a leaf name.
+
+`near_call_selector_window.py` derives the CS interval compatible with a decoded
+word near CALL and checks whether its destination is invariant across that
+interval. `near_call_entry_context.py` binds this conditional entry fact to the
+current native CALL bytes and callee boundary. Consumption rechecks the bytes
+and request deadline, including after native decoding. This does not prove
+reachability, callee CS preservation, or unconditional function equivalence;
+IR consumers must retain and discharge the exact entry condition separately.
+
 `load_dos_mz.py` and `load_dos_ne.py` own CLE loader registration, executable
 headers, relocations and segment mapping. `ne_resources.py` parses optional NE
 resource evidence; it must not infer executable semantics from resource labels.

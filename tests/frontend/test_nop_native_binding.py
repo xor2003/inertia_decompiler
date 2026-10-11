@@ -6,6 +6,7 @@ Responsibility: bind no-effect provenance to native bytes and invocation state.
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import IRFunctionArtifact, IRInstr
 from inertia.ir.instruction_origin import IRInstructionOrigin8616
 from inertia.ir.real16_invocation_domain import _native_origin_equal_8616

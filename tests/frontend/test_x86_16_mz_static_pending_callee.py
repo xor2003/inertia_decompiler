@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import pytest
-import tests.frontend.test_x86_16_mz_static_invocation as worker
+
 import inertia.ir.entry_domain_call_preservation as consumer
+import tests.frontend.test_x86_16_mz_static_invocation as worker
 from inertia.ir.function_ir_registry import (
     FunctionIRArtifactVerdict8616,
     registered_function_ir_artifact_8616,

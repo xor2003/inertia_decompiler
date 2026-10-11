@@ -707,6 +707,7 @@ QA_TYPED_FILES := \
 	inertia/frontend/x86_16/stack_compat.py \
 	inertia/frontend/x86_16/load_propagation.py \
 	inertia/frontend/x86_16/stack_tracker_allocation.py \
+	inertia/frontend/x86_16/function_knowledge_base.py \
 	inertia/frontend/x86_16/stack_tracker_return_segment.py \
 	inertia/frontend/x86_16/stack_value_use.py \
 	inertia/frontend/x86_16/typehoon_compat.py \
@@ -1206,6 +1207,7 @@ QA_TYPED_FILES := \
 	inertia/validation/validation_pointer_parameter_outputs.py \
 	inertia/lowering/gp_stack_restore.py \
 	inertia/lowering/gp_stack_restore_identity.py \
+	inertia/lowering/gp_stack_addressed_byte.py \
 	inertia/lowering/stack_value_projection.py \
 	inertia/validation/entry_stack_ranges.py \
 	inertia/cli/cache_file_digest.py \
@@ -1504,6 +1506,7 @@ QA_RUFF_TARGETS := \
 	inertia/frontend/x86_16/stack_compat.py \
 	inertia/frontend/x86_16/load_propagation.py \
 	inertia/frontend/x86_16/stack_tracker_allocation.py \
+	inertia/frontend/x86_16/function_knowledge_base.py \
 	inertia/frontend/x86_16/stack_tracker_return_segment.py \
 	inertia/frontend/x86_16/stack_value_use.py \
 	inertia/frontend/x86_16/typehoon_compat.py \
@@ -2573,6 +2576,7 @@ QA_RUFF_TARGETS := \
 	inertia/validation/validation_pointer_parameter_outputs.py \
 	inertia/lowering/gp_stack_restore.py \
 	inertia/lowering/gp_stack_restore_identity.py \
+	inertia/lowering/gp_stack_addressed_byte.py \
 	inertia/lowering/stack_value_projection.py \
 	inertia/validation/entry_stack_ranges.py \
 	inertia/cli/cache_file_digest.py \
@@ -3233,6 +3237,7 @@ LINTERS_DEV_MYPY_FILES += inertia/lowering/argument_frame_base.py
 QA_TYPED_FILES += inertia/lowering/argument_frame_base.py
 QA_RUFF_TARGETS += inertia/lowering/argument_frame_base.py tests/lowering/test_x86_16_argument_frame_base.py
 QA_PYTEST_TARGETS += tests/lowering/test_x86_16_argument_frame_base.py
+QA_PYTEST_TARGETS += tests/ir/test_x86_16_codegen_function_ownership.py
 LINTERS_DEV_MYPY_FILES += inertia/lowering/far_pointer_type.py
 QA_TYPED_FILES += inertia/lowering/far_pointer_type.py
 QA_RUFF_TARGETS += inertia/lowering/far_pointer_type.py
@@ -3277,6 +3282,10 @@ LINTERS_DEV_MYPY_FILES += inertia/frontend/x86_16/frontend_boundary_transport.py
 QA_TYPED_FILES += inertia/frontend/x86_16/frontend_boundary_transport.py
 QA_RUFF_TARGETS += inertia/frontend/x86_16/frontend_boundary_transport.py tests/frontend/test_x86_16_frontend_boundary_transport.py
 QA_PYTEST_TARGETS += tests/frontend/test_x86_16_frontend_boundary_transport.py
+LINTERS_DEV_MYPY_FILES += inertia/frontend/x86_16/near_call_selector_window.py inertia/frontend/x86_16/near_call_entry_context.py
+QA_TYPED_FILES += inertia/frontend/x86_16/near_call_selector_window.py inertia/frontend/x86_16/near_call_entry_context.py
+QA_RUFF_TARGETS += inertia/frontend/x86_16/near_call_selector_window.py inertia/frontend/x86_16/near_call_entry_context.py tests/frontend/test_near_call_selector_window.py tests/frontend/test_near_call_entry_context.py tests/frontend/test_near_call_selector_symbolic.py
+QA_PYTEST_TARGETS += tests/frontend/test_near_call_selector_window.py tests/frontend/test_near_call_entry_context.py tests/frontend/test_near_call_selector_symbolic.py
 LINTERS_DEV_MYPY_FILES += inertia/lowering/interprocedural_storage_return_discard.py
 QA_TYPED_FILES += inertia/lowering/interprocedural_storage_return_discard.py
 QA_RUFF_TARGETS += inertia/lowering/interprocedural_storage_return_discard.py tests/lowering/test_x86_16_interprocedural_discarded_return.py
@@ -3575,6 +3584,7 @@ SCOPED_IR_OWNERS := \
 	tools/dosunit/catalog/real16_scoped_invocation.py \
 	inertia/frontend/x86_16/frontend_invocation_inventory.py \
 	inertia/ir/entry_domain_call_preservation.py \
+	inertia/ir/real16_boot_entry_link.py \
 	inertia/ir/scoped_function_ir_view.py
 SCOPED_IR_CONTRACT_TESTS := \
 	tests/ir/test_x86_16_premise_collection_budget.py \
@@ -5119,6 +5129,15 @@ QA_RUFF_TARGETS += inertia/frontend/x86_16/clinic_terminal_control.py tests/fron
 QA_RUFF_TARGETS += tests/cli/test_x86_16_clinic_binary_terminal_control.py
 QA_PYTEST_TARGETS += tests/frontend/test_x86_16_clinic_terminal_control.py
 
+# Function-entry proof transport authenticates the complete Clinic context.
+LINTERS_DEV_MYPY_FILES += inertia/ir/entry_jump_transport.py inertia/frontend/x86_16/clinic_entry_jump_transport.py inertia/frontend/x86_16/clinic_conversion_source.py
+QA_TYPED_FILES += inertia/ir/entry_jump_transport.py inertia/frontend/x86_16/clinic_entry_jump_transport.py inertia/frontend/x86_16/clinic_conversion_source.py
+QA_RUFF_TARGETS += inertia/ir/entry_jump_transport.py inertia/frontend/x86_16/clinic_entry_jump_transport.py inertia/frontend/x86_16/clinic_conversion_source.py
+QA_RUFF_TARGETS += tests/frontend/test_x86_16_clinic_context_mutations.py
+QA_PYTEST_TARGETS += tests/frontend/test_x86_16_clinic_context_mutations.py
+QA_RUFF_TARGETS += tests/lowering/test_x86_16_positive_bp_function_owner.py
+QA_PYTEST_TARGETS += tests/lowering/test_x86_16_positive_bp_function_owner.py
+
 # Complete focused-test admission; duplicate detection remains enforced.
 QA_PYTEST_TARGETS += tools/dosunit/tests/test_flat32_indirect_callbacks.py tools/dosunit/tests/test_flat32_indirect_callback_effects.py tools/dosunit/tests/test_dosunit_kvikdos_strict.py tests/frontend/test_x86_16_aam_fault.py tools/dosunit/tests/test_native_effect_environment_guards.py tools/dosunit/tests/test_dosunit_io_read_state.py tests/integration/test_x86_16_import_identity.py tests/cli/test_acceptance_reporting.py tests/cli/test_cli_shared_future_collection.py tests/cli/test_cli_ranked_task_queue.py tests/ir/test_x86_16_vex_binop_result_width.py tests/ir/test_x86_16_vex_wrtmp_result_width.py tests/cli/test_inertia_telemetry.py tools/dev/tests/test_makefile_variable_expansion.py
 QA_RUFF_TARGETS += tools/dev/tests/test_makefile_variable_expansion.py
@@ -5161,3 +5180,28 @@ QA_RUFF_TARGETS += \
 # Canonical package boundaries and pure DOS service contracts.
 QA_TYPED_FILES += inertia/__init__.py inertia/frontend/__init__.py   inertia/ir/public_api.py
 QA_RUFF_TARGETS += inertia/__init__.py inertia/frontend/__init__.py   inertia/ir/public_api.py
+
+# Source-bound raw boot census controls.
+QA_PYTEST_TARGETS += tests/ir/test_x86_16_boot_entry_link.py
+QA_RUFF_TARGETS += tests/ir/test_x86_16_boot_entry_link.py
+QA_PYTEST_TARGETS += tests/ir/test_x86_16_boot_callee_transport.py
+QA_RUFF_TARGETS += tests/ir/test_x86_16_boot_callee_transport.py
+
+QA_RUFF_TARGETS += tests/ir/test_x86_16_condition_transfer_function_owner.py
+QA_PYTEST_TARGETS += tests/ir/test_x86_16_condition_transfer_function_owner.py
+
+QA_RUFF_TARGETS += tests/structuring/test_x86_16_condition_cfg_function_owner.py
+QA_PYTEST_TARGETS += tests/structuring/test_x86_16_condition_cfg_function_owner.py
+
+QA_RUFF_TARGETS += inertia/structuring/condition_comparison_polarity.py tests/structuring/test_x86_16_condition_comparison_width.py
+QA_TYPED_FILES += inertia/structuring/condition_comparison_polarity.py
+QA_PYTEST_TARGETS += tests/structuring/test_x86_16_condition_comparison_width.py
+
+QA_TYPED_FILES += inertia/structuring/scalar_return_arm_ownership.py
+QA_RUFF_TARGETS += inertia/structuring/scalar_return_arm_ownership.py tests/structuring/test_x86_16_scalar_return_arm_review.py
+QA_PYTEST_TARGETS += tests/structuring/test_x86_16_scalar_return_arm_review.py
+
+# Separate census stage ledgers with constant-work ownership receipts.
+QA_TYPED_FILES += inertia/ir/real16_census_fact_ownership.py
+QA_RUFF_TARGETS += inertia/ir/real16_census_fact_ownership.py tests/ir/test_real16_census_fact_ownership.py
+QA_PYTEST_TARGETS += tests/ir/test_real16_census_fact_ownership.py

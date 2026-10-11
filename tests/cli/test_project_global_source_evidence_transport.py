@@ -3,6 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.cli.project_evidence_transport import (
+    attach_project_global_object_layout_evidence_8616,
+    transfer_project_global_source_evidence_8616,
+)
 from inertia.lowering.callee_global_object_sources import (
     GlobalObjectSourceEvidence8616,
     attach_project_global_object_source_evidence_8616,
@@ -13,13 +18,8 @@ from inertia.lowering.callee_pointer_contracts import (
     callee_pointer_argument_evidence_by_addr_8616,
     record_callee_pointer_argument_evidence_8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
-)
-from inertia.cli.project_evidence_transport import (
-    attach_project_global_object_layout_evidence_8616,
-    transfer_project_global_source_evidence_8616,
 )
 
 

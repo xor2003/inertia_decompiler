@@ -12,15 +12,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from inertia.semantics.callsite_summary_program import (
-    build_callsite_summary_inventory_with_program_evidence_8616,
-)
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.core import IRFunctionArtifact
+from inertia.ir.declared_entry_pipeline import (
+    DeclaredEntryPipeline8616,
+    UnprovedDeclaredEntry8616,
+    _retained_input_8616,
+)
 from inertia.ir.function_ir_registry import (
     FunctionIRArtifactFailure8616,
     FunctionIRArtifactVerdict8616,
@@ -36,11 +37,15 @@ from inertia.ir.function_ssa_registry import (
     registered_function_ssa_artifact_8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact, codegen_function_8616
+from inertia.pipeline.errors import PipelineHardError
+from inertia.semantics.callsite_summary_program import (
+    build_callsite_summary_inventory_with_program_evidence_8616,
+)
 
 from .call_outputs import CallOutputArtifact8616, materialize_call_outputs_8616
 from .call_return_segment import collect_return_segment_frames_8616
-from .call_stack_allocation import collect_call_stack_allocation_proofs_8616
+from .call_stack_allocation import collect_call_stack_allocation_candidates_8616
 from .call_stack_effects import (
     CallStackEffectArtifact8616,
     materialize_call_stack_effects_8616,
@@ -48,26 +53,7 @@ from .call_stack_effects import (
 from .call_target_evidence_8616 import (
     publish_call_semantic_projection_8616,
 )
-
-
-class _FunctionManager8616(Protocol):
-    """Third-party function-manager boundary used for exact lookup."""
-
-    def function(self, *, addr: int, create: bool = False) -> object | None:
-        """Return an existing function without inventing a boundary."""
-        ...
-
-
-class _KnowledgeBase8616(Protocol):
-    """Third-party knowledge-base boundary used by this semantic pass."""
-
-    functions: _FunctionManager8616
-
-
-class _ProjectBoundary8616(Protocol):
-    """Minimal angr project surface needed for exact function lookup."""
-
-    kb: _KnowledgeBase8616
+from .scoped_call_projection import ScopedCallSemanticInput8616, scoped_call_semantic_input_8616
 
 
 class _CFunctionBoundary8616(Protocol):
@@ -79,7 +65,7 @@ class _CFunctionBoundary8616(Protocol):
 class _FunctionBoundary8616(Protocol):
     """Owned metadata extension on a third-party recovered function."""
 
-    info: dict[str, object]
+    info: MutableMapping[str, object]
 
 
 class _CodegenBoundary8616(Protocol):
@@ -104,17 +90,24 @@ class CallSemanticProjection8616:
     effects: CallStackEffectArtifact8616
     outputs: CallOutputArtifact8616
     function_ssa: SSAFunctionArtifact
+    scoped_input: ScopedCallSemanticInput8616 | None = None
 
     @property
     def complete(self) -> bool:
         """Return whether every projection has closed evidence accounting."""
         function_addr = self.source_ir.function_addr
-        return bool(
+        accounting = bool(
             self.effects.stats.closed
             and self.outputs.stats.closed
             and self.effects.function.function_addr == function_addr
             and self.outputs.function.function_addr == function_addr
             and self.function_ssa.function_addr == function_addr
+        )
+        if not accounting or self.scoped_input is None:
+            return accounting
+        return (
+            self.scoped_input.source_ir is self.source_ir
+            and self.scoped_input.authenticates_outputs(self.effects, self.outputs, self.function_ssa)
         )
 
     def matches_codegen(
@@ -249,13 +242,13 @@ def build_semantic_function_ssa_8616(
         function,
         callsite_addrs,
     )
-    allocations = collect_call_stack_allocation_proofs_8616(project, raw_ir, summaries)
+    allocations = collect_call_stack_allocation_candidates_8616(project, raw_ir, summaries)
     return_frames = collect_return_segment_frames_8616(
         project, function,
         {address: summary.return_addr for address, summary in summaries.items() if summary.return_addr is not None},
     )
     effects = materialize_call_stack_effects_8616(
-        raw_ir, summaries, project=project, allocation_proofs=allocations,
+        raw_ir, summaries, project=project, allocation_candidates=allocations,
         return_segment_frames={frame.callsite_addr: frame for frame in return_frames},
     )
     if not effects.stats.closed or (
@@ -307,8 +300,9 @@ def _reusable_projection_8616(
     boundary: _CodegenBoundary8616,
     source_ir: IRFunctionArtifact,
     raw_ir: IRFunctionArtifact,
+    *, project: object, function: object,
 ) -> bool:
-    """Return whether the cached Semantics projection still matches codegen."""
+    """Reauthenticate retained Semantics only in the identical consuming context."""
     try:
         existing_projection = boundary._inertia_call_semantic_projection_8616
         existing_stage = boundary._inertia_vex_ir_function_ssa_stage_8616
@@ -321,6 +315,19 @@ def _reusable_projection_8616(
         and existing_stage is FunctionSSAArtifactStage8616.SEMANTIC
         and existing_projection.matches_codegen(raw_ir, existing_ssa)
     ):
+        entry = _retained_input_8616(boundary)
+        scoped = existing_projection.scoped_input
+        if scoped is None:
+            if entry is not None or source_ir.refusals:
+                return False
+        else:
+            if (entry is None or type(entry) is not DeclaredEntryPipeline8616
+                    or scoped.project is not project
+                    or scoped.function is not function or scoped.source_ir is not source_ir):
+                return False
+            if (entry.bundle.artifact is not source_ir
+                    or scoped.scope is not entry.scope or scoped.view is not entry.view):
+                return False
         if not existing_projection.complete:
             raise PipelineHardError(
                 "cached call Semantics projection has incomplete evidence accounting",
@@ -371,8 +378,15 @@ def _publish_semantic_artifacts_8616(
     effects: CallStackEffectArtifact8616,
     outputs: CallOutputArtifact8616,
     function_ssa: SSAFunctionArtifact,
+    *, scoped_input: ScopedCallSemanticInput8616 | None = None,
 ) -> None:
     """Publish all Semantics artifacts onto codegen and the project."""
+    projection = CallSemanticProjection8616(source_ir, effects, outputs, function_ssa, scoped_input)
+    if scoped_input is not None:
+        if not projection.complete:
+            raise PipelineHardError("conditional call projection failed revalidation", layer="semantics")
+        _attach_semantic_artifacts_8616(boundary, projection)
+        return
     ir_publication = publish_function_ir_artifact_8616(project, source_ir)
     if ir_publication.verdict is not FunctionIRArtifactVerdict8616.PROVEN:
         raise PipelineHardError(
@@ -381,7 +395,6 @@ def _publish_semantic_artifacts_8616(
             details={"function_addr": source_ir.function_addr,
                      "failure": None if ir_publication.failure is None else ir_publication.failure.value},
         )
-    projection = CallSemanticProjection8616(source_ir, effects, outputs, function_ssa)
     publication = publish_call_semantic_projection_8616(project, projection)
     if not publication.complete:
         raise PipelineHardError(
@@ -390,6 +403,14 @@ def _publish_semantic_artifacts_8616(
             details={"function_addr": source_ir.function_addr,
                      "failure": None if publication.failure is None else publication.failure.value},
         )
+    _attach_semantic_artifacts_8616(boundary, projection)
+
+
+def _attach_semantic_artifacts_8616(
+    boundary: _CodegenBoundary8616, projection: CallSemanticProjection8616,
+) -> None:
+    """Attach the same typed projection while keeping publication policy separate."""
+    effects, outputs, function_ssa = projection.effects, projection.outputs, projection.function_ssa
     boundary._inertia_vex_ir_artifact = outputs.function
     boundary._inertia_vex_ir_summary = outputs.function.summary
     boundary._inertia_vex_ir_function_ssa = function_ssa
@@ -408,10 +429,10 @@ def _record_function_info_8616(
     """Mirror Semantics artifacts into the function's info dict."""
     typed_function = cast(_FunctionBoundary8616, function)
     try:
-        info: dict[str, object] | None = typed_function.info
+        info: MutableMapping[str, object] | None = typed_function.info
     except AttributeError:
         info = None
-    if isinstance(info, dict):
+    if isinstance(info, MutableMapping):
         info["x86_16_vex_ir_artifact"] = outputs.function.to_dict()
         info["x86_16_vex_ir_summary"] = dict(outputs.function.summary)
         info["x86_16_vex_ir_function_ssa"] = function_ssa.to_dict()
@@ -429,7 +450,31 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
     if proven is None:
         return False
     cfunc, raw_ir, source_ir = proven
-    if source_ir.refusals:
+    resolved = codegen_function_8616(project, codegen)
+    if resolved is None:
+        return False
+    function, _function_addr = resolved
+    entry = _retained_input_8616(codegen)
+    if type(entry) is UnprovedDeclaredEntry8616:
+        if (
+            entry.bundle.artifact is not source_ir
+            or entry.view.source_artifact is not source_ir
+            or raw_ir is not source_ir
+            or entry.view.boundary.project is not project
+        ):
+            raise PipelineHardError(
+                "unproved declared entry lost its authenticated raw source",
+                layer="semantics", function_addr=cfunc.addr,
+            )
+        # No entry premise authorizes semantic enrichment or universal
+        # publication. Keep the raw SSA and every unresolved effect attached.
+        return False
+    if _reusable_projection_8616(
+        boundary, source_ir, raw_ir, project=project, function=function,
+    ):
+        return False
+    scoped_input = scoped_call_semantic_input_8616(project, codegen, function, source_ir)
+    if source_ir.refusals and scoped_input is None:
         # Import already retained the failure; no derived publication can
         # establish semantics for this source or erase its refusal evidence.
         raise PipelineHardError(
@@ -441,22 +486,16 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
                 "refusals": [refusal.to_dict() for refusal in source_ir.refusals],
             },
         )
-    project_boundary = cast(_ProjectBoundary8616, project)
-    try:
-        function = project_boundary.kb.functions.function(addr=cfunc.addr, create=False)
-    except (AttributeError, KeyError, TypeError):
-        return False
-    if function is None:
-        return False
-    if _reusable_projection_8616(boundary, source_ir, raw_ir):
-        return False
     effects, outputs, function_ssa = build_semantic_function_ssa_8616(
         project,
         function,
-        ir_artifact=source_ir,
+        ir_artifact=source_ir if scoped_input is None else scoped_input.input_ir,
     )
-    function_ssa = _published_function_ssa_8616(project, function_ssa, outputs, cfunc.addr)
-    _publish_semantic_artifacts_8616(project, boundary, source_ir, effects, outputs, function_ssa)
+    if scoped_input is None:
+        function_ssa = _published_function_ssa_8616(project, function_ssa, outputs, cfunc.addr)
+    _publish_semantic_artifacts_8616(
+        project, boundary, source_ir, effects, outputs, function_ssa, scoped_input=scoped_input,
+    )
     _record_function_info_8616(function, outputs, effects, function_ssa)
     return False
 

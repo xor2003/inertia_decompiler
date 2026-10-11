@@ -3,15 +3,15 @@
 from dataclasses import replace
 
 import pytest
-from inertia.ir.constant_flow import IRConstantFlow8616
-from inertia.ir.core import IRInstr, IRRefusal, IRValue, MemSpace
-from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 
 from inertia.alias.segment_stack_fragments import SegmentStackByteOrigin8616, complete_stack_constant_8616
 from inertia.alias.segment_stack_restore import (
     SegmentStackRestoreVerdict8616,
     build_x86_16_stack_register_restore_artifact_8616,
 )
+from inertia.ir.constant_flow import IRConstantFlow8616
+from inertia.ir.core import IRInstr, IRRefusal, IRValue, MemSpace
+from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 
 
 @pytest.mark.parametrize("prefix,expected", [("29 c0", 0), ("31 c0", 0), ("b8 34 12", 0x1234)])

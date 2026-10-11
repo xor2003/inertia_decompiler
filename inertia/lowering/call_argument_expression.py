@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeFixedSizeArray, SimTypePointer
+
 from inertia.semantics.callsite_summary import CallsitePushExprOp8616
 
 type CallArgumentSource8616 = tuple[object, ...]

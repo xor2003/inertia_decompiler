@@ -2,12 +2,11 @@
 
 from dataclasses import replace
 
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
-
-from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.reporting.real16_program_manifest import parse_program_manifest
+from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.runtime.real16_program_model import ProgramAgreement, ProgramStatus, compare_programs
 from tools.dosunit.runtime.real16_program_replay import replay_program
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 
 def stream_environment(*, handles=(1, 2), cap=32):
@@ -89,9 +88,8 @@ def test_zero_write_does_not_dereference_an_outside_pointer():
 def test_public_report_records_output_contract_and_receipts(tmp_path):
     import json
 
-    from tools.dosunit.tests.test_real16_program_cli import arguments, document
-
     from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
+    from tools.dosunit.tests.test_real16_program_cli import arguments, document
 
     args = arguments(tmp_path)
     args.oracle_exe.write_bytes(mz(bytes.fromhex(WRITE_TWO)))

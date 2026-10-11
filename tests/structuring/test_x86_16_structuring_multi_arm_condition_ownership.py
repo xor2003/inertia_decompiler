@@ -4,15 +4,23 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CConstant, CIfElse, CLabel, CStatements
+from angr.analyses.decompiler.structured_codegen.c import (
+    CConstant,
+    CExpression,
+    CIfElse,
+    CLabel,
+    CReturn,
+    CStatements,
+)
 from angr.sim_type import SimTypeShort
+
+import inertia.structuring.multi_arm_condition_ownership as owner
+import inertia.structuring.scalar_return_arm_ownership as scalar_owner
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.structuring.multi_arm_condition_ownership as owner
-
 from inertia.structuring.multi_arm_condition_ownership import (
     MultiArmConditionOwnershipStatus8616,
     materialize_multi_arm_condition_owners_8616,
@@ -247,3 +255,206 @@ def test_multi_arm_materialization_replaces_copied_tags_with_fact_owners() -> No
     assert replacements[1].tags[
         "inertia_structuring_multi_arm_owner_materialized_8616"
     ] is True
+
+
+_SHARED_EPILOGUE_BLOCK = 0x9000
+
+
+def _shared_epilogue_return_body(
+    value: int, codegen: _Codegen, ins_addr: int
+) -> CStatements:
+    """Build one sole scalar return body tagged with the shared epilogue."""
+    statement = CReturn(
+        CConstant(value, SimTypeShort(True), codegen=codegen),
+        codegen=codegen,
+        tags={"ins_addr": ins_addr, "vex_block_addr": _SHARED_EPILOGUE_BLOCK},
+    )
+    return CStatements(
+        [statement],
+        codegen=codegen,
+        tags={"ins_addr": ins_addr, "vex_block_addr": _SHARED_EPILOGUE_BLOCK},
+    )
+
+
+def _return_ladder_conditions() -> tuple[ConditionIR, ...]:
+    """Three proven ladder facts: two continue by fallthrough, one by taken."""
+    argument = IRValue(MemSpace.SS, name="bp", offset=4, size=2)
+    return (
+        ConditionIR(
+            op="sge",
+            lhs=argument,
+            source=("cmp", "jge"),
+            src_insn=0x1012,
+            block_addr=0x1010,
+            producer_insn=0x1010,
+            taken_target=0x2010,
+            fallthrough_target=0x1020,
+        ),
+        ConditionIR(
+            op="sle",
+            lhs=argument,
+            source=("cmp", "jle"),
+            src_insn=0x1022,
+            block_addr=0x1020,
+            producer_insn=0x1020,
+            taken_target=0x1030,
+            fallthrough_target=0x2020,
+        ),
+        ConditionIR(
+            op="ne",
+            lhs=argument,
+            source=("cmp", "jne"),
+            src_insn=0x1032,
+            block_addr=0x1030,
+            producer_insn=0x1030,
+            taken_target=0x2030,
+            fallthrough_target=0x2040,
+        ),
+    )
+
+
+def _return_ladder_successors() -> dict[int, tuple[int, ...]]:
+    return {
+        0x1010: (0x2010, 0x1020),
+        0x1020: (0x1030, 0x2020),
+        0x1030: (0x2030, 0x2040),
+    }
+
+
+def _return_ladder_recover(
+    codegen: _Codegen,
+    leaf_values: dict[int, int | None] | None = None,
+):
+    """Recover each native leaf return expression from classified effects."""
+    values = {0x2010: -1, 0x2020: 1, 0x2030: 0, 0x2040: 2}
+    if leaf_values:
+        values.update(leaf_values)
+
+    def recover(addr: int) -> CExpression | None:
+        value = values.get(addr)
+        if value is None:
+            return None
+        return CConstant(value, SimTypeShort(True), codegen=codegen)
+
+    return recover
+
+
+def _return_ladder_bodies(
+    codegen: _Codegen,
+    arm_values: tuple[int, int, int] = (-1, 1, 0),
+    else_value: int = 2,
+) -> tuple[tuple[CStatements, ...], CStatements]:
+    bodies = tuple(
+        _shared_epilogue_return_body(value, codegen, 0x3000 + index)
+        for index, value in enumerate(arm_values)
+    )
+    return bodies, _shared_epilogue_return_body(else_value, codegen, 0x3100)
+
+
+def test_shared_epilogue_return_ladder_proves_arm_ownership() -> None:
+    codegen = _Codegen()
+    facts = _return_ladder_conditions()
+    successors = _return_ladder_successors()
+    bodies, else_body = _return_ladder_bodies(codegen)
+
+    exact = owner.select_exact_multi_arm_condition_owners_8616(
+        tuple(owner.first_statement_block_8616(body) for body in bodies),
+        facts,
+        else_target=owner.first_statement_block_8616(else_body),
+        successors=successors,
+    )
+    assert not exact.selected
+
+    result = scalar_owner.select_scalar_return_arm_owners_8616(
+        bodies,
+        else_body,
+        facts,
+        successors=successors,
+        recover_return=_return_ladder_recover(codegen),
+    )
+
+    assert result.status is MultiArmConditionOwnershipStatus8616.SELECTED
+    assert result.facts == facts
+    assert result.taken_polarities == (True, False, True)
+
+    inverted: list[CExpression] = []
+    materialized = materialize_multi_arm_condition_owners_8616(
+        tuple(
+            (CConstant(1, SimTypeShort(False), codegen=codegen), body)
+            for body in bodies
+        ),
+        result,
+        lambda fact: CConstant(fact.src_insn, SimTypeShort(False), codegen=codegen),
+        invert=lambda expression: inverted.append(expression) or expression,
+    )
+
+    assert materialized.materialized_count == len(facts)
+    assert materialized.failure_count == 0
+    assert len(inverted) == 1
+    assert tuple(body for _cond, body in materialized.condition_and_nodes) == bodies
+
+
+@pytest.mark.parametrize(
+    ("fault", "expected"),
+    [
+        ("wrong-body-value", MultiArmConditionOwnershipStatus8616.RETURN_VALUE_MISMATCH),
+        ("swapped-arm", MultiArmConditionOwnershipStatus8616.RETURN_VALUE_MISMATCH),
+        ("missing-native-effect", MultiArmConditionOwnershipStatus8616.RETURN_LEAF_UNPROVED),
+        ("extra-edge", MultiArmConditionOwnershipStatus8616.CFG_EDGE_MISMATCH),
+        ("side-effect-body", MultiArmConditionOwnershipStatus8616.RETURN_BODY_UNPROVED),
+        ("non-return-else", MultiArmConditionOwnershipStatus8616.RETURN_BODY_UNPROVED),
+        ("ambiguous-leaf", MultiArmConditionOwnershipStatus8616.AMBIGUOUS_RETURN),
+        ("disconnected", MultiArmConditionOwnershipStatus8616.DISCONNECTED_FALLTHROUGH),
+    ],
+)
+def test_shared_epilogue_return_ladder_refuses_unproven_ownership(
+    fault, expected
+) -> None:
+    codegen = _Codegen()
+    facts = list(_return_ladder_conditions())
+    successors = _return_ladder_successors()
+    leaf_values: dict[int, int | None] = {}
+    arm_values: tuple[int, int, int] = (-1, 1, 0)
+    else_value = 2
+    if fault == "wrong-body-value":
+        leaf_values[0x2010] = 7
+    elif fault == "swapped-arm":
+        arm_values = (1, -1, 0)
+    elif fault == "missing-native-effect":
+        leaf_values[0x2010] = None
+    elif fault == "extra-edge":
+        successors[0x1010] = (0x2010, 0x1020, 0x2FF0)
+    elif fault == "ambiguous-leaf":
+        arm_values = (-1, 1, 0)
+        else_value = 0
+        leaf_values[0x2040] = 0
+    elif fault == "disconnected":
+        facts[0] = replace(facts[0], fallthrough_target=0x1090)
+        successors[0x1010] = (0x2010, 0x1090)
+    bodies, else_body = _return_ladder_bodies(codegen, arm_values, else_value)
+    if fault == "side-effect-body":
+        first = bodies[0].statements[0]
+        bodies = (
+            CStatements(
+                [first, first],
+                codegen=codegen,
+                tags=dict(bodies[0].tags),
+            ),
+            *bodies[1:],
+        )
+    elif fault == "non-return-else":
+        else_body = CStatements(
+            [], codegen=codegen, tags=dict(else_body.tags)
+        )
+
+    result = scalar_owner.select_scalar_return_arm_owners_8616(
+        bodies,
+        else_body,
+        tuple(facts),
+        successors=successors,
+        recover_return=_return_ladder_recover(codegen, leaf_values),
+    )
+
+    assert result.status is expected
+    assert result.facts == ()
+    assert not result.selected

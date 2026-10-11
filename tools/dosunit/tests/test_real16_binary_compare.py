@@ -17,10 +17,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 import tools.dosunit.reporting.ssa_provenance as ssa_provenance
 from tools.dosunit.compare.real16_binary_compare import add_binary16_parser, cmd_compare_binary16, compare_binary16
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 MODULE = "demo.exe"
 

@@ -6,16 +6,16 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CIfElse, CStatements
 from angr.sim_type import SimTypeShort
+
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-from tests.structuring.test_x86_16_structuring_multi_arm_condition_ownership import _Codegen
-
 from inertia.structuring.local_condition_regions import (
     local_condition_continuations_8616,
     prove_local_condition_region_8616,
 )
+from tests.structuring.test_x86_16_structuring_multi_arm_condition_ownership import _Codegen
 
 ROOT, LOW, BODY, CONTINUATION = 0x100, 0x110, 0x200, 0x300
 

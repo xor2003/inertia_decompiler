@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
-from tools.dosunit.tests.test_real16_region_proof import GUARD, LOOP, SPLIT, STORE, STRIDE
 
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
+from tools.dosunit.tests.test_real16_region_proof import GUARD, LOOP, SPLIT, STORE, STRIDE
 
 
 @pytest.mark.parametrize("candidate,expected", [(SPLIT, "proved"), (GUARD, "unknown"),

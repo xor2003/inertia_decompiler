@@ -30,10 +30,11 @@ from inertia.frontend.x86_16.ne_exe_parse import parse_ne_exe
 from tools.signatures.flair_paths import flair_signature_root
 from tools.signatures.omf_pat import (
     CachedPatRegexSpec,
+    LocalPatMatchResult,
     load_cached_pat_regex_specs,
     match_pat_modules,
 )
-from tools.signatures.signature_catalog import match_signature_catalog
+from tools.signatures.signature_catalog import match_signature_catalog, registered_pat_architecture
 
 
 class _AngrMemoryLoader8616(Protocol):
@@ -589,20 +590,20 @@ def _remember_compiler_8616(matched_compiler_names: list[str], name: str | None)
 def _merge_startup_flair_evidence_8616(
     project: angr.Project,
     startup_matches: tuple[FlairStartupPattern, ...],
-    startup_pat_result: tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]],
+    startup_pat_result: LocalPatMatchResult,
     code_labels: dict[int, str],
     code_ranges: dict[int, tuple[int, int]],
     matched_compiler_names: list[str],
     source_parts: list[str],
 ) -> None:
-    startup_pat_labels, startup_pat_ranges, startup_pat_compiler_names = startup_pat_result
-    if startup_pat_labels or startup_pat_ranges:
+    """Merge startup labels while retaining only matcher-proven body extents."""
+    if startup_pat_result.code_labels or startup_pat_result.code_ranges:
         source_parts.append("startup_flair_pat")
-        for compiler_name in startup_pat_compiler_names:
+        for compiler_name in startup_pat_result.matched_compiler_names:
             _remember_compiler_8616(matched_compiler_names, compiler_name)
-        for addr, name in startup_pat_labels.items():
+        for addr, name in startup_pat_result.code_labels.items():
             code_labels.setdefault(addr, name)
-        for addr, span in startup_pat_ranges.items():
+        for addr, span in startup_pat_result.code_ranges.items():
             code_ranges.setdefault(addr, span)
     elif startup_matches:
         source_parts.append("startup_flair_pat")
@@ -611,10 +612,7 @@ def _merge_startup_flair_evidence_8616(
         for offset, name in first.public_names:
             linear = project.entry + offset
             code_labels.setdefault(linear, name.lstrip("_"))
-        if first.public_names:
-            first_offset = min(offset for offset, _name in first.public_names)
-            start = project.entry + first_offset
-            code_ranges.setdefault(start, (start, start + 0x100))
+        # An entry-prefix match proves labels, not an arbitrary body extent.
     if startup_matches:
         # Dynamic angr boundary: project metadata is attached to the live angr project.
         typing.cast(typing.Any, project)._inertia_flair_startup_matches = tuple(match.pat_path for match in startup_matches)
@@ -682,34 +680,33 @@ def _match_flair_startup_pat_functions(
     flair_root: Path,
     *,
     backend: str | None = None,
-) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
+) -> LocalPatMatchResult:
     # Dynamic angr boundary: loader objects expose backend-specific main object metadata.
     main_object = getattr(project.loader, "main_object", None)
     # Dynamic angr boundary: project loader memory is supplied by angr backends.
     memory = getattr(project.loader, "memory", None)
     if main_object is None or memory is None:
-        return {}, {}, ()
+        return LocalPatMatchResult({}, {}, ())
     # Dynamic angr boundary: backend main objects expose image address bounds.
     min_addr = getattr(main_object, "min_addr", None)
     # Dynamic angr boundary: backend main objects expose image address bounds.
     max_addr = getattr(main_object, "max_addr", None)
     if not isinstance(min_addr, int) or not isinstance(max_addr, int) or max_addr < min_addr:
-        return {}, {}, ()
+        return LocalPatMatchResult({}, {}, ())
     try:
         image_bytes = bytes(memory.load(min_addr, max_addr - min_addr + 1))
     except Exception:
-        return {}, {}, ()
+        return LocalPatMatchResult({}, {}, ())
     modules = _load_flair_startup_pat_modules(str(flair_root))
     if not modules:
-        return {}, {}, ()
-    pat_result = match_pat_modules(
+        return LocalPatMatchResult({}, {}, ())
+    return match_pat_modules(
         image_bytes,
         min_addr,
         modules,
         backend=backend,
+        architecture=registered_pat_architecture(project),
     )
-    code_labels, code_ranges, matched_compiler_names = pat_result
-    return code_labels, code_ranges, matched_compiler_names
 
 
 def _parse_mzre_map_metadata(

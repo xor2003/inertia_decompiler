@@ -14,15 +14,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable
-import inertia.structuring.decompiler_structuring_stage as stage
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.real_mode_linear as real_mode_linear
-from inertia.lowering.callee_saved_frame import (
-    CalleeSavedFrameCarrierKind8616,
-    CalleeSavedFrameInstructionRole8616,
-    CalleeSavedFramePruneFact8616,
-    CalleeSavedFramePruneRecord8616,
-)
 from capstone.x86_const import (
     X86_INS_POP,
     X86_INS_PUSH,
@@ -31,6 +22,15 @@ from capstone.x86_const import (
     X86_REG_SI,
 )
 
+import inertia.lowering.real_mode_linear as real_mode_linear
+import inertia.structuring.decompiler_structuring_stage as stage
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.callee_saved_frame import (
+    CalleeSavedFrameCarrierKind8616,
+    CalleeSavedFrameInstructionRole8616,
+    CalleeSavedFramePruneFact8616,
+    CalleeSavedFramePruneRecord8616,
+)
 from inertia.validation.tail_validation_frame_spills import (
     callee_saved_frame_prune_delta_8616,
 )

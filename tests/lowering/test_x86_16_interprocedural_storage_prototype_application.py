@@ -15,8 +15,8 @@ from angr.sim_type import (
     SimTypeShort,
 )
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -54,6 +54,7 @@ from inertia.lowering.near_pointer_type import near_pointer_type_8616
 from inertia.lowering.stack_variable_coordinates import (
     publish_selected_stack_cvar_projection_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class _Codegen:

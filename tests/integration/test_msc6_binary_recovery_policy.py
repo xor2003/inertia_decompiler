@@ -6,14 +6,18 @@ from types import SimpleNamespace
 
 import pytest
 
+import tools.compiler_toolchain.build_msc6_examples as build_msc6_examples
+import tools.dev.batch_decompile_procs as batch_decompile_procs
 from inertia.cli.cli_terminal_status import (
     CliTerminalStatus,
     emit_terminal_status,
     read_terminal_status,
 )
-import tools.dev.batch_decompile_procs as batch_decompile_procs
-import tools.compiler_toolchain.build_msc6_examples as build_msc6_examples
-from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget, TargetBindingStatus, bind_function_targets
+from tools.compiler_toolchain.msc6_function_targets import (
+    BinaryFunctionTarget,
+    TargetBindingStatus,
+    bind_function_targets,
+)
 from tools.compiler_toolchain.msc6_memory_model import MSCMemoryModel
 
 
@@ -156,7 +160,7 @@ def test_roundtrip_commands_disable_alternate_source(monkeypatch, tmp_path, mode
             binary, function_name="probe", **options,
         )
     else:
-        monkeypatch.setattr(build_msc6_examples, "_resolve_main_candidates_from_metadata", lambda *_: [])
+        monkeypatch.setattr(build_msc6_examples, "_resolve_main_candidates_from_metadata", lambda _exe, _cod, *, signature_catalog=None: [])
         build_msc6_examples._decompile(
             binary, tmp_path, decompile_run_timeout=1, decompile_mode=mode,
             decompile_cod_path=None, decompile_max_functions=0,
@@ -226,7 +230,7 @@ def test_source_free_failure_cannot_retry_through_named_sidecar_recovery(monkeyp
 
     monkeypatch.setattr(build_msc6_examples, "_build_from_function_decompiles", named_fallback)
     monkeypatch.setattr(build_msc6_examples, "_decompile", binary_recovery)
-    monkeypatch.setattr(build_msc6_examples, "_lookup_sidecar_code_labels", lambda _: {})
+    monkeypatch.setattr(build_msc6_examples, "_lookup_sidecar_code_labels", lambda _binary, *, signature_catalog=None: {})
     result = build_msc6_examples._decompile_and_validate(
         tmp_path / "TEST.EXE", tmp_path, kvikdos=tmp_path / "kvikdos",
         msc6_root=tmp_path / "msc6", decompile_py=tmp_path / "decompile.py",
@@ -268,7 +272,7 @@ def test_source_free_binding_preserves_bodies_contracts_and_behavior(monkeypatch
         "probe": "int sub_10010(void)\n{\n    return sub_10000();\n}\n",
     }
     calls = []
-    monkeypatch.setattr(build_msc6_examples, "_lookup_sidecar_code_labels", lambda _: {"inner": 0x10000, "probe": 0x10010})
+    monkeypatch.setattr(build_msc6_examples, "_lookup_sidecar_code_labels", lambda _binary, *, signature_catalog=None: {"inner": 0x10000, "probe": 0x10010})
     monkeypatch.setattr(c_runtime_header, "render_c_runtime_header_8616", lambda _: "")
     monkeypatch.setattr(build_msc6_examples, "_prepare_decompiled_source_for_c89", lambda source: source)
 

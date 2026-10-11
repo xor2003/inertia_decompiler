@@ -148,7 +148,7 @@
         "-Od",
         "-ms"
       ],
-      "compile_backend": "dosbox",
+      "compile_backend": "kvikdos",
       "run_backend": "kvikdos",
       "toolchain_root": "/home/xor/inertia_player/dos_compilers/Borland C++ v3.1",
       "tools": {
@@ -215,7 +215,8 @@
       ],
       "cod_argument": null,
       "link_argument": "/m /s e:\\LIB\\C0S+c:\\{obj}{extra_objs},c:\\{exe},c:\\{map},e:\\LIB\\CS e:\\LIB\\EMU e:\\LIB\\MATHS",
-      "extra_object_format": "+c:\\{extra_obj}"
+      "extra_object_format": "+c:\\{extra_obj}",
+      "kvikdos_dpmi_mode": "off"
     },
     {
       "id": "bc31-large",
@@ -230,7 +231,7 @@
         "-Od",
         "-ml"
       ],
-      "compile_backend": "dosbox",
+      "compile_backend": "kvikdos",
       "run_backend": "kvikdos",
       "toolchain_root": "/home/xor/inertia_player/dos_compilers/Borland C++ v3.1",
       "tools": {
@@ -297,13 +298,14 @@
       ],
       "cod_argument": null,
       "link_argument": "/m /s e:\\LIB\\C0L+c:\\{obj}{extra_objs},c:\\{exe},c:\\{map},e:\\LIB\\CL e:\\LIB\\EMU e:\\LIB\\MATHL",
-      "extra_object_format": "+c:\\{extra_obj}"
+      "extra_object_format": "+c:\\{extra_obj}",
+      "kvikdos_dpmi_mode": "off"
     }
   ],
   "runners": {
     "kvikdos": {
       "path": "/home/xor/kvikdos/kvikdos",
-      "sha256": "3d9d534cdcf770ef6c3e392dc7c7c8e69d2c80d71a719c24a7c5cad58914d0cd"
+      "sha256": "3d75ba5d623bc0192bf77447640b8da4b4f486dcd9462fb9784fccd953fe75a0"
     },
     "dosbox": {
       "path": "/usr/bin/dosbox",
@@ -332,6 +334,6 @@
   },
   "probe_evidence": {
     "path": "examples/compiler_coverage/toolchain-probes.json",
-    "sha256": "2b5b83d4f247b393750f035b3c0b3f4dd4a2799eea1915a65228b43031cd6ab7"
+    "sha256": "c4fe68dffb8d2a15cef2add3a2142c7509dd43da9c68b374f7a6c6e434169056"
   }
 }

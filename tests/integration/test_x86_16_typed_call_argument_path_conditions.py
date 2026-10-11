@@ -7,10 +7,11 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CITE, CConstant
 from angr.sim_type import SimTypeShort
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.ir.condition_ir import ConditionIR
-import inertia.structuring.call_argument_path_conditions as path_conditions
 from archinfo import ArchX86
+
+import inertia.structuring.call_argument_path_conditions as path_conditions
+from inertia.ir.condition_ir import ConditionIR
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _summary() -> CallsiteSummary8616:

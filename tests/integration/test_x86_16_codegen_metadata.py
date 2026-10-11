@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 import inertia.lowering.codegen_metadata as codegen_metadata
 
 

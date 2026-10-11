@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_real16_binary_compare import _compare, _exe, _verdict
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_real16_binary_compare import _compare, _exe, _verdict
 
 # oracle: test ax,ax; jz ret; body: dec ax; jnz body; ret
 # Every input ends with AX=0; both binaries have equal final state, including

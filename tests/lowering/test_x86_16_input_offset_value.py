@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from inertia.semantics.callsite_summary import (
-    CallsitePushSourceKind8616,
-    CallsiteSummary8616,
-)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -21,7 +18,6 @@ from inertia.ir.scalar_affine_contracts import (
 from inertia.ir.ssa_function import (
     SSAFunctionArtifact,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.lowering.input_offset_value import (
     InputOffsetValue8616,
     InputOffsetValueFailure8616,
@@ -46,6 +42,10 @@ from inertia.lowering.interprocedural_storage_reaching_contracts import (
 from inertia.lowering.interprocedural_storage_reaching_defs import (
     CallArgumentDefinitionVerdict8616,
     resolve_call_argument_reaching_definition_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsitePushSourceKind8616,
+    CallsiteSummary8616,
 )
 from tests.lowering.x86_16_native_call_fixtures import NativeCallFixture8616, lift_native_call_fixture_8616
 

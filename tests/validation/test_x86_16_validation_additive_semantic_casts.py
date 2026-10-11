@@ -20,6 +20,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeInt, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
@@ -27,7 +28,6 @@ from inertia.lowering.semantic_cast import (
     CSemanticCast8616,
     is_identity_semantic_variable_cast_8616,
 )
-
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 from inertia.validation.validation_branch_conditions import (
     BranchConditionIssueKind8616,

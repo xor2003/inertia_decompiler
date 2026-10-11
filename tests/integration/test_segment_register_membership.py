@@ -1,6 +1,12 @@
 """Equivalent segment-register membership must preserve exact stack facts."""
 
 import pytest
+
+from inertia.alias.segment_stack_restore import (
+    SegmentStackRestoreVerdict8616,
+    build_x86_16_segment_stack_restore_artifact,
+    build_x86_16_stack_register_restore_artifact_8616,
+)
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -12,12 +18,6 @@ from inertia.ir.core import (
     SegmentOrigin,
 )
 from inertia.ir.segment_state_transfer import SEGMENT_REGISTERS
-
-from inertia.alias.segment_stack_restore import (
-    SegmentStackRestoreVerdict8616,
-    build_x86_16_segment_stack_restore_artifact,
-    build_x86_16_stack_register_restore_artifact_8616,
-)
 
 
 def _constant_restore(register):

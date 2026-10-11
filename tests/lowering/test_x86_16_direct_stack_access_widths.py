@@ -6,6 +6,8 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasFactKind8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.instruction_bp_stack_access import (
     InstructionBpStackAccess8616,
@@ -21,8 +23,6 @@ from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
 )
-
-from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasFactKind8616
 
 
 @pytest.mark.parametrize("width", [1, 2])

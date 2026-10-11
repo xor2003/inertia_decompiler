@@ -10,10 +10,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.dosunit_kvikdos_test_support import mz_exe
 
 import tools.dosunit.runtime.kvikdos_backend as backend
 from tools.dosunit.runtime.kvikdos_backend import KvikdosBackendError
+from tools.dosunit.tests.dosunit_kvikdos_test_support import mz_exe
 
 KVIKDOS_C = Path("/home/xor/kvikdos/kvikdos.c")
 requires_kvikdos_c = pytest.mark.skipif(
@@ -242,10 +242,9 @@ def test_handle_table_residue_cleared() -> None:
 @pytest.mark.parametrize("paragraphs", [0, 1, 0x15EA, 0x9F00, 0x9F01, 0xFFFF])
 def test_resize_response_matches_independent_native_execution(paragraphs: int) -> None:
     """Run the same INT21 in real KVM, checking metadata and register/flag outputs."""
+    from tools.dosunit.runtime.real16_program_resize import ResizeAccepted, program_resize_call
     from tools.dosunit.tests.test_real16_program_replay import mz
     from tools.dosunit.tests.test_real16_program_resize import MCB, POLICY, resize_code
-
-    from tools.dosunit.runtime.real16_program_resize import ResizeAccepted, program_resize_call
 
     # Save EAX/EBX and FLAGS before replacing AX with the termination request.
     code = resize_code(paragraphs)[:-10] + "66a3000266891e04029c58a30802b8004ccd21"

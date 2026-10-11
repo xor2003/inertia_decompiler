@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
 from archinfo import Arch
 
 from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
 from inertia.ir.core import IRValue, MemSpace
+from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
 
 from .call_return_stack_stores import (
     CallReturnStackStoreEvidence8616,

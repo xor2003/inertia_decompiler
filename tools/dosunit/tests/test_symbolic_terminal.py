@@ -13,9 +13,9 @@ from dataclasses import replace
 import pytest
 
 import tools.dosunit.compare.symbolic_terminal as ST
+from tools.dosunit.reporting.proof_public_domain import OutcomeAdmission
 from tools.dosunit.runtime.flat32_memory_permissions import DeclaredAccess
 from tools.dosunit.runtime.pe32_program_boot import PeProgramEnvironment, PeProgramMemory
-from tools.dosunit.reporting.proof_public_domain import OutcomeAdmission
 from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment
 from tools.dosunit.runtime.real16_program_model import (
     ProgramAgreement,

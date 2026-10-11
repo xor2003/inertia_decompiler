@@ -21,7 +21,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from inertia.frontend.real16_version_response8616 import INT21_VERSION_FUNCTION_8616, INT21_VERSION_MINIMUM_MAJOR_8616, INT21_VERSION_SELECTOR_8616, INT21_VERSION_SERIAL_MASK_8616, INT21_VERSION_VECTOR_8616, version_response_words_8616
+from inertia.frontend.real16_version_response8616 import (
+    INT21_VERSION_FUNCTION_8616,
+    INT21_VERSION_MINIMUM_MAJOR_8616,
+    INT21_VERSION_SELECTOR_8616,
+    INT21_VERSION_SERIAL_MASK_8616,
+    INT21_VERSION_VECTOR_8616,
+    version_response_words_8616,
+)
 
 # INT21/AH=30 is Get DOS Version; AL=00 is the only admitted selector. Other
 # AL subfunctions (version flags, OEM-dependent variants) are never modeled.

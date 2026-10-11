@@ -4,12 +4,12 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, build_x86_16_segment_state_artifact
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
-
-from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 
 @pytest.mark.parametrize("defect", (None, "foreign", "missing_block", "missing_register", "no_return", "no_coverage"))

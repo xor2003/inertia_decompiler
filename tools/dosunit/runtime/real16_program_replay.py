@@ -16,9 +16,23 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from inertia.frontend.real16_dosbox_entry_policy import dosbox_entry_policy_document
+from inertia.frontend.real16_dosbox_int21_frame import (
+    DosBoxInt21Registers8616,
+    DosBoxInt21Write8616,
+    dosbox_int21_frame_effects_8616,
+)
+from inertia.frontend.real16_dosbox_resize import DosboxResizePolicy, DosboxResizeRefusal, dosbox_resize_response
+from inertia.frontend.real16_vector_response8616 import (
+    INT21_SET_VECTOR_8616,
+    VectorResponseEffect8616,
+    VectorResponseRefusal8616,
+    vector_response_8616,
+)
 from tools.dosunit.contracts.binary_environment import decoded_port_effects
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.reporting.real16_program_input_manifest import input_policy_document
+from tools.dosunit.runtime.real16_dosbox_resize_receipt import DosboxResizeReceiptError, dosbox_resize_event_data
 from tools.dosunit.runtime.real16_guest import _high_ids, _segment_ids
 from tools.dosunit.runtime.real16_program_boot import ProgramBoot
 from tools.dosunit.runtime.real16_program_device_info import (
@@ -60,7 +74,6 @@ from tools.dosunit.runtime.real16_program_resize import (
 )
 from tools.dosunit.runtime.real16_program_rom import readable_memory_contains, rom_document
 from tools.dosunit.runtime.real16_program_vectors import (
-    DOS_VECTOR,
     DOS_VECTOR_RANGE,
     VECTOR_BYTES,
     VectorRefusal,
@@ -313,6 +326,45 @@ def _dos_vector_intact(guest: Uc, state: _ProgramState, address: int) -> bool:
     return False
 
 
+def _dosbox_entry_writes(
+    guest: Uc, state: _ProgramState, address: int, frame: LinearRange,
+) -> tuple[DosBoxInt21Write8616, ...] | None:
+    """Preflight the explicit version/resize prologue against declared memory."""
+    policy = state.boot.environment.dosbox_int21_entry_policy
+    ax = int(guest.reg_read(registers.UC_X86_REG_AX))
+    if policy is None or ax >> 8 not in (0x30, 0x4A):
+        return ()
+    saved = DosBoxInt21Registers8616(*(
+        int(guest.reg_read(identity)) for identity in (
+            registers.UC_X86_REG_AX, registers.UC_X86_REG_BX, registers.UC_X86_REG_CX,
+            registers.UC_X86_REG_DX, registers.UC_X86_REG_SI, registers.UC_X86_REG_DI,
+            registers.UC_X86_REG_BP, registers.UC_X86_REG_DS, registers.UC_X86_REG_ES,
+        )
+    ))
+    effects = dosbox_int21_frame_effects_8616(
+        psp_segment=policy.psp_segment, ss=int(guest.reg_read(registers.UC_X86_REG_SS)),
+        sp=int(guest.reg_read(registers.UC_X86_REG_SP)), registers=saved,
+    )
+    if effects.failure is not None:
+        _stop(guest, state, ProgramEventKind.CONTROL_ESCAPE, address, effects.failure.value.encode())
+        return None
+    for write in effects.writes[1:]:
+        if not state.memory.contains(write.linear, write.size):
+            _stop(guest, state, ProgramEventKind.UNDECLARED_ACCESS, address, b"dosbox_entry_write")
+            return None
+        if any(region.overlaps(write.linear, write.size) for region in state.boot.image.code_ranges):
+            _stop(guest, state, ProgramEventKind.CODE_WRITE, address, b"dosbox_entry_write")
+            return None
+        resize = state.boot.environment.resize_policy
+        metadata_alias = (any(LinearRange(entry.address, len(entry.image)).overlaps(write.linear, write.size)
+                              for entry in resize.chain) if isinstance(resize, DosboxResizePolicy)
+                          else resize is not None and LinearRange(resize.metadata_address, MCB_BYTES).overlaps(write.linear, write.size))
+        if write.linear < 0x400 or frame.overlaps(write.linear, write.size) or metadata_alias:
+            _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, address, b"dosbox_entry_alias")
+            return None
+    return effects.writes[1:]
+
+
 def _service_frame(guest: Uc, state: _ProgramState, address: int, raw: bytes, *, vector: int = 0x21) -> bool:
     """Apply architectural stack bytes before any summarized service reads them.
 
@@ -346,8 +398,15 @@ def _service_frame(guest: Uc, state: _ProgramState, address: int, raw: bytes, *,
         _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, address,
               VideoDispatchRefusal.FRAME_ALIAS.value.encode())
         return False
+    entry_writes = _dosbox_entry_writes(guest, state, address, LinearRange(frame.address, len(frame.data))) if vector == 0x21 else ()
+    if entry_writes is None:
+        return False
     guest.mem_write(frame.address, frame.data)
     state.writes.update(range(frame.address, frame.address + len(frame.data)))
+    for write in entry_writes:
+        assert write.data is not None
+        guest.mem_write(write.linear, write.data)
+        state.writes.update(range(write.linear, write.linear + write.size))
     state.interrupt_frame = LinearRange(frame.address, len(frame.data))
     return True
 
@@ -496,10 +555,79 @@ def _version(guest: Uc, state: _ProgramState, address: int, size: int, ax: int) 
     guest.reg_write(registers.UC_X86_REG_IP, ip + size)
 
 
+def _dosbox_resize_write_valid(
+    guest: Uc, state: _ProgramState, instruction_address: int,
+    address: int, data: bytes, entry: tuple[DosBoxInt21Write8616, ...],
+) -> bool:
+    """Preflight every allocator store, including same-value native writes."""
+    if not state.memory.contains(address, len(data)):
+        _stop(guest, state, ProgramEventKind.UNDECLARED_ACCESS, instruction_address, b"dosbox_resize_write")
+        return False
+    if address < 0x400 or any(LinearRange(write.linear, write.size).overlaps(address, len(data)) for write in entry[1:]):
+        _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, instruction_address, b"dosbox_resize_alias")
+        return False
+    return _service_write(guest, state, address, len(data))
+
+
+def _dosbox_resize(
+    guest: Uc, state: _ProgramState, address: int, size: int, ax: int,
+    policy: DosboxResizePolicy,
+) -> None:
+    """Apply only an independently receipted canonical DOSBox resize response."""
+    ip = int(guest.reg_read(registers.UC_X86_REG_IP))
+    if ip + size > 0xFFFF:
+        _stop(guest, state, ProgramEventKind.CONTROL_ESCAPE, address, b"service_fallthrough_wrap")
+        return
+    segment = int(guest.reg_read(registers.UC_X86_REG_ES))
+    paragraphs = int(guest.reg_read(registers.UC_X86_REG_BX))
+    if any(not state.memory.contains(entry.address, len(entry.image)) for entry in policy.chain):
+        _stop(guest, state, ProgramEventKind.UNDECLARED_ACCESS, address, b"dosbox_resize_chain")
+        return
+    current = tuple(bytes(guest.mem_read(entry.address, len(entry.image))) for entry in policy.chain)
+    header_before = None
+    if paragraphs < policy.final_entry.size:
+        header = (segment + paragraphs) << 4
+        if not state.memory.contains(header, MCB_BYTES):
+            _stop(guest, state, ProgramEventKind.UNDECLARED_ACCESS, address, b"dosbox_resize_split")
+            return
+        header_before = bytes(guest.mem_read(header, MCB_BYTES))
+    response = dosbox_resize_response(policy, segment=segment, paragraphs=paragraphs,
+                                     ax=ax, current_chain=current, new_header_before=header_before)
+    if isinstance(response, DosboxResizeRefusal):
+        _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, address, response.value.encode())
+        return
+    try:
+        receipt = dosbox_resize_event_data(policy, segment=segment, paragraphs=paragraphs, ax=ax,
+                                          current_chain=current, result=response, new_header_before=header_before)
+    except DosboxResizeReceiptError as error:
+        _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, address, str(error).encode())
+        return
+    assert state.interrupt_frame is not None
+    entry = _dosbox_entry_writes(guest, state, address, state.interrupt_frame)
+    if entry is None:
+        return
+    if any(not _dosbox_resize_write_valid(guest, state, address, write.address, write.data, entry)
+           for write in response.writes):
+        return
+    for write in response.writes:
+        guest.mem_write(write.address, write.data)
+        state.writes.update(range(write.address, write.address + len(write.data)))
+    state.events.append(ProgramEvent(ProgramEventKind.DOS_RESIZE, address, receipt))
+    eax, ebx = (int(guest.reg_read(identity)) for identity in (registers.UC_X86_REG_EAX, registers.UC_X86_REG_EBX))
+    guest.reg_write(registers.UC_X86_REG_EAX, (eax & 0xFFFF0000) | response.ax)
+    guest.reg_write(registers.UC_X86_REG_EBX, (ebx & 0xFFFF0000) | response.bx)
+    flags = int(guest.reg_read(registers.UC_X86_REG_EFLAGS))
+    guest.reg_write(registers.UC_X86_REG_EFLAGS, (flags & ~1) | int(response.carry))
+    guest.reg_write(registers.UC_X86_REG_IP, ip + size)
+
+
 def _resize(guest: Uc, state: _ProgramState, address: int, size: int, ax: int) -> None:
     """Commit a checked native tail resize with its complete metadata receipt."""
     policy = state.boot.environment.resize_policy
     assert policy is not None
+    if isinstance(policy, DosboxResizePolicy):
+        _dosbox_resize(guest, state, address, size, ax, policy)
+        return
     ip = int(guest.reg_read(registers.UC_X86_REG_IP))
     if ip + size > 0xFFFF:
         _stop(guest, state, ProgramEventKind.CONTROL_ESCAPE, address, b"service_fallthrough_wrap")
@@ -531,23 +659,29 @@ def _vector(guest: Uc, state: _ProgramState, address: int, size: int, ax: int) -
     function, number = ax >> 8, ax & 0xFF
     slot = number * VECTOR_BYTES
     before = bytes(guest.mem_read(slot, VECTOR_BYTES))
+    response = vector_response_8616(
+        function=function,
+        number=number,
+        slot_before=before,
+        ds=int(guest.reg_read(registers.UC_X86_REG_DS)) if function == INT21_SET_VECTOR_8616 else None,
+        dx=int(guest.reg_read(registers.UC_X86_REG_DX)) if function == INT21_SET_VECTOR_8616 else None,
+    )
+    if isinstance(response, VectorResponseRefusal8616):
+        _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, address, response.value.encode())
+        return
+    assert isinstance(response, VectorResponseEffect8616)
     after = before
-    if function == 0x25:
-        target = SegOffset(int(guest.reg_read(registers.UC_X86_REG_DS)),
-                           int(guest.reg_read(registers.UC_X86_REG_DX)))
-        after = vector_bytes(target)
-        if number == DOS_VECTOR and after != before:
-            _stop(guest, state, ProgramEventKind.UNSUPPORTED_INSTRUCTION, address, VectorRefusal.DOS_UPDATE.value.encode())
-            return
+    if response.slot_after is not None:
+        after = response.slot_after
         if not _service_write(guest, state, slot, VECTOR_BYTES):
             return
         guest.mem_write(slot, after)
         state.writes.update(range(slot, slot + VECTOR_BYTES))
     else:
-        assert function == 0x35
+        assert response.bx is not None and response.es is not None
         ebx = int(guest.reg_read(registers.UC_X86_REG_EBX))
-        guest.reg_write(registers.UC_X86_REG_EBX, (ebx & 0xFFFF0000) | int.from_bytes(before[:2], "little"))
-        guest.reg_write(registers.UC_X86_REG_ES, int.from_bytes(before[2:], "little"))
+        guest.reg_write(registers.UC_X86_REG_EBX, (ebx & 0xFFFF0000) | response.bx)
+        guest.reg_write(registers.UC_X86_REG_ES, response.es)
     state.events.append(ProgramEvent(ProgramEventKind.DOS_VECTOR, address,
                                      vector_event_data(function, number, before, after)))
     guest.reg_write(registers.UC_X86_REG_IP, int(guest.reg_read(registers.UC_X86_REG_IP)) + size)
@@ -630,6 +764,7 @@ def _identities(boot: ProgramBoot) -> tuple[str, str]:
         "services": {"termination": "int21_4c", "input": input_policy_document(environment.input_policy),
                      "version": version_policy_document(environment.version_policy),
                      "resize": resize_policy_document(environment.resize_policy),
+                     "dosbox_int21_entry": dosbox_entry_policy_document(environment.dosbox_int21_entry_policy),
                      "vectors": vector_policy_document(environment.vector_policy),
                      "device_info": device_info_policy_document(environment.device_info_policy),
                      "video": video_policy_document(environment.video_policy),

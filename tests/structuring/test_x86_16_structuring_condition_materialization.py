@@ -18,6 +18,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
+import inertia.structuring.condition_materialization as condition_materialization
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
 from inertia.ir.core import IRValue, MemSpace
@@ -25,8 +27,6 @@ from inertia.lowering.call_output_stack_objects import (
     WideCallReturnConditionResult8616,
     WideCallReturnConditionStats8616,
 )
-import inertia.structuring.condition_materialization as condition_materialization
-
 from inertia.structuring.condition_chain_provenance import (
     ConditionChainProvenance8616,
     condition_chain_provenance_8616,
@@ -50,6 +50,40 @@ class _Codegen:
 
 class _Project:
     pass
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_multi_arm_diagnostics_only_walk_bodies_when_enabled(monkeypatch, caplog, debug):
+    """Disabled diagnostics must not traverse branch bodies for log arguments."""
+    if debug:
+        monkeypatch.setenv("INERTIA_DEBUG_CONDITION_MATERIALIZATION", "1")
+    else:
+        monkeypatch.delenv("INERTIA_DEBUG_CONDITION_MATERIALIZATION", raising=False)
+    codegen = _Codegen()
+    pairs = [(CConstant(index, SimTypeShort(False), codegen=codegen),
+              CStatements([], codegen=codegen)) for index in range(3)]
+    otherwise = CStatements([], codegen=codegen)
+    node = CIfElse(pairs, else_node=otherwise, cstyle_ifs=True, codegen=codegen)
+    visited = []
+
+    def diagnostic_address(body):
+        visited.append(body)
+        return None
+
+    monkeypatch.setattr(condition_materialization, "_first_tagged_ins_addr_8616", diagnostic_address)
+    run = condition_materialization._ConditionChainRun8616(
+        project=_Project(), codegen=codegen, metadata_codegen=codegen, cfunc=None,
+        targeted=(), successors={}, conditions_by_src={}, conditions_by_block={},
+        condition_blocks=frozenset(), tag_session=None, local_continuations={},
+        typed_surface_ids_by_key={},
+    )
+    run._multi_arm_node_8616(node)
+    assert visited == ([body for _, body in pairs] + [otherwise] if debug else [])
+    assert ("multi-arm-candidate" in caplog.text) is debug
+    assert node.condition_and_nodes == pairs
+    assert node.else_node is otherwise
+    assert not run.changed
+    assert (run.raw_count, run.classified_count, run.materialized_count, run.failure_count) == (0, 0, 0, 0)
 
 
 def test_structuring_condition_materialization_delegates_legacy_consumers_in_order(monkeypatch):

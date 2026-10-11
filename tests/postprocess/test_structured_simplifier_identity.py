@@ -8,14 +8,14 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
+import inertia.cli.cli_c_ast_rewrites as rewrites
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.postprocess.decompiler_postprocess_simplify import _simplify_structured_expressions_8616
 from inertia.lowering.condition_stack_operands import project_contained_stack_integer_view_8616
 from inertia.lowering.semantic_cast import CSemanticCast8616
-
+from inertia.postprocess.decompiler_postprocess_simplify import _simplify_structured_expressions_8616
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 from inertia.validation.validation_condition_precision import condition_precision_token_8616
-import inertia.cli.cli_c_ast_rewrites as rewrites
 
 
 class _Codegen:

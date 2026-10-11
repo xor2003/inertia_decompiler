@@ -2,19 +2,19 @@ from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CFunctionCall, CStatements
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypePointer, SimTypeShort
+from archinfo import ArchX86
+
 import inertia.semantics.helper_abi as helper_abi
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.analysis_helpers import (
+    known_helper_signature_decl,
+    preferred_known_helper_signature_decl,
+)
 from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.semantics.helper_abi import (
     known_helper_is_variadic_8616,
     known_helper_logical_argument_widths_8616,
     known_helper_prototype_8616,
-)
-from archinfo import ArchX86
-
-from inertia.lowering.analysis_helpers import (
-    known_helper_signature_decl,
-    preferred_known_helper_signature_decl,
 )
 from inertia.validation.validation_calls import validate_call_interfaces_8616
 

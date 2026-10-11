@@ -6,9 +6,9 @@ Responsibility: keep configured finite intake and receipt-verification limits co
 from __future__ import annotations
 
 import pytest
-from tools.dosunit.tests.test_symbolic_terminal import dos_environment, exit_code, mz, pe32_bytes, pe_environment
 
 import tools.dosunit.compare.symbolic_terminal as ST
+from tools.dosunit.tests.test_symbolic_terminal import dos_environment, exit_code, mz, pe32_bytes, pe_environment
 
 
 @pytest.mark.parametrize("flat32", [False, True], ids=["mz", "pe32"])

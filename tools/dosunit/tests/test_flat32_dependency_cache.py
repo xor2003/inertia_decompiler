@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
-from tools.dosunit.tests.test_flat32_loop_calls_public import CALLER, ENTRY, _image
 
 from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
+from tools.dosunit.tests.test_flat32_loop_calls_public import CALLER, ENTRY, _image
 
 
 def _run(lane: DriverLane, root: Path, oracle: Path, original_listing: Path,
@@ -111,9 +111,8 @@ def test_repeated_callee_reuses_generic_summary_within_composition_budget(driver
     Recomposing the callee on the second call would exhaust that same budget.
     Changing its arithmetic in a fresh image must still reject equivalence.
     """
-    from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
-
     from tools.dosunit.compare.flat32_call_composition import CallCompositionLimits, compare_functions_with_calls
+    from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
     caller = bytes.fromhex("e806000000 e801000000 c3")
     paths = [tmp_path / f"side{index}.exe" for index in range(3)]

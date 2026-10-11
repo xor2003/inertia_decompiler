@@ -6,7 +6,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.recursive_proofs import real16_fetched_code_invariant as code_owner
@@ -21,6 +20,7 @@ from tools.dosunit.recursive_proofs.real16_fetched_code_invariant import (
 from tools.dosunit.recursive_proofs.real16_image_bound_domain import BoundDomainReason, ImageBoundReal16Domain
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import NativeBindingReason, _NativeRefusal
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointModelRequirement, JointReason
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import make_inputs
 
 
 @pytest.mark.parametrize("reason", [FetchedCodeReason.DEADLINE, FetchedCodeReason.SOURCE, FetchedCodeReason.PRESERVED])

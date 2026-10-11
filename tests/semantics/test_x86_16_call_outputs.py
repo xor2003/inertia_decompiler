@@ -6,7 +6,6 @@ from dataclasses import replace
 
 import inertia.semantics.caller_return_use_contracts as caller_return_use_contracts
 import inertia.semantics.callsite_summary as callsite_summary
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.ir import (
     IRAddress,
     IRBlock,
@@ -25,12 +24,12 @@ from inertia.ir.logical_memory_contracts import (
     empty_ir_logical_memory_artifact_8616,
 )
 from inertia.ir.ssa_function import build_x86_16_function_ssa
-
 from inertia.semantics.call_output_contracts import (
     CallOutputFailure8616,
     CallOutputShape8616,
 )
 from inertia.semantics.call_outputs import materialize_call_outputs_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def test_callsite_summary_exports_authoritative_return_use_kind() -> None:

@@ -17,7 +17,7 @@ import threading
 import time
 import typing
 import weakref
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -61,6 +61,7 @@ from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.project_loading import (
     _build_project_cached,
     _build_project_from_bytes,
+    declared_input_path_8616,
 )
 from inertia.cli.runtime_support import (
     AnalysisTimeout as _AnalysisTimeout,
@@ -109,6 +110,10 @@ from inertia.lowering.analysis_helpers import (
     infer_com_region,
     patch_interrupt_service_call_sites,
     seed_calling_conventions,
+)
+from inertia.lowering.proven_call_cfg_extension import (
+    ProvenCallExtensionReceipt8616,
+    extend_cfg_for_proven_calls_8616,
 )
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
@@ -865,12 +870,13 @@ def _recover_target_cfg_8616(
     data_refs: bool,
     smart_scan_modes: tuple[bool | None, ...],
 ) -> _AngrCfg | None:
-    """Try CFGFast across complete/smart scan modes until the target lands."""
+    """Try scans with independent KBs so later attempts cannot orphan functions."""
     cfg = None
     for complete_scan in (False, True) if project.arch.name == "86_16" else (False,):
         for smart_scan in smart_scan_modes:
             try:
                 cfg = project.analyses.CFGFast(
+                    kb=angr.KnowledgeBase(project),
                     start_at_entry=False,
                     function_starts=[target_addr],
                     regions=regions,
@@ -932,6 +938,7 @@ def _pick_function_lean(
         """
         target_addr = project.entry if addr is None else addr
         cfg = project.analyses.CFGFast(
+            kb=angr.KnowledgeBase(project),
             start_at_entry=False,
             function_starts=[target_addr],
             regions=regions,
@@ -1252,30 +1259,31 @@ def _mark_function_binary_exact_region_8616(
     function: _AngrFunction,
     exact_region: tuple[int, int],
 ) -> None:
-    """Attach binary-derived function bounds at the dynamic angr boundary."""
+    """Attach binary-derived function bounds at the dynamic angr boundary.
+
+    Writes through the existing ``info`` mapping; non-mapping ``info`` is a
+    typed no-result. angr ``FunctionInfo`` accepts only JSON-serializable
+    values, so the mark is stored as a list.
+    """
     info = _dynamic_attr(function, "info", None)
-    if not isinstance(info, dict):
-        with contextlib.suppress(Exception):
-            function.info = {}
-        info = _dynamic_attr(function, "info", None)
-    if isinstance(info, dict):
-        info[_BINARY_EXACT_REGION_INFO_KEY_8616] = exact_region
+    if isinstance(info, MutableMapping):
+        info[_BINARY_EXACT_REGION_INFO_KEY_8616] = list(exact_region)
 
 
 def _function_binary_exact_region_8616(function: object) -> tuple[int, int] | None:
     """Return validated binary-derived bounds attached during discovery."""
     info = _dynamic_attr(function, "info", None)
-    if not isinstance(info, dict):
+    if not isinstance(info, Mapping):
         return None
     region = info.get(_BINARY_EXACT_REGION_INFO_KEY_8616)
     if (
-        isinstance(region, tuple)
+        isinstance(region, (tuple, list))
         and len(region) == 2
         and isinstance(region[0], int)
         and isinstance(region[1], int)
         and region[0] < region[1]
     ):
-        return region
+        return (region[0], region[1])
     return None
 
 
@@ -1951,17 +1959,23 @@ def _scan_repair_block_8616(
     edges: set[tuple[int, int]],
     seen_targets: set[int],
 ) -> int:
-    """Pop and scan one repair block, queueing successors; returns new byte count."""
+    """Scan within the remaining window and budget, retaining external edges."""
     block_addr = queue.pop(0)
     if block_addr in visited or not bounds.contains(block_addr):
         return visited_bytes
+    lift_size = min(bounds.end_bound - block_addr, bounds.scan_limit - visited_bytes)
+    if lift_size <= 0:
+        return visited_bytes
     visited.add(block_addr)
     try:
-        block = project.factory.block(block_addr, opt_level=0)
+        # angr's ``size`` fixes the reported block extent even when VEX
+        # stops at an earlier branch. ``max_size`` bounds the lift while
+        # retaining the actual decoded extent and its control transfer.
+        block = project.factory.block(block_addr, max_size=lift_size, opt_level=0)
     except Exception:
         return visited_bytes
     block_size = int(_dynamic_attr(block, "size", 0))
-    if block_size <= 0:
+    if block_size <= 0 or block_size > lift_size:
         return visited_bytes
     visited_bytes += block_size
     if visited_bytes > bounds.scan_limit:
@@ -2217,7 +2231,7 @@ def _best_region_function_candidate(
 
 def _function_recovery_truncated(function: _AngrFunction) -> bool:
     info = _dynamic_attr(function, "info", None)
-    return isinstance(info, dict) and bool(info.get("x86_16_recovery_truncated"))
+    return isinstance(info, Mapping) and bool(info.get("x86_16_recovery_truncated"))
 
 
 def _needs_pre_entry_body_supplement(function: _AngrFunction, project_entry: int) -> bool:
@@ -2298,7 +2312,7 @@ def _record_follow_on_targets_8616(
 
 def _mark_function_recovery_truncated(function: _AngrFunction, truncated: bool) -> None:
     info = _dynamic_attr(function, "info", None)
-    if isinstance(info, dict):
+    if isinstance(info, MutableMapping):
         info["x86_16_recovery_truncated"] = truncated
 
 
@@ -2397,6 +2411,7 @@ def _recover_candidate_function_pair(
             bounded_exact_region,
             exact_region,
             last_error,
+            seed_calling_conventions_enabled=seed_calling_conventions_enabled,
         )
 
     return _impl()
@@ -2529,6 +2544,90 @@ def _recover_small_unbounded_pair_8616(
     return best_pair, best_score, last_error
 
 
+_PROVEN_CALL_RECEIPT_INFO_KEY_8616 = "x86_16_proven_call_extension_receipt"
+
+
+def _attach_proven_call_receipt_8616(
+    function: _AngrFunction,
+    receipt: ProvenCallExtensionReceipt8616,
+) -> None:
+    """Keep the closed extension census observable on the selected caller.
+
+    angr ``Function`` is ``__slots__``-bound and ``FunctionInfo`` accepts
+    only JSON-serializable values, so the typed receipt's ``to_dict``
+    projection is what ``info`` can durably retain for diagnostics.
+    Absent or non-mapping ``info`` is a typed no-result: nothing is stored.
+    """
+    info = _dynamic_attr(function, "info", None)
+    if isinstance(info, MutableMapping):
+        info[_PROVEN_CALL_RECEIPT_INFO_KEY_8616] = receipt.to_dict()
+
+
+def _preserve_candidate_function_info_8616(
+    previous: _AngrFunction,
+    function: _AngrFunction,
+) -> None:
+    """Carry owned info markers onto a function rebound inside a new KB.
+
+    Writes through the existing ``FunctionInfo`` mapping (never assigning a
+    new object); values outside its JSON-serializable contract are skipped
+    as the interface's own typed boundary refusal.
+    """
+    info = _dynamic_attr(previous, "info", None)
+    target = _dynamic_attr(function, "info", None)
+    if not (isinstance(info, Mapping) and isinstance(target, MutableMapping)):
+        return
+    for key, value in info.items():
+        try:
+            target[key] = value
+        except TypeError:
+            logging.getLogger(__name__).debug(
+                "x86-16 candidate info key %r is outside FunctionInfo's JSON contract",
+                key,
+            )
+
+
+def _extend_candidate_pair_for_proven_calls_8616(
+    candidate_project: angr.Project,
+    best_pair: _FunctionCfgPair,
+    repair_region: tuple[int, int] | None,
+    seed_calling_conventions_enabled: bool,
+) -> _FunctionCfgPair:
+    """Swap in the proven-callee extension pair, preserving caller identity.
+
+    The extension rebuilds the candidate-private CFG with only natively
+    proven near-CALL callees seeded; the caller is re-bound by address in
+    the new KB, so its owned info markers, graph repair, and callsite
+    patches are re-applied to keep the pair coherent for Clinic/CCA.
+    Extension defects propagate with their cause; ``None`` is the owner's
+    typed non-evaluable-surface result.
+    """
+    extension = extend_cfg_for_proven_calls_8616(
+        candidate_project,
+        best_pair[0],
+        best_pair[1],
+        caller_regions=[repair_region] if repair_region is not None else None,
+        seed_calling_conventions_enabled=seed_calling_conventions_enabled,
+    )
+    if extension is None:
+        return best_pair
+    if extension.cfg is not None and extension.function is not None:
+        _preserve_candidate_function_info_8616(best_pair[1], extension.function)
+        _repair_x86_16_function_graph_8616(
+            candidate_project,
+            extension.function,
+            exact_region=repair_region,
+        )
+        patch_interrupt_service_call_sites(
+            extension.function,
+            _dynamic_attr(candidate_project.loader.main_object, "binary", None),
+        )
+        _attach_proven_call_receipt_8616(extension.function, extension.receipt)
+        return (extension.cfg, extension.function)
+    _attach_proven_call_receipt_8616(best_pair[1], extension.receipt)
+    return best_pair
+
+
 def _finalize_candidate_pair_8616(
     candidate_project: angr.Project,
     candidate_addr: int,
@@ -2537,13 +2636,21 @@ def _finalize_candidate_pair_8616(
     bounded_exact_region: tuple[int, int] | None,
     exact_region: tuple[int, int] | None,
     last_error: Exception | None,
+    seed_calling_conventions_enabled: bool = True,
 ) -> _FunctionCfgPair:
     """Repair, mark, and return the best pair; otherwise raise the last error."""
     if best_pair is not None:
+        repair_region = bounded_exact_region or exact_region
         _repair_x86_16_function_graph_8616(
             candidate_project,
             best_pair[1],
-            exact_region=bounded_exact_region or exact_region,
+            exact_region=repair_region,
+        )
+        best_pair = _extend_candidate_pair_for_proven_calls_8616(
+            candidate_project,
+            best_pair,
+            repair_region,
+            seed_calling_conventions_enabled,
         )
         if bounded_exact_region is not None:
             _mark_function_binary_exact_region_8616(best_pair[1], bounded_exact_region)
@@ -2989,6 +3096,7 @@ def _recover_prologue_candidate_8616(
             force_blob=False,
             base_addr=ctx.linked_base,
             entry_point=project.entry,
+            real16_declared_input=declared_input_path_8616(project),
         )
     return _pick_function_lean(
         candidate_project,
@@ -3455,15 +3563,16 @@ def _seed_ranking_metadata_context(
     if metadata is not None:
         recovery_labels = _recovery_code_labels(metadata)
         signature_matched_addrs = _signature_matched_code_addrs(metadata)
-        signature_source = _dynamic_attr(metadata, "source_format", "")
+        signature_source = metadata.source_format
         allow_signature_seed = include_library_functions or (
             "signature_catalog" not in signature_source and "flair_sig" not in signature_source
         )
-        code_ranges = _dynamic_attr(metadata, "code_ranges", None) or {}
+        code_ranges = metadata.code_ranges
         metadata_fingerprint = {
-            "source_format": _dynamic_attr(metadata, "source_format", None),
+            "source_format": metadata.source_format,
             "recovery_code_addrs": sorted(recovery_labels),
             "signature_code_addrs": sorted(signature_matched_addrs),
+            "signature_code_ranges": sorted(metadata.signature_code_ranges.items()),
             "bounded_code_range_count": sum(
                 1 for span in code_ranges.values() if span is not None and span[1] > span[0]
             ),
@@ -3802,8 +3911,28 @@ def _exe_seed_context_8616(
     )
 
 
+def _verified_library_seed_ranges_8616(ctx: _ExeSeedCtx8616) -> tuple[tuple[int, int], ...]:
+    """Select binary-verified extents only; optional listing bounds are not proof."""
+    if ctx.metadata is None or ctx.lib_functions:
+        return ()
+    return tuple(
+        span for start, span in ctx.metadata.signature_code_ranges.items()
+        if start in ctx.signature_matched_addrs and span[0] == start < span[1]
+    )
+
+
+def _is_library_seed_8616(
+    ctx: _ExeSeedCtx8616, addr: int, ranges: tuple[tuple[int, int], ...],
+) -> bool:
+    """Combine existing public-label policy with verified body membership."""
+    return (addr in ctx.signature_matched_addrs and not ctx.allow_signature_seed) or any(
+        start <= addr < end for start, end in ranges
+    )
+
+
 def _collect_ranked_seed_state_8616(project: angr.Project, ctx: _ExeSeedCtx8616) -> _SeedCandidateState8616:
     """Collect ranked seed candidates and the evidence sets used to rerank them."""
+    signature_ranges = _verified_library_seed_ranges_8616(ctx)
     def _window_contains(addr: int) -> bool:
         return any(start <= addr < end for start, end in ctx.seed_windows)
 
@@ -3813,7 +3942,7 @@ def _collect_ranked_seed_state_8616(project: angr.Project, ctx: _ExeSeedCtx8616)
     def _consider(addr: int, priority: int) -> None:
         if not (ctx.linked_base <= addr < ctx.linked_base + len(ctx.code)):
             return
-        if addr in ctx.signature_matched_addrs and not ctx.allow_signature_seed:
+        if _is_library_seed_8616(ctx, addr, signature_ranges):
             return
         if not _window_contains(addr):
             return
@@ -4961,6 +5090,7 @@ def _recover_once_with_cache_8616(
             force_blob=False,
             base_addr=linked_base,
             entry_point=ctx.project_entry,
+            real16_declared_input=declared_input_path_8616(project),
         )
         recovered_pair = _recover_pair_in_project_8616(candidate_project, ctx)
         _store_recovery_cache_value_8616(project, ctx, ("ok", recovered_pair))

@@ -2,12 +2,12 @@ import inspect
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.frontend.x86_16.instr16 as instr16
 import inertia.frontend.x86_16.instr32 as instr32
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
-
 from inertia.frontend.x86_16.instr_base import InstrBase
 from inertia.frontend.x86_16.instruction import CHK_IMM8, CHK_MODRM, MAX_OPCODE
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 
 
 @pytest.mark.parametrize("module,cls,width", [(instr16, instr16.Instr16, 16), (instr32, instr32.Instr32, 32)])

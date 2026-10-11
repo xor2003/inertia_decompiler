@@ -670,7 +670,8 @@ def test_cod_dos_loadprogram_wrapper_keeps_err_guard_and_segment_stores(
     assert compile_result.passed, compile_result.stderr
 
 
-def test_prune_dead_local_assignments_removes_unused_constant_stores():
+@pytest.mark.parametrize("register_backed", [False, True])
+def test_prune_dead_local_assignments_removes_unused_constant_stores(register_backed):
     class _FakeCodegen:
         def __init__(self):
             self._idx = 0
@@ -686,7 +687,10 @@ def test_prune_dead_local_assignments_removes_unused_constant_stores():
             return name
 
     codegen = _FakeCodegen()
-    dead_var = SimStackVariable(4, 2, base="bp", name="dead", region=0x1000)
+    dead_var = (
+        SimRegisterVariable(0, 2, name="arbitrary", region=0x1000)
+        if register_backed else SimStackVariable(4, 2, base="bp", name="dead", region=0x1000)
+    )
     live_var = SimStackVariable(6, 2, base="bp", name="live", region=0x1000)
     dead_cvar = structured_c.CVariable(dead_var, variable_type=SimTypeShort(False), codegen=codegen)
     live_cvar = structured_c.CVariable(live_var, variable_type=SimTypeShort(False), codegen=codegen)
@@ -718,9 +722,12 @@ def test_prune_dead_local_assignments_removes_unused_constant_stores():
 
     changed = decompile._prune_dead_local_assignments(codegen)
 
-    assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 1
-    assert codegen.cfunc.statements.statements[0].lhs.variable is live_var
+    assert changed is not register_backed
+    remaining = codegen.cfunc.statements.statements
+    assert len(remaining) == (2 if register_backed else 1)
+    assert remaining[-1].lhs.variable is live_var
+    if register_backed:
+        assert remaining[0].lhs.variable is dead_var
 
 
 def test_prune_dead_local_assignments_removes_overwritten_local_stores():
@@ -770,7 +777,8 @@ def test_prune_dead_local_assignments_removes_overwritten_local_stores():
     assert codegen.cfunc.statements.statements[1].retval.variable is local_var
 
 
-def test_prune_dead_local_assignments_removes_overwritten_storage_aliases():
+@pytest.mark.parametrize("register_partial", [False, True])
+def test_prune_dead_local_assignments_removes_overwritten_storage_aliases(register_partial):
     class _FakeCodegen:
         def __init__(self):
             self._idx = 0
@@ -786,10 +794,19 @@ def test_prune_dead_local_assignments_removes_overwritten_storage_aliases():
             return name
 
     codegen = _FakeCodegen()
-    first_var = SimStackVariable(-2, 2, base="bp", name="first", region=0x1000)
-    second_var = SimStackVariable(-2, 2, base="bp", name="second", region=0x1000)
+    first_var = (
+        SimRegisterVariable(0, 2, name="first", region=0x1000)
+        if register_partial else SimStackVariable(-2, 2, base="bp", name="first", region=0x1000)
+    )
+    second_var = (
+        SimRegisterVariable(0, 1, name="second", region=0x1000)
+        if register_partial else SimStackVariable(-2, 2, base="bp", name="second", region=0x1000)
+    )
     first_cvar = structured_c.CVariable(first_var, variable_type=SimTypeShort(False), codegen=codegen)
     second_cvar = structured_c.CVariable(second_var, variable_type=SimTypeShort(False), codegen=codegen)
+    if register_partial:
+        first_cvar.unified_variable = first_var
+        second_cvar.unified_variable = first_var
     overwritten = structured_c.CStatements(
         [
             structured_c.CAssignment(
@@ -816,10 +833,13 @@ def test_prune_dead_local_assignments_removes_overwritten_storage_aliases():
 
     changed = decompile._prune_dead_local_assignments(codegen)
 
-    assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 2
-    assert codegen.cfunc.statements.statements[0].rhs.value == 2
-    assert codegen.cfunc.statements.statements[1].retval.variable is second_var
+    assert changed is not register_partial
+    remaining = codegen.cfunc.statements.statements
+    assert len(remaining) == (3 if register_partial else 2)
+    assert remaining[-2].rhs.value == 2
+    assert remaining[-1].retval.variable is second_var
+    if register_partial:
+        assert remaining[0].lhs.variable is first_var
 
 
 def test_prune_dead_local_assignments_removes_redundant_call_before_same_return():

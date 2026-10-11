@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeShort, TypeRef
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.ir.core import IRAddress, MemSpace
 from inertia.lowering.callee_global_object_evidence import (
     CalleeGlobalObjectInterfaceVerdict8616,
@@ -20,7 +20,7 @@ from inertia.lowering.callee_pointer_evidence import (
     CalleePointerArgumentEvidence8616,
     callee_pointer_argument_indices_at_address_8616,
 )
-
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,
     GlobalObjectLayoutEvidence8616,

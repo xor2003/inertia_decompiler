@@ -7,8 +7,8 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.validation.tail_validation import _clear_tail_validation_expr_fingerprint_cache_8616
 from inertia.validation.tail_validation_condition_context import (
     _owned_materialized_condition_fingerprint_8616,

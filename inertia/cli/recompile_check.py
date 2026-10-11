@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from inertia.cli.recompile_check_contract import RecompileCacheIdentity
 from inertia.cli.recompile_check_contract import (
     RecompileCheckOutcome as RecompileCheckOutcome,
 )
@@ -24,6 +25,12 @@ from inertia.cli.recompile_check_contract import (
     RecompileCheckResult as RecompileCheckResult,
 )
 from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
+from tools.compiler_toolchain.compiler_profile import (
+    TAIL_COMPILER_CONTEXT_ENV,
+    FrozenCompilerContext,
+    ToolStageOutcome,
+    compile_profile_translation_unit,
+)
 
 
 def _sanitize_nested_block_comments(text: str) -> str:
@@ -469,11 +476,56 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
     return _impl()
 
 
+def _check_selected_profile_8616(c_text: str, *, target: str, context: str) -> RecompileCheckResult:
+    """Use frozen original compiler evidence without running a default KVM preflight."""
+    checked_payload, checked_hash = _checked_payload_identity_8616(c_text)
+    try:
+        toolchain = FrozenCompilerContext.parse(context).resolve()
+    except (ValueError, OSError) as error:
+        return RecompileCheckResult(RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE, target, None, None,
+                                    "", str(error), (), checked_payload, checked_hash)
+    tmpdir = Path(tempfile.mkdtemp(prefix="inertia-selected-recompile-"))
+    src_path = tmpdir / "GEN.C"
+    src_path.write_text(_compile_input_payload_8616(c_text, target=target), encoding="utf-8")
+    try:
+        receipt = compile_profile_translation_unit(toolchain, tmpdir)
+    except OSError as error:
+        return RecompileCheckResult(RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE, target, None,
+                                    str(toolchain.compiler_host_path), "", str(error), (), checked_payload,
+                                    checked_hash, str(src_path), toolchain.profile_id)
+    outcome = RecompileCheckOutcome.FAILED
+    if receipt.passed:
+        outcome = RecompileCheckOutcome.PASSED
+    elif receipt.outcome in (ToolStageOutcome.LAUNCH_FAILED, ToolStageOutcome.TIMED_OUT, ToolStageOutcome.INCOMPLETE):
+        outcome = RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE
+    result = RecompileCheckResult(outcome, target, receipt.exit_code, str(toolchain.compiler_host_path),
+                                  receipt.stdout, receipt.stderr, receipt.command, checked_payload,
+                                  checked_hash, str(src_path), toolchain.profile_id, receipt.signal)
+    if result.passed:
+        shutil.rmtree(tmpdir)
+    return result
+
+
+def tail_compiler_cache_identity_8616() -> RecompileCacheIdentity:
+    """Validate selected evidence before consulting the recompilation result cache."""
+    context = os.environ.get(TAIL_COMPILER_CONTEXT_ENV)
+    if context is None:
+        return RecompileCacheIdentity(None, RecompileCheckOutcome.PASSED)
+    try:
+        FrozenCompilerContext.parse(context).resolve()
+    except (ValueError, OSError):
+        return RecompileCacheIdentity(context, RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE)
+    return RecompileCacheIdentity(context, RecompileCheckOutcome.PASSED)
+
+
 def check_c_recompiles_8616(c_text: str, *, target: str = "portable-flat") -> RecompileCheckResult:
     """Compile without linking; syntax-only GCC omits return-flow diagnostics."""
 
     def _impl() -> RecompileCheckResult:
         if target == "msc-dos":
+            context = os.environ.get(TAIL_COMPILER_CONTEXT_ENV)
+            if context is not None:
+                return _check_selected_profile_8616(c_text, target=target, context=context)
             return _check_c_recompiles_msc51_8616(c_text, target=target)
         compile_payload = _compile_input_payload_8616(c_text, target=target)
         checked_payload, checked_hash = _checked_payload_identity_8616(c_text)

@@ -3,7 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.lowering.project_global_object_source_collection as collection
+from inertia.lowering.analysis_helpers import CallTargetKind8616, CallTargetSeed
 from inertia.lowering.callee_global_object_sources import (
     GlobalObjectSourceEvidence8616,
 )
@@ -12,8 +14,6 @@ from inertia.lowering.callee_pointer_contracts import (
     callee_pointer_argument_evidence_by_addr_8616,
     record_callee_pointer_argument_evidence_8616,
 )
-
-from inertia.lowering.analysis_helpers import CallTargetKind8616, CallTargetSeed
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
 )

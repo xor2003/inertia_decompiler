@@ -7,8 +7,13 @@ from typing import Any
 import angr
 import pytest
 from angr.analyses.decompiler.clinic import Clinic
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from pyvex.expr import Binop
+from pyvex.stmt import Put, WrTmp
+
 import inertia.ir.status_flag_lift_context as status_flag_lift_context
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.compat import apply_x86_16_compatibility
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir.status_flag_lift_context import (
     StatusFlagLiftArtifact8616,
     StatusFlagLiftArtifactSource8616,
@@ -19,11 +24,6 @@ from inertia.ir.status_flag_lift_context import (
     published_status_flag_lift_artifact_8616,
     resolve_status_flag_lift_artifact_8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-from pyvex.expr import Binop
-from pyvex.stmt import Put, WrTmp
-
-from inertia.frontend.x86_16.compat import apply_x86_16_compatibility
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.status_flag_contracts import (
     INCDEC_STATUS_FLAG_WRITES_8616,
@@ -366,3 +366,161 @@ def test_cfg_context_consumes_defined_multibit_shift_writes() -> None:
         assert function.addr in session.materialized_addresses
 
     assert session.stats.complete
+
+
+@pytest.mark.parametrize("foreign_project", (False, True))
+def test_flag_source_scope_rejects_foreign_same_bytes(foreign_project: bool) -> None:
+    """Foreign native imports retain the local architectural decoder policy."""
+    code = bytes.fromhex("d2e0 39d8 c3")
+    project, _ = _project_function(code, function_starts=(0x1000,))
+    other, _ = _project_function(code, function_starts=(0x1000,))
+    target = other if foreign_project else project
+    target.factory.default_engine.clear_cache()
+    baseline = str(target.factory.block(0x1000, opt_level=0).vex)
+    session = StatusFlagLiftSession8616(
+        function_address=0x1000, candidates=(), source_project=project,
+        owned_instruction_addresses=frozenset({0x1000, 0x1002, 0x1004}),
+    )
+    token = status_flag_lift_context._active_session.set(session)
+    try:
+        with status_flag_lift_context.status_flag_native_source_scope_8616(
+            target, 0x1000 if foreign_project else 0x2000,
+        ):
+            assert status_flag_lift_context.cfg_status_flag_dead_write_mask_8616(
+                0x1000, STATUS_FLAGS_8616,
+            ) is None
+            assert str(target.factory.block(0x1000, opt_level=0).vex) == baseline
+    finally:
+        status_flag_lift_context._active_session.reset(token)
+
+
+def test_owned_missing_candidate_keeps_flags_and_consumption_is_not_policy() -> None:
+    """Ownership is independent of candidate presence or consumption counters."""
+    project = SimpleNamespace(factory=SimpleNamespace(
+        default_engine=SimpleNamespace(clear_cache=lambda: None),
+    ))
+    session = StatusFlagLiftSession8616(
+        function_address=0x1000, candidates=(), source_project=project,
+        owned_instruction_addresses=frozenset({0x1000, 0x1002}),
+    )
+    token = status_flag_lift_context._active_session.set(session)
+    try:
+        with status_flag_lift_context.status_flag_native_source_scope_8616(project, 0x1000):
+            before = status_flag_lift_context.status_flag_native_policy_key_8616(project, 0x1000)
+            assert status_flag_lift_context.cfg_status_flag_dead_write_mask_8616(
+                0x1002, STATUS_FLAGS_8616,
+            ) == StatusFlag8616.NONE
+            session._materialized_addresses.add(0x1000)
+            assert status_flag_lift_context.status_flag_native_policy_key_8616(project, 0x1000) == before
+    finally:
+        status_flag_lift_context._active_session.reset(token)
+
+
+def test_native_source_exception_restores_owned_flag_policy() -> None:
+    project = SimpleNamespace(factory=SimpleNamespace(
+        default_engine=SimpleNamespace(clear_cache=lambda: None),
+    ))
+    session = StatusFlagLiftSession8616(
+        0x1000, (), source_project=project,
+        owned_instruction_addresses=frozenset({0x1000}),
+    )
+    token = status_flag_lift_context._active_session.set(session)
+    try:
+        with status_flag_lift_context.status_flag_native_source_scope_8616(project, 0x1000):
+            with (
+                pytest.raises(ValueError, match="boundary"),
+                status_flag_lift_context.status_flag_native_source_scope_8616(project, 0x2000),
+            ):
+                raise ValueError("boundary")
+            assert status_flag_lift_context.cfg_status_flag_dead_write_mask_8616(
+                0x1000, STATUS_FLAGS_8616,
+            ) == StatusFlag8616.NONE
+    finally:
+        status_flag_lift_context._active_session.reset(token)
+
+
+def test_nested_same_address_different_project_is_not_owned() -> None:
+    code = bytes.fromhex("39d8 7500 c3")
+    project, function = _project_function(code, function_starts=(0x1000,))
+    foreign, other = _project_function(code, function_starts=(0x1000,))
+    with (
+        active_status_flag_lift_context_8616(project, function),
+        pytest.raises(PipelineHardError, match="identity"),
+        active_status_flag_lift_context_8616(foreign, other),
+    ):
+        pass
+
+
+def test_mutated_candidate_index_cannot_grant_foreign_instruction_proof() -> None:
+    candidate = StatusFlagLiftCandidate8616(0x1000, STATUS_FLAGS_8616, STATUS_FLAGS_8616)
+    session = StatusFlagLiftSession8616(0x1000, (candidate,))
+    session._candidate_by_address[0x1002] = candidate
+    assert session.dead_write_mask(0x1002, STATUS_FLAGS_8616) == StatusFlag8616.NONE
+    session._candidate_by_address[0x1000] = StatusFlagLiftCandidate8616(
+        0x1000, STATUS_FLAGS_8616, StatusFlag8616.ZERO,
+    )
+    assert session.dead_write_mask(0x1000, STATUS_FLAGS_8616) == StatusFlag8616.NONE
+
+
+def test_native_source_cache_invalidation_failure_refuses_and_restores() -> None:
+    project = object()
+    session = StatusFlagLiftSession8616(0x1000, (), source_project=project)
+    token = status_flag_lift_context._active_session.set(session)
+    previous = status_flag_lift_context._active_native_source.get()
+    try:
+        with (
+            pytest.raises(PipelineHardError, match="invalidation failed"),
+            status_flag_lift_context.status_flag_native_source_scope_8616(project, 0x1000),
+        ):
+            pytest.fail("uninvalidated native cache must not be consumed")
+        assert status_flag_lift_context._active_native_source.get() is previous
+    finally:
+        status_flag_lift_context._active_session.reset(token)
+
+
+def test_direct_foreign_project_lazy_lift_keeps_local_flag_policy() -> None:
+    """The actual engine source must bind even a lazy third-party block lift."""
+    code = bytes.fromhex("d2e0 39d8 c3")
+    project, function = _project_function(code, function_starts=(0x1000,))
+    foreign, _ = _project_function(code, function_starts=(0x1000,))
+    foreign.factory.default_engine.clear_cache()
+    baseline = str(foreign.factory.block(0x1000, opt_level=0).vex)
+    foreign.factory.default_engine.clear_cache()
+    with active_status_flag_lift_context_8616(project, function):
+        assert str(foreign.factory.block(0x1000, opt_level=0).vex) == baseline
+
+
+def test_warm_native_engine_restores_policy_after_architectural_replay() -> None:
+    """Same-head cached VEX cannot cross architectural/optimized policy changes."""
+    code = bytes.fromhex("050100 e80a00 83c402 39d8 7500 c3 9090 29db c3")
+    project, function = _project_function(code, function_starts=(0x1000, 0x1010))
+    with active_status_flag_lift_context_8616(project, function) as session:
+        assert _flags_puts(project, 0x1000) == ()
+        assert _flags_puts(project, 0x1000) == ()
+        with status_flag_lift_context.architectural_status_flag_replay_8616():
+            assert _flags_puts(project, 0x1000)
+        assert _flags_puts(project, 0x1000) == ()
+        _flags_puts(project, 0x1006)
+        assert session.materialized_addresses == frozenset({0x1000, 0x1006})
+    assert session.stats.complete
+
+
+def test_status_flag_resolver_binds_actual_project_at_same_function_head() -> None:
+    """Foreign active evidence cannot replace another project's publication."""
+    code = bytes.fromhex("39d8 7500 c3")
+    project, function = _project_function(code, function_starts=(0x1000,))
+    foreign, other = _project_function(code, function_starts=(0x1000,))
+    with active_status_flag_lift_context_8616(project, function) as session:
+        own = resolve_status_flag_lift_artifact_8616(project, function.addr)
+        assert own is not None and own.source is StatusFlagLiftArtifactSource8616.ACTIVE
+        assert own.artifact == session.artifact
+        assert resolve_status_flag_lift_artifact_8616(foreign, other.addr) is None
+        published = StatusFlagLiftSession8616(
+            other.addr, (), packed_preservation_addresses=frozenset({other.addr}),
+        )
+        published.finalize()
+        status_flag_lift_context._publish_stats_8616(other, published)
+        selected = resolve_status_flag_lift_artifact_8616(foreign, other.addr)
+        assert selected is not None
+        assert selected.source is StatusFlagLiftArtifactSource8616.PUBLISHED
+        assert selected.artifact == published.artifact

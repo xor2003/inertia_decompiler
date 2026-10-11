@@ -19,7 +19,13 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -29,7 +35,6 @@ from inertia.ir import (
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactVerdict8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.lowering.near_return_c_ast_congruence import (
     NearReturnOperandCongruenceFailure8616,
     NearReturnOperandCongruenceStats8616,
@@ -47,11 +52,6 @@ from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_alias_8616,
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
-)
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
 )
 from inertia.semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,

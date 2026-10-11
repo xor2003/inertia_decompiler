@@ -4,10 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import inertia.cli.mz_static_intake as intake
 import inertia.ir.entry_domain_call_preservation as consumer
 import tests.frontend.test_x86_16_mz_static_invocation as fixtures
-
-import inertia.cli.mz_static_intake as intake
 
 
 def _refusal():
@@ -23,10 +22,11 @@ def test_retained_source_change_retries_refusal(monkeypatch):
     calls = []
     monkeypatch.setattr(intake, "_request_freshness_key_8616", lambda _project: (0, 0, "same-image"))
 
-    def install(_project, source, *, declared_boot=None, declared_boot_recompute=None, declared_services=()):
+    def install(_project, source, *, declared_boot=None, declared_boot_recompute=None, declared_services=(), function_entries=()):
         assert declared_boot is None
         assert declared_boot_recompute is None
         assert declared_services == ()
+        assert function_entries == ()
         calls.append(source)
         return _refusal()
 
@@ -43,10 +43,11 @@ def test_reentrant_source_query_does_not_restart_intake(monkeypatch):
     calls = []
     monkeypatch.setattr(intake, "_request_freshness_key_8616", lambda _project: None)
 
-    def install(_project, _source, *, declared_boot=None, declared_boot_recompute=None, declared_services=()):
+    def install(_project, _source, *, declared_boot=None, declared_boot_recompute=None, declared_services=(), function_entries=()):
         assert declared_boot is None
         assert declared_boot_recompute is None
         assert declared_services == ()
+        assert function_entries == ()
         calls.append(1)
         assert len(calls) == 1, "recursive query restarted the same in-progress intake"
         assert consumer._real16_invocation_source_8616(project) is None
@@ -80,10 +81,11 @@ def test_unexpected_exception_does_not_leave_request_in_progress(monkeypatch):
     calls = []
     monkeypatch.setattr(intake, "_request_freshness_key_8616", lambda _project: None)
 
-    def install(_project, _source, *, declared_boot=None, declared_boot_recompute=None, declared_services=()):
+    def install(_project, _source, *, declared_boot=None, declared_boot_recompute=None, declared_services=(), function_entries=()):
         assert declared_boot is None
         assert declared_boot_recompute is None
         assert declared_services == ()
+        assert function_entries == ()
         calls.append(1)
         if len(calls) == 1:
             raise ValueError("unexpected inventory defect")

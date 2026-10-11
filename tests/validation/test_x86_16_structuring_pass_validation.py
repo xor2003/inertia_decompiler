@@ -3,12 +3,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
+import inertia.lowering.real_mode_linear as real_mode_linear
+import inertia.lowering.segment_global_materialization as segment_global_materialization
 import inertia.postprocess.decompiler_postprocess as legacy_postprocess
 import inertia.postprocess.decompiler_postprocess_stage as post_stage
 import inertia.structuring.decompiler_structuring_stage as stage
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.real_mode_linear as real_mode_linear
-import inertia.lowering.segment_global_materialization as segment_global_materialization
 from inertia.lowering.real_mode_linear import DirectStackMoveSourceKind8616
 from inertia.lowering.segmented_global_loads import (
     DwordGlobalZeroTestEvidence8616,
@@ -18,7 +19,6 @@ from inertia.lowering.segmented_global_loads import (
     IndexedSegmentedGlobalLoadSiteEvidence8616,
     IndexedSegmentedGlobalMaterializationRecord8616,
 )
-
 from inertia.structuring.guard_decisions import (
     VoidTailCallGuardDecision8616 as _VoidTailCallGuardDecision8616,
 )
@@ -2089,6 +2089,7 @@ def test_structuring_validation_prime_refreshes_conditions_after_final_lowering_
 
     for name in (
         "_apply_structuring_stable_stack_semantics_8616",
+        "_continue_structuring_stack_semantics_8616",
         "_apply_structuring_direct_stack_materialization_8616",
         "_materialize_structuring_selector_return_branches_8616",
         "_materialize_structuring_return_chains_8616",
@@ -2153,8 +2154,8 @@ def test_structuring_validation_prime_refreshes_conditions_after_final_lowering_
         lambda *_args, **_kwargs: calls.append("memory-alias") or False,
     )
     monkeypatch.setattr(
-        stage._segment_state,
-        "apply_x86_16_segment_state_artifact",
+        stage,
+        "apply_pipeline_segment_state_8616",
         lambda *_args, **_kwargs: calls.append("segment-state") or False,
     )
     monkeypatch.setattr(stage, "_prime_structuring_segment_global_semantics_8616", segment_replay)

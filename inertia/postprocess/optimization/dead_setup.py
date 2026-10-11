@@ -23,13 +23,13 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CUnaryOp,
     CVariable,
 )
+
 from inertia.postprocess.callsite_stack_metadata import (
     _callsite_materialization_complete_8616,
 )
 from inertia.postprocess.callsite_stack_metadata import (
     _prune_dead_stack_carrier_assignments_8616 as _prune_dead_stack_carrier_assignments_core_8616,
 )
-
 from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616
 
 __all__ = [

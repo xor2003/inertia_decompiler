@@ -3,6 +3,11 @@
 from dataclasses import replace
 
 import pytest
+
+from inertia.alias.stack_word_call_window import (
+    StackWordCallWindowFailure8616,
+    prove_stack_word_call_window_8616,
+)
 from inertia.ir.core import AddressStatus, IRAddress, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.ir.logical_constant_word_receipt import (
     LogicalConstantWordReceipt8616,
@@ -11,11 +16,6 @@ from inertia.ir.logical_constant_word_receipt import (
 from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact
-
-from inertia.alias.stack_word_call_window import (
-    StackWordCallWindowFailure8616,
-    prove_stack_word_call_window_8616,
-)
 
 
 def _receipt() -> tuple[IRFunctionArtifact, LogicalConstantWordReceipt8616]:

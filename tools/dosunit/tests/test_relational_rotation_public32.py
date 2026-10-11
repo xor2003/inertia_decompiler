@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
 
 from tools.dosunit.contracts.binary_initial_state import InitialImageReason
 from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
 
 TEXT_BASE = 0x08048000
 # All eight 32-bit GPRs: the full REG32 output contract, not a narrowed ABI.

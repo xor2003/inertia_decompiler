@@ -13,6 +13,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
 )
 from angr.sim_type import SimTypeShort
+
 import inertia.lowering.segmented_global_loads as owner
 from inertia.lowering.straight_line_placement import adjacent_straight_line_statements_8616
 from tests.lowering.test_x86_16_segmented_global_loads import _DummyCodegen, _mem_word, _reg

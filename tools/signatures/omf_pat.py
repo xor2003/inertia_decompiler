@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,80 @@ class PatPublicName:
     name: str
 
 
+class PatFixupKind(StrEnum):
+    """Typed OMF relocation mode/kind projection retained from FIXUPP evidence."""
+
+    SELF_RELATIVE_OFFSET16 = "self_relative_offset16"
+    UNSUPPORTED = "unsupported"
+
+
+class PatLinkerIdentityVerdict(StrEnum):
+    """Bounded verdict for one candidate reference authentication."""
+
+    PROVEN = "proven"
+    UNRESOLVED_REFERENCE = "unresolved_reference"
+    UNSUPPORTED_REFERENCE = "unsupported_reference"
+    MALFORMED_REFERENCE = "malformed_reference"
+    AMBIGUOUS_ANCHOR = "ambiguous_anchor"
+    DISPLACEMENT_OUT_OF_RANGE = "displacement_out_of_range"
+    TARGET_MISMATCH = "target_mismatch"
+
+
+class PatReferenceDecodeVerdict(StrEnum):
+    """Outcome of decoding the native displacement field a reference claims."""
+
+    DECODED = "decoded"
+    UNAVAILABLE = "unavailable"
+    REFUSED = "refused"
+
+
+@dataclass(frozen=True)
+class PatReferenceDecoding:
+    """One registered architecture's read of a self-relative displacement field."""
+
+    verdict: PatReferenceDecodeVerdict
+    instruction_address: int | None = None
+    encoded_signed_displacement: int | None = None
+
+
+@dataclass(frozen=True)
+class PatLinkerReference:
+    """Authenticated OMF relocation projection for one PAT referenced name.
+
+    ``offset`` is the pattern-relative relocation field offset. ``kind`` is
+    the authenticated OMF mode/location class, never inferred from names or
+    opcodes. The remaining fields bind the projection to its producing
+    library/object and exact FIXUPP subrecord bytes.
+    """
+    offset: int
+    width_bytes: int
+    kind: PatFixupKind
+    target_public_identity: str
+    explicit_target_displacement: int | None
+    source_library_sha256: str
+    source_object_sha256: str
+    source_segment_index: int
+    source_segment_offset: int
+    fixupp_record_offset: int
+    raw_fixupp_subrecord: bytes
+
+
+@dataclass(frozen=True)
+class PatLinkerIdentityEvidence:
+    """Per-reference authentication record for one repeated-match candidate.
+
+    This is a library layout pattern identity only; it never asserts an
+    executable target, CS behavior, ABI, or control semantics.
+    """
+    candidate_public_address: int
+    reference: PatLinkerReference
+    field_address: int
+    encoded_signed_displacement: int | None
+    anchor_public_address: int | None
+    anchor_checked_range: tuple[int, int] | None
+    verdict: PatLinkerIdentityVerdict
+
+
 @dataclass(frozen=True)
 class PatModule:
     """Parsed PAT bytes, symbol offsets and optional source provenance."""
@@ -46,15 +121,17 @@ class PatModule:
     public_names: tuple[PatPublicName, ...]
     referenced_names: tuple[PatPublicName, ...]
     tail_bytes: tuple[int | None, ...]
+    linker_references: tuple[PatLinkerReference, ...] = ()
 
 
 @dataclass(frozen=True)
 class LocalPatMatchResult:
-    """Unambiguous image labels and ranges from optional signature evidence."""
+    """Unique labels and fully checked pattern extents, including masked fixups."""
     code_labels: dict[int, str]
     code_ranges: dict[int, tuple[int, int]]
     source_formats: tuple[str, ...]
     matched_compiler_names: tuple[str, ...] = ()
+    linker_evidence: tuple[PatLinkerIdentityEvidence, ...] = ()
 
 
 @dataclass
@@ -79,6 +156,11 @@ class _OMFFixupRef:
     offset: int
     width: int
     name: str
+    self_relative: bool = False
+    location_kind: int = -1
+    explicit_target_displacement: int | None = None
+    record_offset: int = -1
+    raw_subrecord: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -147,6 +229,7 @@ class CachedPatRegexSpec:
     public_names: tuple[PatPublicName, ...]
     referenced_names: tuple[PatPublicName, ...]
     required_literal: bytes = b""
+    linker_references: tuple[PatLinkerReference, ...] = ()
 
 
 _PAT_HEX_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}|\.\.)+$")
@@ -214,13 +297,22 @@ def parse_pat_line(line: str, *, source_path: str = "<memory>") -> PatModule | N
         return None
     try:
         module_length = int(parts[3], 16)
+        crc_length = int(parts[1], 16)
     except ValueError:
+        return None
+    # CRC-bearing records need CRC validation and a correctly positioned tail.
+    # This matcher supports explicit literal/wildcard bytes only.
+    if crc_length != 0:
         return None
     pattern_bytes = tuple(_decode_pat_bytes(pattern_text[:64]))
     public_names, referenced_names, tail_bytes = _collect_pat_line_names(parts)
     if not public_names or module_length <= 0:
         return None
-    comment_source_path, comment_compiler_name, comment_module_name = _parse_pat_comment_metadata(comment_text)
+    comment_metadata = _parse_pat_comment_metadata(comment_text)
+    comment_source_path, comment_compiler_name, comment_module_name, linker_refs_text = comment_metadata
+    linker_references = _decode_pat_linker_references(linker_refs_text)
+    if linker_references is None:
+        return None
     return PatModule(
         source_path=comment_source_path or source_path,
         compiler_name=comment_compiler_name or _compiler_name_from_source_path(comment_source_path or source_path),
@@ -230,6 +322,7 @@ def parse_pat_line(line: str, *, source_path: str = "<memory>") -> PatModule | N
         public_names=tuple(public_names),
         referenced_names=tuple(referenced_names),
         tail_bytes=tail_bytes,
+        linker_references=linker_references,
     )
 
 
@@ -291,16 +384,19 @@ def _format_pat_comment(module: PatModule) -> str:
         parts.append(f"src={module.source_path}")
     if module.compiler_name:
         parts.append(f"compiler={module.compiler_name}")
+    if module.linker_references:
+        parts.append(f"refs={_encode_pat_linker_references(module.linker_references)}")
     return " | ".join(parts)
 
 
-def _parse_pat_comment_metadata(comment_text: str) -> tuple[str, str, str]:
+def _parse_pat_comment_metadata(comment_text: str) -> tuple[str, str, str, str | None]:
     """Read PAT metadata fields without splitting merged provenance values."""
     if not comment_text:
-        return "", "", ""
+        return "", "", "", None
     source_path = ""
     compiler_name = ""
     module_name = ""
+    linker_refs_text: str | None = None
     for part in (piece.strip() for piece in re.split(r"(?<!\|)\|(?!\|)", comment_text)):
         if "=" not in part:
             continue
@@ -313,7 +409,62 @@ def _parse_pat_comment_metadata(comment_text: str) -> tuple[str, str, str]:
             compiler_name = value
         elif key == "mod":
             module_name = value
-    return source_path, compiler_name, module_name
+        elif key == "refs":
+            linker_refs_text = value
+    return source_path, compiler_name, module_name, linker_refs_text
+
+
+def _encode_pat_linker_references(references: tuple[PatLinkerReference, ...]) -> str:
+    """Serialize the typed OMF relocation projection into one comment field."""
+    records: list[str] = []
+    for ref in sorted(references, key=lambda item: (item.offset, item.target_public_identity)):
+        addend = "-" if ref.explicit_target_displacement is None else str(ref.explicit_target_displacement)
+        records.append(":".join((
+            f"{ref.offset:x}",
+            str(ref.width_bytes),
+            ref.kind.value,
+            addend,
+            ref.source_library_sha256 or "-",
+            ref.source_object_sha256 or "-",
+            str(ref.source_segment_index),
+            f"{ref.source_segment_offset:x}",
+            f"{ref.fixupp_record_offset:x}",
+            ref.raw_fixupp_subrecord.hex() or "-",
+            ref.target_public_identity.encode("latin1").hex(),
+        )))
+    return "v1:" + ",".join(records)
+
+
+def _decode_pat_linker_references(encoded: str | None) -> tuple[PatLinkerReference, ...] | None:
+    """Decode the typed relocation projection; malformed input yields no proof."""
+    if encoded is None:
+        return ()
+    if not encoded.startswith("v1:") or not encoded[3:]:
+        return None
+    references: list[PatLinkerReference] = []
+    try:
+        for record in encoded[3:].split(","):
+            fields = record.split(":")
+            if len(fields) != 11:
+                return None
+            references.append(
+                PatLinkerReference(
+                    offset=int(fields[0], 16),
+                    width_bytes=int(fields[1]),
+                    kind=PatFixupKind(fields[2]),
+                    target_public_identity=bytes.fromhex(fields[10]).decode("latin1"),
+                    explicit_target_displacement=None if fields[3] == "-" else int(fields[3]),
+                    source_library_sha256="" if fields[4] == "-" else fields[4],
+                    source_object_sha256="" if fields[5] == "-" else fields[5],
+                    source_segment_index=int(fields[6]),
+                    source_segment_offset=int(fields[7], 16),
+                    fixupp_record_offset=int(fields[8], 16),
+                    raw_fixupp_subrecord=b"" if fields[9] == "-" else bytes.fromhex(fields[9]),
+                )
+            )
+    except (TypeError, ValueError):
+        return None
+    return tuple(references)
 
 
 def _compiler_name_from_source_path(source_path: str) -> str:
@@ -532,20 +683,160 @@ def _fallback_pat_lines(input_path: Path, suffix: str, cache_dir: Path, cache_ke
     return lines
 
 
+@dataclass(frozen=True)
+class _PatAnchorPublic:
+    """One independently unique, fully checked catalog public identity."""
+    address: int
+    checked_range: tuple[int, int]
+
+
+@lru_cache(maxsize=16)
+def _authenticated_library_patterns(source_path: str, source_digest: str) -> tuple[PatModule, ...]:
+    """Rebuild authoritative projections from one fingerprinted library.
+
+    The caller rechecks the file digest before using this bounded cache. A
+    changed or unavailable source cannot authorize saved relocation evidence.
+    """
+    source = Path(source_path)
+    try:
+        blob = source.read_bytes()
+    except OSError:
+        return ()
+    if hashlib.sha256(blob).hexdigest() != source_digest:
+        return ()
+    patterns: list[PatModule] = []
+    for obj in extract_omf_modules_from_lib(source):
+        lines = _generate_pat_lines_from_omf_blob(
+            obj.data, source_name=obj.module_name, provenance_source=source_path,
+            provenance_compiler=_compiler_name_from_source_path(source_path),
+            source_library_sha256=source_digest,
+        )
+        for line in lines:
+            parsed = parse_pat_line(line)
+            if parsed is not None:
+                patterns.append(parsed)
+    return tuple(patterns)
+
+
+type _PatProvenanceKey = tuple[
+    int, int, tuple[PatPublicName, ...], tuple[PatPublicName, ...],
+    tuple[PatLinkerReference, ...], bytes,
+]
+
+
+@dataclass
+class _PatSourceSnapshot:
+    """Invocation-local fresh fingerprint and derived authoritative index."""
+
+    digest: str
+    pattern_keys: frozenset[_PatProvenanceKey] | None = None
+
+
+def _pat_provenance_key(module: PatModule | CachedPatRegexSpec) -> _PatProvenanceKey:
+    """Retain exact owned pattern bytes, extent, publics and relocation facts."""
+    regex_source = (
+        module.regex_source if isinstance(module, CachedPatRegexSpec)
+        else _build_pat_regex_source(module)[0]
+    )
+    return (
+        module.module_length, _get_pat_checked_match_length(module), module.public_names,
+        module.referenced_names, module.linker_references, regex_source,
+    )
+
+
+def _pat_source_snapshot(
+    source_identity: str,
+    source_snapshots: dict[str, _PatSourceSnapshot | None],
+) -> _PatSourceSnapshot | None:
+    """Fingerprint each source once in this invocation, retaining unavailable state."""
+    if source_identity not in source_snapshots:
+        try:
+            digest = hashlib.sha256(Path(source_identity).read_bytes()).hexdigest()
+        except OSError:
+            source_snapshots[source_identity] = None
+        else:
+            source_snapshots[source_identity] = _PatSourceSnapshot(digest)
+    return source_snapshots[source_identity]
+
+
+def _pat_module_provenance_valid(
+    module: PatModule | CachedPatRegexSpec,
+    source_snapshots: dict[str, _PatSourceSnapshot | None],
+) -> bool:
+    """Refuse projected metadata that disagrees with its source OMF pattern.
+
+    Legacy literal matching remains unchanged. Once a record declares a typed
+    projection, even a unique byte hit must not downgrade forged evidence to
+    legacy matching or become an independent anchor.
+    """
+    if not module.linker_references:
+        return True
+    references = module.linker_references
+    if any(
+        not re.fullmatch(r"[0-9a-f]{64}", ref.source_library_sha256)
+        or not re.fullmatch(r"[0-9a-f]{64}", ref.source_object_sha256)
+        or not ref.raw_fixupp_subrecord
+        or ref.offset < 0 or ref.offset + ref.width_bytes > module.module_length
+        or ref.source_segment_index <= 0 or ref.fixupp_record_offset < 0
+        for ref in references
+    ):
+        return False
+    expected_names = {(ref.offset, ref.target_public_identity) for ref in references}
+    if expected_names != {(ref.offset, ref.name) for ref in module.referenced_names}:
+        return False
+    for source_text in module.source_path.split(" || "):
+        source = Path(source_text.strip())
+        source_identity = str(source)
+        snapshot = _pat_source_snapshot(source_identity, source_snapshots)
+        if snapshot is None:
+            continue
+        if any(ref.source_library_sha256 != snapshot.digest for ref in references):
+            continue
+        if snapshot.pattern_keys is None:
+            snapshot.pattern_keys = frozenset(
+                _pat_provenance_key(original)
+                for original in _authenticated_library_patterns(source_identity, snapshot.digest)
+            )
+        if _pat_provenance_key(module) in snapshot.pattern_keys:
+            return True
+    return False
+
+
 def match_pat_modules(
     image_bytes: bytes,
     base_addr: int,
     modules: tuple[PatModule | CachedPatRegexSpec, ...] | list[PatModule | CachedPatRegexSpec],
     *,
     backend: str | None = None,
-) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
-    """Return labels and ranges only for signatures with a unique image hit."""
+    architecture: str | None = None,
+) -> LocalPatMatchResult:
+    """Return unique labels; publish ranges only for fully checked extents.
+
+    Relocation wildcards remain explicitly masked pattern bytes. A missing
+    prefix/tail is unverified coverage and cannot supply a library interval.
+    A repeated pattern earns library identity only when exactly one
+    candidate's authenticated self-relative16 references resolve to
+    independently unique, fully checked catalog public anchors. That is a
+    linker-layout identity only; it never asserts an executable target.
+    """
     selected_backend = _normalize_pat_backend_choice(backend)
     code_labels: dict[int, str] = {}
     code_ranges: dict[int, tuple[int, int]] = {}
     matched_compiler_names: list[str] = []
-    for module in modules:
-        hits = _find_pat_matches(image_bytes, module, backend=selected_backend)
+    linker_evidence: list[PatLinkerIdentityEvidence] = []
+    source_snapshots: dict[str, _PatSourceSnapshot | None] = {}
+    hits_by_module = [
+        (module, _find_pat_matches(image_bytes, module, backend=selected_backend))
+        for module in modules
+        if _pat_module_provenance_valid(module, source_snapshots)
+    ]
+    anchors = _collect_pat_anchor_publics(hits_by_module, base_addr)
+    for module, hits in hits_by_module:
+        if len(hits) > 1:
+            hits = _select_anchored_pat_hit(
+                image_bytes, base_addr, module, hits, anchors,
+                architecture=architecture, linker_evidence=linker_evidence,
+            )
         if len(hits) != 1:
             continue
         for compiler_name in (
@@ -557,7 +848,7 @@ def match_pat_modules(
         match_addr = base_addr + start_off
         public_names = module.public_names
         module_length = module.module_length
-        if public_names:
+        if public_names and _get_pat_checked_match_length(module) == module_length:
             first_public = min(public_names, key=lambda pub: pub.offset)
             code_start = match_addr + first_public.offset
             code_end = match_addr + module_length
@@ -566,7 +857,228 @@ def match_pat_modules(
         for public_name in public_names:
             linear = match_addr + public_name.offset
             code_labels.setdefault(linear, public_name.name.lstrip("_"))
-    return code_labels, code_ranges, tuple(matched_compiler_names)
+    return LocalPatMatchResult(
+        code_labels,
+        code_ranges,
+        (),
+        tuple(matched_compiler_names),
+        tuple(linker_evidence),
+    )
+
+
+def _collect_pat_anchor_publics(
+    hits_by_module: list[tuple[PatModule | CachedPatRegexSpec, list[int]]],
+    base_addr: int,
+) -> dict[str, _PatAnchorPublic | None]:
+    """Index anchors solely from original unique, fully checked publics.
+
+    A ``None`` value marks an exact catalog identity claimed by more than one
+    unique anchor coordinate; such conflicting identities refuse anchoring.
+    Repeated or partially checked matches never bootstrap anchor status.
+    """
+    anchors: dict[str, _PatAnchorPublic | None] = {}
+    for module, hits in hits_by_module:
+        if len(hits) != 1:
+            continue
+        if not module.public_names or _get_pat_checked_match_length(module) != module.module_length:
+            continue
+        match_addr = base_addr + hits[0]
+        first_public = min(module.public_names, key=lambda pub: pub.offset)
+        checked_range = (match_addr + first_public.offset, match_addr + module.module_length)
+        if checked_range[1] <= checked_range[0]:
+            continue
+        for public_name in module.public_names:
+            identity = public_name.name
+            anchor = _PatAnchorPublic(address=match_addr + public_name.offset, checked_range=checked_range)
+            existing = anchors.get(identity, anchor)
+            anchors[identity] = None if existing is None or existing != anchor else anchor
+    return anchors
+
+
+def _select_anchored_pat_hit(
+    image_bytes: bytes,
+    base_addr: int,
+    module: PatModule | CachedPatRegexSpec,
+    hits: list[int],
+    anchors: dict[str, _PatAnchorPublic | None],
+    *,
+    architecture: str | None,
+    linker_evidence: list[PatLinkerIdentityEvidence],
+) -> list[int]:
+    """Keep the single candidate whose authenticated references resolve.
+
+    Every typed reference must be a supported self-relative16 field whose
+    signed unwrapped encoding equals ``anchor - (field + 2)``. Zero or more
+    than one surviving candidate stays refused: repeated application hits
+    remain application obligations and are never labeled.
+    """
+    references = module.linker_references
+    if not references:
+        return hits
+    decoder = _PAT_REFERENCE_FIELD_DECODERS.get(architecture) if architecture else None
+    surviving: list[int] = []
+    for hit in hits:
+        match_addr = base_addr + hit
+        candidate_address = match_addr + min(
+            module.public_names, key=lambda pub: pub.offset
+        ).offset if module.public_names else match_addr
+        candidate_ok = True
+        for reference in references:
+            evidence = _authenticate_pat_linker_reference(
+                image_bytes, base_addr, hit, candidate_address, reference, anchors, decoder, module.module_length
+            )
+            linker_evidence.append(evidence)
+            if evidence.verdict is not PatLinkerIdentityVerdict.PROVEN:
+                candidate_ok = False
+        if candidate_ok:
+            surviving.append(hit)
+    return surviving if len(surviving) == 1 else hits
+
+
+def _pat_reference_has_supported_shape(reference: PatLinkerReference) -> bool:
+    """Return whether the projection is an addend-free self-relative16 field."""
+    return (
+        reference.kind is PatFixupKind.SELF_RELATIVE_OFFSET16
+        and reference.width_bytes == 2
+        and reference.explicit_target_displacement in (None, 0)
+    )
+
+
+def _authenticate_pat_linker_reference(
+    image_bytes: bytes,
+    base_addr: int,
+    hit: int,
+    candidate_address: int,
+    reference: PatLinkerReference,
+    anchors: dict[str, _PatAnchorPublic | None],
+    decoder: Callable[[bytes, int, int, int, int], PatReferenceDecoding] | None,
+    module_length: int,
+) -> PatLinkerIdentityEvidence:
+    """Authenticate one typed reference against unique anchor identities."""
+    field_offset = hit + reference.offset
+    field_address = base_addr + field_offset
+
+    def _refused(
+        verdict: PatLinkerIdentityVerdict,
+        *,
+        encoded_signed_displacement: int | None = None,
+        anchor: _PatAnchorPublic | None = None,
+    ) -> PatLinkerIdentityEvidence:
+        return PatLinkerIdentityEvidence(
+            candidate_public_address=candidate_address,
+            reference=reference,
+            field_address=field_address,
+            encoded_signed_displacement=encoded_signed_displacement,
+            anchor_public_address=None if anchor is None else anchor.address,
+            anchor_checked_range=None if anchor is None else anchor.checked_range,
+            verdict=verdict,
+        )
+
+    if not _pat_reference_has_supported_shape(reference):
+        return _refused(PatLinkerIdentityVerdict.UNSUPPORTED_REFERENCE)
+    decoding = (
+        PatReferenceDecoding(verdict=PatReferenceDecodeVerdict.UNAVAILABLE)
+        if decoder is None
+        else decoder(image_bytes, field_offset, field_address, hit, module_length)
+    )
+    if decoding.verdict is PatReferenceDecodeVerdict.UNAVAILABLE:
+        return _refused(PatLinkerIdentityVerdict.UNRESOLVED_REFERENCE)
+    if (
+        decoding.verdict is not PatReferenceDecodeVerdict.DECODED
+        or decoding.encoded_signed_displacement is None
+    ):
+        return _refused(PatLinkerIdentityVerdict.MALFORMED_REFERENCE)
+    anchor = anchors.get(reference.target_public_identity)
+    if anchor is None:
+        anchor_verdict = (
+            PatLinkerIdentityVerdict.AMBIGUOUS_ANCHOR
+            if reference.target_public_identity in anchors
+            else PatLinkerIdentityVerdict.UNRESOLVED_REFERENCE
+        )
+        return _refused(
+            anchor_verdict,
+            encoded_signed_displacement=decoding.encoded_signed_displacement,
+        )
+    expected = anchor.address - (field_address + 2)
+    if not -32768 <= expected <= 32767:
+        return _refused(
+            PatLinkerIdentityVerdict.DISPLACEMENT_OUT_OF_RANGE,
+            encoded_signed_displacement=decoding.encoded_signed_displacement,
+            anchor=anchor,
+        )
+    if decoding.encoded_signed_displacement != expected:
+        return _refused(
+            PatLinkerIdentityVerdict.TARGET_MISMATCH,
+            encoded_signed_displacement=decoding.encoded_signed_displacement,
+            anchor=anchor,
+        )
+    return PatLinkerIdentityEvidence(
+        candidate_public_address=candidate_address,
+        reference=reference,
+        field_address=field_address,
+        encoded_signed_displacement=decoding.encoded_signed_displacement,
+        anchor_public_address=anchor.address,
+        anchor_checked_range=anchor.checked_range,
+        verdict=PatLinkerIdentityVerdict.PROVEN,
+    )
+
+
+def _decode_x86_16_near_rel16_field(
+    image_bytes: bytes, field_offset: int, field_address: int,
+    candidate_offset: int, module_length: int,
+) -> PatReferenceDecoding:
+    """Bind a near rel16 field to registered x86-16 instruction boundaries.
+
+    The canonical byte-edge decoder classifies only the exact instruction
+    found by the registered architecture decoder from the candidate entry.
+    No executable destination, selector, or segment state is asserted.
+    """
+    from archinfo import ArchError
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.frontend.x86_16.relative_control_edge import (
+        DecodedRelativeEdge,
+        RelativeEdgeForm,
+        decode_relative_edge,
+    )
+
+    if not 0 <= candidate_offset <= field_offset < field_offset + 2 <= candidate_offset + module_length <= len(image_bytes):
+        return PatReferenceDecoding(PatReferenceDecodeVerdict.REFUSED)
+    try:
+        decoder = Arch86_16().capstone
+    except ArchError:
+        return PatReferenceDecoding(PatReferenceDecodeVerdict.UNAVAILABLE)
+    start_address = field_address - field_offset + candidate_offset
+    instructions = decoder.disasm(
+        image_bytes[candidate_offset:field_offset + 2], start_address,
+    )
+    next_address = start_address
+    for instruction in instructions:
+        if instruction.address != next_address:
+            return PatReferenceDecoding(PatReferenceDecodeVerdict.REFUSED)
+        next_address += instruction.size
+        if next_address != field_address + 2:
+            continue
+        decoded = decode_relative_edge(
+            instruction.address, bytes(instruction.bytes), source="pat_linker_layout_identity",
+        )
+        if not isinstance(decoded, DecodedRelativeEdge) or decoded.form not in (
+            RelativeEdgeForm.CALL_REL16, RelativeEdgeForm.JMP_REL16,
+        ):
+            return PatReferenceDecoding(PatReferenceDecodeVerdict.REFUSED)
+        if instruction.address + 1 != field_address:
+            return PatReferenceDecoding(PatReferenceDecodeVerdict.REFUSED)
+        return PatReferenceDecoding(
+            PatReferenceDecodeVerdict.DECODED, decoded.head, decoded.displacement,
+        )
+    return PatReferenceDecoding(PatReferenceDecodeVerdict.REFUSED)
+
+
+_PAT_REFERENCE_FIELD_DECODERS: dict[
+    str, Callable[[bytes, int, int, int, int], PatReferenceDecoding]
+] = {
+    "x86_16": _decode_x86_16_near_rel16_field,
+}
 
 
 def generate_pat_from_omf_obj(obj_path: Path, out_path: Path) -> int:
@@ -598,6 +1110,7 @@ def generate_pat_from_omf_lib(lib_path: Path, out_path: Path) -> int:
             # Unsupported format - don't crash, just return 0
             return 0
 
+        source_library_sha256 = hashlib.sha256(blob).hexdigest()
         for module in extract_omf_modules_from_lib(lib_path):
             lines.extend(
                 _generate_pat_lines_from_omf_blob(
@@ -605,6 +1118,7 @@ def generate_pat_from_omf_lib(lib_path: Path, out_path: Path) -> int:
                     source_name=module.module_name,
                     provenance_source=str(lib_path),
                     provenance_compiler=_compiler_name_from_source_path(str(lib_path)),
+                    source_library_sha256=source_library_sha256,
                 )
             )
 
@@ -953,9 +1467,9 @@ def _parse_omf_blob(
     module_name_hint: str,
 ) -> tuple[str, list[_OMFSegment], list[_OMFPublic], list[_OMFFixupRef]]:
     state = _OMFRecordState(module_name=module_name_hint)
-    for record_type, payload in _iter_omf_records(blob):
+    for record_type, payload, record_offset in _iter_omf_records(blob):
         if not _apply_omf_name_record(state, record_type, payload):
-            _apply_omf_data_fixupp_record(state, record_type, payload)
+            _apply_omf_data_fixupp_record(state, record_type, payload, record_offset)
     return state.module_name, state.segments, state.publics, state.fixup_refs
 
 
@@ -993,7 +1507,9 @@ def _apply_omf_name_record(state: _OMFRecordState, record_type: int, payload: by
     return True
 
 
-def _apply_omf_data_fixupp_record(state: _OMFRecordState, record_type: int, payload: bytes) -> None:
+def _apply_omf_data_fixupp_record(
+    state: _OMFRecordState, record_type: int, payload: bytes, record_offset: int
+) -> None:
     """Apply a data/fixup record that may update the data context."""
     if record_type in {0xA0, 0xA1}:
         state.last_data_context = _apply_ledata(payload, state.segments, use32=record_type == 0xA1)
@@ -1007,6 +1523,7 @@ def _apply_omf_data_fixupp_record(state: _OMFRecordState, record_type: int, payl
                 state.external_names,
                 state.target_threads,
                 state.frame_threads,
+                record_offset=record_offset,
             )
         )
 
@@ -1017,8 +1534,10 @@ def _generate_pat_lines_from_omf_blob(
     source_name: str,
     provenance_source: str = "",
     provenance_compiler: str = "",
+    source_library_sha256: str = "",
 ) -> list[str]:
     module_name, segments, publics, fixup_refs = _parse_omf_blob(blob, module_name_hint=Path(source_name).stem)
+    source_object_sha256 = hashlib.sha256(blob).hexdigest()
     lines: list[str] = []
     publics_by_segment: dict[int, list[_OMFPublic]] = {}
     for public in publics:
@@ -1035,6 +1554,8 @@ def _generate_pat_lines_from_omf_blob(
                 segment_refs=sorted(refs_by_segment.get(seg_index, ()), key=lambda item: (item.offset, item.name)),
                 provenance_source=provenance_source,
                 provenance_compiler=provenance_compiler,
+                source_library_sha256=source_library_sha256,
+                source_object_sha256=source_object_sha256,
             )
         )
     if not lines:
@@ -1054,18 +1575,17 @@ def _pat_line_with_provenance(
     module_name: str,
     provenance_source: str,
     provenance_compiler: str,
+    linker_references: tuple[PatLinkerReference, ...] = (),
 ) -> str:
     """Attach the sanitized provenance comment to a built PAT line."""
+    comment_parts = [
+        f"mod={module_name}",
+        f"src={provenance_source}" if provenance_source else "",
+        f"compiler={provenance_compiler}" if provenance_compiler else "",
+        f"refs={_encode_pat_linker_references(linker_references)}" if linker_references else "",
+    ]
     return line.rsplit(" ; ", 1)[0] + " ; " + _sanitize_pat_comment(
-        " | ".join(
-            part
-            for part in (
-                f"mod={module_name}",
-                f"src={provenance_source}" if provenance_source else "",
-                f"compiler={provenance_compiler}" if provenance_compiler else "",
-            )
-            if part
-        )
+        " | ".join(part for part in comment_parts if part)
     )
 
 
@@ -1077,6 +1597,8 @@ def _segment_pat_lines(
     segment_refs: list[_OMFFixupRef],
     provenance_source: str,
     provenance_compiler: str,
+    source_library_sha256: str = "",
+    source_object_sha256: str = "",
 ) -> list[str]:
     """Emit PAT lines for each public inside one code-looking segment."""
     lines: list[str] = []
@@ -1100,9 +1622,18 @@ def _segment_pat_lines(
                 segment_refs=segment_refs,
                 provenance_source=provenance_source,
                 provenance_compiler=provenance_compiler,
+                source_library_sha256=source_library_sha256,
+                source_object_sha256=source_object_sha256,
             )
         )
     return lines
+
+
+def _omf_fixup_kind(self_relative: bool, location_kind: int, width: int) -> PatFixupKind:
+    """Project the authenticated OMF mode/location class for one fixup."""
+    if self_relative and location_kind == 1 and width == 2:
+        return PatFixupKind.SELF_RELATIVE_OFFSET16
+    return PatFixupKind.UNSUPPORTED
 
 
 def _public_pat_lines(
@@ -1114,6 +1645,8 @@ def _public_pat_lines(
     segment_refs: list[_OMFFixupRef],
     provenance_source: str,
     provenance_compiler: str,
+    source_library_sha256: str = "",
+    source_object_sha256: str = "",
 ) -> list[str]:
     """Emit base and wildcard-variant PAT lines for one public function."""
     lines: list[str] = []
@@ -1135,6 +1668,23 @@ def _public_pat_lines(
         for fixup_ref in segment_refs
         if start <= fixup_ref.offset < end and fixup_ref.name
     )
+    linker_references = tuple(
+        PatLinkerReference(
+            offset=fixup_ref.offset - start,
+            width_bytes=fixup_ref.width,
+            kind=_omf_fixup_kind(fixup_ref.self_relative, fixup_ref.location_kind, fixup_ref.width),
+            target_public_identity=fixup_ref.name,
+            explicit_target_displacement=fixup_ref.explicit_target_displacement,
+            source_library_sha256=source_library_sha256,
+            source_object_sha256=source_object_sha256,
+            source_segment_index=fixup_ref.seg_index,
+            source_segment_offset=fixup_ref.offset,
+            fixupp_record_offset=fixup_ref.record_offset,
+            raw_fixupp_subrecord=fixup_ref.raw_subrecord,
+        )
+        for fixup_ref in segment_refs
+        if start <= fixup_ref.offset < end and fixup_ref.name
+    )
     variants = _omf_variant_byte_patterns(func_bytes, public.name, function_refs, provenance_compiler)
     for variant_bytes in variants:
         line = _build_pat_line(
@@ -1144,7 +1694,12 @@ def _public_pat_lines(
             referenced_names=function_refs,
         )
         if line is not None:
-            lines.append(_pat_line_with_provenance(line, public.name, provenance_source, provenance_compiler))
+            lines.append(
+                _pat_line_with_provenance(
+                    line, public.name, provenance_source, provenance_compiler,
+                    linker_references=linker_references,
+                )
+            )
     return lines
 
 
@@ -1193,7 +1748,7 @@ def _synthetic_fallback_pat_lines(
     return lines
 
 
-def _iter_omf_records(blob: bytes) -> Iterator[tuple[int, bytes]]:
+def _iter_omf_records(blob: bytes) -> Iterator[tuple[int, bytes, int]]:
     offset = 0
     while offset + 3 <= len(blob):
         record_type = blob[offset]
@@ -1201,7 +1756,7 @@ def _iter_omf_records(blob: bytes) -> Iterator[tuple[int, bytes]]:
         if record_length <= 0 or offset + 3 + record_length > len(blob):
             break
         payload = blob[offset + 3 : offset + 3 + record_length - 1]
-        yield record_type, payload
+        yield record_type, payload, offset
         offset += 3 + record_length
 
 
@@ -1672,6 +2227,8 @@ def _parse_fixupp_refs(
     external_names: list[str],
     target_threads: dict[int, tuple[int, int]],
     frame_threads: dict[int, tuple[int, int]],
+    *,
+    record_offset: int = -1,
 ) -> list[_OMFFixupRef]:
     """Decode FIXUPP locations; LOCAT stores control bits before offset bits."""
     refs: list[_OMFFixupRef] = []
@@ -1683,6 +2240,7 @@ def _parse_fixupp_refs(
             continue
         if offset + 3 > len(payload):
             break
+        subrecord_start = offset
         locat = int.from_bytes(payload[offset : offset + 2], "big")
         offset += 2
         fixdat = payload[offset]
@@ -1691,7 +2249,13 @@ def _parse_fixupp_refs(
         target_method, target_index, offset = _consume_fixupp_target(payload, offset, fixdat, target_threads)
         location_kind = (locat >> 10) & 0x0F
         displacement_size = _omf_fixup_width_from_location_kind(location_kind)
+        explicit_target_displacement: int | None = None
         if not (fixdat & 0x04):
+            if offset + displacement_size > len(payload):
+                break
+            explicit_target_displacement = int.from_bytes(
+                payload[offset : min(len(payload), offset + displacement_size)], "little"
+            )
             offset = min(len(payload), offset + displacement_size)
         dro = locat & 0x03FF
         if dro >= last_data_context.data_length:
@@ -1705,6 +2269,11 @@ def _parse_fixupp_refs(
                 offset=last_data_context.data_offset + dro,
                 width=displacement_size,
                 name=target_name,
+                self_relative=not bool(locat & 0x4000),
+                location_kind=location_kind,
+                explicit_target_displacement=explicit_target_displacement,
+                record_offset=record_offset,
+                raw_subrecord=payload[subrecord_start:offset],
             )
         )
     return refs
@@ -2003,6 +2572,7 @@ def _compile_pat_module_to_cached_regex(module: PatModule) -> CachedPatRegexSpec
         public_names=module.public_names,
         referenced_names=module.referenced_names,
         required_literal=required_pat_literal(module.pattern_bytes, module.module_length, module.tail_bytes),
+        linker_references=module.linker_references,
     )
 
 
@@ -2015,7 +2585,8 @@ def _get_pat_module_regex(module: PatModule | CachedPatRegexSpec) -> re.Pattern[
 
 @lru_cache(maxsize=4096)
 def _build_pat_regex_source(module: PatModule) -> tuple[bytes, bytes, int]:
-    checked_prefix_len = min(module.module_length, 32)
+    """Compile explicit bytes and report their actual checked contiguous width."""
+    checked_prefix_len = min(module.module_length, 32, len(module.pattern_bytes))
     python_parts = [_pattern_bytes_to_regex(module.pattern_bytes[:checked_prefix_len])]
     hyperscan_parts = [_pattern_bytes_to_hyperscan_regex(module.pattern_bytes[:checked_prefix_len])]
     if module.module_length > 32 and module.tail_bytes:

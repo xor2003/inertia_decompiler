@@ -8,6 +8,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CIndexedVariable, CVariable
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.real_mode_linear import (
     RealModeLinearStackAccess8616,

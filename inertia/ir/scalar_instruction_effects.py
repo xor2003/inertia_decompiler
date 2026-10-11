@@ -29,6 +29,8 @@ from .core import (
     IRValue,
     MemSpace,
 )
+from .frozen_dispatch import FrozenDispatch
+from .frozen_dispatch import frozen_dispatch_lookup as frozen_dispatch_lookup
 from .no_effect_instructions import (
     NO_EFFECT_INSTRUCTION_OP_8616,
     no_effect_claim_shape_8616,
@@ -43,6 +45,8 @@ __all__ = [
     "ScalarInstructionClobber8616",
     "ScalarInstructionEffect8616",
     "ScalarInstructionEffectKind8616",
+    "scalar_boolean_result_bits_8616",
+    "scalar_dispatch_producers_8616",
     "scalar_instruction_effect_8616",
 ]
 
@@ -406,15 +410,31 @@ def _classify_widening_product_8616(
     return effect if effect is not None else _unknown_8616("widening_product_shape")
 
 
-_CLASSIFIERS_8616: dict[str, Callable[[IRInstr], ScalarInstructionEffect8616]] = {
-    "MOV": _classify_mov_8616,
-    "LOAD": _classify_load_8616,
-    "CALL": _classify_call_8616,
-    "CJMP": _classify_cjmp_8616,
-    "JMP": _classify_jmp_8616,
-    "STORE": _classify_store_8616,
-    NO_EFFECT_INSTRUCTION_OP_8616: _classify_nop_8616,
-}
+_CLASSIFIERS_8616: FrozenDispatch[str, Callable[[IRInstr], ScalarInstructionEffect8616]] | dict[
+    str, Callable[[IRInstr], ScalarInstructionEffect8616]
+] = (
+    ("MOV", _classify_mov_8616),
+    ("LOAD", _classify_load_8616),
+    ("CALL", _classify_call_8616),
+    ("CJMP", _classify_cjmp_8616),
+    ("JMP", _classify_jmp_8616),
+    ("STORE", _classify_store_8616),
+    (NO_EFFECT_INSTRUCTION_OP_8616, _classify_nop_8616),
+)
+
+
+def scalar_dispatch_producers_8616() -> tuple[object, ...]:
+    """Bind immutable dispatch or every entry of foreign dictionary instrumentation.
+
+    Exact tuples retain a stable membership identity. A replaced dictionary
+    additionally captures keys and handlers, so in-place changes invalidate
+    producer-bound native caches without allocating unstable pair identities.
+    """
+    registry = _CLASSIFIERS_8616
+    retained: tuple[object, ...] = (frozen_dispatch_lookup, type(registry), registry)
+    if type(registry) is dict:
+        return (*retained, *(item for pair in registry.items() for item in pair))
+    return retained
 
 
 def scalar_instruction_effect_8616(
@@ -433,7 +453,7 @@ def scalar_instruction_effect_8616(
     unknown. CALL and
     every malformed or unsupported form remain UNKNOWN.
     """
-    classifier = _CLASSIFIERS_8616.get(instruction.op)
+    classifier = frozen_dispatch_lookup(_CLASSIFIERS_8616, instruction.op)
     if classifier is not None:
         return classifier(instruction)
     for classify in (
@@ -444,3 +464,26 @@ def scalar_instruction_effect_8616(
         if effect is not None:
             return effect
     return _unknown_8616("unsupported_op")
+
+
+def scalar_boolean_result_bits_8616(instruction: IRInstr) -> int | None:
+    """Authoritative semantic result width in bits for Boolean-producing IR ops.
+
+    Returns ``1`` only when an owning classifier proves the instruction is a
+    pure integer comparison or a VEX one-bit Boolean operation
+    (``Iop_Xor1``/``Iop_And1``/``Iop_Or1``): the exact typed shape validates
+    and the effect is CLOSED_DESTINATION. The returned width is semantic —
+    one-bit predicates still occupy one byte of IR storage, so this is not a
+    byte size and does not alter the effect record.
+
+    Returns ``None`` for every other instruction and for malformed or
+    contradictory shapes: ordinary byte arithmetic, MOV/LOAD, widening
+    products, constants 0 or 1, and unsupported operators carry no one-bit
+    evidence, and no operand value, name, or detail string may supply it.
+    """
+    for classify in (_classify_comparison_8616, _classify_boolean_binary_8616):
+        effect = classify(instruction)
+        if (effect is not None
+                and effect.kind is ScalarInstructionEffectKind8616.CLOSED_DESTINATION):
+            return 1
+    return None

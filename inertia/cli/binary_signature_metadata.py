@@ -28,6 +28,7 @@ def load_binary_signature_metadata(
     if labels or ranges:
         metadata = LSTMetadata(
             data_labels={}, code_labels=labels, code_ranges=ranges,
+            signature_code_ranges=dict(ranges),
             signature_code_addrs=frozenset(labels), absolute_addrs=True,
             source_format="+".join(dict.fromkeys(formats)),
         )

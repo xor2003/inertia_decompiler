@@ -85,6 +85,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
 
+import inertia.lowering.segmented_memory_reasoning as _segmented_mem
 from inertia.cli.runtime_support import AnalysisTimeout, analysis_timeout, timing_output_enabled
 from inertia.cli.telemetry import annotate_current_span, span
 from inertia.frontend.x86_16.cod_known_objects import canonical_known_cod_object_name
@@ -104,7 +105,6 @@ from inertia.ir.condition_ir import (
     normalize_condition_fingerprint_string_8616,
 )
 from inertia.ir.status_flag_lift_context import active_status_flag_lift_context_8616
-import inertia.lowering.segmented_memory_reasoning as _segmented_mem
 from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from inertia.lowering.c_ast_utils import _c_ast_cycle_path_8616
@@ -591,7 +591,7 @@ from inertia.validation.tail_validation import (
     validation_stack_write_delta_offsets_are_evidenced_8616,
     validation_without_delta_fields_8616,
     void_tail_call_guard_materialization_delta_8616,
-    x86_16_tail_validation_result_passed,
+    x86_16_tail_validation_result_preserves_behavior,
 )
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint, _stack_slot_fingerprint_from_slot_8616
 from inertia.validation.tail_validation_generation import tail_validation_summary_input_generation_8616
@@ -11259,7 +11259,7 @@ class _PostprocessPassRun8616:
                 self.transaction_state.baseline_summary,
                 current_summary,
             )
-        if x86_16_tail_validation_result_passed(validation):
+        if x86_16_tail_validation_result_preserves_behavior(validation):
             return None
         is_exit_goto_repair_delta = _postprocess_exit_goto_repair_delta_8616(validation)
         has_structured_blocking_reason = bool(_postprocess_validation_blocking_reasons_8616(validation))
@@ -12745,9 +12745,9 @@ def _postprocess_restored_step_matches_baseline_8616(
         )
         return False
     return require_result_type_8616(
-        x86_16_tail_validation_result_passed(validation),
+        x86_16_tail_validation_result_preserves_behavior(validation),
         bool,
-        owner="tail_validation.x86_16_tail_validation_result_passed",
+        owner="tail_validation.x86_16_tail_validation_result_preserves_behavior",
     )
 
 
@@ -17645,7 +17645,7 @@ def _decompile_8616(self: StructuredAstValue) -> None:
             func_name,
         )
         log = logging.getLogger(__name__)
-        if not x86_16_tail_validation_result_passed(validation):
+        if not x86_16_tail_validation_result_preserves_behavior(validation):
             if _finalize_failed_postprocess_validation_8616(
                 self,
                 validation=validation,
@@ -18937,7 +18937,7 @@ def _apply_destructive_discard_identity_gate_8616(
     """Require a final-C identity proof when the discard delta was destructive."""
     if not destructive_discard_delta:
         return
-    if x86_16_tail_validation_result_passed(restored_validation):
+    if x86_16_tail_validation_result_preserves_behavior(restored_validation):
         self.codegen._inertia_postprocess_final_c_identity_proven_8616 = True
         restored_validation["destructive_discard_identity_proven"] = True
     elif not bool(getattr(self.codegen, "_inertia_postprocess_final_c_identity_proven_8616", False)):
@@ -19106,7 +19106,7 @@ def _discard_failed_postprocess_result_8616(
         stage="postprocess",
         validation=restored_validation,
     )
-    if x86_16_tail_validation_result_passed(restored_validation):
+    if x86_16_tail_validation_result_preserves_behavior(restored_validation):
         self.codegen._inertia_postprocess_validation_failed = False
         self.codegen._inertia_postprocess_validation_failure_pass = None
         self.codegen._inertia_postprocess_validation_failure_error = None

@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.analysis.stack_frame_ir import (
     FrameCoordinateStatus8616,
     build_x86_16_ir_frame_access_artifact,

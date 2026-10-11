@@ -7,6 +7,7 @@ import operator
 from collections.abc import Callable
 
 import pytest
+
 import inertia.ir.real16_edge_feasibility8616 as edge
 
 

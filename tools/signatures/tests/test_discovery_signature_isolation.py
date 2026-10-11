@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from inertia.cli.lst_extract import LSTMetadata
 import inertia.cli.discovery_evidence_project as isolation
+from inertia.cli.lst_extract import LSTMetadata
 
 
 @pytest.mark.parametrize("with_metadata,with_setting", [(False, False), (False, True), (True, False)])
@@ -36,6 +36,7 @@ def test_isolation_retains_only_detached_signature_evidence(monkeypatch):
         code_labels={0x1000: "runtime", 0x1100: "source_function"},
         code_ranges={0x1000: (0x1000, 0x1020), 0x1100: (0x1100, 0x1140)},
         signature_code_addrs=frozenset({0x1000}),
+        signature_code_ranges={0x1000: (0x1000, 0x1010)},
         source_format="cod_listing+signature_catalog", cod_path="source.COD",
         debug_source_files=("source.c",),
     )
@@ -50,6 +51,8 @@ def test_isolation_retains_only_detached_signature_evidence(monkeypatch):
     assert copied.code_labels == {0x1000: "runtime"}
     assert copied.code_ranges == {0x1000: (0x1000, 0x1020)}
     assert copied.signature_code_addrs == frozenset({0x1000})
+    assert copied.signature_code_ranges == {0x1000: (0x1000, 0x1010)}
+    assert copied.signature_code_ranges is not metadata.signature_code_ranges
     assert copied.cod_path is None
     assert copied.debug_source_files == ()
     assert copied.data_labels == {}

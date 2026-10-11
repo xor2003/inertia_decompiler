@@ -15,6 +15,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable, SimTemporaryVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import IRCallOutputProvenance8616, IRCallOutputShape8616
 from inertia.lowering.call_return_stack_bindings import call_result_escapes_group_8616
@@ -35,7 +36,6 @@ from inertia.lowering.wide_call_output_assignment_replay import (
     WideCallOutputAuthoritativeOwnershipStatus8616,
     classify_authoritative_wide_call_output_projection_8616,
 )
-
 from inertia.semantics.carry_borrow_contracts import CarryBorrowKind8616
 
 _INITIAL_CALLSITE = 0x100B

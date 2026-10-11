@@ -5,7 +5,10 @@ from dataclasses import replace
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.segment_call_preservation import prove_segment_call_preservation_8616
@@ -13,11 +16,8 @@ from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
 from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.lowering.interprocedural_storage_return_pointer import classify_pointer_return_storage_8616
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
+from inertia.lowering.interprocedural_storage_return_pointer import classify_pointer_return_storage_8616
 from tests.lowering.test_x86_16_interprocedural_storage_return_pointer import _definition, _fact
 
 
@@ -69,11 +69,10 @@ def test_other_selectors_require_actual_data_segment_copy(selector: str) -> None
 
 def test_stack_selector_consumes_only_retained_caller_entry_context() -> None:
     """A real upstream near call establishes DS==SS for this invocation only."""
+    from inertia.alias.segment_stack_restore import build_x86_16_segment_stack_restore_artifact
     from inertia.ir.direct_call_segment_context import bind_direct_call_segment_context_8616
     from inertia.ir.real16_invocation_domain import prove_real16_invocation_domain_8616
     from inertia.lowering.near_return_segment_use import bind_near_return_data_segment_use_8616
-
-    from inertia.alias.segment_stack_restore import build_x86_16_segment_stack_restore_artifact
     from tests.ir.test_x86_16_invocation_domain import _boot, _recompute
 
     boot = _boot()

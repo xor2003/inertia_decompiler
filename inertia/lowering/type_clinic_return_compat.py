@@ -2,7 +2,9 @@
 
 Layer: Types/lowering compatibility boundary.
 Responsibility: present complete AIL terminal-return evidence to the owned
-return-type lowerer after angr has synthesized its generated prototype.
+return-type lowerer after angr has synthesized its generated prototype, and
+preserve native Clinic knowledge-base ownership across nested CCA and
+CallSiteMaker construction.
 Forbidden: instruction, source, COD, name, or rendered-C based recovery.
 
 Package ownership contract (canonical inertia/lowering package):
@@ -15,13 +17,17 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterable
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from angr import ailment
+from angr import KnowledgeBase, Project, ailment
+from angr.analyses.calling_convention.calling_convention import CallingConventionAnalysis
+from angr.analyses.complete_calling_conventions import CompleteCallingConventionsAnalysis
+from angr.analyses.decompiler.callsite_maker import CallSiteMaker
 from angr.analyses.decompiler.clinic import Clinic
 from angr.analyses.decompiler.decompiler import Decompiler
 from angr.knowledge_plugins.functions.function import PrototypeSource
-from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
 
 from inertia.lowering.authoritative_function_prototypes import (
     capture_authoritative_function_prototype_8616,
@@ -34,6 +40,7 @@ from inertia.lowering.unused_void_return_types import (
     materialize_unused_caller_void_return_type_8616,
     record_terminal_return_value_evidence_8616,
 )
+from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
 from inertia.semantics.terminal_register_returns import collect_terminal_ax_return_evidence_8616
 
 __all__ = [
@@ -71,13 +78,93 @@ class _ClinicSurface8616(Protocol):
 
     _ail_graph: _GraphSurface8616
     function: _FunctionSurface8616
-    project: object
+    project: Project
+    kb: KnowledgeBase
+
+
+class _CallSiteMakerSurface8616(Protocol):
+    """Third-party CallSiteMaker fields consumed by the compatibility adapter."""
+
+    project: Project
+    kb: KnowledgeBase
 
 
 class _DecompilerSurface8616(Protocol):
     """Third-party decompiler field available before its constructor runs."""
 
     project: object
+
+
+@dataclass(frozen=True, slots=True)
+class _ClinicCallingConventionScope8616:
+    """Exact native Clinic analysis owner inherited by its nested CCA or CallSiteMaker request."""
+
+    project: Project
+    kb: KnowledgeBase
+
+
+_CLINIC_CALLING_CONVENTION_SCOPE_8616: ContextVar[_ClinicCallingConventionScope8616 | None] = ContextVar(
+    "native_clinic_calling_convention_scope", default=None,
+)
+_CCA_INIT_PATCHED_8616 = False
+
+
+def _native_clinic_kb_scope_8616(clinic: _ClinicSurface8616) -> _ClinicCallingConventionScope8616 | None:
+    """Return the owning native Clinic's KB scope; ``None`` leaves foreign defaults."""
+    if clinic.project.arch.name != "86_16":
+        return None
+    return _ClinicCallingConventionScope8616(clinic.project, clinic.kb)
+
+
+def _bind_clinic_calling_convention_kb_8616() -> None:
+    """Supply Clinic's KB to whole-function and callsite convention analyses."""
+    global _CCA_INIT_PATCHED_8616
+    if _CCA_INIT_PATCHED_8616:
+        return
+    original = CompleteCallingConventionsAnalysis.__init__
+
+    def _init_8616(self: CompleteCallingConventionsAnalysis, *args: object, **kwargs: object) -> None:
+        """Bind only the matching native Clinic's CCA instance before initialization."""
+        scope = _CLINIC_CALLING_CONVENTION_SCOPE_8616.get()
+        if scope is not None and self.project is scope.project and self.project.arch.name == "86_16":
+            self.kb = scope.kb
+        cast(Any, original)(self, *args, **kwargs)
+
+    original_callsite = CallingConventionAnalysis.__init__
+
+    def _callsite_init_8616(self: CallingConventionAnalysis, *args: object, **kwargs: object) -> None:
+        """Bind Clinic's callsite-only convention requests to the same caller KB."""
+        scope = _CLINIC_CALLING_CONVENTION_SCOPE_8616.get()
+        if scope is not None and self.project is scope.project and self.project.arch.name == "86_16":
+            self.kb = scope.kb
+        cast(Any, original_callsite)(self, *args, **kwargs)
+
+    cast(Any, CompleteCallingConventionsAnalysis).__init__ = _init_8616
+    cast(Any, CallingConventionAnalysis).__init__ = _callsite_init_8616
+    _CCA_INIT_PATCHED_8616 = True
+
+
+def _bind_clinic_callsite_maker_kb_8616() -> None:
+    """Supply Clinic's KB to CallSiteMaker before its analysis consumes it.
+
+    ``CallSiteMaker.__init__`` assigns ``self.kb = project.kb`` and immediately
+    runs ``_analyze``; rebinding inside the ``_analyze`` seam is the last point
+    where the Clinic-owned KB can replace that default before callee,
+    callsite-prototype, and argument lookups read it.
+    """
+    original = CallSiteMaker._analyze
+    if original.__name__ == "_callsite_maker_analyze_8616":
+        return
+
+    def _callsite_maker_analyze_8616(self: CallSiteMaker) -> None:
+        """Rebind only the matching native Clinic scope's KB over the default."""
+        maker = cast(_CallSiteMakerSurface8616, self)
+        scope = _CLINIC_CALLING_CONVENTION_SCOPE_8616.get()
+        if scope is not None and maker.project is scope.project and maker.project.arch.name == "86_16":
+            maker.kb = scope.kb
+        cast(Any, original)(self)
+
+    cast(Any, CallSiteMaker)._analyze = _callsite_maker_analyze_8616
 
 
 _DECOMPILER_INIT_PATCHED_8616 = False
@@ -121,13 +208,46 @@ def _preserve_strong_prototype_during_cc_recovery_8616() -> None:
         function = clinic.function
         preserved_prototype = function.prototype
         preserved_source = function.prototype_source
-        cast(Any, original)(self, func_graph=func_graph)
+        token = _CLINIC_CALLING_CONVENTION_SCOPE_8616.set(_native_clinic_kb_scope_8616(clinic))
+        try:
+            cast(Any, original)(self, func_graph=func_graph)
+        finally:
+            _CLINIC_CALLING_CONVENTION_SCOPE_8616.reset(token)
         if preserved_prototype is not None and preserved_source >= PrototypeSource.CCA_DECOMPILER:
             function.prototype = preserved_prototype
             function.prototype_source = preserved_source
 
     cast(Any, Clinic)._recover_calling_conventions = _recover_calling_conventions_8616
 
+
+def _preserve_clinic_kb_during_callsite_making_8616() -> None:
+    """Publish the owning Clinic's KB scope across nested CallSiteMaker construction."""
+    original = Clinic._make_callsites
+    if original.__name__ == "_make_callsites_8616":
+        return
+
+    def _make_callsites_8616(
+        self: object,
+        ail_graph: object,
+        func_args: object | None = None,
+        stack_pointer_tracker: object | None = None,
+        preserve_vvar_ids: object | None = None,
+    ) -> object:
+        """Bind the Clinic KB scope while angr 9.3 rewrites call statements."""
+        clinic = cast(_ClinicSurface8616, self)
+        token = _CLINIC_CALLING_CONVENTION_SCOPE_8616.set(_native_clinic_kb_scope_8616(clinic))
+        try:
+            return cast(Any, original)(
+                self,
+                ail_graph,
+                func_args=func_args,
+                stack_pointer_tracker=stack_pointer_tracker,
+                preserve_vvar_ids=preserve_vvar_ids,
+            )
+        finally:
+            _CLINIC_CALLING_CONVENTION_SCOPE_8616.reset(token)
+
+    cast(Any, Clinic)._make_callsites = _make_callsites_8616
 
 
 def collect_clinic_terminal_return_evidence_8616(graph: object) -> TerminalReturnValueEvidence8616:
@@ -197,8 +317,11 @@ def finalize_clinic_return_type_8616(
 
 def apply_x86_16_clinic_return_type_compatibility() -> None:
     """Install the post-prototype Clinic lowering adapter once."""
+    _bind_clinic_calling_convention_kb_8616()
+    _bind_clinic_callsite_maker_kb_8616()
     _capture_strong_prototype_at_decompiler_entry_8616()
     _preserve_strong_prototype_during_cc_recovery_8616()
+    _preserve_clinic_kb_during_callsite_making_8616()
     apply_native_terminal_return_values_8616()
     original = Clinic._make_function_prototype
     if original.__name__ == "_make_function_prototype_8616":

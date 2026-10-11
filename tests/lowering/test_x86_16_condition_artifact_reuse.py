@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from pytest import MonkeyPatch
+
+import inertia.lowering.condition_transfer as condition_transfer
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactVerdict8616,
     function_ssa_artifact_for_boundary_8616,
 )
-import inertia.lowering.condition_transfer as condition_transfer
 from inertia.lowering.condition_transfer import (
     collect_typed_condition_artifacts_8616,
 )
-from pytest import MonkeyPatch
-
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 def test_complete_registered_ir_conditions_bypass_lowering_relift(

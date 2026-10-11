@@ -8,17 +8,6 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.semantics.callsite_summary_program import (
-    ProgramCallsiteSummaryFact8616,
-    program_callsite_summary_evidence_from_facts_8616,
-)
-from inertia.lowering.callee_callsite_contracts import (
-    CalleeCallsiteCensus8616,
-    CalleeCallsiteFact8616,
-    attach_callee_callsite_censuses_8616,
-    callee_callsite_censuses_by_addr_8616,
-)
 
 import inertia.cli.cache as recovery_cache_module
 import inertia.cli.program_callsite_cache as cache_module
@@ -32,6 +21,17 @@ from inertia.cli.program_callsite_cache import (
     load_program_callsite_cache_8616,
     program_callsite_evidence_from_project_8616,
     store_program_callsite_cache_8616,
+)
+from inertia.lowering.callee_callsite_contracts import (
+    CalleeCallsiteCensus8616,
+    CalleeCallsiteFact8616,
+    attach_callee_callsite_censuses_8616,
+    callee_callsite_censuses_by_addr_8616,
+)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.semantics.callsite_summary_program import (
+    ProgramCallsiteSummaryFact8616,
+    program_callsite_summary_evidence_from_facts_8616,
 )
 
 

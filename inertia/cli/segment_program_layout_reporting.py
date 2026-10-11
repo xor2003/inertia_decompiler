@@ -12,6 +12,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Protocol, cast
 
+from inertia.cli.discovery_cache_contract import SourceRegionCatalogEvidence8616
+from inertia.cli.work_items import FunctionWorkItem, FunctionWorkResult
 from inertia.semantics.segment_function_summary import SegmentFunctionSummary8616
 from inertia.semantics.segment_program_layout import build_x86_16_segment_program_layout
 from inertia.semantics.segment_program_layout_codec import segment_program_function_evidence_8616
@@ -20,9 +22,6 @@ from inertia.semantics.segment_program_layout_contract import (
     SegmentProgramFunctionEvidence8616,
     SegmentProgramLayoutContract8616,
 )
-
-from inertia.cli.discovery_cache_contract import SourceRegionCatalogEvidence8616
-from inertia.cli.work_items import FunctionWorkItem, FunctionWorkResult
 
 
 class _ProjectBoundary8616(Protocol):

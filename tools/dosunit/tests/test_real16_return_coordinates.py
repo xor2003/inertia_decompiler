@@ -3,15 +3,21 @@ from pathlib import Path
 
 import pytest
 import z3
-from tools.dosunit.tests.test_dosunit_tool import _mz_exe
-from tools.dosunit.tests.test_real16_region_proof import _document
 
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.real16_call_contracts import initial_state, materialize_function
 from tools.dosunit.compare.real16_call_evidence import group_lookup
 from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.runtime.real16_replay import replay
-from tools.dosunit.runtime.real16_replay_model import CallerFrame, FrameKind, Real16ReplayStatus, Real16Vector, SegOffset
+from tools.dosunit.runtime.real16_replay_model import (
+    CallerFrame,
+    FrameKind,
+    Real16ReplayStatus,
+    Real16Vector,
+    SegOffset,
+)
+from tools.dosunit.tests.test_dosunit_tool import _mz_exe
+from tools.dosunit.tests.test_real16_region_proof import _document
 
 
 @pytest.mark.parametrize("code,cleanup", [(bytes.fromhex("c3"),0),(bytes.fromhex("c20200"),2)])

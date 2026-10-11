@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from tests.fixtures.segment_nonleaf_test_helpers import _Chain, call_preservation
 
 

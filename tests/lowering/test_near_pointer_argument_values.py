@@ -8,11 +8,12 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CFunctionCall, CUnaryOp
 from angr.sim_type import SimTypeChar, SimTypeFloat, SimTypePointer, SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 from inertia.lowering.callsite_pointer_values import (
     consume_near_pointer_argument_value_8616,
 )
-from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 from inertia.lowering.near_pointer_argument_values import (
     materialize_near_pointer_argument_value_8616,
 )

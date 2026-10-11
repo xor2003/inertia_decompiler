@@ -4,8 +4,9 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.lowering.real_mode_linear as real_mode_linear
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.assignment_lvalue_casts import (
     AssignmentLvalueCastStats8616,
     normalize_scalar_assignment_lvalues_8616,

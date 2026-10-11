@@ -3,9 +3,10 @@
 from dataclasses import replace
 
 import pytest
-from inertia.semantics.callsite_summary import CallsiteArgumentClass8616, CallsiteSummary8616
+
 from inertia.lowering.call_argument_shape import reconcile_materialized_call_argument_shape_8616
 from inertia.lowering.call_argument_shape_publication import publish_reconciled_call_argument_shape_8616
+from inertia.semantics.callsite_summary import CallsiteArgumentClass8616, CallsiteSummary8616
 
 
 def _summary() -> CallsiteSummary8616:

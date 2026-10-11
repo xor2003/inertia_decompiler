@@ -2,6 +2,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import (
     IRActiveUnary8616,
     IRCondition,

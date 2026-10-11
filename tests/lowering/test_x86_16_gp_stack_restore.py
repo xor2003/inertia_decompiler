@@ -8,6 +8,12 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
+from inertia.alias.segment_stack_restore import (
+    StackRegisterRestoreArtifact8616,
+    StackRegisterRestoreFact8616,
+    StackRegisterRestoreVerdict8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.gp_register_state import (
     runtime_gp_expression_view_8616,
@@ -19,12 +25,6 @@ from inertia.lowering.segmented_memory_lowering import (
     replay_final_codegen_projections_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.alias.segment_stack_restore import (
-    StackRegisterRestoreArtifact8616,
-    StackRegisterRestoreFact8616,
-    StackRegisterRestoreVerdict8616,
-)
 from inertia.postprocess.optimization.dce import (
     _dead_code_elimination_8616,
 )

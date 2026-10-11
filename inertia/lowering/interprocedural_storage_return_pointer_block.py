@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inertia.semantics.caller_return_use_contracts import CallerReturnUseFact8616
-
 from inertia.alias.domains import (
     AX,
     FULL16,
@@ -26,6 +24,7 @@ from inertia.alias.domains import (
 from inertia.ir.core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
 from inertia.ir.logical_memory_register_transfer_contracts import LogicalMemoryRegisterTransferKind8616
 from inertia.ir.ssa import SSABlock
+from inertia.semantics.caller_return_use_contracts import CallerReturnUseFact8616
 from inertia.widening.stack_word_register_transfers import (
     StackWordRegisterTransfer8616,
     StackWordStorageVersion8616,

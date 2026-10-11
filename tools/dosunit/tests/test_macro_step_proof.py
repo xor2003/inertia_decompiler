@@ -16,10 +16,6 @@ from typing import Any
 
 import angr
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function
-from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
-from tools.dosunit.tests.test_real16_call_composition import _lower
 
 from tools.dosunit.compare.flat32_macro_proof import compare_macro_cfg
 from tools.dosunit.compare.macro_step_contracts import (
@@ -32,12 +28,16 @@ from tools.dosunit.compare.macro_step_contracts import (
 )
 from tools.dosunit.compare.macro_step_pairing import propose_macro_steps
 from tools.dosunit.compare.paired_region_graph import RegionExitKind, RegionNode
-from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.contracts.proof_scope import ProofScope
 from tools.dosunit.compare.real16_call_contracts import Real16CallLimits, prove_terms_equal
 from tools.dosunit.compare.real16_macro_proof import compare_real16_macro
 from tools.dosunit.compare.real16_region_proof import compare_real16_regions
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.contracts.proof_scope import ProofScope
 from tools.dosunit.ssa.region_path_terms import endpoint_consistency_term, guard_true
+from tools.dosunit.tests.test_dosunit_tool import _edge_function
+from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 # jcxz ret / lea bx,[bx+1]; dec cx; jmp body / ret
 ORACLE16 = bytes.fromhex("e3068d5f0149ebf8c3")

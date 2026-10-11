@@ -14,9 +14,9 @@ import cle
 import pytest
 import pyvex
 from angr.analyses.cfg.indirect_jump_resolvers.default_resolvers import DEFAULT_RESOLVERS
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.vex_import import _block_to_ir
 
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_cfg_direct_call import (
     NativeDirectCallResolver8616,
     native_direct_call_evidence_8616,
@@ -28,6 +28,7 @@ from inertia.frontend.x86_16.relative_control_edge import (
     RelativeEdgeRefusal,
     RelativeEdgeRefusalReason,
 )
+from inertia.ir.vex_import import _block_to_ir
 from inertia.semantics.direct_near_call_target_binding import (
     DirectNearCallTargetBinding8616,
     DirectNearCallTargetBindingFailure8616,
@@ -35,7 +36,6 @@ from inertia.semantics.direct_near_call_target_binding import (
     DirectNearCallTargetBindingVerdict8616,
     prove_direct_near_call_target_binding_from_decoded_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
 
 _CODE = (
     bytes.fromhex("e80d00" + "8cc0" + "c3")

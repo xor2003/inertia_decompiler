@@ -4,21 +4,21 @@ from dataclasses import asdict
 
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 from unicorn import UC_ARCH_X86, UC_MODE_16, Uc
 from unicorn.x86_const import UC_X86_REG_AX, UC_X86_REG_BP, UC_X86_REG_EFLAGS
 
 import tools.dosunit.compare.straightline_ssa as S
-from tools.dosunit.contracts.model import write_json
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.compare.real16_call_contracts import Real16CallLimits, materialize_function
 from tools.dosunit.compare.real16_loop_calls import compare_real16_loop_calls
+from tools.dosunit.contracts.model import write_json
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.runtime.real16_replay import compare_executions, replay
 from tools.dosunit.runtime.real16_replay_model import CallerFrame, FrameKind, Real16Agreement, Real16Vector, SegOffset
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 
 def _fixture(leaf, body=None):

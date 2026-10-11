@@ -5,13 +5,14 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
     FrameCoordinateStats8616,
     FrameCoordinateStatus8616,
 )
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_prototype_layout import (
     stack_prototype_argument_layout_8616,
     stack_prototype_cvar_for_machine_bp_range_8616,
@@ -44,10 +45,9 @@ def test_stack_prototype_layout_places_pointer_and_word_contiguously() -> None:
     assert [(argument.offset, argument.storage_width) for argument in layout] == [(4, 2), (6, 2)]
 
 
-def test_prototype_resolves_proven_entry_sp_arguments_without_publication() -> None:
-    """Owned types and frame delta resolve formals without global mutation."""
-    arch = Arch86_16()
-    codegen = SimpleNamespace(
+def _proven_bp_frame_codegen_8616(arch: Arch86_16) -> SimpleNamespace:
+    """Build a codegen boundary with a proven BP-to-entry-SP delta of -2."""
+    return SimpleNamespace(
         project=SimpleNamespace(arch=arch),
         next_ident=lambda name: name,
         next_idx=lambda _name: 1,
@@ -61,10 +61,17 @@ def test_prototype_resolves_proven_entry_sp_arguments_without_publication() -> N
             )
         )
     )
+
+
+def test_prototype_resolves_proven_entry_sp_arguments_without_publication() -> None:
+    """Owned types and frame delta resolve formals without global mutation."""
+    arch = Arch86_16()
+    codegen = _proven_bp_frame_codegen_8616(arch)
     arguments = tuple(
         structured_c.CVariable(
             SimStackVariable(offset, 2, base="bp", name=name),
             codegen=codegen,
+            variable_type=SimTypeShort(False),
         )
         for offset, name in ((2, "lhs"), (4, "rhs"))
     )
@@ -82,3 +89,66 @@ def test_prototype_resolves_proven_entry_sp_arguments_without_publication() -> N
     assert stack_prototype_cvar_for_machine_bp_range_8616(codegen, 6, 2) is arguments[1]
     assert stack_prototype_cvar_for_machine_bp_range_8616(codegen, 5, 2) is None
     assert stack_cvar_for_machine_bp_range_8616(codegen, 4, 2) is None
+
+
+def test_padded_char_slot_does_not_own_a_word_load() -> None:
+    """A two-byte ABI slot holding a char must not claim a 16-bit load."""
+    arch = Arch86_16()
+    codegen = _proven_bp_frame_codegen_8616(arch)
+    arguments = (
+        structured_c.CVariable(
+            SimStackVariable(2, 2, base="bp", name="flag"),
+            codegen=codegen,
+            variable_type=SimTypeChar(),
+        ),
+        structured_c.CVariable(
+            SimStackVariable(4, 2, base="bp", name="count"),
+            codegen=codegen,
+            variable_type=SimTypeShort(False),
+        ),
+    )
+    prototype = SimTypeFunction(
+        [SimTypeChar(), SimTypeShort(False)],
+        SimTypeShort(False),
+    ).with_arch(arch)
+    codegen.cfunc = SimpleNamespace(
+        arg_list=arguments,
+        functy=prototype,
+        prototype=prototype,
+    )
+
+    assert stack_prototype_cvar_for_machine_bp_range_8616(codegen, 4, 2) is None
+    assert stack_prototype_cvar_for_machine_bp_range_8616(codegen, 6, 2) is arguments[1]
+
+
+def test_padded_slot_rejects_contradictory_cvar_type() -> None:
+    """A CVariable whose type contradicts the prototype slot width is refused."""
+    arch = Arch86_16()
+    codegen = _proven_bp_frame_codegen_8616(arch)
+    widened = structured_c.CVariable(
+        SimStackVariable(2, 2, base="bp", name="flag"),
+        codegen=codegen,
+        variable_type=SimTypeShort(False),
+    )
+    char_prototype = SimTypeFunction([SimTypeChar()], SimTypeShort(False)).with_arch(arch)
+    codegen.cfunc = SimpleNamespace(
+        arg_list=(widened,),
+        functy=char_prototype,
+        prototype=char_prototype,
+    )
+
+    assert stack_prototype_cvar_for_machine_bp_range_8616(codegen, 4, 2) is None
+
+    narrowed = structured_c.CVariable(
+        SimStackVariable(2, 2, base="bp", name="flag"),
+        codegen=codegen,
+        variable_type=SimTypeChar(),
+    )
+    word_prototype = SimTypeFunction([SimTypeShort(False)], SimTypeShort(False)).with_arch(arch)
+    codegen.cfunc = SimpleNamespace(
+        arg_list=(narrowed,),
+        functy=word_prototype,
+        prototype=word_prototype,
+    )
+
+    assert stack_prototype_cvar_for_machine_bp_range_8616(codegen, 4, 2) is None

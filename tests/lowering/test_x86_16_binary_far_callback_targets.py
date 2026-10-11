@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
+from inertia.cli.project_loading import _build_project
+from inertia.frontend.x86_16.mz_image import UnpackedMZImage
 from inertia.lowering.binary_far_callback_targets import (
     BinaryFarCallbackTargetStatus8616,
     prove_binary_far_callback_target_8616,
@@ -12,9 +15,6 @@ from inertia.lowering.binary_far_callback_targets import (
 from inertia.lowering.function_pointer_parameter_evidence import (
     FunctionPointerParameterFact8616,
 )
-
-from inertia.frontend.x86_16.mz_image import UnpackedMZImage
-from inertia.cli.project_loading import _build_project
 
 
 @pytest.fixture(scope="module")

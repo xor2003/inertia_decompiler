@@ -9,6 +9,7 @@ definition, and a CALL destination is a target — never an output definition.
 from __future__ import annotations
 
 import pytest
+
 from inertia.ir.constant_flow import IRConstantFlow8616
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 

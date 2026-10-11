@@ -16,6 +16,7 @@ from unittest.mock import Mock
 import pytest
 
 import tools.compiler_toolchain.build_msc6_examples as harness
+import tools.compiler_toolchain.compiler_profile as profile_owner
 from tools.compiler_toolchain.compiler_coverage_manifest import load_manifest
 from tools.compiler_toolchain.compiler_profile import (
     DEFAULT_PROFILE_REGISTRY,
@@ -163,6 +164,7 @@ def _probe_entry(record: dict, **overrides) -> dict:
         "model_flag": record["declared_flags"][-1],
         "compile_runner": record["compile_backend"],
         "run_runner": record["run_backend"],
+        "kvikdos_dpmi_mode": record.get("kvikdos_dpmi_mode", "auto"),
     }
     entry.update(overrides)
     return entry
@@ -309,13 +311,16 @@ def test_default_registry_resolves_verified_profiles():
         return
     profiles = {toolchain.profile_id: toolchain for toolchain in load_compiler_profiles(DEFAULT_PROFILE_REGISTRY)}
     assert {"msc51-small", "msc51-large", "bc31-small", "bc31-large"} <= set(profiles)
+    for profile_id in ("msc51-small", "msc51-large", "bc31-small", "bc31-large"):
+        assert profiles[profile_id].compile_backend is CompileBackend.KVIKDOS
+        assert profiles[profile_id].run_backend is CompileBackend.KVIKDOS
     msc51 = profiles["msc51-small"]
     assert msc51.identity is CompilerIdentity.MSC51
     assert msc51.compile_backend is CompileBackend.KVIKDOS
     assert len(msc51.dependency_tools) == 4
     bc31 = profiles["bc31-small"]
     assert bc31.identity is CompilerIdentity.BORLAND31
-    assert bc31.compile_backend is CompileBackend.DOSBOX
+    assert bc31.compile_backend is CompileBackend.KVIKDOS
     assert bc31.run_backend is CompileBackend.KVIKDOS
     assert "bcpp31-small" in bc31.aliases
     assert len(bc31.dependency_tools) == 6
@@ -627,11 +632,11 @@ def test_dosbox_stage_marker_controls(
     registry, _root = _borland_registry(tmp_path)
     toolchain = resolve_case_toolchain("bc31-small", evidence_path=registry)
     monkeypatch.setattr(
-        harness, "_run",
+        profile_owner, "_run",
         _dosbox_run(toolchain, tmp_path, marker_mode, artifact=artifact,
                     artifact_payload=artifact_payload, rc=rc, log=log),
     )
-    ok, stage_log = harness._run_dosbox_stage(
+    receipt = profile_owner._run_dosbox_stage(
         toolchain,
         tmp_path,
         tag="CC",
@@ -640,9 +645,9 @@ def test_dosbox_stage_marker_controls(
         environment=toolchain.compiler_environment,
         required=("CASE.OBJ",),
     )
-    assert ok is expect_ok
+    assert receipt.passed is expect_ok
     if match is not None:
-        assert match in stage_log
+        assert match in receipt.stdout + receipt.stderr
 
 
 def test_dosbox_stage_invokes_the_pinned_runner(tmp_path, monkeypatch):
@@ -655,15 +660,15 @@ def test_dosbox_stage_invokes_the_pinned_runner(tmp_path, monkeypatch):
         commands.append(command)
         return fake(command, **kwargs)
 
-    monkeypatch.setattr(harness, "_run", run)
-    ok, _log = harness._run_dosbox_stage(
+    monkeypatch.setattr(profile_owner, "_run", run)
+    receipt = profile_owner._run_dosbox_stage(
         toolchain, tmp_path, tag="CC",
         command_line=toolchain.compile_dos_command(source_name="CASE.C", obj_name="CASE.OBJ"),
         path_dos=toolchain.compiler_path_dos,
         environment=toolchain.compiler_environment,
         required=("CASE.OBJ",),
     )
-    assert ok
+    assert receipt.passed
     command = commands[0]
     assert command[0] == str(toolchain.dosbox_executable)
     assert "-noconsole" in command
@@ -868,21 +873,6 @@ def test_dosbox_runtime_refuses_valid_mz_outside_mount_with_colliding_basename(t
     launch.assert_not_called()
 
 
-def test_kvikdos_program_run_keeps_the_legacy_argv_without_a_profile(tmp_path, monkeypatch):
-    commands = []
-    monkeypatch.setattr(
-        harness, "_run",
-        lambda command, **kwargs: commands.append((command, kwargs))
-        or SimpleNamespace(returncode=5, stdout="guest", stderr=""),
-    )
-    result = harness._run_example(tmp_path / "CASE.EXE", tmp_path, kvikdos=tmp_path / "kvikdos")
-    assert result == (False, 5, "guest", "")
-    command, kwargs = commands[0]
-    assert command == [
-        str(tmp_path / "kvikdos"), f"--mount=c:{tmp_path}/", "--drive=c",
-        "--cwd-dos=c:\\", "--prog=c:\\CASE.EXE", "c:\\CASE.EXE",
-    ]
-    assert kwargs == {"timeout": 30}
 
 
 def test_kvikdos_stage_dispatches_the_profile_command(tmp_path, monkeypatch):
@@ -891,11 +881,11 @@ def test_kvikdos_stage_dispatches_the_profile_command(tmp_path, monkeypatch):
     toolchain = resolve_case_toolchain("msc51-small", evidence_path=registry)
     commands = []
     monkeypatch.setattr(
-        harness, "_run",
-        lambda command, **kwargs: commands.append(command)
-        or SimpleNamespace(returncode=0, stdout="", stderr=""),
+        profile_owner, "_run",
+        lambda command, **kwargs: (commands.append(command), (tmp_path / "CASE.OBJ").write_bytes(b"object"),
+                                    SimpleNamespace(returncode=0, stdout="", stderr=""))[-1],
     )
-    ok, _stdout, _stderr = harness._run_tool_stage(
+    receipt = profile_owner._run_tool_stage(
         toolchain, tmp_path, kvikdos=tmp_path / "kvikdos.bin", tag="CC",
         program=toolchain.compiler_program,
         argv=toolchain.compile_argv(source_name="CASE.C", obj_name="CASE.OBJ"),
@@ -904,13 +894,25 @@ def test_kvikdos_stage_dispatches_the_profile_command(tmp_path, monkeypatch):
         environment=toolchain.compiler_environment,
         required=("CASE.OBJ",),
     )
-    assert ok
+    assert receipt.passed
     command = commands[0]
     assert command[0] == str(tmp_path / "kvikdos.bin")
     assert f"--mount=e:{root}/" in command
     assert "--prog=e:\\bin\\CL.EXE" in command
     assert "--env=INCLUDE=E:\\INCLUDE;C:\\" in command
     assert "/Foc:\\CASE.OBJ" in command
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _dosbox_pipeline_run(tmp_path, commands, built_artifacts):
@@ -945,7 +947,7 @@ def test_compile_and_link_uses_dosbox_for_every_stage(tmp_path, monkeypatch):
         timeouts.append(kwargs["timeout"])
         return pipeline_run(command, **kwargs)
 
-    monkeypatch.setattr(harness, "_run", run)
+    monkeypatch.setattr(profile_owner, "_run", run)
     built, *_ = harness._compile_and_link_unlocked(
         tmp_path / "CASE.C",
         tmp_path,
@@ -972,9 +974,10 @@ def test_compile_and_link_uses_dosbox_for_every_stage(tmp_path, monkeypatch):
     assert "e:\\LIB\\C0S+c:\\CASE.OBJ+c:\\INERTIA.OBJ,c:\\CASE.EXE" in link_bat
 
 
-def test_compile_and_link_kvikdos_profile_keeps_one_pipeline(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mode", ["auto", "off"])
+def test_compile_and_link_kvikdos_profile_keeps_one_pipeline(tmp_path, monkeypatch, mode):
     root = tmp_path / "msc51"
-    registry = _registry(tmp_path, [_msc51_record(root)])
+    registry = _registry(tmp_path, [_msc51_record(root, kvikdos_dpmi_mode=mode)])
     toolchain = resolve_case_toolchain("msc51-small", evidence_path=registry)
     commands = []
     timeouts = []
@@ -986,7 +989,7 @@ def test_compile_and_link_kvikdos_profile_keeps_one_pipeline(tmp_path, monkeypat
             (tmp_path / name).write_bytes(b"artifact")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(harness, "_run", run)
+    monkeypatch.setattr(profile_owner, "_run", run)
     built, *_ = harness._compile_and_link_unlocked(
         tmp_path / "CASE.C",
         tmp_path,
@@ -1006,6 +1009,7 @@ def test_compile_and_link_kvikdos_profile_keeps_one_pipeline(tmp_path, monkeypat
     for command in commands:
         assert command[0] == str(tmp_path / "kvikdos.bin")
         assert f"--mount=e:{root}/" in command
+        assert ("--dpmi=off" in command) == (mode == "off")
     assert "--prog=e:\\bin\\CL.EXE" in commands[0]
     assert "c:\\INERTIA.C" in commands[1]
     assert "--prog=e:\\bin\\LINK.EXE" in commands[2]
@@ -1203,7 +1207,7 @@ def test_frozen_decompile_stage_timeout_kills_owned_parent_and_child(tmp_path):
                 force_rizin=False,
             )
         elapsed = time.monotonic() - start
-        assert elapsed < 0.5 + harness._STAGE_PROCESS_CLEANUP_GRACE_SECONDS + 0.5
+        assert elapsed < 0.5 + profile_owner._STAGE_PROCESS_CLEANUP_GRACE_SECONDS + 0.5
         assert "parent stdout" in failure.value.stdout
         assert "parent stderr" in failure.value.stderr
         assert ready_path.read_text() == "ready"
@@ -1314,7 +1318,7 @@ def test_runtime_source_tus_compile_and_link_in_order(tmp_path, monkeypatch):
             (tmp_path / name).write_bytes(b"artifact")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(harness, "_run", run)
+    monkeypatch.setattr(profile_owner, "_run", run)
     built, *_ = harness._compile_and_link_unlocked(
         tmp_path / "CASE.C",
         tmp_path,
@@ -1336,8 +1340,8 @@ def test_runtime_source_tus_compile_and_link_in_order(tmp_path, monkeypatch):
 def test_unstaged_runtime_source_refuses_before_tools_run(tmp_path, monkeypatch):
     registry = _registry(tmp_path, [_msc51_record(tmp_path / "msc51")])
     toolchain = resolve_case_toolchain("msc51-small", evidence_path=registry)
-    execute = Mock()
-    monkeypatch.setattr(harness, "_run", execute)
+    execute = Mock(return_value=subprocess.CompletedProcess([], 1, "", "compile refused"))
+    monkeypatch.setattr(profile_owner, "_run", execute)
     with pytest.raises(ValueError, match="not staged"):
         harness._compile_and_link_unlocked(
             tmp_path / "CASE.C",
@@ -1360,3 +1364,106 @@ def test_expected_run_ok_requires_exit_code_and_stdout(tmp_path):
     no_stdout = SimpleNamespace(expected_exit_code=255, expected_stdout_contains=None)
     assert harness._expected_run_ok(no_stdout, 255, "anything")
     assert not harness._expected_run_ok(no_stdout, 1, "anything")
+
+
+def test_frozen_tail_context_binds_selected_profile_and_rejects_drift(tmp_path):
+    """Tail routing resolves the same frozen profile and refuses changed evidence."""
+    from tools.compiler_toolchain.compiler_profile import FrozenCompilerContext
+
+    registry, _root = _borland_registry(tmp_path)
+    spec = resolve_case_toolchain("bc31-small", evidence_path=registry)
+    context = FrozenCompilerContext.create(spec, registry)
+    restored = FrozenCompilerContext.parse(context.serialize())
+    assert restored.resolve().to_dict() == spec.to_dict()
+    registry.write_text(registry.read_text() + "\n")
+    with pytest.raises(ValueError, match="evidence"):
+        restored.resolve()
+
+
+def test_selected_tail_compile_uses_profile_compile_only(tmp_path, monkeypatch):
+    """A selected DOSBox compiler compiles a function-only TU without KVM or linking."""
+    from inertia.cli import recompile_check
+    from tools.compiler_toolchain import compiler_profile
+
+    registry, _root = _borland_registry(tmp_path)
+    spec = resolve_case_toolchain("bc31-small", evidence_path=registry)
+    context = compiler_profile.FrozenCompilerContext.create(spec, registry)
+    monkeypatch.setenv("INERTIA_TAIL_COMPILER_CONTEXT", context.serialize())
+    seen = []
+
+    def run(command, **kwargs):
+        seen.append(command)
+        work = Path(command[command.index("-conf") + 1]).parent
+        batch = (work / "CC.BAT").read_text()
+        assert "BCC" in batch.upper()
+        assert "GEN.C" in batch and "GEN.OBJ" in batch
+        assert "LINK" not in batch.upper()
+        assert "main" not in (work / "GEN.C").read_text()
+        (work / "GEN.OBJ").write_bytes(b"object")
+        (work / "CCOK.OUT").write_text(spec.dosbox_ok_marker("CC"))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(compiler_profile, "_run", run)
+    result = recompile_check.check_c_recompiles_8616("int value(void) { return 7; }", target="msc-dos")
+    assert result.passed
+    assert len(seen) == 1 and seen[0][0] == str(spec.dosbox_executable)
+    assert result.compiler_profile == "bc31-small"
+    assert result.checked_payload == "int value(void) { return 7; }"
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("signal", "launch_failed"), ("fail", "compile_failed"),
+    ("missing", "incomplete"), ("object_missing", "artifact_missing"), ("timeout", "timed_out"),
+])
+def test_compile_only_receipt_preserves_failure_class(tmp_path, monkeypatch, mode, expected):
+    """Host failure, DOS error, absent stage evidence and missing OBJ remain distinct."""
+    registry, _root = _borland_registry(tmp_path)
+    spec = resolve_case_toolchain("bc31-small", evidence_path=registry)
+
+    def run(command, **kwargs):
+        if mode == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"], output=b"partial stdout", stderr=b"partial stderr")
+        if mode == "fail":
+            (tmp_path / "CCFL.OUT").write_text("1")
+            (tmp_path / "CC.OUT").write_text("Error: invalid declaration")
+        if mode == "object_missing":
+            (tmp_path / "CCOK.OUT").write_text(spec.dosbox_ok_marker("CC"))
+        return SimpleNamespace(returncode=-11 if mode == "signal" else 0, stdout="", stderr="")
+
+    monkeypatch.setattr(profile_owner, "_run", run)
+    receipt = profile_owner.compile_profile_translation_unit(spec, tmp_path)
+    assert receipt.outcome is profile_owner.ToolStageOutcome(expected)
+    assert receipt.signal == (11 if mode == "signal" else None)
+    if mode == "timeout":
+        assert "partial stdout" in receipt.stdout and "partial stderr" in receipt.stderr
+    if mode == "fail":
+        assert "invalid declaration" in receipt.stdout
+
+
+def test_builder_carries_frozen_context_to_child_environment(tmp_path, monkeypatch):
+    """The existing child environment preserves exact selected context bytes."""
+    registry, _root = _borland_registry(tmp_path)
+    spec = resolve_case_toolchain("bc31-small", evidence_path=registry)
+    serialized = profile_owner.FrozenCompilerContext.create(spec, registry).serialize()
+    monkeypatch.setenv(profile_owner.TAIL_COMPILER_CONTEXT_ENV, serialized)
+    assert harness._make_decompile_env(False)[profile_owner.TAIL_COMPILER_CONTEXT_ENV] == serialized
+
+
+def test_frozen_tail_context_refuses_tampered_toolchain_root(tmp_path):
+    """Evidence-backed profiles cannot ignore a changed frozen root field."""
+    registry, _root = _borland_registry(tmp_path)
+    spec = resolve_case_toolchain("bc31-small", evidence_path=registry)
+    context = profile_owner.FrozenCompilerContext.create(spec, registry)
+    data = json.loads(context.serialize())
+    data["toolchain_root"] = str(tmp_path / "other-toolchain")
+    tampered = profile_owner.FrozenCompilerContext.parse(json.dumps(data))
+    with pytest.raises(ValueError, match="root"):
+        tampered.resolve()
+
+
+def test_frozen_tail_context_preserves_classic_msc6_root(tmp_path):
+    """The built-in profile still resolves its explicitly selected root."""
+    root = tmp_path / "classic-msc6"
+    spec = resolve_case_toolchain(MSC6_AX_PROFILE_ID, msc6_root=root)
+    context = profile_owner.FrozenCompilerContext.create(spec, None)
+    assert context.resolve().toolchain_root == root

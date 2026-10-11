@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
+import tools.dosunit.compare.real16_binary_compare as real16_binary_compare
+import tools.dosunit.compare.real16_macro_retry as real16_macro_retry
+from tools.dosunit.compare.macro_step_contracts import MacroProofReason, MacroStepProof
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
+from tools.dosunit.contracts.proof_scope import ProofScope
 from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 from tools.dosunit.tests.test_macro_step_proof import (
     CANDIDATE16,
@@ -15,12 +21,6 @@ from tools.dosunit.tests.test_macro_step_proof import (
     STRIDE16,
     STUTTER16,
 )
-
-import tools.dosunit.compare.real16_binary_compare as real16_binary_compare
-import tools.dosunit.compare.real16_macro_retry as real16_macro_retry
-from tools.dosunit.compare.macro_step_contracts import MacroProofReason, MacroStepProof
-from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
-from tools.dosunit.contracts.proof_scope import ProofScope
 
 # Original unequal-step family, real16 MZ bytes (owned by test_macro_step_proof).
 # stc;ret replaces the final `ret`: a return-flags mutation on the unrolled body.
@@ -144,6 +144,8 @@ def test_scoped_counterexample_admits_unknown_not_failure() -> None:
 
 def test_candidate_resolution_exhaustion_never_starts_macro(monkeypatch: pytest.MonkeyPatch) -> None:
     """The total deadline also charges candidate resolution before solver work."""
+    from tools.dosunit.compare.real16_call_contracts import Real16CallLimits
+    from tools.dosunit.compare.real16_call_retry import FunctionRetryEvidence
     from tools.dosunit.contracts.proof_contracts import (
         Architecture,
         ContractIdentity,
@@ -151,8 +153,6 @@ def test_candidate_resolution_exhaustion_never_starts_macro(monkeypatch: pytest.
         ObligationEvidence,
         ObligationId,
     )
-    from tools.dosunit.compare.real16_call_contracts import Real16CallLimits
-    from tools.dosunit.compare.real16_call_retry import FunctionRetryEvidence
 
     class Clock:
         now = 0.0

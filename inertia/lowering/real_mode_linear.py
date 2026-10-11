@@ -1689,6 +1689,18 @@ def _normalize_address_label_terms_8616(
     allow_sp_anchor: bool = False,
 ) -> tuple[StructuredAstValue, int]:
     """Fold address-label references to integer offsets inside EA arithmetic."""
+    if isinstance(node, CSemanticCast8616):
+        expression, count = _normalize_address_label_terms_8616(
+            node.expr, codegen=codegen, allow_sp_anchor=allow_sp_anchor,
+        )
+        if not count:
+            return node, 0
+        # Required truncation/extension is part of the retained term's value,
+        # even when address labels beneath it can be resolved to offsets.
+        return CSemanticCast8616(
+            node.src_type, node.dst_type, expression,
+            codegen=node.codegen or codegen, tags=node.tags,
+        ), count
     folded_value = _address_label_value_8616(node, allow_sp_anchor=allow_sp_anchor)
     if folded_value is not None:
         ctype = SimTypeShort(False)

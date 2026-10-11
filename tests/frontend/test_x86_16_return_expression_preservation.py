@@ -1,7 +1,6 @@
 """Existing native return expressions are not missing-value placeholders."""
 
 import inertia.frontend.x86_16.decompiler_return_compat as compat
-
 from tests.frontend.test_x86_16_smoketest import _project_from_bytes
 
 

@@ -6,10 +6,10 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
+
+import inertia.lowering.packed_flags_state as packed_flags_state
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.status_flag_lift_context import StatusFlagLiftArtifact8616
-import inertia.lowering.packed_flags_state as packed_flags_state
-
 from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 
 _PRESERVATION_SITE = 0x104

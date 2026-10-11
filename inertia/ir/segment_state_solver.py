@@ -119,7 +119,10 @@ def _scoped_predecessor_map_8616(
 
     The consuming entry is independently supplied — never read back from
     the view's retained scope — and the whole retained chain is validated
-    through one ``cfg_projection_for`` replay per solve. The projection
+    through one ``cfg_projection_for`` replay per solve. That canonical
+    typed view producer owns entry authentication; independently repeating
+    it here would open another full parent replay before the same operation.
+    The projection
     census is then reconciled against the raw block census: a missing or
     foreign block, a foreign recorded in-edge, or a pending block that
     still publishes an outgoing-edge claim is a caller-contract error,
@@ -129,10 +132,7 @@ def _scoped_predecessor_map_8616(
     predecessor tuple and join to honest unknowns exactly like the
     universal route.
     """
-    from .real16_invocation_domain import (
-        Real16InvocationDomain8616,
-        same_real16_entry_scope_8616,
-    )
+    from .real16_invocation_domain import Real16InvocationDomain8616
 
     if type(invocation_scope) is not Real16InvocationDomain8616:
         raise ValueError(
@@ -144,9 +144,7 @@ def _scoped_predecessor_map_8616(
             "scoped view is not bound to the identical raw IR artifact"
         )
     retained_scope = scoped_view.invocation_scope
-    if retained_scope is None or not same_real16_entry_scope_8616(
-        invocation_scope, retained_scope
-    ):
+    if retained_scope is None:
         raise ValueError(
             "supplied entry does not authenticate the retained scoped view"
         )

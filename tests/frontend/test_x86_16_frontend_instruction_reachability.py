@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from angr.errors import SimEngineError
 
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.cli.recovery_instruction_coverage import (
     ExactInstructionCoverageVerdict8616,
     collect_exact_instruction_coverage_8616,
@@ -22,7 +23,6 @@ from inertia.frontend.x86_16.frontend_instruction_reachability import (
     collect_instruction_reachability_8616,
     decoded_block_instructions_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 @pytest.mark.parametrize("cached_failure", [False, True])

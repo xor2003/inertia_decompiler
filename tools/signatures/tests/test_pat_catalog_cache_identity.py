@@ -16,6 +16,8 @@ def test_catalog_match_identity_covers_existing_parser_and_literal_owners():
         Path(signature_catalog.__file__).resolve(),
         Path(omf_pat.__file__).resolve(),
         Path(pat_literal_filter.__file__).resolve(),
+        Path(signature_catalog.__file__).resolve().parents[2] / "inertia/frontend/x86_16/relative_control_edge.py",
+        Path(signature_catalog.__file__).resolve().parents[2] / "inertia/frontend/x86_16/arch_86_16.py",
     )
     assert all(path.is_file() for path in components)
 

@@ -4,9 +4,11 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.ir.direct_evidence_deadline as deadline_owner
 import inertia.ir.vex_import as importer
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.relative_control_edge import DecodedRelativeEdge, decode_relative_edge
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -39,8 +41,6 @@ from inertia.ir.vex_terminal_jump import (
     TerminalJumpEvidenceStats8616,
     TerminalJumpRefusalReason8616,
 )
-
-from inertia.frontend.x86_16.relative_control_edge import DecodedRelativeEdge, decode_relative_edge
 
 
 def _const(value: int):
@@ -803,9 +803,14 @@ def test_import_uses_earliest_active_session_deadline_and_restores_outer_slot(mo
     project._inertia_direct_evidence_deadline_8616 = 30.0
     project._inertia_entry_domain_call_resolution_8616 = SimpleNamespace(deadline=9.0)
     project._inertia_entry_domain_premise_resolution_8616 = SimpleNamespace(deadline=25.0)
+
+    def forbidden_lift(*args: object, **kwargs: object) -> None:
+        pytest.fail("an already expired import must not start lifting")
+
+    monkeypatch.setattr(project.factory, "block", forbidden_lift)
     with deadline_owner.direct_evidence_deadline_scope_8616(project, 20.0):
         assert project._inertia_direct_evidence_deadline_8616 == 9.0
         artifact = build_x86_16_ir_function_artifact(project, function)
     assert project._inertia_direct_evidence_deadline_8616 == 30.0
     assert artifact.refusals[-1].kind == importer.IRImportRefusalReason8616.DIRECT_EVIDENCE_DEADLINE_EXPIRED.value
-    assert artifact.blocks[0].instrs
+    assert not artifact.blocks

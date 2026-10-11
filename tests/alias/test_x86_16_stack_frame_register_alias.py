@@ -3,8 +3,6 @@
 from dataclasses import replace
 
 import pytest
-from inertia.ir import IRAddress, IRCallStackEffect8616, IRInstr, IRValue, MemSpace
-from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 
 from inertia.alias.segment_stack_restore import (
     SegmentStackRestoreVerdict8616,
@@ -15,6 +13,8 @@ from inertia.alias.stack_restore_state import (
     StackRestoreState8616,
     join_stack_restore_states_8616,
 )
+from inertia.ir import IRAddress, IRCallStackEffect8616, IRInstr, IRValue, MemSpace
+from tests.alias.test_x86_16_segment_stack_restore import _lift_function
 
 _DI_SAVE_DISPLACEMENT = 0xEC
 

@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 
 import pytest
-import inertia.lowering.callee_range_callsite_facts as ranges
 
+import inertia.lowering.callee_range_callsite_facts as ranges
 from inertia.frontend.x86_16.frontend_caller_return_use_program import build_caller_return_use_program_evidence_8616
 
 
@@ -80,12 +80,11 @@ def test_transitive_return_observation_follows_call_to_padded_wrapper():
 def test_canonical_return_evidence_survives_worker_json_codec():
     import json
 
-    from inertia.semantics.callsite_summary import collect_caller_return_use_evidence_8616
-
     from inertia.cli.discovery_cache_contract import (
         caller_return_use_evidence_from_record_8616,
         caller_return_use_evidence_record_8616,
     )
+    from inertia.semantics.callsite_summary import collect_caller_return_use_evidence_8616
 
     project = _project(bytes.fromhex("90 90 e8 fb ff c3"))
     original = collect_caller_return_use_evidence_8616(project, 0x1100, ((0x1100, 0x1106),))

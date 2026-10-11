@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import inertia.cli.indexed_alias_program_publication as indexed_publication
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
 )
-import inertia.cli.indexed_alias_program_publication as indexed_publication
 
 
 def test_complete_source_collection_runs_only_in_whole_file_parent(

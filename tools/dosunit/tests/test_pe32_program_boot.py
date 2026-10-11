@@ -11,11 +11,11 @@ import hashlib
 import struct
 
 import pytest
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 import tools.dosunit.runtime.pe32_program_boot as boot_mod
 from tools.dosunit.runtime.flat32_memory_permissions import DeclaredAccess, MappingOrigin
 from tools.dosunit.runtime.flat32_replay_model import ReplayImage
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 CODE = bytes.fromhex("b807000000c3")  # mov eax,7; ret
 

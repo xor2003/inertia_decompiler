@@ -20,6 +20,10 @@ from inertia.cli.cache import (
 from tools.signatures.omf_pat import (
     CachedPatRegexSpec,
     LocalPatMatchResult,
+    PatFixupKind,
+    PatLinkerIdentityEvidence,
+    PatLinkerIdentityVerdict,
+    PatLinkerReference,
     PatModule,
     PatPublicName,
     ensure_pat_from_omf_input,
@@ -35,6 +39,8 @@ _SIGNATURE_MATCH_CACHE_COMPONENTS = (
     Path(__file__).resolve(),
     Path(__file__).resolve().with_name("omf_pat.py"),
     Path(__file__).resolve().with_name("pat_literal_filter.py"),
+    Path(__file__).resolve().parents[2] / "inertia/frontend/x86_16/relative_control_edge.py",
+    Path(__file__).resolve().parents[2] / "inertia/frontend/x86_16/arch_86_16.py",
 )
 
 
@@ -134,6 +140,7 @@ def build_signature_catalog(
                     _normalized_pat_name_key(module.public_names),
                     _normalized_pat_name_key(module.referenced_names),
                     module.tail_bytes,
+                    module.linker_references,
                 )
                 if key in unique_modules:
                     duplicate_module_count += 1
@@ -149,6 +156,7 @@ def build_signature_catalog(
                 tuple((public.offset, public.name) for public in module.public_names),
                 tuple((ref.offset, ref.name) for ref in module.referenced_names),
                 tuple(-1 if byte is None else byte for byte in module.tail_bytes),
+                _pat_linker_reference_sort_key(module.linker_references),
             ),
         )
         resolved_output.parent.mkdir(parents=True, exist_ok=True)
@@ -179,6 +187,29 @@ def _merge_pat_module_provenance(existing: PatModule, incoming: PatModule) -> Pa
         public_names=existing.public_names,
         referenced_names=existing.referenced_names,
         tail_bytes=existing.tail_bytes,
+        linker_references=existing.linker_references,
+    )
+
+
+def _pat_linker_reference_sort_key(
+    references: tuple[PatLinkerReference, ...],
+) -> tuple[tuple[object, ...], ...]:
+    """Order typed references deterministically for catalog emission."""
+    return tuple(
+        (
+            ref.offset,
+            ref.width_bytes,
+            ref.kind.value,
+            ref.target_public_identity,
+            -1 if ref.explicit_target_displacement is None else ref.explicit_target_displacement,
+            ref.source_library_sha256,
+            ref.source_object_sha256,
+            ref.source_segment_index,
+            ref.source_segment_offset,
+            ref.fixupp_record_offset,
+            ref.raw_fixupp_subrecord,
+        )
+        for ref in references
     )
 
 
@@ -213,11 +244,15 @@ def match_signature_catalog(
     if loaded_image is None:
         return LocalPatMatchResult({}, {}, ())
     image_bytes, min_addr = loaded_image
+    architecture = registered_pat_architecture(project)
+    specs = _load_filtered_catalog_specs(catalog_path, cache_dir, compiler_names)
     cache_key = _signature_catalog_match_cache_key(
         catalog_path=catalog_path,
         binary_path=binary_path,
         backend=backend,
         compiler_names=compiler_names,
+        architecture=architecture,
+        provenance_sources=tuple(sorted({spec.source_path for spec in specs if spec.linker_references})),
     )
     if cache_key is not None:
         cached = _load_cache_json("signature_catalog_match", cache_key)
@@ -225,17 +260,23 @@ def match_signature_catalog(
         if cached_result is not None:
             return cached_result
 
-    specs = _load_filtered_catalog_specs(catalog_path, cache_dir, compiler_names)
     if not specs:
         return LocalPatMatchResult({}, {}, ())
-    code_labels, code_ranges, matched_compiler_names = match_pat_modules(
+    pat_match = match_pat_modules(
         image_bytes,
         min_addr,
         specs,
         backend=backend,
+        architecture=architecture,
     )
-    source_formats = ("signature_catalog",) if code_labels or code_ranges else ()
-    result = LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
+    source_formats = ("signature_catalog",) if pat_match.code_labels or pat_match.code_ranges else ()
+    result = LocalPatMatchResult(
+        pat_match.code_labels,
+        pat_match.code_ranges,
+        source_formats,
+        pat_match.matched_compiler_names,
+        pat_match.linker_evidence,
+    )
     if cache_key is not None:
         _store_cache_json("signature_catalog_match", cache_key, _encode_signature_catalog_match(result))
     return result
@@ -281,24 +322,39 @@ def _load_filtered_catalog_specs(
     return specs
 
 
+def registered_pat_architecture(project: object) -> str | None:
+    """Select identity decoding only for the registered 16-bit frontend arch."""
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
+    # Dynamic third-party boundary: callers supply angr-compatible projects.
+    architecture = getattr(project, "arch", None)
+    return "x86_16" if isinstance(architecture, Arch86_16) else None
+
+
 def _signature_catalog_match_cache_key(
     *,
     catalog_path: Path,
     binary_path: Path,
     backend: str | None,
     compiler_names: tuple[str, ...],
+    architecture: str | None = None,
+    provenance_sources: tuple[str, ...] = (),
 ) -> dict[str, object] | None:
     binary_fingerprint = _cache_file_fingerprint(binary_path)
     catalog_fingerprint = _cache_file_fingerprint(catalog_path)
     if binary_fingerprint is None or catalog_fingerprint is None:
         return None
     return {
-        "schema": 1,
+        "schema": 3,
         "kind": "signature_catalog_match",
         "binary": binary_fingerprint,
         "catalog": catalog_fingerprint,
         "backend": (backend or "").strip().lower(),
         "compiler_names": tuple(compiler_names),
+        "architecture": architecture,
+        "provenance_sources": {
+            source: _cache_file_fingerprint(Path(source)) for source in provenance_sources
+        },
         "components": _cache_source_digest(_SIGNATURE_MATCH_CACHE_COMPONENTS),
     }
 
@@ -309,7 +365,88 @@ def _encode_signature_catalog_match(result: LocalPatMatchResult) -> dict[str, ob
         "code_ranges": {str(addr): [span[0], span[1]] for addr, span in result.code_ranges.items()},
         "source_formats": list(result.source_formats),
         "matched_compiler_names": list(result.matched_compiler_names),
+        "linker_evidence": [_encode_pat_linker_evidence(item) for item in result.linker_evidence],
     }
+
+
+def _encode_pat_linker_evidence(item: PatLinkerIdentityEvidence) -> dict[str, object]:
+    """Serialize one linker identity record with its typed verdict."""
+    return {
+        "candidate_public_address": item.candidate_public_address,
+        "field_address": item.field_address,
+        "encoded_signed_displacement": item.encoded_signed_displacement,
+        "anchor_public_address": item.anchor_public_address,
+        "anchor_checked_range": (
+            None if item.anchor_checked_range is None else list(item.anchor_checked_range)
+        ),
+        "verdict": item.verdict.value,
+        "reference": {
+            "offset": item.reference.offset,
+            "width_bytes": item.reference.width_bytes,
+            "kind": item.reference.kind.value,
+            "target_public_identity": item.reference.target_public_identity,
+            "explicit_target_displacement": item.reference.explicit_target_displacement,
+            "source_library_sha256": item.reference.source_library_sha256,
+            "source_object_sha256": item.reference.source_object_sha256,
+            "source_segment_index": item.reference.source_segment_index,
+            "source_segment_offset": item.reference.source_segment_offset,
+            "fixupp_record_offset": item.reference.fixupp_record_offset,
+            "raw_fixupp_subrecord": item.reference.raw_fixupp_subrecord.hex(),
+        },
+    }
+
+
+def _decode_pat_linker_evidence(payload: object) -> tuple[PatLinkerIdentityEvidence, ...] | None:
+    """Decode cached linker identity records; malformed data yields no proof."""
+    if not isinstance(payload, (tuple, list)):
+        return None
+    decoded: list[PatLinkerIdentityEvidence] = []
+    try:
+        for item in payload:
+            if not isinstance(item, dict):
+                return None
+            raw_reference = item["reference"]
+            if not isinstance(raw_reference, dict):
+                return None
+            raw_range = item["anchor_checked_range"]
+            if raw_range is not None and not (
+                isinstance(raw_range, list)
+                and len(raw_range) == 2
+                and all(isinstance(value, int) for value in raw_range)
+            ):
+                return None
+            decoded.append(
+                PatLinkerIdentityEvidence(
+                    candidate_public_address=int(cast(int, item["candidate_public_address"])),
+                    reference=PatLinkerReference(
+                        offset=int(cast(int, raw_reference["offset"])),
+                        width_bytes=int(cast(int, raw_reference["width_bytes"])),
+                        kind=PatFixupKind(cast(str, raw_reference["kind"])),
+                        target_public_identity=cast(str, raw_reference["target_public_identity"]),
+                        explicit_target_displacement=cast(
+                            "int | None", raw_reference["explicit_target_displacement"]
+                        ),
+                        source_library_sha256=cast(str, raw_reference["source_library_sha256"]),
+                        source_object_sha256=cast(str, raw_reference["source_object_sha256"]),
+                        source_segment_index=int(cast(int, raw_reference["source_segment_index"])),
+                        source_segment_offset=int(cast(int, raw_reference["source_segment_offset"])),
+                        fixupp_record_offset=int(cast(int, raw_reference["fixupp_record_offset"])),
+                        raw_fixupp_subrecord=bytes.fromhex(
+                            cast(str, raw_reference["raw_fixupp_subrecord"])
+                        ),
+                    ),
+                    field_address=int(cast(int, item["field_address"])),
+                    encoded_signed_displacement=cast("int | None", item["encoded_signed_displacement"]),
+                    anchor_public_address=cast("int | None", item["anchor_public_address"]),
+                    anchor_checked_range=(
+                        None if raw_range is None else (cast(int, raw_range[0]), cast(int, raw_range[1]))
+                    ),
+                    verdict=PatLinkerIdentityVerdict(cast(str, item["verdict"])),
+                )
+            )
+    except (KeyError, TypeError, ValueError):
+        return None
+    return tuple(decoded)
 
 
 def _decode_signature_catalog_match(payload: dict[str, object] | None) -> LocalPatMatchResult | None:
@@ -329,9 +466,14 @@ def _decode_signature_catalog_match(payload: dict[str, object] | None) -> LocalP
     raw_compilers = payload.get("matched_compiler_names", ())
     if not isinstance(raw_compilers, (tuple, list)):
         return None
+    linker_evidence = _decode_pat_linker_evidence(payload.get("linker_evidence", ()))
+    if linker_evidence is None:
+        return None
     source_formats = tuple(value for value in raw_formats if isinstance(value, str))
     matched_compiler_names = tuple(value for value in raw_compilers if isinstance(value, str))
-    return LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
+    return LocalPatMatchResult(
+        code_labels, code_ranges, source_formats, matched_compiler_names, linker_evidence
+    )
 
 
 def _decode_match_label_range_maps(

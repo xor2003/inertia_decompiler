@@ -19,6 +19,11 @@ from inertia.postprocess.codegen_parentheses import apply_codegen_parentheses_86
 
 from .ail_displacement_compat import apply_register_displacement_compatibility_8616
 from .call_frame_compat import apply_call_frame_compatibility_8616
+from .clinic_entry_jump_transport import (
+    begin_clinic_entry_jump_conversion_8616,
+    capture_clinic_converted_block_8616,
+    transport_clinic_entry_jumps_8616,
+)
 from .clinic_terminal_control import (
     record_clinic_terminal_transport_8616,
     transport_terminal_direct_jump_8616,
@@ -90,6 +95,7 @@ class _ClinicConversionBoundary8616(_ClinicBoundary8616, Protocol):
     """Third-party Clinic surface required by the conversion wrapper."""
 
     _ail_manager: _AilManagerBoundary8616
+    function: Any
 
 
 def _normalize_x86_16_io_dirty_statements(
@@ -223,11 +229,53 @@ def _apply_clinic_custom_lifter_compatibility() -> None:
         if not transport.stats.closed:
             raise ValueError(f"Unclosed x86-16 terminal transport ledger: {transport.stats.to_dict()}")
         record_clinic_terminal_transport_8616(clinic, transport)
+        capture_clinic_converted_block_8616(clinic, block, converted, transport=transport)
         return converted
 
     convert_guarded = cast(Any, _convert_vex_with_io_normalization)
     convert_guarded._inertia_x86_16_io_dirty_normalizer = True
     Clinic._convert_vex = convert_guarded
+
+    _install_clinic_entry_jump_conversion_8616()
+
+
+def _install_clinic_entry_jump_conversion_8616() -> None:
+    """Install the whole-conversion source-bound proof consumer."""
+    current_all = cast(Callable[[_ClinicConversionBoundary8616], None], Clinic._convert_all)
+
+    def _convert_all_with_entry_domain_transport(clinic: _ClinicConversionBoundary8616) -> None:
+        """Consume one source-bound function proof before SSA and structuring."""
+        if clinic.project.arch.name != "86_16":
+            current_all(clinic)
+            return
+        from inertia.ir.declared_entry_pipeline import (
+            DeclaredEntryPipeline8616,
+            prepare_declared_entry_pipeline_8616,
+            retain_declared_entry_pipeline_8616,
+        )
+
+        from .clinic_scoped_control import (
+            prepare_clinic_scoped_partition_8616,
+            transport_clinic_scoped_control_8616,
+        )
+
+        entry = prepare_declared_entry_pipeline_8616(clinic.project, clinic, clinic.function.addr)
+        if type(entry) is DeclaredEntryPipeline8616:
+            prepare_clinic_scoped_partition_8616(clinic, entry)
+        elif entry is not None:
+            # Unproved declared entry: no premise authority reaches the
+            # private scoped partition; keep the typed record visible.
+            retain_declared_entry_pipeline_8616(clinic, entry)
+        begin_clinic_entry_jump_conversion_8616(clinic)
+        current_all(clinic)
+        if type(entry) is DeclaredEntryPipeline8616:
+            transport_clinic_scoped_control_8616(clinic, entry)
+            return
+        report = transport_clinic_entry_jumps_8616(clinic, next_atom=clinic._ail_manager.next_atom)
+        if not report.stats.closed:
+            raise ValueError(f"Unclosed entry-jump transport ledger: {report.stats.to_dict()}")
+
+    Clinic._convert_all = cast(Any, _convert_all_with_entry_domain_transport)
 
 
 def apply_x86_16_compatibility() -> None:

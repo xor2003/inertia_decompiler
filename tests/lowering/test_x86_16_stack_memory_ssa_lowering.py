@@ -4,13 +4,16 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+import inertia.lowering.stack_memory_ssa as stack_memory_lowering
+from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
     FrameCoordinateStats8616,
     FrameCoordinateStatus8616,
 )
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -22,7 +25,6 @@ from inertia.ir.core import (
     SegmentOrigin,
 )
 from inertia.ir.ssa_function import build_x86_16_function_ssa
-import inertia.lowering.stack_memory_ssa as stack_memory_lowering
 from inertia.lowering.stack_lowering_result import (
     StackLoweringResult,
     StackLoweringStatus,
@@ -39,8 +41,6 @@ from inertia.lowering.stack_variable_coordinates import (
     stack_variable_coordinate_registry_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-
-from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
 from inertia.widening.stack_memory_objects import (
     build_x86_16_stack_memory_object_widening_artifact,
 )

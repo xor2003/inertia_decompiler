@@ -3,9 +3,9 @@
 from types import SimpleNamespace
 
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from capstone import CS_ARCH_X86, CS_MODE_16, Cs
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.calling_convention_compat import collect_bp_word_stack_access_offsets_8616
 from inertia.widening.widening_rules import (
     collect_bp_stack_access_widths_from_instructions_8616,

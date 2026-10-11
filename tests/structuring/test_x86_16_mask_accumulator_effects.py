@@ -6,12 +6,12 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CFunctionCall, CReturn, CStatements, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
-from tests.structuring.test_x86_16_structuring_return_chains import _const, _DummyCodegen
 
 from inertia.structuring.return_chains import (
     MaskAccumulatorMaterializationCallbacks8616,
     materialize_cfg_mask_accumulator_8616,
 )
+from tests.structuring.test_x86_16_structuring_return_chains import _const, _DummyCodegen
 
 
 @pytest.mark.parametrize("extra", ["stack", "runtime", "unknown", "call", "same-offset", None])

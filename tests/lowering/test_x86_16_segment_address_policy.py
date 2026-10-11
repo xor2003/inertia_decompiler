@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CFunctionCall
 from angr.sim_type import SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.segment_contract import (
     SegmentFactVerdict,

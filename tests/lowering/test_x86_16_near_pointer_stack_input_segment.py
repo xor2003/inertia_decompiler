@@ -5,8 +5,10 @@ from dataclasses import replace
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import summarize_x86_16_callsite
+from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir.function_ir_registry import (
     publish_function_ir_artifact_8616,
     registered_function_ir_artifact_8616,
@@ -16,15 +18,13 @@ from inertia.ir.segment_call_preservation import prove_segment_call_preservation
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
 from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.lowering.interprocedural_storage_return_pointer import classify_pointer_return_storage_8616
 from inertia.lowering.near_pointer_stack_input_segment import bind_near_pointer_stack_input_segment_8616
 from inertia.lowering.near_return_segment_use import bind_near_return_data_segment_use_8616
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.semantics.call_stack_effect_pipeline import semantic_function_ssa_artifact_at_address_8616
 from inertia.semantics.call_target_evidence_8616 import resolve_call_target_evidence_8616
+from inertia.semantics.callsite_summary import summarize_x86_16_callsite
 from tests.lowering.test_x86_16_interprocedural_storage_return_pointer import _definition, _fact
 
 

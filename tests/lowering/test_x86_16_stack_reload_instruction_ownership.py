@@ -18,11 +18,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from capstone.x86 import X86_INS_MOV, X86_REG_AX
+
 from inertia.lowering.real_mode_linear import (
     materialize_direct_stack_mov_instructions_8616,
 )
 from inertia.lowering.register_reload_consumers import instruction_local_register_read_8616
-from capstone.x86 import X86_INS_MOV, X86_REG_AX
 from tests.lowering.test_x86_16_segmented_runtime_lowering import (
     _bp_mem_operand,
     _imm_operand,

@@ -6,11 +6,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_flat32_concrete_replay import _image, _vector
-from tools.dosunit.tests.test_flat32_replay_cli import _elf32
 
 from tools.dosunit.dosunit import main
 from tools.dosunit.runtime.flat32_replay import ReplayAgreement, ReplayStatus, compare_replays, replay
+from tools.dosunit.tests.test_flat32_concrete_replay import _image, _vector
+from tools.dosunit.tests.test_flat32_replay_cli import _elf32
 
 
 @pytest.mark.parametrize("original,candidate", [
@@ -60,9 +60,8 @@ def test_unobserved_vector_and_floating_state_refuses_instead_of_agreeing(code: 
                          ids=["clock", "cpu_features", "random", "seed", "serialized_clock", "extended_control"])
 def test_undeclared_machine_inputs_refuse_in_function_and_program_replay(code: str) -> None:
     """Clock, CPU identity and random sources require explicit environment state."""
-    from tools.dosunit.tests.test_pe32_program_replay import execute, exit_code
-
     from tools.dosunit.runtime.real16_program_model import ProgramAgreement, ProgramStatus, compare_programs
+    from tools.dosunit.tests.test_pe32_program_replay import execute, exit_code
 
     result = replay(_image(bytes.fromhex(code + "c3")), 0x10000, _vector(), instruction_limit=10)
     assert result.status is ReplayStatus.UNSUPPORTED

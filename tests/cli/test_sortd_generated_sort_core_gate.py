@@ -4,13 +4,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from inertia.lowering.gp_register_state import runtime_gp_state_symbols_8616
-from inertia.lowering.gp_word_runtime import (
-    GPRegisterRuntimeABI8616 as ABI,
-)
 
 from inertia.cli.generated_c_function_extraction import (
     load_generated_function_artifacts,
+)
+from inertia.lowering.gp_register_state import runtime_gp_state_symbols_8616
+from inertia.lowering.gp_word_runtime import (
+    GPRegisterRuntimeABI8616 as ABI,
 )
 from tools.dev.check_sortd_generated_sort_core import (
     SORT_FUNCTIONS,

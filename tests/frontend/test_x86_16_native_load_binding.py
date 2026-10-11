@@ -2,6 +2,7 @@
 from dataclasses import replace
 
 import pytest
+
 import tests.ir.test_x86_16_declared_resize_boundary as native
 from inertia.ir.core import IRAddress
 from inertia.ir.real16_invocation_domain import Real16InvocationFailure8616

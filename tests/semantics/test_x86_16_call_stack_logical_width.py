@@ -1,10 +1,10 @@
 """Pointer escape must cover every byte of the evidenced machine operand."""
 
 import pytest
-from tests.fixtures.x86_16_logical_memory_fixtures import FUNCTION_ADDR, lift_ir_artifact_with_blocks
-from tests.semantics.test_x86_16_call_stack_effects import _summary
 
 from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
+from tests.fixtures.x86_16_logical_memory_fixtures import FUNCTION_ADDR, lift_ir_artifact_with_blocks
+from tests.semantics.test_x86_16_call_stack_effects import _summary
 
 
 @pytest.mark.parametrize("source,preserved", [

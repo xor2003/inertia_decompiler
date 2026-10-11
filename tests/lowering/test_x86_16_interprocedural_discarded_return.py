@@ -4,11 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
+
 from inertia.lowering.interprocedural_storage_contracts import (
     CallsiteStorageTrials8616,
     StorageTrialStats8616,
@@ -17,6 +13,11 @@ from inertia.lowering.interprocedural_storage_return_trial_collection import (
     collect_function_return_storage_trials_8616,
 )
 from inertia.lowering.interprocedural_storage_solver import resolve_program_storage_trials_8616
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 from tests.lowering.test_x86_16_interprocedural_storage_return_passthrough import (
     FUNCTION_ADDR,
     _evidence,

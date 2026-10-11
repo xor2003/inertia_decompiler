@@ -8,8 +8,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -43,6 +43,7 @@ from inertia.lowering.interprocedural_storage_transaction import (
 from inertia.lowering.stack_prototype_materialization import (
     reconcile_exact_stack_argument_prototype_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class _Codegen:

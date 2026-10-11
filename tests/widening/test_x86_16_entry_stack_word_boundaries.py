@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
 from inertia.ir.core import IRInstr, IRValue, MemSpace
+from inertia.widening.entry_stack_word_value_contracts import (
+    EntryStackWordProof8616,
+    EntryStackWordRefusalKind8616,
+)
+from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
 from tests.fixtures.entry_stack_byte_test_support import (
     _artifact,
     _binop,
@@ -17,13 +24,6 @@ from tests.fixtures.entry_stack_byte_test_support import (
     _ss_addr,
     _tmp,
 )
-
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
-from inertia.widening.entry_stack_word_value_contracts import (
-    EntryStackWordProof8616,
-    EntryStackWordRefusalKind8616,
-)
-from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
 
 
 def _word() -> list[IRInstr]:

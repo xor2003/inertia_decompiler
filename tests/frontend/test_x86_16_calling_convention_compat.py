@@ -7,17 +7,8 @@ import archinfo
 import pytest
 from angr.errors import SimEngineError
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    AxValueView8616,
-    ByteReturnExtensionKind8616,
-    CallerReturnUseEvidence8616,
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
-from inertia.semantics.callsite_summary import record_caller_return_use_evidence_8616
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.calling_convention_compat import (
     _caller_sign_extends_byte_return_8616,
     _promote_wide_return_and_stack_args_8616,
@@ -35,6 +26,15 @@ from inertia.lowering.analysis_helpers import (
     seed_calling_conventions,
     seed_wide_stack_prototype_from_binary_address_8616,
 )
+from inertia.semantics.caller_return_use_contracts import (
+    AxValueView8616,
+    ByteReturnExtensionKind8616,
+    CallerReturnUseEvidence8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
+from inertia.semantics.callsite_summary import record_caller_return_use_evidence_8616
 
 
 @pytest.mark.parametrize(

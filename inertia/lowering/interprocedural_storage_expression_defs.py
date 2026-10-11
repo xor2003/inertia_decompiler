@@ -14,15 +14,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inertia.semantics.callsite_summary import (
-    CallsitePushExprOp8616,
-    CallsitePushSourceKind8616,
-)
-
 from inertia.ir.core import IRAddress
 from inertia.ir.scalar_affine_contracts import ScalarAffineExpression8616, ScalarAffineFailure8616
 from inertia.ir.scalar_affine_trace import trace_scalar_affine_expression_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.semantics.callsite_summary import (
+    CallsitePushExprOp8616,
+    CallsitePushSourceKind8616,
+)
 
 from .interprocedural_storage_contracts import StorageReachingDefinition8616
 from .interprocedural_storage_physical_defs import (

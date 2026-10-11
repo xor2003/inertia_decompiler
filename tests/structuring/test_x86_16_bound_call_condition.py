@@ -6,14 +6,14 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CITE, CBinaryOp, CConstant, CFunctionCall, CUnaryOp
 from angr.sim_type import SimTypeFunction, SimTypeShort
-from inertia.semantics.callsite_summary import bind_structured_callsite_identity_8616
-from tests.structuring.test_x86_16_call_return_conditions import _condition, _summary, _surface
 
+from inertia.semantics.callsite_summary import bind_structured_callsite_identity_8616
 from inertia.structuring.bound_call_condition import materialize_bound_call_condition_8616
 from inertia.structuring.call_return_conditions import (
     _target_calls_8616,
     materialize_call_return_conditions_8616,
 )
+from tests.structuring.test_x86_16_call_return_conditions import _condition, _summary, _surface
 
 _GUARD_ARGUMENT = 104
 

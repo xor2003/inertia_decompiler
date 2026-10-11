@@ -18,7 +18,22 @@ from functools import partial
 from pathlib import Path
 
 import angr
+import pytest
+
 import inertia.ir.entry_domain_call_preservation as edcp
+import inertia.ir.real16_invocation_domain as invocation
+from inertia.cli.project_loading import _build_project
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    build_boundary_direct_callsite_index_8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    mapped_entry_function_boundary_8616,
+)
+from inertia.frontend.x86_16.load_dos_mz import DOSMZ
+from inertia.frontend.x86_16.mz_static_boot import (
+    mz_static_boot_8616,
+    recompute_mz_static_boot_8616,
+)
 from inertia.ir.real16_invocation_domain import (
     Real16CallChainLink8616,
     Real16InvocationFailure8616,
@@ -29,21 +44,9 @@ from inertia.ir.real16_invocation_domain import (
 from inertia.ir.vex_import import (
     build_x86_16_ir_function_artifact,
 )
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    build_boundary_direct_callsite_index_8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    mapped_entry_function_boundary_8616,
-)
-from inertia.frontend.x86_16.mz_static_boot import (
-    mz_static_boot_8616,
-    recompute_mz_static_boot_8616,
-)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.project_loading import _build_project
 from tools.dosunit.runtime.real16_declared_invocation8616 import (
     declared_int21_version_service_8616,
 )
@@ -183,6 +186,7 @@ def _make_project(mz: bytes, tmp_path: Path) -> angr.Project:
         fixture, force_blob=False, base_addr=BASE, entry_point=BASE
     )
     assert isinstance(project, angr.Project)
+    assert isinstance(project.loader.main_object, DOSMZ)
     return project
 
 
@@ -272,7 +276,7 @@ def test_declared_success_keeps_site_none(tmp_path: Path) -> None:
     assert leg.failure_count == 0
 
 
-def test_pre_census_refusal_keeps_site_none(tmp_path: Path) -> None:
+def test_pre_census_refusal_keeps_site_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A structural refusal before any row keeps ``refusal_site=None``."""
     mz = _interrupt_mz()
     project = _make_project(mz, tmp_path)
@@ -285,6 +289,11 @@ def test_pre_census_refusal_keeps_site_none(tmp_path: Path) -> None:
         boot=boot,
         boot_recompute=recompute_mz_static_boot_8616,
     )
+    def unexpected_deadline() -> float:
+        """A retained failure has no proof work requiring a fresh deadline."""
+        pytest.fail("failed domain reopened a census deadline")
+
+    monkeypatch.setattr(invocation, "_census_deadline_8616", unexpected_deadline)
     assert not leg.complete
     assert leg.failure is Real16InvocationFailure8616.CALLSITE_UNREACHABLE
     assert leg.refusal_site is None

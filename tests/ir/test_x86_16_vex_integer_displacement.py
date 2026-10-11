@@ -1,6 +1,7 @@
 """Equivalent integer bit patterns produce one relative IR displacement."""
 
 import pytest
+
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.vex_import import _binary_value_from_operands_8616
 from inertia.ir.vex_integer_displacement import canonical_vex_integer_displacement_8616

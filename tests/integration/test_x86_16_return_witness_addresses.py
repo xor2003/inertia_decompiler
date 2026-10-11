@@ -3,11 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
+
 from inertia.ir import IRInstr, IRValue, MemSpace
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.ssa import SSABlock
@@ -19,7 +15,11 @@ from inertia.lowering.interprocedural_storage_return_trial_materialization impor
 from inertia.lowering.interprocedural_storage_return_types import (
     classify_return_storage_type_8616,
 )
-
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616
 
 

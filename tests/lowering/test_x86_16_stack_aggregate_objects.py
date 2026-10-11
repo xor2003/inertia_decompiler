@@ -13,8 +13,19 @@ from angr.sim_type import (
     SimTypeShort,
 )
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from capstone.x86_const import (
+    X86_INS_CALL,
+    X86_INS_LEA,
+    X86_INS_MOV,
+    X86_INS_PUSH,
+    X86_INS_SHL,
+    X86_OP_IMM,
+    X86_OP_MEM,
+    X86_OP_REG,
+)
+
 import inertia.lowering.stack_aggregate_objects as aggregate_objects
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
@@ -35,16 +46,6 @@ from inertia.lowering.stack_aggregate_objects import (
 from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_projection_8616,
-)
-from capstone.x86_const import (
-    X86_INS_CALL,
-    X86_INS_LEA,
-    X86_INS_MOV,
-    X86_INS_PUSH,
-    X86_INS_SHL,
-    X86_OP_IMM,
-    X86_OP_MEM,
-    X86_OP_REG,
 )
 from tests.lowering.x86_16_frame_coordinate_fixtures import proven_frame_coordinate
 

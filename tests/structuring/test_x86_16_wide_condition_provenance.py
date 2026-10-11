@@ -5,16 +5,16 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from inertia.ir.condition_ir import ConditionRegisterBindingIR
-from tests.structuring.test_x86_16_wide_stack_condition_chains import _adjacent, _condition, _word
 
 from inertia.alias.condition_register_bindings import condition_operand_storage_binding_8616
+from inertia.ir.condition_ir import ConditionRegisterBindingIR
 from inertia.structuring.wide_stack_condition_chains import recover_wide_stack_condition_chain_8616
 from inertia.structuring.wide_stack_predicate_graphs import (
     WidePredicateLeaf8616,
     recover_wide_stack_predicate_graph_8616,
 )
 from inertia.structuring.wide_stack_single_branches import recover_wide_stack_single_body_condition_8616
+from tests.structuring.test_x86_16_wide_stack_condition_chains import _adjacent, _condition, _word
 
 
 @pytest.mark.parametrize("mode", ["chain", "graph", "single"])

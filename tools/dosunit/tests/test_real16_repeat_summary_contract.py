@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
@@ -13,6 +12,7 @@ from tools.dosunit.contracts.repeat_string_contracts import (
     decode_repeat_summary,
     is_repeat_string_instruction,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 
 def _instruction(code: str, display: str = "rep stosw") -> dict:

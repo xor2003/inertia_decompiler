@@ -8,6 +8,12 @@ materialization obligations live in ``test_x86_16_entry_stack_bytes.py``.
 from __future__ import annotations
 
 import pytest
+
+from inertia.alias.entry_stack_byte_contracts import (
+    EntryStackByteRefusalKind8616,
+    EntryStackByteVerdict8616,
+)
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -32,12 +38,6 @@ from tests.fixtures.entry_stack_byte_test_support import (
     _ss_addr,
     _tmp,
 )
-
-from inertia.alias.entry_stack_byte_contracts import (
-    EntryStackByteRefusalKind8616,
-    EntryStackByteVerdict8616,
-)
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
 
 
 @pytest.mark.parametrize(

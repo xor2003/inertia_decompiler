@@ -7,6 +7,8 @@ If invariants fail, rewrite is blocked and honest partial output is emitted.
 """
 
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.alias_model_impl import AliasStorageFacts, _StackSlotIdentity, _StorageDomainSignature
 from inertia.pipeline.invariants import (
     InvariantCheck,
     InvariantReport,
@@ -14,8 +16,6 @@ from inertia.pipeline.invariants import (
     format_invariant_report_8616,
     validate_before_rewrite_8616,
 )
-
-from inertia.alias.alias_model_impl import AliasStorageFacts, _StackSlotIdentity, _StorageDomainSignature
 
 
 class TestInvariantStatusEnum:

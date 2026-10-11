@@ -31,6 +31,10 @@ from .return_effect_operands import (
     _terminal_value_arithmetic_effect_8616,
 )
 
+_FULL_WORD_COPY_SOURCES_8616: frozenset[str] = frozenset(
+    {"ax", "bx", "cx", "dx", "si", "di", "bp", "sp"}
+)
+
 
 def _branch_move_effect_8616(
     insn: object, mnemonic: str, operands: tuple[object, ...],
@@ -76,6 +80,18 @@ def _branch_move_effect_8616(
                     mem_disp=disp,
                     mem_size=size,
                 )
+        if _operand_kind_8616(rhs) == X86_OP_REG:
+            src_reg = _register_name_8616(insn, rhs)
+            if src_reg not in _FULL_WORD_COPY_SOURCES_8616:
+                return BranchTargetReturnEffect8616(
+                    BranchTargetReturnEffectKind8616.OTHER,
+                    dst_reg=dst_reg,
+                )
+            return BranchTargetReturnEffect8616(
+                BranchTargetReturnEffectKind8616.MOV_REG_REG,
+                dst_reg=dst_reg,
+                src_reg=src_reg,
+            )
     return None
 
 

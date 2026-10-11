@@ -15,11 +15,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.rustylib.ailment import Tags
 from angr.sim_type import SimTypeFixedSizeArray, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from archinfo import ArchX86
+
 from inertia.lowering.real_mode_linear import (
     _insert_before_first_stack_cvar_use_8616,
     _node_has_instruction_address_8616,
 )
-from archinfo import ArchX86
 
 
 class _Codegen:

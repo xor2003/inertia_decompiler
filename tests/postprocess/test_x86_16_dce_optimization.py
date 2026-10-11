@@ -3,18 +3,19 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import archinfo
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeLong, SimTypeShort
-from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
+
+from inertia.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
+)
 from inertia.postprocess.decompiler_postprocess_stage import (
     _dead_code_elimination_after_flag_prune_8616,
     _dead_code_elimination_final_cleanup_8616,
     _postprocess_runtime_config_8616,
 )
-from inertia.lowering.stack_variable_coordinates import (
-    record_stack_variable_coordinate_projection_8616,
-)
-
 from inertia.postprocess.optimization.dce import (
     _dead_code_elimination_8616,
 )
@@ -43,11 +44,11 @@ def _mk_codegen_with_statements(statements):
     return codegen
 
 
-def _mk_cvar(codegen, name: str, reg: int = 0):
-    return structured_c.CVariable(
-        SimRegisterVariable(reg, 2, name=name),
-        codegen=codegen,
-    )
+def _mk_cvar(codegen, name: str, tmp_id: int = 0):
+    """Model temporary-value obligations without fabricating register effects."""
+    variable = SimTemporaryVariable(tmp_id, 2)
+    variable.name = name
+    return structured_c.CVariable(variable, codegen=codegen)
 
 
 def _const(codegen, value: int = 1):
@@ -264,9 +265,11 @@ def test_dce_keeps_direct_global_memory_assignment_with_call_rhs():
     assert getattr(codegen, "dce_deleted", 0) == 0
 
 
-def test_dce_preserves_effectful_call_when_dropping_unused_temp_result_declaration():
+@pytest.mark.parametrize("architectural_result", [False, True])
+def test_dce_preserves_effectful_call_when_dropping_unused_temp_result_declaration(architectural_result):
     codegen = _mk_codegen_with_statements([])
-    tmp_var = SimRegisterVariable(0, 2, name="vvar_21")
+    tmp_var = SimRegisterVariable(0, 2) if architectural_result else SimTemporaryVariable(0, 2)
+    tmp_var.name = "vvar_21"
     tmp = structured_c.CVariable(tmp_var, variable_type=SimTypeShort(False), codegen=codegen)
     arg = _mk_cvar(codegen, "arg_1", 2)
     call = structured_c.CFunctionCall("outtext", None, [arg], codegen=codegen)
@@ -277,6 +280,11 @@ def test_dce_preserves_effectful_call_when_dropping_unused_temp_result_declarati
 
     changed = _dead_code_elimination_8616(codegen)
 
+    if architectural_result:
+        assert changed is False
+        assert list(codegen.cfunc.statements.statements) == [stmt]
+        assert codegen.cfunc.variables_in_use == {tmp_var: tmp}
+        return
     assert changed is True
     statements = list(codegen.cfunc.statements.statements)
     assert len(statements) == 1
@@ -1935,3 +1943,35 @@ def test_dce_keeps_remaining_wrapper_statements_after_boundary_duplicate_delete(
     assert list(second_wrapper.statements) == [other]
     assert getattr(codegen, "dce_duplicate_assignment_candidates", 0) == 1
     assert getattr(codegen, "dce_duplicate_assignment_deleted", 0) == 1
+
+
+@pytest.mark.parametrize("unified_only", [False, True])
+def test_dce_keeps_architectural_register_without_dead_effect_proof(unified_only):
+    codegen = _mk_codegen_with_statements([])
+    register = SimRegisterVariable(0, 2, name="arbitrary")
+    variable = SimStackVariable(-2, 2, base="bp") if unified_only else register
+    lhs = structured_c.CVariable(variable, codegen=codegen)
+    if unified_only:
+        lhs.unified_variable = register
+    stmt = structured_c.CAssignment(lhs, _const(codegen, 2), codegen=codegen)
+    codegen.cfunc.statements = structured_c.CStatements([stmt], codegen=codegen)
+    assert _dead_code_elimination_after_flag_prune_8616(codegen) is False
+    assert list(codegen.cfunc.statements.statements) == [stmt]
+    assert codegen.dce_deleted == 0
+
+
+def test_dce_keeps_partial_register_views_with_shared_unified_identity():
+    codegen = _mk_codegen_with_statements([])
+    word = SimRegisterVariable(0, 2, name="word")
+    byte = SimRegisterVariable(0, 1, name="byte")
+    lhs_word = structured_c.CVariable(word, codegen=codegen)
+    lhs_byte = structured_c.CVariable(byte, codegen=codegen)
+    lhs_word.unified_variable = word
+    lhs_byte.unified_variable = word
+    statements = [
+        structured_c.CAssignment(lhs_word, _const(codegen, 0x1234), codegen=codegen),
+        structured_c.CAssignment(lhs_byte, _const(codegen, 0x56), codegen=codegen),
+    ]
+    codegen.cfunc.statements = structured_c.CStatements(statements, codegen=codegen)
+    assert _dead_code_elimination_after_flag_prune_8616(codegen) is False
+    assert list(codegen.cfunc.statements.statements) == statements

@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 import pyvex
 from angr.ailment import IRSBConverter, Manager
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from pyvex.lifting.util.vex_helper import Type
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.compat import _normalize_x86_16_io_dirty_statements
 from inertia.frontend.x86_16.dev_io import MemoryIO, PortIO
 from inertia.frontend.x86_16.io import IO
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 
 class _PortDevice(PortIO):

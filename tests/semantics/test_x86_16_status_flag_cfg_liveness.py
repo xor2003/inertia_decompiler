@@ -3,11 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.ir.status_flag_binary_cfg as status_flag_binary_cfg
 from inertia.ir.status_flag_binary_cfg import (
     summarize_binary_status_flag_entry_reads_8616,
 )
-
 from inertia.semantics.status_flag_cfg_liveness import (
     StatusFlagCFGBlock8616,
     StatusFlagCFGInstruction8616,

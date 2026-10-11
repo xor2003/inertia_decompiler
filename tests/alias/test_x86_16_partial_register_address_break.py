@@ -6,12 +6,12 @@ import io
 from types import SimpleNamespace
 
 import angr
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 from inertia.alias.partial_register_address_break import (
     collect_partial_register_address_break_8616,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 
 def _instructions(code: bytes) -> tuple[object, ...]:

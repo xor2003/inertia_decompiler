@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CReturn, CVariable
 from angr.sim_variable import SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactStage8616

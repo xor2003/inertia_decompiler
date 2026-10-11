@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
+
 from inertia.semantics.callsite_summary import (
     CallsiteSummary8616,
     callsite_machine_frame_kind_8616,

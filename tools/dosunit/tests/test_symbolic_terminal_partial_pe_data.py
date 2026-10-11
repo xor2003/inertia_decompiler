@@ -2,9 +2,8 @@
 
 import struct
 
-import tools.dosunit.tests.test_symbolic_terminal as fixtures
-
 import tools.dosunit.compare.symbolic_terminal as terminal
+import tools.dosunit.tests.test_symbolic_terminal as fixtures
 
 
 def data_image(initial: bytes) -> bytes:

@@ -8,10 +8,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from tools.dosunit.tests.recursive_proof_fixtures.entry_domain_inputs import _document
-from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, _proposal
-from tools.dosunit.tests.recursive_proof_fixtures.real16_joint_system import build_real16_joint_system
-
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.compare.real16_call_evidence import group_functions
@@ -19,6 +15,9 @@ from tools.dosunit.recursive_proofs.loaded_byte_image_binding import bind_real16
 from tools.dosunit.recursive_proofs.loaded_byte_relation import propose_loaded_byte_relation
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import prove_loaded_byte_relation
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointStepKind, JointSystem
+from tools.dosunit.tests.recursive_proof_fixtures.entry_domain_inputs import _document
+from tools.dosunit.tests.recursive_proof_fixtures.image_bound_inputs import Inputs, _proposal
+from tools.dosunit.tests.recursive_proof_fixtures.real16_joint_system import build_real16_joint_system
 
 TWO_CALL_CODE: bytes = bytes.fromhex("e30d4985c07405e8f6ffeb03e8f1ffc3")
 

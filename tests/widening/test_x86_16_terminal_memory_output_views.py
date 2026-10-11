@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from inertia.alias.terminal_memory_outputs import (
+    TerminalMemoryAliasFact8616,
+    classify_terminal_memory_output_aliases_8616,
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -16,11 +20,6 @@ from inertia.lowering.interprocedural_storage_live_out_contracts import (
 )
 from inertia.lowering.interprocedural_storage_live_out_flow import (
     materialize_memory_live_out_candidate_8616,
-)
-
-from inertia.alias.terminal_memory_outputs import (
-    TerminalMemoryAliasFact8616,
-    classify_terminal_memory_output_aliases_8616,
 )
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,

@@ -11,6 +11,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
+from inertia.alias.segment_stack_restore import (
+    SegmentStackRestoreFact8616,
+    SegmentStackRestoreVerdict8616,
+    build_x86_16_segment_stack_restore_artifact,
+    build_x86_16_stack_register_restore_artifact_8616,
+)
 from inertia.ir import (
     IRAddress,
     IRBlock,
@@ -22,13 +29,6 @@ from inertia.ir import (
 )
 from inertia.ir.core import AddressStatus
 from tests.alias.test_x86_16_segment_stack_restore import _lift_function
-
-from inertia.alias.segment_stack_restore import (
-    SegmentStackRestoreFact8616,
-    SegmentStackRestoreVerdict8616,
-    build_x86_16_segment_stack_restore_artifact,
-    build_x86_16_stack_register_restore_artifact_8616,
-)
 
 
 @pytest.mark.parametrize("register", ("bp", "ds"))

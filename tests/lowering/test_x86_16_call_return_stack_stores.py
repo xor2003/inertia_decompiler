@@ -15,19 +15,17 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from capstone.x86_const import (
+    X86_INS_MOV,
+    X86_OP_MEM,
+    X86_OP_REG,
+    X86_REG_AL,
+    X86_REG_AX,
+    X86_REG_BP,
+    X86_REG_INVALID,
+)
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_argument_value_sources import (
-    CallArgumentStackValueSource8616,
-    call_argument_stack_value_source_8616,
-)
-from inertia.semantics.callsite_summary import (
-    CallsiteReturnUseKind8616,
-    CallsiteSummary8616,
-    _push_arg_source_from_context,
-)
-from inertia.postprocess.decompiler_postprocess_calls import (
-    _materialize_callsite_stack_arguments_8616,
-)
 from inertia.lowering.call_return_stack_stores import (
     ZeroArgCallReturnStackStoreEvidence8616,
     recover_zero_arg_call_return_stack_store_8616,
@@ -39,14 +37,17 @@ from inertia.lowering.real_mode_linear import (
     _same_stack_move_rhs_8616,
     _tree_has_zero_arg_call_return_assignment_8616,
 )
-from capstone.x86_const import (
-    X86_INS_MOV,
-    X86_OP_MEM,
-    X86_OP_REG,
-    X86_REG_AL,
-    X86_REG_AX,
-    X86_REG_BP,
-    X86_REG_INVALID,
+from inertia.postprocess.decompiler_postprocess_calls import (
+    _materialize_callsite_stack_arguments_8616,
+)
+from inertia.semantics.callsite_argument_value_sources import (
+    CallArgumentStackValueSource8616,
+    call_argument_stack_value_source_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteReturnUseKind8616,
+    CallsiteSummary8616,
+    _push_arg_source_from_context,
 )
 
 

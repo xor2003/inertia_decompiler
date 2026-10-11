@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 
 _HARNESS = r'''

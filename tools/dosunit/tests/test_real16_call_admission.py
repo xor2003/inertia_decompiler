@@ -4,9 +4,9 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_real16_call_composition import _caller_bytes, _caller_catalog, _lower
 
 from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
+from tools.dosunit.tests.test_real16_call_composition import _caller_bytes, _caller_catalog, _lower
 
 
 @pytest.mark.parametrize("field", ["function_machine_code_size", "function_machine_code_sha256"])

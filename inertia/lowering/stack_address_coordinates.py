@@ -16,8 +16,8 @@ from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
-from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordinateStatus8616
 
+from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordinateStatus8616
 from inertia.ir.native_stack_anchor import native_stack_anchor_8616
 
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616

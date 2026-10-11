@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from tools.dosunit.compare.straightline_ssa import INTERNAL_STATE_REGS
 from tools.dosunit.contracts.proof_contracts import Architecture
 from tools.dosunit.reporting.proof_public_domain import (
     AddressModel,
@@ -37,7 +38,6 @@ from tools.dosunit.reporting.proof_public_domain import (
     flat32_public_domain,
     real16_public_domain,
 )
-from tools.dosunit.compare.straightline_ssa import INTERNAL_STATE_REGS
 
 BACKEND = OutputDeclarationSource.BACKEND_DECLARED
 CALLER = OutputDeclarationSource.CALLER_DECLARED

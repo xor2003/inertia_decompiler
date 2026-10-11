@@ -14,8 +14,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CUnaryOp,
 )
 from angr.sim_type import SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.structuring.return_chain_condition_selection import (
     ReturnChainConditionSelectionStats8616,
     ReturnChainConditionSelectionVerdict8616,

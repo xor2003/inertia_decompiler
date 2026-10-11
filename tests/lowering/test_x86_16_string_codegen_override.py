@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from inertia.structuring.string_codegen_override import apply_x86_16_string_codegen_override
 from inertia.lowering.string_instruction_lowering import (
     StringInstructionCoverage8616,
     StringIntrinsicArtifact,
     StringIntrinsicRecord,
 )
+from inertia.structuring.string_codegen_override import apply_x86_16_string_codegen_override
 
 
 def test_string_codegen_override_replaces_render_text_with_normal_path_c():

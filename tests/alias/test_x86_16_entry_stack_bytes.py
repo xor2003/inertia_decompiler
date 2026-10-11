@@ -9,6 +9,13 @@ POINT.EXE replay stays in external diagnostics.
 from __future__ import annotations
 
 import pytest
+
+from inertia.alias.entry_stack_byte_contracts import (
+    EntryStackByteRefusalKind8616,
+    EntryStackByteScope8616,
+    EntryStackByteVerdict8616,
+)
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
 from inertia.ir.core import IRAddress, IRInstr, MemSpace
 from tests.fixtures.entry_stack_byte_test_support import (
     ENTRY_8616,
@@ -22,13 +29,6 @@ from tests.fixtures.entry_stack_byte_test_support import (
     _reg,
     _ss_addr,
 )
-
-from inertia.alias.entry_stack_byte_contracts import (
-    EntryStackByteRefusalKind8616,
-    EntryStackByteScope8616,
-    EntryStackByteVerdict8616,
-)
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
 
 
 def test_exact_local_pair() -> None:

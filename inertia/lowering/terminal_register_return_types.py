@@ -20,6 +20,7 @@ from angr.analyses.decompiler.structured_codegen.c import CReturn
 from angr.sim_type import SimType, SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeInt, SimTypeLong, SimTypeShort
 from archinfo import Arch
 
+from inertia.ir.vex_import import codegen_function_8616
 from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
@@ -118,19 +119,6 @@ class _FunctionSurface8616(Protocol):
     prototype: object | None
 
 
-class _FunctionManagerSurface8616(Protocol):
-    """Third-party function lookup boundary."""
-
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
-        """Return an existing function without creating one."""
-
-
-class _KnowledgeBaseSurface8616(Protocol):
-    """Third-party knowledge-base fields used by return type lowering."""
-
-    functions: _FunctionManagerSurface8616
-
-
 @dataclass(frozen=True, slots=True)
 class TerminalRegisterReturnTypeStats8616:
     """Evidence accounting for one terminal register return type decision."""
@@ -220,9 +208,14 @@ def apply_terminal_register_return_type_evidence_8616(
     )
     if byte_result.applicable:
         return _terminal_result_from_byte_8616(byte_result)
+    guessed_byte = (
+        isinstance(prototype, SimTypeFunction)
+        and isinstance(prototype.returnty, SimTypeChar)
+        and function_surface.is_prototype_guessed
+    )
     if prototype is not None and (
         not isinstance(prototype, SimTypeFunction)
-        or not isinstance(prototype.returnty, SimTypeBottom)
+        or (not isinstance(prototype.returnty, SimTypeBottom) and not guessed_byte)
     ):
         return TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616())
     caller_use = proven_function_result_observation_8616(
@@ -245,7 +238,7 @@ def apply_terminal_register_return_type_evidence_8616(
         arg_names=prototype.arg_names if isinstance(prototype, SimTypeFunction) else None,
         variadic=prototype.variadic if isinstance(prototype, SimTypeFunction) else False,
     ).with_arch(project_surface.arch)
-    function_surface.is_prototype_guessed = prototype is None
+    function_surface.is_prototype_guessed = prototype is None or guessed_byte
     return TerminalRegisterReturnTypeResult8616(
         True,
         TerminalRegisterReturnTypeStats8616(1, 1, 1, 1, 0),
@@ -290,8 +283,8 @@ def materialize_terminal_register_return_type_8616(
     codegen_surface = cast(_CodegenSurface8616, codegen)
     try:
         cfunc = cast(_CFunctionSurface8616, codegen_surface.cfunc)
-        knowledge_base = cast(_KnowledgeBaseSurface8616, project_surface.kb)
-        function = knowledge_base.functions.function(addr=cfunc.addr, create=False)
+        resolved = codegen_function_8616(project, codegen)
+        function = cast(_FunctionSurface8616, resolved[0]) if resolved is not None else None
     except AttributeError:
         if os.environ.get("INERTIA_DEBUG_TERMINAL_RETURN_TYPES") == "1":
             _LOGGER.warning("terminal AX return type unavailable: missing codegen or function-manager surface")

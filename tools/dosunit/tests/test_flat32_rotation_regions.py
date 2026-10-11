@@ -1,9 +1,9 @@
 """Unpatched flat32 consumers retain progress and full shared-guard effects."""
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _compare_loops, _driver_lane
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
 from tools.dosunit.compare.region_pairing import RegionFormation
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.tests.test_flat32_comparator_lane import _compare_loops, _driver_lane
 
 ORIGINAL = 'e3088d5b018d49ffebf6c3'
 

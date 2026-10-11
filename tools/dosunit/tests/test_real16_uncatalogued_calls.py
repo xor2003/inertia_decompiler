@@ -1,8 +1,6 @@
 """Binary-only caller obligations with omitted direct-call leaf catalogs."""
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-from tools.dosunit.tests.test_real16_loop_calls import _fixture as _loop_fixture
 
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
@@ -15,6 +13,8 @@ from tools.dosunit.runtime.real16_replay_model import (
     Real16Vector,
     SegOffset,
 )
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
+from tools.dosunit.tests.test_real16_loop_calls import _fixture as _loop_fixture
 
 
 def _uncatalogued_image(target, leaf):

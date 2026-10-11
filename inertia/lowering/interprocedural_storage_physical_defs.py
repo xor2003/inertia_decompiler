@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
-
 from inertia.ir.core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
 from inertia.ir.scalar_value_projection import (
     ScalarProjectionKind8616,
@@ -22,6 +20,7 @@ from inertia.ir.scalar_value_projection import (
     scalar_produced_decoration_8616,
     scalar_read_projection_8616,
 )
+from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
 
 from .interprocedural_storage_contracts import (
     StorageIdentity8616,

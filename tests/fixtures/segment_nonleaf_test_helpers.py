@@ -11,6 +11,12 @@ from types import SimpleNamespace
 
 import inertia.ir.segment_call_preservation as call_preservation
 import inertia.ir.segment_effect_closure as effect_closure
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsite8616,
+    DecodedDirectCallsiteIndex8616,
+    DecodedDirectCallsiteIndexStats8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.ir import (
     IRBlock,
     IRFunctionArtifact,
@@ -25,13 +31,6 @@ from inertia.ir.segment_call_preservation import SegmentCallPreservationResult86
 from inertia.ir.segment_effect_closure import SegmentEffectClosureFailure8616
 from inertia.ir.segment_effect_closure import SegmentEffectClosureResult8616 as ClosureResult
 from inertia.ir.segment_state import SegmentStateArtifact
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsite8616,
-    DecodedDirectCallsiteIndex8616,
-    DecodedDirectCallsiteIndexStats8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 
 def _mov_seg(register: str, const: int, addr: int) -> IRInstr:

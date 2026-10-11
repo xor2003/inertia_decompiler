@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-from tools.dosunit.tests.test_real16_symbolic_call_control import _relative
 
 from tools.dosunit.compare.real16_call_contracts import (
     ComposeSession,
@@ -12,6 +11,7 @@ from tools.dosunit.compare.real16_call_contracts import (
     initial_state,
 )
 from tools.dosunit.compare.real16_call_execution import _compose_ip_targets
+from tools.dosunit.tests.test_real16_symbolic_call_control import _relative
 
 
 def _context(head=0x200):

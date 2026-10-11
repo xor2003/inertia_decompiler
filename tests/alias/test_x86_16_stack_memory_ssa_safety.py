@@ -3,11 +3,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from angr.sim_variable import SimStackVariable
-from inertia.ir.analysis.stack_frame_ir import (
-    BPFrameCoordinateEvidence8616,
-    FrameAccessArtifact,
-    FrameCoordinateStats8616,
-    FrameCoordinateStatus8616,
+
+from inertia.alias.stack_memory_ssa import (
+    StackMemoryAliasRefusalKind8616,
+    build_x86_16_stack_memory_ssa_alias_artifact,
+)
+from inertia.alias.stack_memory_ssa_contracts import (
+    StackMemorySSAAliasArtifact8616,
 )
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import (
@@ -20,6 +22,12 @@ from inertia.ir import (
     MemSpace,
     SegmentOrigin,
 )
+from inertia.ir.analysis.stack_frame_ir import (
+    BPFrameCoordinateEvidence8616,
+    FrameAccessArtifact,
+    FrameCoordinateStats8616,
+    FrameCoordinateStatus8616,
+)
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.lowering.stack_memory_ssa import (
     StackMemorySSALoweringRefusalKind8616,
@@ -29,14 +37,6 @@ from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
-)
-
-from inertia.alias.stack_memory_ssa import (
-    StackMemoryAliasRefusalKind8616,
-    build_x86_16_stack_memory_ssa_alias_artifact,
-)
-from inertia.alias.stack_memory_ssa_contracts import (
-    StackMemorySSAAliasArtifact8616,
 )
 from inertia.widening.stack_memory_objects import (
     build_x86_16_stack_memory_object_widening_artifact,

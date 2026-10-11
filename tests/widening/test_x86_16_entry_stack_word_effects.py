@@ -9,13 +9,13 @@ No control-frontier, flags, callee or generated-C acceptance is implied.
 from __future__ import annotations
 
 import pytest
-from inertia.ir.core import IRCondition, IRInstr
-from tests.fixtures.entry_stack_byte_test_support import _const, _mov, _reg, _tmp
-from tests.widening.test_x86_16_entry_stack_word_values import _prove, _word_instrs
 
+from inertia.ir.core import IRCondition, IRInstr
 from inertia.widening.entry_stack_word_value_contracts import (
     EntryStackWordVerdict8616 as Verdict,
 )
+from tests.fixtures.entry_stack_byte_test_support import _const, _mov, _reg, _tmp
+from tests.widening.test_x86_16_entry_stack_word_values import _prove, _word_instrs
 
 
 def _conditional() -> IRInstr:

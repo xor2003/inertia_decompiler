@@ -14,14 +14,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from inertia.ir.condition_ir import ConditionIR
 from inertia.semantics.caller_return_use_contracts import (
     CallerReturnUseEvidence8616,
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
 from inertia.semantics.callsite_summary import caller_return_use_evidence_by_addr_8616
-
-from inertia.ir.condition_ir import ConditionIR
 
 from .condition_transfer import collect_typed_condition_artifacts_8616
 from .interprocedural_storage_caller_context import caller_ssa_context_for_return_use_8616

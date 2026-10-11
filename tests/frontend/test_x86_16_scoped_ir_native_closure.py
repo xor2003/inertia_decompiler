@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
 import inertia.ir.ir_boundary_cfg as ir_boundary_cfg
 import inertia.ir.real16_invocation_domain as real16_invocation_domain
 import inertia.ir.segment_call_preservation as segment_call_preservation
 import inertia.ir.segment_effect_closure as segment_effect_closure
 import inertia.ir.segment_state as segment_state
+import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
 from tools.dosunit.tests.test_x86_16_scoped_native_inputs import LEAF, _view, world  # noqa: F401
 
 

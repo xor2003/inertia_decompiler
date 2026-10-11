@@ -18,7 +18,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CTypeCast,
     CVariable,
 )
-from angr.sim_variable import SimMemoryVariable
+from angr.sim_variable import SimMemoryVariable, SimStackVariable
 
 from inertia.ir.core import MemSpace
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
@@ -57,6 +57,11 @@ def _memory_operand_identity_8616(
     variable = node.unified_variable
     if not isinstance(variable, SimMemoryVariable):
         variable = node.variable
+    if isinstance(variable, SimStackVariable):
+        # Stack variables inherit SimMemoryVariable, but their numeric addr
+        # is a frame-relative offset, not a DS address. Keep the frame/base
+        # comparison in the caller's exact C-variable identity resolver.
+        return None
     if (
         not isinstance(variable, SimMemoryVariable)
         or not isinstance(variable.addr, int)

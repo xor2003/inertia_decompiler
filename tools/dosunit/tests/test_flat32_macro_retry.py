@@ -5,12 +5,12 @@ from typing import cast
 
 import angr
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
-from tools.dosunit.tests.test_macro_step_proof import CANDIDATE32, ORACLE32
 
 from tools.dosunit.compare.flat32_proof_retry import ProofContext, retry_function_proof
 from tools.dosunit.contracts.proof_scope import ProofScope
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
+from tools.dosunit.tests.test_macro_step_proof import CANDIDATE32, ORACLE32
 
 
 @pytest.mark.parametrize("driver", ["msc8", "bc5"])

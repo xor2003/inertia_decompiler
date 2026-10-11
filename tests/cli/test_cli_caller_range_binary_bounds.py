@@ -8,15 +8,15 @@ from typing import Any, cast
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 from inertia.cli import cli_function_discovery as discovery
 from inertia.cli import discovery_candidate_ranges as ranges_module
 from inertia.cli.lst_extract import LSTMetadata
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_function_boundary import (
     exact_function_range_boundary_8616,
 )
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.semantics.callsite_summary import (
     CallerReturnUseVerdict8616,
     collect_caller_return_use_evidence_8616,

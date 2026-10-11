@@ -2,21 +2,6 @@
 
 from __future__ import annotations
 
-from tools.dosunit.tests.flat32_replay_test_support import (
-    ELF_CODE,
-    ELF_RDATA,
-    ELF_RWDATA,
-    ESP,
-    PE_DATA,
-    PE_TEXT,
-    SCRATCH,
-    _elf_image,
-    _file_denied,
-    _grant,
-    _pe_image,
-    _vector,
-)
-
 from tools.dosunit.runtime.flat32_memory_permissions import (
     DeclaredAccess,
     DeclaredRegion,
@@ -30,6 +15,20 @@ from tools.dosunit.runtime.flat32_replay import (
     ReplayVector,
     compare_replays,
     replay,
+)
+from tools.dosunit.tests.flat32_replay_test_support import (
+    ELF_CODE,
+    ELF_RDATA,
+    ELF_RWDATA,
+    ESP,
+    PE_DATA,
+    PE_TEXT,
+    SCRATCH,
+    _elf_image,
+    _file_denied,
+    _grant,
+    _pe_image,
+    _vector,
 )
 
 

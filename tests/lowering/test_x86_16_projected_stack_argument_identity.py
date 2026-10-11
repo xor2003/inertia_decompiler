@@ -9,11 +9,8 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallsiteReturnUseKind8616,
-)
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.lowering.call_return_stack_bindings import (
     CallReturnStackBindingStatus8616,
     bind_call_return_stack_assignment_8616,
@@ -35,7 +32,10 @@ from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
     stack_cvar_for_machine_bp_range_8616,
 )
-
+from inertia.semantics.caller_return_use_contracts import (
+    CallsiteReturnUseKind8616,
+)
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.structuring.condition_lowering import (
     stable_stack_condition_binding_tags_8616,
 )

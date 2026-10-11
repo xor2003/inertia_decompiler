@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeInt
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.postprocess.codegen_parentheses import apply_codegen_parentheses_8616
 
 

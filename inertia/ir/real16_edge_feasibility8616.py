@@ -45,10 +45,12 @@ so no reachable byte obligation is silently dropped.
 
 from __future__ import annotations
 
+import heapq
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 
 from inertia.semantics.register_value_preservation import (
     register_value_family_8616,
@@ -66,14 +68,20 @@ from .core import (
     IRValue,
     MemSpace,
 )
-from .real16_declared_interrupt8616 import interrupt_call_vector_8616
+from .frozen_dispatch import FrozenDispatch
+from .frozen_dispatch import frozen_dispatch_lookup as frozen_dispatch_lookup
+from .real16_declared_interrupt8616 import interrupt_call_vector_8616 as interrupt_call_vector_8616
 from .real16_path_memory8616 import (
     SEGMENT_BASE_NAME_8616,
     SEGMENT_SHIFT_8616,
     PathMemory8616,
     meet_path_memory_8616,
-    path_memory_tainted_8616,
-    store_atom_clean_8616,
+)
+from .real16_path_memory8616 import (
+    path_memory_tainted_8616 as path_memory_tainted_8616,
+)
+from .real16_path_memory8616 import (
+    store_atom_clean_8616 as store_atom_clean_8616,
 )
 from .real16_wide_multiply8616 import wide_multiply_shape_8616, wide_multiply_value_8616
 from .scalar_instruction_effects import (
@@ -83,6 +91,8 @@ from .scalar_instruction_effects import (
 )
 
 __all__ = [
+    "Real16CallCutRequest8616",
+    "Real16CallCutState8616",
     "Real16EdgeFeasibility8616",
     "invocation_feasible_scope_8616",
 ]
@@ -113,6 +123,118 @@ _BINOP_TAG_8616 = re.compile(
 
 
 @dataclass(frozen=True, slots=True)
+class Real16CallCutRequest8616:
+    """Select one exact terminal CALL; this request grants no authority."""
+
+    artifact: IRFunctionArtifact
+    block: IRBlock
+    index: int
+    instruction: IRInstr
+
+
+@dataclass(frozen=True, slots=True)
+class Real16CallCutState8616:
+    """Detached pre-CALL snapshot data from the final committed current round.
+
+    Identity references are not immutable source receipts. Consumers must
+    authenticate current native sources and compare their own must-state.
+    """
+
+    artifact: IRFunctionArtifact
+    block: IRBlock
+    index: int
+    instruction: IRInstr
+    registers: tuple[tuple[str, int], ...]
+    memory_known: tuple[tuple[int, int], ...]
+    memory_unknown: tuple[int, ...]
+    direction: bool | None
+
+
+def _call_cut_owned_8616(
+    request: Real16CallCutRequest8616, artifact: IRFunctionArtifact,
+    dangerous: frozenset[int], head: int, budget: list[int], deadline: float,
+    dead: frozenset[tuple[int, int]] = frozenset(),
+) -> bool:
+    """Charge exact row geometry and CFG reachability before optional capture."""
+    budget[0] -= len(artifact.blocks) + len(request.block.instrs) + 1
+    if budget[0] < 0 or time.monotonic() > deadline:
+        return False
+    block, index = request.block, request.index
+    if request.artifact is not artifact or type(index) is not int or index < 0:
+        return False
+    if index != len(block.instrs) - 1 or block.instrs[index] is not request.instruction:
+        return False
+    if request.instruction.op != "CALL":
+        return False
+    if (sum(owned is block for owned in artifact.blocks) != 1
+        or sum(owned.addr == block.addr for owned in artifact.blocks) != 1
+        or any(row.op in ("RET", "JMP", "CJMP") for row in block.instrs[:index])):
+        return False
+    blocks = {owned.addr: owned for owned in artifact.blocks}
+    ready, seen = [head], set()
+    while ready:
+        if budget[0] < 0 or time.monotonic() > deadline:
+            return False
+        addr = ready.pop()
+        if addr in seen or addr not in dangerous or addr not in blocks:
+            continue
+        seen.add(addr)
+        successors = blocks[addr].successor_addrs
+        budget[0] -= len(successors) + 1
+        ready.extend(successor for successor in successors if (addr, successor) not in dead)
+    return budget[0] >= 0 and block.addr in seen
+
+
+def _admit_call_cut_8616(
+    request: Real16CallCutRequest8616 | None, artifact: IRFunctionArtifact,
+    dangerous: frozenset[int], head: int, budget: list[int], deadline: float,
+) -> Real16CallCutRequest8616 | None:
+    """Normalize an optional exact selection without granting admission."""
+    if request is None:
+        return None
+    return request if _call_cut_owned_8616(request, artifact, dangerous, head, budget, deadline) else None
+
+
+def _capture_call_cut_8616(
+    request: Real16CallCutRequest8616, registers: _KbRegs8616,
+    memory: PathMemory8616, budget: list[int],
+) -> Real16CallCutState8616 | None:
+    """Prepay bounded projection and sorting; retain no mutable scalar alias."""
+    lengths = (len(registers), len(memory.known), len(memory.unknown))
+    budget[0] -= sum(n * (n.bit_length() + 2) for n in lengths) + 1
+    if budget[0] < 0 or memory.tainted:
+        return None
+    return Real16CallCutState8616(
+        request.artifact, request.block, request.index, request.instruction,
+        tuple(sorted(_kb_known_registers_8616(registers).items())),
+        tuple(sorted(memory.known.items())), tuple(sorted(memory.unknown)),
+        direction_fact_8616(registers),
+    )
+
+
+def _current_call_cut_8616(
+    cut: Real16CallCutState8616 | None, budget: list[int], deadline: float,
+) -> Real16CallCutState8616 | None:
+    """Drop optional data on expiry after all validation and result sorting."""
+    if cut is None:
+        return None
+    return cut if budget[0] >= 0 and time.monotonic() <= deadline else None
+
+
+def _observe_call_cut_8616(
+    request: Real16CallCutRequest8616 | None, instruction: IRInstr,
+    registers: _KbRegs8616, memory: PathMemory8616, budget: list[int],
+    states: list[Real16CallCutState8616] | None,
+) -> None:
+    """Observe only the requested row without invoking any effect callback."""
+    if request is None or instruction is not request.instruction or states is None:
+        return
+    captured = _capture_call_cut_8616(request, registers, memory, budget)
+    if captured is not None:
+        states.append(captured)
+
+
+@dataclass(frozen=True, slots=True)
 class Real16EdgeFeasibility8616:
     """Typed per-edge feasibility result for one invocation census scope.
 
@@ -140,6 +262,107 @@ class Real16EdgeFeasibility8616:
     proven_edges: int
     converged: bool
     work_units: int
+    call_cut: Real16CallCutState8616 | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Real16InvocationOrder8616:
+    """One fresh CFG projection; no order on cycles or resource exhaustion."""
+
+    blocks: tuple[int, ...] | None
+    work_units: int
+
+    @classmethod
+    def from_walk(cls, order: list[int], scope: frozenset[int], work: int) -> Real16InvocationOrder8616:
+        """Reject a cyclic partial walk without publishing a partial order."""
+        return cls(tuple(order) if len(order) == len(scope) else None, work)
+
+
+class LoadSnapshotReplay8616(Enum):
+    """Whether a discarded LOAD transfer has an externally observable callback.
+
+    READ_ONLY_OWNED is admitted only for owned readers with no mutation or
+    external hooks. It never skips fixpoint LOADs or the native effect census.
+    Unknown/dynamic readers retain OBSERVABLE replay by default.
+    """
+
+    OBSERVABLE = "observable"
+    READ_ONLY_OWNED = "read_only_owned"
+
+
+def invocation_transfer_order_8616(
+    scope: frozenset[int], proposed: tuple[int, ...] | None,
+) -> tuple[int, ...] | None:
+    """Keep sorted default traversal or require exact coverage without duplicates."""
+    if proposed is None:
+        return tuple(sorted(scope))
+    if len(proposed) != len(scope) or frozenset(proposed) != scope:
+        return None
+    return proposed
+
+
+def acyclic_invocation_order_8616(
+    scope: frozenset[int], predecessors: Mapping[int, Iterable[int]], *,
+    deadline: float, work_limit: int,
+) -> Real16InvocationOrder8616:
+    """Order an acyclic scope deterministically, charging node/edge visits.
+
+    This is geometry, not an effect proof. Callers must preserve arbitrary
+    callback schedules and use this projection only where their own transfers
+    cannot mutate the CFG or external callback authority. A cycle retains the
+    original bounded fixpoint; exhausted preparation grants no ordering.
+    """
+    degree = dict.fromkeys(scope, 0)
+    successors: dict[int, list[int]] = {addr: [] for addr in scope}
+    work = 0
+    for addr in sorted(scope):
+        work += 1
+        if _invocation_order_budget_exhausted_8616(work, work_limit, deadline):
+            return Real16InvocationOrder8616(None, work)
+        for pred in predecessors.get(addr, ()):
+            work += 1
+            if _invocation_order_budget_exhausted_8616(work, work_limit, deadline):
+                return Real16InvocationOrder8616(None, work)
+            if pred in scope:
+                degree[addr] += 1
+                successors[pred].append(addr)
+    return _walk_acyclic_invocation_order_8616(
+        scope, degree, successors, work, deadline=deadline, work_limit=work_limit,
+    )
+
+
+def _walk_acyclic_invocation_order_8616(
+    scope: frozenset[int],
+    degree: dict[int, int],
+    successors: dict[int, list[int]],
+    work: int,
+    *,
+    deadline: float,
+    work_limit: int,
+) -> Real16InvocationOrder8616:
+    """Consume the fresh predecessor counts with a bounded deterministic Kahn walk."""
+    pending = [addr for addr, count in degree.items() if count == 0]
+    heapq.heapify(pending)
+    order: list[int] = []
+    while pending:
+        work += 1
+        if _invocation_order_budget_exhausted_8616(work, work_limit, deadline):
+            return Real16InvocationOrder8616(None, work)
+        addr = heapq.heappop(pending)
+        order.append(addr)
+        for successor in successors[addr]:
+            work += 1
+            if _invocation_order_budget_exhausted_8616(work, work_limit, deadline):
+                return Real16InvocationOrder8616(None, work)
+            degree[successor] -= 1
+            if degree[successor] == 0:
+                heapq.heappush(pending, successor)
+    return Real16InvocationOrder8616.from_walk(order, scope, work)
+
+
+def _invocation_order_budget_exhausted_8616(work: int, limit: int, deadline: float) -> bool:
+    """Keep preparation inside its original charged-work and absolute-time bounds."""
+    return work > limit or time.monotonic() > deadline
 
 
 def _kb_width_mask_8616(size: object) -> int | None:
@@ -283,16 +506,16 @@ def _kb_mul_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
     return (mask, (a[1] * b[1]) & mask)
 
 
-_KB_BINOP_PLAIN_8616: dict[str, Callable[[_Kb8616, _Kb8616, int], _Kb8616]] = {
-    "Add": _kb_add_8616,
-    "Sub": _kb_sub_8616,
-    "Mul": _kb_mul_8616,
-    "And": _kb_and_8616,
-    "Or": _kb_or_8616,
-    "Xor": _kb_xor_8616,
-    "CmpEQ": _kb_cmp_eq_8616,
-    "CmpNE": _kb_cmp_ne_8616,
-}
+_KB_BINOP_PLAIN_8616: FrozenDispatch[str, Callable[[_Kb8616, _Kb8616, int], _Kb8616]] = (
+    ("Add", _kb_add_8616),
+    ("Sub", _kb_sub_8616),
+    ("Mul", _kb_mul_8616),
+    ("And", _kb_and_8616),
+    ("Or", _kb_or_8616),
+    ("Xor", _kb_xor_8616),
+    ("CmpEQ", _kb_cmp_eq_8616),
+    ("CmpNE", _kb_cmp_ne_8616),
+)
 
 
 def _kb_binary_op_8616(
@@ -319,7 +542,7 @@ def _kb_binary_op_8616(
         return None
     name, digits, signed_suffix = match.groups()
     width_mask = (1 << int(digits)) - 1
-    plain = _KB_BINOP_PLAIN_8616.get(name)
+    plain = frozen_dispatch_lookup(_KB_BINOP_PLAIN_8616, name)
     if plain is not None:
         return plain(a, b, width_mask)
     if name in ("Shl", "Shr"):
@@ -1200,11 +1423,28 @@ def _cjmp_live_successor_8616(
     return exit_target if verdict else other
 
 
+def _ordinary_call_target_8616(instruction: IRInstr) -> bool:
+    """Admit typed native targets; the callback owns resolution and proof."""
+    if instruction.op != "CALL" or instruction.dst is not None or len(instruction.args) != 1:
+        return False
+    target = instruction.args[0]
+    if type(target) is not IRValue or target.size not in (2, 4):
+        return False
+    if target.space is MemSpace.CONST:
+        return type(target.const) is int and 0 <= target.const < (1 << 20)
+    if target.space is MemSpace.TMP:
+        # Native near-call coordinates may be dword expressions after segment
+        # and offset composition. Their shape grants no target authority.
+        return True
+    return target.space is MemSpace.REG and type(target.name) is str and bool(target.name)
+
+
 def _kb_call_row_8616(
     instruction: IRInstr,
     registers: _KbRegs8616,
     memory: PathMemory8616,
     apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
 ) -> _KbRegs8616:
     """Known-bits transfer for one CALL row.
 
@@ -1216,17 +1456,20 @@ def _kb_call_row_8616(
     memory anywhere, and the real census refuses the same row if the
     block stays live, so nothing is lost by keeping edges live here. A
     refused declared crossing also taints — the interrupt may have done
-    anything.
+    anything. The optional ordinary ``apply_call`` hook is a caller-owned
+    authentication boundary: only exact True consumes its fully known register
+    projection and live memory effects; absent/refused/malformed calls taint.
     """
     declared = (
         instruction.dst is None
         and interrupt_call_vector_8616(instruction) is not None
     )
-    if not declared:
-        memory.taint()
-        return {}
     known = _kb_known_registers_8616(registers)
-    if apply_service(instruction, known, memory):
+    if declared:
+        if apply_service(instruction, known, memory):
+            return _kb_seed_state_8616(known)
+    elif (apply_call is not None and _ordinary_call_target_8616(instruction)
+          and apply_call(instruction, known, memory) is True):
         return _kb_seed_state_8616(known)
     memory.taint()
     return {}
@@ -1241,13 +1484,14 @@ def _kb_transfer_effect_8616(
     instruction_entry: _KbRegs8616,
     apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
 ) -> _KbRegs8616:
     """Transfer a store, call or data row using one instruction-entry snapshot."""
     if instruction.op == "STORE":
         _kb_store_row_8616(instruction, instruction_entry, dirty, tmps, memory)
         return registers
     if instruction.op == "CALL":
-        result = _kb_call_row_8616(instruction, registers, memory, apply_service)
+        result = _kb_call_row_8616(instruction, registers, memory, apply_service, apply_call)
         tmps.clear()
         return result
     dst = instruction.dst
@@ -1301,6 +1545,9 @@ def _kb_block_exit_8616(
     budget: list[int],
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
+    call_cut: Real16CallCutRequest8616 | None = None,
+    cut_states: list[Real16CallCutState8616] | None = None,
 ) -> _KbPathState8616:
     """Walk one block's rows in known-bits form; return the exit state.
 
@@ -1335,6 +1582,8 @@ def _kb_block_exit_8616(
         if stop_after is not None and instruction.addr > stop_after:
             break
         budget[0] -= 1
+        if call_cut is not None:
+            _observe_call_cut_8616(call_cut, instruction, registers, memory, budget, cut_states)
         if budget[0] < 0:
             registers.clear()
             memory.taint()
@@ -1345,16 +1594,23 @@ def _kb_block_exit_8616(
             dirty = set()
         op = instruction.op
         if op == "CJMP":
-            if _kb_cjmp_exit_8616(
-                instruction, block, registers, tmps, sink
-            ):
-                return _KbPathState8616({}, path_memory_tainted_8616())
-            break
+            return _kb_cjmp_path_exit_8616(instruction, block, registers, tmps, memory, sink)
         if op in ("JMP", "RET"):
             continue
         registers = _kb_transfer_effect_8616(
-            instruction, registers, memory, tmps, dirty, instruction_entry, apply_service, read_load,
+            instruction, registers, memory, tmps, dirty, instruction_entry, apply_service, read_load, apply_call,
         )
+    return _KbPathState8616(registers, memory)
+
+
+def _kb_cjmp_path_exit_8616(
+    instruction: IRInstr, block: IRBlock, registers: _KbRegs8616,
+    tmps: _KbTmps8616, memory: PathMemory8616,
+    sink: Callable[[IRInstr, _KbRegs8616, _KbTmps8616], None] | None,
+) -> _KbPathState8616:
+    """Close the branch walk with the existing terminal-row validity check."""
+    if _kb_cjmp_exit_8616(instruction, block, registers, tmps, sink):
+        return _KbPathState8616({}, path_memory_tainted_8616())
     return _KbPathState8616(registers, memory)
 
 
@@ -1448,6 +1704,8 @@ def _kb_fixpoint_8616(
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
     infeasible_edges: frozenset[tuple[int, int]] = frozenset(),
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
+    transfer_order: tuple[int, ...] | None = None,
 ) -> dict[int, _KbPathState8616] | None:
     """Iterate the must-meet transfer to convergence, or ``None``.
 
@@ -1459,13 +1717,16 @@ def _kb_fixpoint_8616(
     returns ``None`` — no partial state. Only earlier fully proved dead
     edges may be excluded from predecessor meets during refinement.
     """
+    order = invocation_transfer_order_8616(dangerous, transfer_order)
+    if order is None:
+        return None
     entries: dict[int, _KbPathState8616] = {}
     exits: dict[int, _KbPathState8616] = {}
     for _ in range(iteration_limit):
         if time.monotonic() > deadline or budget[0] <= 0:
             return None
         changed = False
-        for addr in sorted(dangerous):
+        for addr in order:
             predecessors = [
                 pred for pred in predecessor_map.get(addr, ())
                 if pred in dangerous and (pred, addr) not in infeasible_edges
@@ -1496,11 +1757,63 @@ def _kb_fixpoint_8616(
                 budget=budget,
                 read_load=read_load,
                 apply_repeat=apply_repeat,
+                apply_call=apply_call,
             )
             changed = True
         if not changed:
             return entries
     return None
+
+
+def _kb_snapshot_observed_8616(
+    block: IRBlock, *, has_load_hook: bool,
+    exempt_call: IRInstr | None = None,
+) -> bool:
+    """Keep branch/hook replay; pure owned transfers have no snapshot observer.
+
+    This classification is fresh at consumption, never retained across hooks.
+    A scalar/store transfer only changes the copied block-local exit state,
+    which the snapshot pass discards. Its actual effects remain in the fixpoint
+    and the subsequent native census. Unknown effects and non-owned block,
+    instruction or operation types retain the walker. Repeat hooks precede it
+    because even NOT_APPLICABLE may change external authentication state.
+    ``exempt_call`` is a single instruction object the caller proved inert:
+    only that exact row object skips the CALL observability check.
+    """
+    if type(block) is not IRBlock:
+        return True
+    for instruction in block.instrs:
+        if type(instruction) is not IRInstr or type(instruction.op) is not str:
+            return True
+        if instruction.op in ("CJMP", "CALL") or (
+            instruction.op == "LOAD" and has_load_hook
+        ):
+            if instruction.op == "CALL" and instruction is exempt_call:
+                continue
+            return True
+        if instruction.op == "RET":
+            continue
+        if scalar_instruction_effect_8616(instruction).kind is ScalarInstructionEffectKind8616.UNKNOWN:
+            return True
+    return False
+
+
+def _snapshot_terminal_exemption_8616(
+    block: IRBlock, call_block_addr: int, callsite_addr: int,
+    terminal_call_noop: Callable[[IRInstr], bool] | None,
+    call_cut: Real16CallCutRequest8616 | None,
+) -> IRInstr | None:
+    """Select one inert last CALL without losing a requested pre-CALL cut."""
+    if (terminal_call_noop is None or block.addr != call_block_addr
+            or type(block.instrs) is not tuple or not block.instrs):
+        return None
+    instruction = block.instrs[-1]
+    if (type(instruction) is not IRInstr or instruction.op != "CALL"
+            or instruction.addr != callsite_addr):
+        return None
+    if call_cut is not None and call_cut.block is block:
+        return None
+    return instruction if terminal_call_noop(instruction) else None
 
 
 def _kb_cjmp_snapshots_8616(
@@ -1514,14 +1827,59 @@ def _kb_cjmp_snapshots_8616(
     budget: list[int],
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
+    load_snapshot_replay: LoadSnapshotReplay8616 = LoadSnapshotReplay8616.OBSERVABLE,
+    repeat_consult_noop: Callable[[IRBlock], bool] | None = None,
+    load_reader_readonly: Callable[[], bool] | None = None,
+    terminal_call_noop: Callable[[IRInstr], bool] | None = None,
+    call_cut: Real16CallCutRequest8616 | None = None,
+    cut_states: list[Real16CallCutState8616] | None = None,
 ) -> list[tuple[int, IRInstr, _KbRegs8616, _KbTmps8616]] | None:
-    """Re-walk each converged block to capture terminal-CJMP states."""
+    """Freshly replay branch/hook blocks, discarding unobserved pure exits.
+
+    Charge one selection unit per classified block. Full row transfer charges
+    remain for every replayed block; omitted transfers publish no state.
+    With ``apply_repeat`` present, an optional ``repeat_consult_noop``
+    predicate may prove per block that the repeat consultation is a
+    side-effect-free non-candidate at the current moment; only then does the
+    walk pay one selection unit for the guard/classification stage, whether
+    the block is then omitted or replayed. ``load_reader_readonly`` is the
+    per-moment ownedness verdict for the LOAD reader; absent or ``False``
+    keeps hooked LOAD rows observable. ``terminal_call_noop`` is the
+    per-moment verdict that consulting the call handler on one exact row is
+    inert; it can exempt only the last row of the selected stopping block at
+    the stopping coordinate, never under a requested cut for that block. A
+    ``False`` verdict or a missing predicate retains the unconditional
+    replay, including the repeat and call consultations.
+    """
     snapshots: list[tuple[int, IRInstr, _KbRegs8616, _KbTmps8616]] = []
     for addr in sorted(dangerous):
         if time.monotonic() > deadline or budget[0] <= 0:
             return None
         if addr not in entries:
             continue
+        if apply_repeat is None:
+            budget[0] -= 1
+            if not _kb_snapshot_observed_8616(
+                blocks_by_addr[addr], has_load_hook=(
+                    read_load is not None
+                    and load_snapshot_replay is not LoadSnapshotReplay8616.READ_ONLY_OWNED
+                ),
+            ):
+                continue
+        elif repeat_consult_noop is not None and repeat_consult_noop(blocks_by_addr[addr]):
+            budget[0] -= 1
+            block = blocks_by_addr[addr]
+            exempt_call = _snapshot_terminal_exemption_8616(
+                block, call_block_addr, callsite_addr, terminal_call_noop, call_cut,
+            )
+            if not _kb_snapshot_observed_8616(
+                block, has_load_hook=(
+                    read_load is not None
+                    and not (load_reader_readonly is not None and load_reader_readonly())
+                ), exempt_call=exempt_call,
+            ):
+                continue
         def collect_snapshot(
             instruction: IRInstr,
             regs: _KbRegs8616,
@@ -1540,6 +1898,9 @@ def _kb_cjmp_snapshots_8616(
             budget=budget,
             read_load=read_load,
             apply_repeat=apply_repeat,
+            apply_call=apply_call,
+            call_cut=call_cut if call_cut is not None and call_cut.block is blocks_by_addr[addr] else None,
+            cut_states=cut_states,
         )
     if time.monotonic() > deadline or budget[0] < 0:
         return None
@@ -1627,6 +1988,35 @@ def _kb_surviving_cone_8616(
     return frozenset(live_blocks)
 
 
+def _kb_refinement_inputs_changed_8616(
+    previous_live: frozenset[int],
+    surviving: frozenset[int],
+    new_dead: frozenset[tuple[int, int]],
+    deadline: float,
+    budget: list[int],
+) -> bool | None:
+    """Require another transfer only for changed cone blocks or internal edges.
+
+    Predecessor meets consume edges with both endpoints in the live cone.
+    Removing an external edge while keeping the same cone changes no transfer
+    predecessor-meet input. This detects convergence after a complete round; it neither
+    reuses a proof nor omits a hook from a requested transfer. None means the
+    bounded selection did not finish, so only the committed round may survive.
+    """
+    if time.monotonic() > deadline or budget[0] <= 0:
+        return None
+    budget[0] -= 1
+    if surviving != previous_live:
+        return True
+    for source, target in new_dead:
+        budget[0] -= 1
+        if budget[0] < 0 or time.monotonic() > deadline:
+            return None
+        if source in previous_live and target in previous_live:
+            return True
+    return False
+
+
 def invocation_feasible_scope_8616(
     *,
     artifact: IRFunctionArtifact,
@@ -1643,6 +2033,13 @@ def invocation_feasible_scope_8616(
     work_limit: int,
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
+    apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
+    transfer_order: tuple[int, ...] | None = None,
+    load_snapshot_replay: LoadSnapshotReplay8616 = LoadSnapshotReplay8616.OBSERVABLE,
+    repeat_consult_noop: Callable[[IRBlock], bool] | None = None,
+    load_reader_readonly: Callable[[], bool] | None = None,
+    terminal_call_noop: Callable[[IRInstr], bool] | None = None,
+    call_cut: Real16CallCutRequest8616 | None = None,
 ) -> Real16EdgeFeasibility8616:
     """Prove which dangerous-cone edges are untraversable on this invocation.
 
@@ -1654,14 +2051,29 @@ def invocation_feasible_scope_8616(
     must-style per predecessor. The ``apply_service`` hook receives the
     projected fully-known register lanes *and* the live path memory so a
     declared service may only publish constants the current path bytes
-    prove. Per-edge verdicts are read only from the converged fixpoint —
+    prove. Optional ``apply_call`` consumes authenticated ordinary callee effects
+    under the same fully-known projection; unknown calls still taint and keep
+    edges live. This callback grants no independent callee authority. Per-edge verdicts are read only from the converged fixpoint —
     provisional or budget-cut rounds publish no new pruning. Each completed
     round removes only proven-dead edges, then recomputes register and memory
     must-facts from the identical seed. All rounds share the original absolute
     deadline and work budget. On exhaustion, earlier committed evidence stays
     valid with ``converged=True`` for that retained dataflow round. This
     reports proof validity, not saturation of all refinements; no budget or
-    deadline is reset.
+    deadline is reset. An optional order is a freshly prepared CFG projection
+    admitted by a consumer with read-only callbacks; ordinary callers retain
+    their existing sorted schedule. It never authorizes cached effects.
+    A read-only owned LOAD reader may omit discarded branchless snapshot
+    transfers; generic readers retain callback replay. Branch states and the
+    complete fixpoint/census remain mandatory with either policy.
+    A newly dead edge outside an unchanged live cone alters no predecessor
+    meet; the completed round already establishes dataflow convergence there.
+    Internal-edge removal still recomputes facts even if all blocks survive.
+    An optional exact ``call_cut`` retains detached pre-CALL data during the
+    existing snapshot walk, charging copies and selection to this budget.
+    Only a complete final round with unchanged refinement inputs publishes
+    it; retained earlier pruning never authorizes a provisional cut state.
+    This data is neither source authentication nor prefix reuse admission.
     """
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
     budget = [work_limit]
@@ -1669,19 +2081,28 @@ def invocation_feasible_scope_8616(
     live = frozenset(dangerous)
     dead: frozenset[tuple[int, int]] = frozenset()
     evaluated = 0
+    call_cut = _admit_call_cut_8616(call_cut, artifact, dangerous, head_addr, budget, deadline)
 
-    def finish(converged: bool) -> Real16EdgeFeasibility8616:
+    def finish(converged: bool, cut: Real16CallCutState8616 | None = None) -> Real16EdgeFeasibility8616:
         """Publish only fully committed rounds, including their consumed work."""
+        if cut is not None and call_cut is not None and not _call_cut_owned_8616(
+            call_cut, artifact, live, head_addr, budget, deadline, dead,
+        ):
+            cut = None
+        ordered_dead = tuple(sorted(dead))
+        cut = _current_call_cut_8616(cut, budget, deadline)
         return Real16EdgeFeasibility8616(
             live_blocks=live,
-            infeasible_edges=tuple(sorted(dead)),
+            infeasible_edges=ordered_dead,
             evaluated_cjmps=evaluated,
             proven_edges=len(dead),
             converged=converged,
             work_units=work_limit - budget[0],
+            call_cut=cut,
         )
 
-    if any(addr not in blocks_by_addr for addr in dangerous):
+    requested_order = invocation_transfer_order_8616(dangerous, transfer_order)
+    if requested_order is None or any(addr not in blocks_by_addr for addr in dangerous):
         return finish(False)
     for _ in range(_EDGE_REFINEMENT_ROUND_LIMIT_8616):
         entries = _kb_fixpoint_8616(
@@ -1699,9 +2120,12 @@ def invocation_feasible_scope_8616(
             read_load,
             apply_repeat,
             infeasible_edges=dead,
+            apply_call=apply_call,
+            transfer_order=tuple(addr for addr in requested_order if addr in live),
         )
         if entries is None:
             return finish(bool(dead))
+        cut_states: list[Real16CallCutState8616] = []
         snapshots = _kb_cjmp_snapshots_8616(
             blocks_by_addr,
             live,
@@ -1713,13 +2137,19 @@ def invocation_feasible_scope_8616(
             budget,
             read_load,
             apply_repeat,
+            apply_call,
+            load_snapshot_replay=load_snapshot_replay,
+            repeat_consult_noop=repeat_consult_noop,
+            load_reader_readonly=load_reader_readonly,
+            terminal_call_noop=terminal_call_noop,
+            call_cut=call_cut, cut_states=cut_states,
         )
         if snapshots is None:
             return finish(bool(dead))
         candidate = dead | frozenset(_kb_infeasible_edges_8616(snapshots, blocks_by_addr))
         if candidate == dead:
             evaluated += len(snapshots)
-            return finish(True)
+            return finish(True, cut_states[0] if len(cut_states) == 1 else None)
         surviving = _kb_surviving_cone_8616(
             blocks_by_addr,
             dangerous,
@@ -1735,8 +2165,13 @@ def invocation_feasible_scope_8616(
         # Neither a provisional fixpoint nor a partial cone may publish
         # evidence. Commit the entire round, then restart from the same seed
         # under only the dead edges proved by these completed rounds.
+        inputs_changed = _kb_refinement_inputs_changed_8616(
+            live, surviving, candidate - dead, deadline, budget,
+        )
         dead, live = candidate, surviving
         evaluated += len(snapshots)
+        if inputs_changed is not True:
+            return finish(True, cut_states[0] if inputs_changed is False and len(cut_states) == 1 else None)
     return finish(bool(dead))
 
 

@@ -1,6 +1,7 @@
 """Idempotent storage OR projections preserve exact location distinctions."""
 
 import pytest
+
 from inertia.ir.condition_ir import canonicalize_condition_storage_fingerprint_8616 as normalize
 
 

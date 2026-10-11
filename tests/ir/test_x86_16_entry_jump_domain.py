@@ -17,7 +17,13 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+from pyvex.errors import PyVEXError
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.relative_control_edge import (
+    DecodedRelativeEdge,
+    decode_relative_edge,
+)
 from inertia.ir.core import (
     IRBlock,
     IRFunctionArtifact,
@@ -40,12 +46,6 @@ from inertia.ir.vex_terminal_jump import (
     TerminalJumpEvidence8616,
     TerminalJumpEvidenceStats8616,
     TerminalJumpRefusalReason8616,
-)
-from pyvex.errors import PyVEXError
-
-from inertia.frontend.x86_16.relative_control_edge import (
-    DecodedRelativeEdge,
-    decode_relative_edge,
 )
 
 _FUNCTION_ADDR = 0x1000

@@ -61,6 +61,7 @@ from .dce_walk import (
     _walk_statements_8616,
 )
 from .local_declarations import prune_dce_proven_declarations_8616
+from .local_liveness import has_architectural_register_storage_8616
 
 __all__ = ["_dead_code_elimination_8616"]
 
@@ -336,13 +337,16 @@ class _DeadCodeEliminationRun8616:
         return node_name if isinstance(node_name, str) else ""
 
     def _is_observable_lvalue(self, lhs: object) -> bool:
+        """Return whether a write may be observable; unknown effects stay live."""
+        if has_architectural_register_storage_8616(lhs):
+            return True
         if isinstance(lhs, (CUnaryOp, CStructField, CBinaryOp, CIndexedVariable, CVariableField)):
             return True
         if isinstance(lhs, CFunctionCall):
             return True
         if isinstance(lhs, CVariable):
             var = _dynamic_dce_getattr_8616(lhs, "variable", None)
-            if isinstance(var, (SimStackVariable, SimRegisterVariable)):
+            if isinstance(var, SimStackVariable):
                 return False
             if isinstance(var, SimMemoryVariable):
                 return True
@@ -474,12 +478,10 @@ class _DeadCodeEliminationRun8616:
         return saw_discardable_artifact
 
     def _is_plain_local_lvalue_8616(self, lhs: object) -> bool:
-        if not isinstance(lhs, CVariable):
+        """Exclude architectural effects lacking an owned dead-effect proof."""
+        if not isinstance(lhs, CVariable) or has_architectural_register_storage_8616(lhs):
             return False
-        var = _dynamic_dce_getattr_8616(lhs, "variable", None)
-        if isinstance(var, SimStackVariable):
-            return True
-        return bool(isinstance(var, SimRegisterVariable))
+        return isinstance(lhs.variable, (SimStackVariable, SimTemporaryVariable))
 
     def _is_frame_anchor_stack_lvalue_8616(self, lhs: object) -> bool:
         if not isinstance(lhs, CVariable):

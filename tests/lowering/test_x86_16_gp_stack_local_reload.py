@@ -7,13 +7,14 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable, SimTemporaryVariable
+
 import inertia.semantics.callsite_summary as callsite_summary
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import CallsiteReturnUseKind8616
 from inertia.lowering.gp_register_state import runtime_gp_state_expr_8616
 from inertia.lowering.gp_stack_local_reload import has_materialized_gp_local_reload_8616
 from inertia.lowering.gp_stack_restore import materialize_gp_stack_restores_8616
 from inertia.lowering.segment_register_state import runtime_segment_state_cvar_8616
+from inertia.semantics.caller_return_use_contracts import CallsiteReturnUseKind8616
 from tests.lowering.test_x86_16_gp_stack_restore import _artifact, _Codegen
 from tests.semantics.test_x86_16_call_stack_effects import _summary
 

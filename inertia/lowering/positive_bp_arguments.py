@@ -146,14 +146,13 @@ def _canonical_argument_name_8616(
     return f"arg_{bp_offset:x}"
 
 
-def _function_for_codegen_8616(project: object, address: int) -> _FunctionSurface8616 | None:
-    """Resolve an existing angr function through its dynamic project boundary."""
-    try:
-        project_dynamic = cast(Any, project)
-        function = project_dynamic.kb.functions.function(addr=address, create=False)
-    except (AttributeError, KeyError):
-        return None
-    return cast(_FunctionSurface8616, function) if function is not None else None
+def _function_for_codegen_8616(project: object, codegen: object) -> _FunctionSurface8616 | None:
+    """Consume the authenticated recovery owner, including private analysis KBs."""
+    # Defer the native IR boundary until argument recovery needs its context.
+    from inertia.ir.vex_import import codegen_function_8616
+
+    resolved = codegen_function_8616(project, codegen)
+    return cast(_FunctionSurface8616, resolved[0]) if resolved is not None else None
 
 
 def _existing_interface_matches_8616(
@@ -537,7 +536,7 @@ def _prepare_positive_bp_run_8616(
     except AttributeError:
         pass
     first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
-    function = _function_for_codegen_8616(project, cfunc.addr)
+    function = _function_for_codegen_8616(project, codegen)
     word_access_offsets = frozenset(
         collect_bp_word_stack_access_offsets_8616(project, function)
         if function is not None

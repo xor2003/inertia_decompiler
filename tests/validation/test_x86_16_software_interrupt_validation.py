@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.interrupt_contract import interrupt_core_addr_8616
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
-
 from inertia.semantics.software_interrupt_inputs import (
     SoftwareInterruptInputArtifact8616,
     SoftwareInterruptInputFact8616,

@@ -19,10 +19,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.rustylib.ailment import Tags as AilmentTags
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
 import inertia.lowering.call_return_frame as frame_lowering
 import inertia.lowering.call_return_frame_arguments as frame_argument_lowering
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.call_return_frame import (
     prune_exact_call_return_frame_projections_8616,
 )
@@ -36,7 +36,6 @@ from inertia.lowering.real_mode_linear import (
 from inertia.lowering.stack_probe_callsite_lowering import (
     lower_fixed_stack_probe_callsite_artifacts_8616,
 )
-
 from inertia.semantics.call_return_frame_effects import (
     CallReturnFrameEffectCollection8616,
     CallReturnFrameEffectFact8616,
@@ -51,6 +50,7 @@ from inertia.semantics.call_return_frame_projections import (
     CallReturnFrameProjectionRole8616,
     collect_call_return_frame_store_projections_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 class _Codegen:

@@ -10,7 +10,6 @@ trips is independent execution evidence, never part of the symbolic proof.
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _project
 
 from tools.dosunit.compare.flat32_call_contracts import CallCompositionLimits
 from tools.dosunit.compare.flat32_loop_calls import compare_flat32_loop_calls
@@ -23,6 +22,7 @@ from tools.dosunit.runtime.flat32_replay import (
     compare_replays,
     replay,
 )
+from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _project
 
 pytest_plugins = ["test_flat32_comparator_lane"]
 

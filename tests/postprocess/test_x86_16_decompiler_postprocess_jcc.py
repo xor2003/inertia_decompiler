@@ -21,7 +21,13 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.condition_ir import JCC_TO_COND_8616
+from inertia.lowering.annotations import ANNOTATION_KEY
+from inertia.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
+)
 from inertia.postprocess.decompiler_postprocess_jcc import (
     _COND_TO_CMP_OP_8616,
     _JCC_COMPARE_OPS_8616,
@@ -49,12 +55,6 @@ from inertia.postprocess.decompiler_postprocess_stage import (
 from inertia.structuring.decompiler_structuring_stage import (
     _try_accept_structuring_validation_delta_from_evidence_8616,
 )
-from inertia.ir.condition_ir import JCC_TO_COND_8616
-from inertia.lowering.stack_variable_coordinates import (
-    record_stack_variable_coordinate_projection_8616,
-)
-
-from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.validation.tail_validation_condition_context import build_x86_16_contextual_condition_fingerprints
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 

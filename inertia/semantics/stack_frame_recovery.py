@@ -29,9 +29,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+from inertia.pipeline.errors import PipelineHardError
 
 
 @dataclass(frozen=True)

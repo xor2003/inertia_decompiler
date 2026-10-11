@@ -451,8 +451,8 @@ def _evidence_row(status: object) -> ObligationEvidence:
 
 def test_bind_io_premise_marks_consumed_row_conditional() -> None:
     """A PROVED row consuming I/O becomes CONDITIONAL."""
-    from tools.dosunit.contracts.proof_contracts import ProofStatus
     from tools.dosunit.compare.real16_binary_compare import _bind_io_premise
+    from tools.dosunit.contracts.proof_contracts import ProofStatus
 
     model = declared_ordered_io(Architecture.REAL16)
     document = {"functions": [
@@ -466,8 +466,8 @@ def test_bind_io_premise_marks_consumed_row_conditional() -> None:
 
 def test_bind_io_premise_marks_backend_consumed_row() -> None:
     """Backend-recorded premise consumption is marked too."""
-    from tools.dosunit.contracts.proof_contracts import ProofStatus
     from tools.dosunit.compare.real16_binary_compare import _bind_io_premise
+    from tools.dosunit.contracts.proof_contracts import ProofStatus
 
     model = declared_ordered_io(Architecture.REAL16)
     document = {"functions": []}
@@ -479,8 +479,8 @@ def test_bind_io_premise_marks_backend_consumed_row() -> None:
 
 def test_bind_io_premise_keeps_unconsumed_proved() -> None:
     """Rows without I/O consumption stay unchanged."""
-    from tools.dosunit.contracts.proof_contracts import ProofStatus
     from tools.dosunit.compare.real16_binary_compare import _bind_io_premise
+    from tools.dosunit.contracts.proof_contracts import ProofStatus
 
     model = declared_ordered_io(Architecture.REAL16)
     document = {"functions": [

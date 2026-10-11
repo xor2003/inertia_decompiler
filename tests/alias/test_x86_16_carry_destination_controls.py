@@ -2,11 +2,11 @@
 from dataclasses import replace
 
 import pytest
-from inertia.ir import IRInstr, IRValue, MemSpace
-from inertia.ir.core import IRActiveUnary8616
 
 from inertia.alias.carry_borrow_destinations import _value_reaches_result_lane
 from inertia.alias.domains import register_domain_for_name
+from inertia.ir import IRInstr, IRValue, MemSpace
+from inertia.ir.core import IRActiveUnary8616
 
 
 def _case():

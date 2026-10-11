@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.frontend_capstone_block import DirectCapstoneBlock8616
 from inertia.lowering.analysis_helpers import (
     _analysis_project_block_8616,
     resolve_direct_call_target_from_block,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 def test_analysis_helper_uses_direct_frontend_block_without_vex(monkeypatch) -> None:

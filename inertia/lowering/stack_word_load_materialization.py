@@ -2,8 +2,10 @@
 
 Layer: Types/Lowering.
 Responsibility: replace a structured ``low | (high << 8)`` projection with
-the canonical stack CVariable only when instruction provenance, the exact
+the canonical stack scalar value only when instruction provenance, the exact
 Alias load range, and the BP-to-entry-SP coordinate registry all agree.
+Pointer owners yield guest offset bits through the owned storage bridge;
+their host C addresses must never replace machine integer word values.
 Consumes alias, widening, and typed facts. Unproven candidates are retained and
 reported as typed refusals.
 Do not recover semantics from COD, source, assembly, or rendered C text.
@@ -18,6 +20,7 @@ from enum import StrEnum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+from angr.sim_type import SimType
 from angr.sim_variable import SimStackVariable
 
 from inertia.alias.stack_memory_ssa_contracts import (
@@ -33,6 +36,7 @@ from .instruction_bp_stack_access import (
 )
 from .segment_access_policy import instruction_addrs_from_node_8616
 from .stack_prototype_layout import stack_prototype_cvar_for_machine_bp_range_8616
+from .stack_value_projection import project_pointer_storage_value_8616
 from .stack_variable_coordinates import stack_cvar_for_machine_bp_range_8616
 from .stack_word_load_candidate import (
     direct_machine_bp_word_owner_8616,
@@ -60,6 +64,7 @@ class StackWordLoadRefusalKind8616(StrEnum):
     ALIAS_LOAD_AMBIGUOUS = "alias_load_ambiguous"
     STACK_PROJECTION_MISMATCH = "stack_projection_mismatch"
     CAPTURED_VALUE = "captured_value"
+    VALUE_WIDTH_UNPROVEN = "value_width_unproven"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +148,19 @@ def _word_load_candidates_8616(
     }, key=lambda fact: (fact.displacement, fact.size, fact.kind.value)))
 
 
+def _owner_represents_word_value_8616(owner: structured_c.CVariable) -> bool:
+    """Require all loaded bits in the C value, independently of slot padding."""
+    value_type = owner.variable_type
+    if not isinstance(value_type, SimType):
+        return False
+    try:
+        size_bits: object = value_type.size
+        return isinstance(size_bits, int) and size_bits == 16
+    except (AttributeError, TypeError, ValueError):
+        # Third-party SimType can lack an architecture-dependent size.
+        return False
+
+
 @dataclass
 class _StackWordRecomposition8616:
     """Replace proven word projections and retain every typed refusal."""
@@ -169,8 +187,39 @@ class _StackWordRecomposition8616:
             )
         )
 
+    def _materialized_word_value(
+        self,
+        owner: structured_c.CExpression,
+        instruction_addrs: frozenset[int] = frozenset(),
+    ) -> structured_c.CExpression | None:
+        """Return the guest scalar storage value for one proven word owner.
+
+        A machine word recomposition stores the owner's guest offset bits, so
+        host C pointer owners must be projected through the scalar bridge.
+        Non-pointer owners pass through unchanged. The caller's word-width
+        gate rejects wider pointer owners before this projection; a missing
+        storage projection retains the original expression with a typed refusal.
+        """
+        projected = project_pointer_storage_value_8616(self.codegen, owner, 2)
+        if projected is None:
+            self._refuse(
+                StackWordLoadRefusalKind8616.VALUE_WIDTH_UNPROVEN,
+                instruction_addrs,
+                detail="pointer owner width is not a supported machine word",
+            )
+            return None
+        self.materialized_count += 1
+        return projected
+
     def _logical_owner(self, node: object, low: object, high: object) -> object:
         """Resolve an owner when no instruction provenance exists."""
+        if not isinstance(low, structured_c.CVariable):
+            self._refuse(
+                StackWordLoadRefusalKind8616.NO_INSTRUCTION_PROVENANCE,
+                detail="instructionless byte view has no canonical stack variable",
+            )
+            return node
+        assert self.source_alias is not None  # Established by _operand_gates.
         logical_owner = resolve_logical_stack_word_owner_8616(
             self.codegen,
             self.source_alias,
@@ -178,8 +227,11 @@ class _StackWordRecomposition8616:
             high,
         )
         if logical_owner.resolved and logical_owner.cvar is not None:
-            self.materialized_count += 1
-            return logical_owner.cvar
+            if not _owner_represents_word_value_8616(logical_owner.cvar):
+                self._refuse(StackWordLoadRefusalKind8616.VALUE_WIDTH_UNPROVEN)
+                return node
+            value = self._materialized_word_value(logical_owner.cvar)
+            return node if value is None else value
         self._refuse(
             StackWordLoadRefusalKind8616.NO_INSTRUCTION_PROVENANCE,
             detail=logical_owner.detail,
@@ -223,7 +275,7 @@ class _StackWordRecomposition8616:
                 load.displacement,
                 load.size,
             )
-        if isinstance(canonical_owner, structured_c.CVariable):
+        if isinstance(canonical_owner, structured_c.CVariable) and _owner_represents_word_value_8616(canonical_owner):
             return canonical_owner
         return None
 
@@ -245,8 +297,11 @@ class _StackWordRecomposition8616:
             return node
         direct_owner = direct_machine_bp_word_owner_8616(low, load)
         if direct_owner is not None:
-            self.materialized_count += 1
-            return direct_owner
+            if not _owner_represents_word_value_8616(direct_owner):
+                self._refuse(StackWordLoadRefusalKind8616.VALUE_WIDTH_UNPROVEN, instruction_addrs)
+                return node
+            value = self._materialized_word_value(direct_owner, instruction_addrs)
+            return node if value is None else value
         if not isinstance(low, structured_c.CVariable):
             self._refuse(
                 StackWordLoadRefusalKind8616.STACK_PROJECTION_MISMATCH,
@@ -274,8 +329,11 @@ class _StackWordRecomposition8616:
                 ),
             )
             return node
-        self.materialized_count += 1
-        return resolution.cvar
+        if not _owner_represents_word_value_8616(resolution.cvar):
+            self._refuse(StackWordLoadRefusalKind8616.VALUE_WIDTH_UNPROVEN, instruction_addrs)
+            return node
+        value = self._materialized_word_value(resolution.cvar, instruction_addrs)
+        return node if value is None else value
 
     def _operand_gates(self, low: object, high: object) -> bool:
         """Refuse captured, side-effectful, or alias-unproven candidates."""
@@ -298,8 +356,11 @@ class _StackWordRecomposition8616:
         projected_owner = stack_word_projection_owner_8616(self.codegen, node)
         if projected_owner is not None:
             self.raw_fact_count += 1
-            self.materialized_count += 1
-            return projected_owner
+            if not _owner_represents_word_value_8616(projected_owner):
+                self._refuse(StackWordLoadRefusalKind8616.VALUE_WIDTH_UNPROVEN)
+                return node
+            value = self._materialized_word_value(projected_owner)
+            return node if value is None else value
         recomposition = recognize_stack_word_recomposition_8616(node)
         if recomposition is None:
             return node
@@ -313,6 +374,7 @@ class _StackWordRecomposition8616:
         if not instruction_addrs:
             return self._logical_owner(node, low, high)
         if self.index is None:
+            assert self.source_alias is not None  # Established by _operand_gates.
             self.index = ensure_instruction_bp_stack_access_index_8616(
                 self.codegen,
                 self.source_alias,
@@ -322,8 +384,8 @@ class _StackWordRecomposition8616:
             return node
         canonical_owner = self._canonical_owner(load)
         if canonical_owner is not None:
-            self.materialized_count += 1
-            return canonical_owner
+            value = self._materialized_word_value(canonical_owner, instruction_addrs)
+            return node if value is None else value
         return self._projected_owner(node, low, high, load, instruction_addrs)
 
 

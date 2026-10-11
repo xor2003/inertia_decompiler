@@ -8,6 +8,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CVariable
 from angr.sim_type import SimTypeInt
 from angr.sim_variable import SimVariable
+
 from inertia.ir.condition_fingerprint_masks import (
     _split_args_8616,
     normalize_condition_full_width_masks_8616,

@@ -11,6 +11,13 @@ Implementation changes are out of scope even if a control fails.
 from __future__ import annotations
 
 import pytest
+
+from inertia.alias.entry_stack_byte_contracts import (
+    EntryStackByteRead8616,
+)
+from inertia.alias.entry_stack_bytes import (
+    prove_entry_stack_bytes_8616,
+)
 from inertia.ir.scalar_value_projection import (
     ScalarBinaryKind8616 as Kind,
 )
@@ -20,25 +27,18 @@ from inertia.ir.scalar_value_projection import (
 from inertia.ir.scalar_value_projection import (
     ScalarProjectionKind8616 as ProjectionKind,
 )
-from tests.fixtures.entry_stack_byte_test_support import (
-    _artifact,
-    _capture,
-    _load,
-    _ss_addr,
-)
-
-from inertia.alias.entry_stack_byte_contracts import (
-    EntryStackByteRead8616,
-)
-from inertia.alias.entry_stack_bytes import (
-    prove_entry_stack_bytes_8616,
-)
 from inertia.widening.entry_stack_word_bits import (
     EntryStackWordBit8616,
     binary_entry_bits_8616,
     bit_vector_constant_8616,
     constant_bits_8616,
     project_entry_bits_8616,
+)
+from tests.fixtures.entry_stack_byte_test_support import (
+    _artifact,
+    _capture,
+    _load,
+    _ss_addr,
 )
 
 

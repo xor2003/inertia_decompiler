@@ -11,12 +11,12 @@ import struct
 
 import angr
 
+from tools.dosunit.architectures.flat32_pe_loader import InclusivePE
 from tools.dosunit.runtime.flat32_memory_permissions import (
     DeclaredAccess,
     MappingOrigin,
     PageGrant,
 )
-from tools.dosunit.architectures.flat32_pe_loader import InclusivePE
 from tools.dosunit.runtime.flat32_replay import (
     ReplayImage,
     ReplayResult,

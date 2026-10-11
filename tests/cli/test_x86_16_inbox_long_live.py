@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from pycparser import c_ast, c_parser
+
 from tests.cli.test_x86_16_cli import REPO_ROOT, _run_decompile_proc
 from tests.structuring.test_x86_16_wide_condition_provenance import assert_inbox_behavior
 

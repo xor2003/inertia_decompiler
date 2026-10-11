@@ -13,12 +13,9 @@ Do not perform structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
-
-from inertia.pipeline.errors import PipelineHardError
 
 from inertia.alias.indexed_address_contracts import (
     IndexedAddressAliasEvidence8616,
@@ -26,6 +23,8 @@ from inertia.alias.indexed_address_contracts import (
 )
 from inertia.ir.core import MemSpace
 from inertia.ir.indexed_address_contracts import IndexedAddressAccessKind8616
+from inertia.ir.vex_import import codegen_function_8616
+from inertia.pipeline.errors import PipelineHardError
 
 from .segmented_global_loads import (
     IndexedSegmentedGlobalLoadSiteEvidence8616,
@@ -144,24 +143,6 @@ class _CodegenBoundary8616(Protocol):
     cfunc: _CFuncBoundary8616 | None
     _inertia_indexed_address_alias_evidence_8616: IndexedAddressAliasEvidence8616
     _inertia_indexed_address_collector_parity_8616: IndexedAddressCollectorParity8616
-
-
-class _FunctionManagerBoundary8616(Protocol):
-    """Minimal dynamic angr function lookup surface."""
-
-    function: Callable[..., object | None]
-
-
-class _KnowledgeBaseBoundary8616(Protocol):
-    """Minimal dynamic angr knowledge-base surface."""
-
-    functions: _FunctionManagerBoundary8616
-
-
-class _ProjectBoundary8616(Protocol):
-    """Minimal dynamic angr project surface for parity collection."""
-
-    kb: _KnowledgeBaseBoundary8616
 
 
 def _alias_key_8616(fact: IndexedAddressAliasFact8616) -> IndexedAddressCollectorKey8616:
@@ -307,10 +288,10 @@ def collect_indexed_address_collector_parity_8616(
             "indexed-address Alias evidence has the wrong pipeline contract",
             layer="lowering",
         )
-    project_boundary = cast(_ProjectBoundary8616, project)
-    function = project_boundary.kb.functions.function(addr=cfunc.addr, create=False)
-    if function is None:
+    resolved = codegen_function_8616(project, codegen)
+    if resolved is None:
         return None
+    function, _function_addr = resolved
     result = compare_indexed_address_collectors_8616(
         alias_evidence,
         recover_indexed_segmented_global_load_site_evidence_8616(project, function),

@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from inertia.alias.carry_borrow_projection import (
+    CarryBorrowAliasFailure8616,
+    project_carry_borrow_aliases_8616,
+)
 from inertia.ir import (
     IRInstr,
     IRValue,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
-from tests.fixtures.x86_16_carry_borrow_call_output_support import lift_after_dx_ax_call
-
-from inertia.alias.carry_borrow_projection import (
-    CarryBorrowAliasFailure8616,
-    project_carry_borrow_aliases_8616,
-)
 from inertia.semantics.carry_borrow_contracts import CarryBorrowFailure8616
 from inertia.semantics.carry_borrow_links import analyze_carry_borrow_links_8616
 from inertia.widening.carry_borrow_values import widen_carry_borrow_values_8616
+from tests.fixtures.x86_16_carry_borrow_call_output_support import lift_after_dx_ax_call
 
 
 def _low_adds(artifact: SSAFunctionArtifact) -> tuple[tuple[int, IRInstr], ...]:

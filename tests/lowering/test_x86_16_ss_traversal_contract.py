@@ -4,6 +4,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 import inertia.lowering.real_mode_linear as real_mode_linear
 from inertia.lowering.real_mode_linear import lower_stable_ss_linear_stack_dereferences_8616
 from tests.lowering.test_x86_16_segmented_runtime_lowering import _project

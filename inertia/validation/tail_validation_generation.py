@@ -19,12 +19,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from inertia.lowering.return_type_evidence import proven_function_return_class_8616
 from inertia.semantics.callsite_summary import (
     caller_return_use_evidence_by_addr_8616,
     callsite_summary_inventory_8616,
 )
-
-from inertia.lowering.return_type_evidence import proven_function_return_class_8616
 
 from .status_flag_preservation import (
     packed_status_flag_preservation_evidence_8616,

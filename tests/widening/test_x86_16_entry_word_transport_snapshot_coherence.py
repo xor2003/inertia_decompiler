@@ -8,10 +8,11 @@ refusing contradictory register views, absent versions and duplicate producers.
 from __future__ import annotations
 
 import pytest
-from inertia.ir.core import IRValue, MemSpace
+
 import inertia.widening.entry_word_transport as _TRANSPORT
 import inertia.widening.entry_word_transport_snapshots as _SNAPSHOTS
 import inertia.widening.entry_word_transport_state as _STATE
+from inertia.ir.core import IRValue, MemSpace
 from tests.widening.test_x86_16_entry_word_transport import EXTERNAL, TARGET, _const, _mov, _reg, _tmp
 from tests.widening.test_x86_16_entry_word_transport_snapshots import _prove, _snap
 

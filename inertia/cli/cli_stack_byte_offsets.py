@@ -14,6 +14,10 @@ from typing import Any, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.lowering.segment_register_state import (
+    runtime_segment_name_for_variable_8616,
+)
 from inertia.pipeline.structured_assignment_index import (
     StructuredAssignmentIdentityIndex8616,
     StructuredAssignmentIdentityKey8616,
@@ -22,10 +26,6 @@ from inertia.pipeline.structured_assignment_index import (
 )
 from inertia.pipeline.structured_ast_query_index import (
     StructuredAstQueryIndex8616,
-)
-
-from inertia.lowering.segment_register_state import (
-    runtime_segment_name_for_variable_8616,
 )
 
 _LINEAR_TEMP_NAME_RE_8616 = re.compile(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)")

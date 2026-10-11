@@ -5,11 +5,11 @@ import ctypes
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_real16_control_boundary import _CALLBACKS
 
 import tools.dosunit.compare.real16_control_boundary as boundary
 import tools.dosunit.compare.real16_control_targets as targets
 import tools.dosunit.compare.straightline_ssa as ssa
+from tools.dosunit.tests.test_real16_control_boundary import _CALLBACKS
 
 
 def _wrapped_alarm(alarm: ssa._BlockLiftTimeout) -> None:

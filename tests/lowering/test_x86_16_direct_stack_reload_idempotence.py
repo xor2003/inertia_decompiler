@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CConstant, CStatements, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
+import inertia.lowering.real_mode_linear as real_mode_linear
 import inertia.structuring.decompiler_structuring_stage as structuring_stage
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-import inertia.lowering.real_mode_linear as real_mode_linear
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveSourceKind8616,
     DirectStackReloadFact8616,
@@ -255,6 +256,39 @@ def test_structured_ast_generation_does_not_evaluate_opaque_properties() -> None
     generation = structured_ast_generation_8616(codegen)
 
     assert generation.structured_node_count == 0
+
+
+def test_generation_dispatch_observes_each_dynamic_boundary_instance(monkeypatch) -> None:
+    """Equal concrete Python types need not share an isinstance classification."""
+    from inertia.pipeline import structured_ast_generation as generation
+
+    class BoundaryProxy:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        @property
+        def __class__(self):
+            return dict if self.mapping else object
+
+        def __len__(self):
+            return 1
+
+        def items(self):
+            return [("value", 1)]
+
+    first = BoundaryProxy(True)
+    second = BoundaryProxy(False)
+    visited = []
+    builder_type = generation._StructuredAstGenerationBuilder8616
+    original = builder_type._object_value
+
+    def observe(self, value):
+        visited.append(value)
+        return original(self, value)
+
+    monkeypatch.setattr(builder_type, "_object_value", observe)
+    builder_type().build([first, second])
+    assert visited == [second]
 
 
 def test_structuring_stage_delegates_replay_stability_to_lowering_owner(monkeypatch) -> None:

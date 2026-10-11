@@ -3,27 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    CallsiteSummary8616,
-    record_caller_return_use_evidence_8616,
-)
-from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
-from inertia.lowering.callsite_prototype_declarations import (
-    _joined_return_type_8616,
-)
-from inertia.lowering.project_global_object_layout import (
-    collect_project_direct_global_object_layout_evidence_8616,
-)
-from inertia.lowering.project_global_signedness import (
-    ProjectGlobalOrderingView8616,
-    recover_project_global_signedness_evidence_8616,
-)
-from inertia.lowering.segmented_global_loads import (
-    _project_direct_global_scalar_refs_8616,
-    _sidecar_free_project_direct_global_scalar_refs_8616,
-)
 from capstone.x86_const import (
     X86_INS_CALL,
     X86_INS_CMP,
@@ -39,6 +18,27 @@ from capstone.x86_const import (
     X86_REG_ES,
 )
 
+from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+from inertia.lowering.callsite_prototype_declarations import (
+    _joined_return_type_8616,
+)
+from inertia.lowering.project_global_object_layout import (
+    collect_project_direct_global_object_layout_evidence_8616,
+)
+from inertia.lowering.project_global_signedness import (
+    ProjectGlobalOrderingView8616,
+    recover_project_global_signedness_evidence_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    _project_direct_global_scalar_refs_8616,
+    _sidecar_free_project_direct_global_scalar_refs_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    CallsiteSummary8616,
+    record_caller_return_use_evidence_8616,
+)
 from inertia.semantics.direct_call_result_storage import (
     recover_direct_call_result_storage_facts_8616,
 )

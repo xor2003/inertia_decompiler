@@ -6,8 +6,8 @@ from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.lowering.authoritative_function_prototypes import (
     authoritative_function_prototype_8616,
 )
@@ -35,6 +35,7 @@ from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_projection_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _closed_three_word_evidence(*, complete_sources: bool) -> CalleeArgumentCountEvidence8616:

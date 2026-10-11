@@ -2,10 +2,10 @@
 from dataclasses import replace
 
 import pytest
-from inertia.ir.core import IRActiveUnary8616, IRValue, MemSpace
-from tests.fixtures.entry_stack_byte_test_support import _binop, _capture, _const, _reg
 
 from inertia.alias.entry_stack_pointer_snapshots import EntryStackPointerSnapshots8616
+from inertia.ir.core import IRActiveUnary8616, IRValue, MemSpace
+from tests.fixtures.entry_stack_byte_test_support import _binop, _capture, _const, _reg
 
 
 def _engine():

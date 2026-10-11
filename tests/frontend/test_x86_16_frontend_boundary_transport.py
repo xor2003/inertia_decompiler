@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.frontend_boundary_transport import (
     capture_function_boundary_8616,
     restore_function_boundary_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 def _fixture(code=b"\xeb\x03\x90\x90\x90\xc3", base=0x1000):
@@ -148,7 +148,6 @@ def test_callsite_codec_retains_boundary_on_fresh_project(original_owner, corrup
     assert restored.caller_function.project is destination
     assert restored.caller_function.reachable_instruction_addrs == {0x1000, 0x1005}
     from inertia.ir.function_ssa_registry import FunctionSSAArtifactVerdict8616
-
     from inertia.semantics.call_stack_effect_pipeline import (
         semantic_function_ssa_artifact_at_address_8616,
     )

@@ -5,13 +5,6 @@ from dataclasses import replace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.core import IRInstr, IRValue, MemSpace
-from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
-from inertia.ir.ir_boundary_cfg import IRBoundaryCoverageResult8616, prove_ir_boundary_coverage_8616
-from inertia.ir.logical_constant_word_receipt import prove_logical_constant_word_write_8616
-from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
-from inertia.ir.ssa_function import build_x86_16_function_ssa
 
 from inertia.alias.stack_word_call_binding import (
     StackWordCallBindingFailure8616,
@@ -21,7 +14,14 @@ from inertia.alias.stack_word_call_window import (
     StackWordCallWindowReceipt8616,
     prove_stack_word_call_window_8616,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
+from inertia.ir.core import IRInstr, IRValue, MemSpace
+from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
+from inertia.ir.ir_boundary_cfg import IRBoundaryCoverageResult8616, prove_ir_boundary_coverage_8616
+from inertia.ir.logical_constant_word_receipt import prove_logical_constant_word_write_8616
+from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
+from inertia.ir.ssa_function import build_x86_16_function_ssa
 from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact
 
 

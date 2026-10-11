@@ -11,19 +11,24 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import angr
+
+import inertia.lowering.interprocedural_storage_trial_collection as storage_trial_collection
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallsiteArgumentClass8616,
-    CallsitePushSourceKind8616,
-    CallsiteSummary8616,
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    build_boundary_direct_callsite_index_8616,
 )
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import IRValue, MemSpace, SegmentOrigin
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-import inertia.lowering.interprocedural_storage_trial_collection as storage_trial_collection
+from inertia.lowering.analysis_helpers import (
+    resolve_direct_call_target_from_instruction_8616,
+)
 from inertia.lowering.callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     CalleeArgumentCountVerdict8616,
@@ -47,15 +52,10 @@ from inertia.lowering.interprocedural_storage_solver import (
 from inertia.lowering.interprocedural_storage_trial_collection import (
     collect_function_input_storage_trials_8616,
 )
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    build_boundary_direct_callsite_index_8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    exact_function_range_boundary_8616,
-)
-from inertia.lowering.analysis_helpers import (
-    resolve_direct_call_target_from_instruction_8616,
+from inertia.semantics.callsite_summary import (
+    CallsiteArgumentClass8616,
+    CallsitePushSourceKind8616,
+    CallsiteSummary8616,
 )
 
 

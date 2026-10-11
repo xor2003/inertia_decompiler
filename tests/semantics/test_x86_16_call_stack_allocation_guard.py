@@ -3,11 +3,11 @@
 from dataclasses import replace
 
 import pytest
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr
 
+from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr
 from inertia.semantics.call_stack_effect_contracts import CallStackEffectFailure8616
 from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _summary() -> CallsiteSummary8616:

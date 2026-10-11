@@ -7,16 +7,16 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.segment_stack_restore import SegmentStackRestoreVerdict8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.lowering.codegen_return_origin import ReturnValueOrigin8616
 from inertia.lowering.gp_stack_local_return import has_materialized_gp_local_return_8616
 from inertia.lowering.gp_stack_restore import materialize_gp_stack_restores_8616
+from inertia.semantics.register_definition_return import unchanged_register_return_path_8616
 from tests.lowering.test_x86_16_gp_stack_local_reload import _fixture as _reload_fixture
 from tests.lowering.test_x86_16_gp_stack_restore import _artifact, _Codegen
-
-from inertia.alias.segment_stack_restore import SegmentStackRestoreVerdict8616
-from inertia.semantics.register_definition_return import unchanged_register_return_path_8616
 
 
 def _fixture():

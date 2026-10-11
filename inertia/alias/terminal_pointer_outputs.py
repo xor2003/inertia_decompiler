@@ -11,12 +11,11 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 
 from __future__ import annotations
 
+from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.semantics.callsite_register_provenance import (
     recover_register_source_before_instruction_8616,
 )
 from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
-
-from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.semantics.terminal_pointer_output_contracts import (
     TerminalPointerOutputEvidence8616,
 )

@@ -367,12 +367,161 @@ def build_decoded_direct_callsite_index_8616(
 
 
 @dataclass(frozen=True, slots=True)
+class _CallsiteFact8616:
+    """Freeze one resolved call independently of its admission window."""
+
+    lookup_target: int
+    caller: int
+    instruction_index: int
+    callsite: int
+    target: int
+    far: bool
+    identity: CallerEntryIdentity8616 | None
+    instructions: tuple[tuple[int, int, bytes], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DecodedCensusSnapshot8616:
+    """Immutable native census; decoding bounds remain on the boundary."""
+
+    head: int
+    blocks: frozenset[int]
+    instructions: frozenset[int]
+    edges: tuple[tuple[int, int], ...]
+    encodings: tuple[tuple[int, tuple[tuple[int, int, bytes], ...]], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DecodedIndexSnapshot8616:
+    """Immutable resolved index facts, excluding census admission bounds."""
+
+    stats: DecodedDirectCallsiteIndexStats8616
+    identities: tuple[CallerEntryIdentity8616, ...]
+    near: tuple[_CallsiteFact8616, ...]
+    far: tuple[_CallsiteFact8616, ...]
+    censuses: tuple[tuple[int, tuple[tuple[int, int, bytes], ...]], ...]
+
+
+def _instruction_snapshot_8616(instructions: Sequence[object]) -> tuple[tuple[int, int, bytes], ...] | None:
+    """Copy third-party native instruction bytes, or retain legacy absence."""
+    rows: list[tuple[int, int, bytes]] = []
+    for instruction in instructions:
+        native = cast(_NativeCallsiteInstruction8616, instruction)
+        try:
+            address, size, encoding = native.address, native.size, bytes(native.bytes)
+        except (AttributeError, TypeError):
+            return None
+        if type(address) is not int or type(size) is not int or size <= 0 or len(encoding) != size:
+            raise ValueError("malformed decoded instruction snapshot")
+        rows.append((address, size, encoding))
+    return tuple(rows)
+
+
+def _census_snapshot_8616(boundary: ExactFunctionRangeBoundary8616) -> _DecodedCensusSnapshot8616 | None:
+    """Authenticate census consistency and window containment without decoding."""
+    if not boundary.blocks:
+        return None
+    rows: list[tuple[int, tuple[tuple[int, int, bytes], ...]]] = []
+    addresses: list[int] = []
+    for block in sorted((cast(_BoundaryBlock8616, item) for item in boundary.blocks), key=lambda item: item.addr):
+        instructions = _instruction_snapshot_8616(block.capstone.insns)
+        if instructions is None:
+            return None
+        if any(not boundary.decode_start <= addr < addr + size <= boundary.decode_end for addr, size, _ in instructions):
+            raise ValueError("decoded instructions escape admission window")
+        addresses.extend(addr for addr, _, _ in instructions)
+        rows.append((block.addr, instructions))
+    block_addresses = tuple(addr for addr, _ in rows)
+    if (not boundary.decode_start <= boundary.addr < boundary.decode_end
+            or len(set(block_addresses)) != len(block_addresses)
+            or frozenset(block_addresses) != boundary.block_addrs_set
+            or len(set(addresses)) != len(addresses)
+            or frozenset(addresses) != boundary.reachable_instruction_addrs):
+        raise ValueError("conflicting decoded callsite census for caller")
+    return _DecodedCensusSnapshot8616(boundary.addr, boundary.block_addrs_set,
+                                    boundary.reachable_instruction_addrs, boundary.successor_edges, tuple(rows))
+
+
+type _InstructionSnapshotCache8616 = dict[int, tuple[Sequence[object], tuple[tuple[int, int, bytes], ...] | None]]
+
+
+def _shared_instruction_snapshot_8616(
+    instructions: Sequence[object], cache: _InstructionSnapshotCache8616,
+) -> tuple[tuple[int, int, bytes], ...] | None:
+    """Copy each pinned instruction sequence once within one snapshot operation."""
+    key = id(instructions)
+    if key not in cache:
+        cache[key] = (instructions, _instruction_snapshot_8616(instructions))
+    return cache[key][1]
+
+
+def _callsite_snapshot_8616(
+    entries: dict[int, tuple[DecodedDirectCallsite8616, ...]], cache: _InstructionSnapshotCache8616,
+) -> tuple[_CallsiteFact8616, ...] | None:
+    """Freeze lookup keys and call interpretation, not only instruction bytes."""
+    rows: list[_CallsiteFact8616] = []
+    for target, calls in sorted(entries.items()):
+        for call in calls:
+            instructions = _shared_instruction_snapshot_8616(call.instructions, cache)
+            if instructions is None:
+                return None
+            rows.append(_CallsiteFact8616(target, call.caller_start, call.instruction_index,
+                                         call.callsite_addr, call.target_addr, call.is_far,
+                                         call.entry_identity, instructions))
+    return tuple(rows)
+
+
+def _index_snapshot_8616(index: DecodedDirectCallsiteIndex8616) -> _DecodedIndexSnapshot8616 | None:
+    """Freeze every retained call fact while keeping window provenance separate."""
+    cache: _InstructionSnapshotCache8616 = {}
+    near = _callsite_snapshot_8616(index._entries_by_normalized_target, cache)
+    far = _callsite_snapshot_8616(index._entries_by_exact_far_target, cache)
+    if near is None or far is None:
+        return None
+    censuses: list[tuple[int, tuple[tuple[int, int, bytes], ...]]] = []
+    for census in index.caller_censuses:
+        instructions = _shared_instruction_snapshot_8616(census.instructions, cache)
+        if instructions is None:
+            return None
+        if any(not census.decode_start <= addr < addr + size <= census.decode_end for addr, size, _ in instructions):
+            raise ValueError("indexed instructions escape admission window")
+        censuses.append((census.entry_addr, instructions))
+    return _DecodedIndexSnapshot8616(index.stats, index.entry_identities, near, far, tuple(censuses))
+
+
+@dataclass(frozen=True, slots=True)
 class RetainedDecodedCallsiteIndex8616:
     """One closed decoded index retained against its exact caller census."""
 
     caller_addr: int
     boundary: ExactFunctionRangeBoundary8616
     index: DecodedDirectCallsiteIndex8616
+    census_snapshot: _DecodedCensusSnapshot8616 | None = field(default=None, repr=False)
+    index_snapshot: _DecodedIndexSnapshot8616 | None = field(default=None, repr=False)
+
+
+def _require_same_retained_census_8616(
+    existing: RetainedDecodedCallsiteIndex8616,
+    boundary: ExactFunctionRangeBoundary8616,
+    index: DecodedDirectCallsiteIndex8616 | None = None,
+) -> None:
+    """Reuse exact immutable facts without widening their retained provenance."""
+    incoming = _census_snapshot_8616(boundary)
+    current = _census_snapshot_8616(existing.boundary)
+    legacy_window_changed = incoming is None and existing.boundary != boundary
+    if (existing.boundary.project is not boundary.project
+            or existing.caller_addr != boundary.addr
+            or current != existing.census_snapshot or incoming != existing.census_snapshot
+            or legacy_window_changed):
+        raise ValueError("conflicting decoded callsite census for caller")
+    current_index = _index_snapshot_8616(existing.index)
+    if current_index != existing.index_snapshot:
+        raise ValueError("conflicting retained decoded callsite index facts")
+    if index is not None:
+        incoming_index = _index_snapshot_8616(index)
+        if (incoming_index != existing.index_snapshot
+                or (incoming_index is None and index != existing.index)):
+            raise ValueError("conflicting decoded callsite index facts")
 
 
 class _DecodedIndexRegistrySurface8616(Protocol):
@@ -418,10 +567,10 @@ def retain_decoded_callsite_index_8616(
 ) -> RetainedDecodedCallsiteIndex8616:
     """Retain one closed index against its exact decoded caller census.
 
-    The boundary's compared census fields (entry, size, reachable block and
-    instruction sets, edges) are the retention key. Re-retaining the same
-    census keeps the first record deterministically; a different census for
-    the same caller is a contract error and fails loudly.
+    Native census snapshots identify decoded facts independently of admission
+    bounds. Re-retaining the same facts keeps the first boundary provenance;
+    changed bytes, edges or call facts fail loudly. Without native encodings,
+    legacy records remain limited to an identical boundary.
     """
     if not isinstance(boundary, ExactFunctionRangeBoundary8616):
         raise ValueError("decoded callsite retention requires an exact boundary census")
@@ -438,10 +587,10 @@ def retain_decoded_callsite_index_8616(
         surface._inertia_decoded_callsite_indexes_8616 = registry
     existing = registry.get(boundary.addr)
     if existing is not None:
-        if existing.boundary != boundary:
-            raise ValueError("conflicting decoded callsite census for caller")
+        _require_same_retained_census_8616(existing, boundary, index)
         return existing
-    record = RetainedDecodedCallsiteIndex8616(boundary.addr, boundary, index)
+    record = RetainedDecodedCallsiteIndex8616(boundary.addr, boundary, index,
+                                            _census_snapshot_8616(boundary), _index_snapshot_8616(index))
     registry[boundary.addr] = record
     return record
 
@@ -464,13 +613,13 @@ def decoded_callsite_index_for_boundary_8616(
         raise ValueError("decoded callsite boundary belongs to another project")
     existing = registered_decoded_callsite_index_8616(project, boundary.addr)
     if existing is not None:
-        if existing.boundary != boundary:
-            raise ValueError("conflicting decoded callsite census for caller")
+        _require_same_retained_census_8616(existing, boundary)
         return existing
     build_boundary_direct_callsite_index_8616(
         boundary, direct_target_resolver=direct_target_resolver
     )
     record = registered_decoded_callsite_index_8616(project, boundary.addr)
-    if record is None or record.boundary != boundary:
+    if record is None:
         raise ValueError("decoded callsite index retention did not hold")
+    _require_same_retained_census_8616(record, boundary)
     return record

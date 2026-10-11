@@ -6,9 +6,9 @@ from unittest.mock import Mock
 import angr
 import pytest
 
-from inertia.cli.lst_extract import LSTMetadata
 import inertia.cli.binary_signature_metadata as signatures
 import inertia.cli.cli_core as cli_core
+from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.sidecar_metadata import _visible_code_labels
 
 
@@ -35,6 +35,7 @@ def test_signature_loader_keeps_debug_fields_empty(tmp_path, monkeypatch, matche
         return
     assert metadata.signature_code_addrs == frozenset(labels)
     assert metadata.code_ranges == ranges
+    assert metadata.signature_code_ranges == ranges
     assert metadata.cod_path is None
     assert not metadata.data_labels
     assert not metadata.cod_proc_kinds
@@ -71,3 +72,65 @@ def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypat
     load_signatures.assert_called_once_with(args.binary, project, pat_backend="python_regex", signature_catalog=catalog)
     sidecars.assert_not_called()
     assert "no helper metadata (.lst/.map/.cod/debug info) found" in capsys.readouterr().out
+
+
+def test_signature_extents_survive_cache_without_debug_range_promotion():
+    from inertia.cli.sidecar_cache import _deserialize_lst_metadata, _serialize_lst_metadata
+
+    metadata = LSTMetadata(
+        data_labels={}, code_labels={0x1000: "runtime"},
+        code_ranges={0x1000: (0x1000, 0x2000)},
+        signature_code_ranges={0x1000: (0x1000, 0x1020)},
+        signature_code_addrs=frozenset({0x1000}),
+    )
+    restored = _deserialize_lst_metadata(_serialize_lst_metadata(metadata))
+    assert restored.signature_code_ranges == {0x1000: (0x1000, 0x1020)}
+    assert restored.code_ranges == {0x1000: (0x1000, 0x2000)}
+    old_payload = _serialize_lst_metadata(metadata)
+    del old_payload["signature_code_ranges"]
+    assert _deserialize_lst_metadata(old_payload).signature_code_ranges == {}
+
+
+def test_startup_prefix_does_not_invent_body_range():
+    from inertia.cli.sidecar_parsers import _merge_startup_flair_evidence_8616
+    from tools.signatures.omf_pat import LocalPatMatchResult
+
+    labels, ranges = {}, {}
+    project = SimpleNamespace(entry=0x1000)
+    prefix = SimpleNamespace(public_names=((0, "runtime"),), compiler_tag="test", pat_path="test.pat")
+    _merge_startup_flair_evidence_8616(
+        project, (prefix,), LocalPatMatchResult({}, {}, ()), labels, ranges, [], [])
+    assert labels == {0x1000: "runtime"}
+    assert ranges == {}
+
+
+def test_sidecar_merge_keeps_verified_extent_separate_from_listing(monkeypatch, tmp_path):
+    import inertia.cli.sidecar_metadata as sidecars
+
+    labels = {0x1000: "source_name"}
+    bounds = {0x1000: (0x1000, 0x2000)}
+    verified = {}
+    monkeypatch.setattr(sidecars, "_detect_flair_metadata", lambda *args, **kwargs: (
+        {0x1000: "binary_name"}, {0x1000: (0x1000, 0x1020)}, ("signature_catalog",),
+    ))
+    addresses = sidecars._load_flair_sidecar_8616(
+        tmp_path / "app.exe", SimpleNamespace(), pat_backend=None, signature_catalog=None,
+        code_labels=labels, code_ranges=bounds, source_formats=[], signature_code_ranges=verified,
+    )
+    assert addresses == {0x1000}
+    assert bounds == {0x1000: (0x1000, 0x2000)}
+    assert verified == {0x1000: (0x1000, 0x1020)}
+
+
+def test_rebase_preserves_separate_signature_extent():
+    from inertia.cli.sidecar_cache import _maybe_rebase_stale_absolute_metadata
+
+    metadata = LSTMetadata(
+        data_labels={}, code_labels={0: "entry"}, code_ranges={0: (0, 256)},
+        signature_code_ranges={0: (0, 16)}, signature_code_addrs=frozenset({0}),
+        absolute_addrs=True, source_format="cod_listing+signature_catalog",
+    )
+    project = SimpleNamespace(entry=0x1000, loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x1000)))
+    rebased = _maybe_rebase_stale_absolute_metadata(metadata, project)
+    assert rebased.code_ranges == {0x1000: (0x1000, 0x1100)}
+    assert rebased.signature_code_ranges == {0x1000: (0x1000, 0x1010)}

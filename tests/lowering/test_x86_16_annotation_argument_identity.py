@@ -5,14 +5,14 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 import inertia.postprocess.decompiler_postprocess as postprocess
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.near_pointer_type import SimTypeNearPointer16_8616
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
-
-from inertia.lowering.annotations import ANNOTATION_KEY
 
 
 def test_annotations_preserve_lowering_owned_argument_cvars_over_byte_views() -> None:

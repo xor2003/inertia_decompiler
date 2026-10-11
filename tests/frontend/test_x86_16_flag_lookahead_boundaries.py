@@ -26,6 +26,7 @@ def test_later_overwrite_beyond_transfer_cannot_kill_flags(mnemonic: str) -> Non
 def test_unrolled_loop_first_step_preserves_flags_at_odd_exit() -> None:
     """Real instruction bytes retain the DEC FLAGS before JCXZ can return."""
     import pyvex
+
     from inertia.frontend.x86_16.arch_86_16 import Arch86_16
     from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 

@@ -155,6 +155,7 @@ from .multi_arm_return_chains import (
     is_materialized_multi_arm_return_chain_8616,
     recover_structured_multi_arm_wide_return_chain_8616,
 )
+from .scalar_return_arm_ownership import select_scalar_return_arm_owners_8616
 from .scalar_return_evidence import materialize_complete_scalar_return_leaves_8616
 from .single_branch_return_orientation import (
     classify_cfg_binary_arm_orientation_8616,
@@ -287,7 +288,7 @@ class _ConditionMaterializationProject8616(Protocol):
     """Project diagnostics written while condition consumers run."""
 
     _inertia_decompiler_stage: str
-    kb: object
+    kb: _ConditionMaterializationKnowledgeBase8616
 
 
 class _ConditionMaterializationCFunction8616(Protocol):
@@ -300,7 +301,7 @@ class _ConditionMaterializationCFunction8616(Protocol):
 class _ConditionMaterializationKnowledgeBase8616(Protocol):
     """Dynamic angr knowledge-base fields consumed at the structuring boundary."""
 
-    functions: object
+    functions: _ConditionMaterializationFunctionManager8616
 
 
 class _ConditionMaterializationFunctionManager8616(Protocol):
@@ -453,17 +454,14 @@ def _cfg_node_addr_8616(node: object) -> int | None:
 
 
 def condition_chain_successors_8616(project: object, codegen: object) -> dict[int, tuple[int, ...]]:
-    """Return in-function CFG successors keyed by block address."""
+    """Consume the authenticated function's in-region CFG, including private KBs."""
+    from inertia.ir.vex_import import codegen_function_8616
+
     try:
-        cfunc = cast(_ConditionMaterializationCFunction8616, cast(_ConditionMaterializationCodegen8616, codegen).cfunc)
-        function_manager = cast(
-            _ConditionMaterializationFunctionManager8616,
-            cast(
-                _ConditionMaterializationKnowledgeBase8616,
-                cast(_ConditionMaterializationProject8616, project).kb,
-            ).functions,
-        )
-        function = cast(_ConditionMaterializationFunction8616, function_manager.function(addr=cfunc.addr, create=False))
+        resolved = codegen_function_8616(project, codegen)
+        if resolved is None:
+            return {}
+        function = cast(_ConditionMaterializationFunction8616, resolved[0])
         graph = cast(_ConditionMaterializationGraph8616, function.transition_graph)
         block_addrs = set(function.block_addrs_set)
     except (AttributeError, TypeError):
@@ -2353,24 +2351,27 @@ class _ConditionChainRun8616:
             self.conditions_by_src.get(key[0]) if key is not None else None
             for key in keys
         )
-        _debug_condition_chain_8616(
-            "multi-arm-candidate",
-            arm_count=len(condition_and_nodes),
-            arm_condition_addrs=keys,
-            arm_body_addrs=tuple(
-                _first_tagged_ins_addr_8616(arm_body)
-                for _condition, arm_body in condition_and_nodes
-            ),
-            arm_body_types=tuple(
-                tuple(type(child).__name__ for child in _iter_c_nodes_deep_8616(arm_body))
-                for _condition, arm_body in condition_and_nodes
-            ),
-            else_body_addr=_first_tagged_ins_addr_8616(node.else_node),
-            else_body_types=tuple(
-                type(child).__name__
-                for child in _iter_c_nodes_deep_8616(node.else_node)
-            ),
-        )
+        # These subtree inventories serve only the diagnostic record. Avoid
+        # constructing them when its logger would immediately discard them.
+        if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") == "1":
+            _debug_condition_chain_8616(
+                "multi-arm-candidate",
+                arm_count=len(condition_and_nodes),
+                arm_condition_addrs=keys,
+                arm_body_addrs=tuple(
+                    _first_tagged_ins_addr_8616(arm_body)
+                    for _condition, arm_body in condition_and_nodes
+                ),
+                arm_body_types=tuple(
+                    tuple(type(child).__name__ for child in _iter_c_nodes_deep_8616(arm_body))
+                    for _condition, arm_body in condition_and_nodes
+                ),
+                else_body_addr=_first_tagged_ins_addr_8616(node.else_node),
+                else_body_types=tuple(
+                    type(child).__name__
+                    for child in _iter_c_nodes_deep_8616(node.else_node)
+                ),
+            )
         if not any(fact is not None for fact in source_facts):
             return
         exact_facts = tuple(
@@ -2511,12 +2512,26 @@ class _ConditionChainRun8616:
         condition_and_nodes: tuple[tuple[CExpression, object], ...],
     ) -> bool:
         """Materialize an exact-owned else ladder; False falls through."""
+        artifact = registered_function_ssa_artifact_8616(self.project, self.cfunc.addr).artifact
         exact_ownership = select_exact_multi_arm_condition_owners_8616(
             tuple(first_statement_block_8616(body) for _condition, body in condition_and_nodes),
             proven_facts, else_target=first_statement_block_8616(node.else_node),
             successors=self.successors,
-            artifact=registered_function_ssa_artifact_8616(self.project, self.cfunc.addr).artifact,
+            artifact=artifact,
         )
+        if not exact_ownership.selected:
+            # Cloned shared-epilogue returns collapse every statement target;
+            # prove ownership from CFG continuations plus native return leaves.
+            exact_ownership = select_scalar_return_arm_owners_8616(
+                tuple(body for _condition, body in condition_and_nodes),
+                node.else_node,
+                proven_facts,
+                successors=self.successors,
+                artifact=artifact,
+                recover_return=lambda target: recover_branch_target_return_expression_8616(
+                    self.project, self.codegen, target
+                ),
+            )
         if not exact_ownership.selected:
             return False
         owned = materialize_multi_arm_condition_owners_8616(

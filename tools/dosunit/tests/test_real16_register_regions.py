@@ -1,9 +1,9 @@
 """Actual-MZ relational induction and mutation controls in the shared tree."""
 import pytest
-from tools.dosunit.tests.test_real16_region_proof import _document
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_region_proof import RegionObligation, compare_real16_regions
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_real16_region_proof import _document
 
 ORIGINAL = '85c074034875fdc3'
 CANDIDATE = '9185c974034975fd91c3'

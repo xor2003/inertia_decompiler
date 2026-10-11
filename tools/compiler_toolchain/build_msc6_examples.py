@@ -16,7 +16,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import textwrap
@@ -43,12 +42,25 @@ from inertia.lowering.gp_word_runtime import (  # noqa: E402
 )
 from tools.compiler_toolchain.compiler_profile import (  # noqa: E402
     MSC6_AX_PROFILE_ID,
+    TAIL_COMPILER_CONTEXT_ENV,
     CompileBackend,
     CompilerIdentity,
     CompilerToolchain,
+    FrozenCompilerContext,
+    KvikdosDPMIMode,
+    _dos_case_file,
+    _run,
+    _run_tool_stage,
+    _timeout_output_text,
     compiler_toolchain_lock,
     msc6_ax_toolchain,
     resolve_case_toolchain,
+)
+from tools.compiler_toolchain.conditional_function_receipt import (  # noqa: E402
+    ConditionalFunctionTransport,
+    ConditionalTransportStatus,
+    binary_image_sha256,
+    bind_conditional_function_artifact,
 )
 from tools.compiler_toolchain.generated_c_return_contract import has_returned_call_8616  # noqa: E402
 from tools.compiler_toolchain.msc6_function_targets import (  # noqa: E402
@@ -65,7 +77,6 @@ from tools.compiler_toolchain.msc6_runtime_support import (  # noqa: E402
     msc6_runtime_support_source,
 )
 from tools.dev.decompile_process_budget import focused_decompile_process_timeout  # noqa: E402
-from tools.dev.process_metrics import process_tree_pids  # noqa: E402
 from tools.signatures.flair_paths import default_flair_startup_root  # noqa: E402
 from tools.signatures.signature_catalog import build_signature_catalog  # noqa: E402
 
@@ -1126,106 +1137,6 @@ class ExampleResult:
     compiler_profile: str
 
 
-_STAGE_PROCESS_CLEANUP_GRACE_SECONDS: float = 0.5
-
-
-def _kill_owned_process_group(process: subprocess.Popen[str]) -> None:
-    """Kill only the isolated stage process group owned by this caller."""
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
-
-
-def _kill_owned_process_tree(process: subprocess.Popen[str]) -> None:
-    """Snapshot and kill this root's descendants before terminating its group."""
-    descendants = process_tree_pids((process.pid,)) or (process.pid,)
-    for pid in reversed(descendants):
-        if pid != process.pid:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
-    _kill_owned_process_group(process)
-
-
-def _timeout_output_text(value: str | bytes | None) -> str | None:
-    """Normalize one partial timeout stream while retaining undecodable bytes."""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
-
-
-def _combine_timeout_output(before: str | bytes | None, after: str | bytes | None) -> str | None:
-    """Keep the fullest partial stream when bounded cleanup retries communicate."""
-    initial = _timeout_output_text(before)
-    final = _timeout_output_text(after)
-    if not initial:
-        return final
-    if not final:
-        return initial
-    if final.startswith(initial):
-        return final
-    if initial.startswith(final):
-        return initial
-    return initial + final
-
-
-def _run(
-    cmd: list[str],
-    *,
-    cwd: Path | None = None,
-    timeout: int | float = 60,
-    env: dict[str, str] | None = None,
-    cleanup_process_group: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    """Run a command with captured output and explicit environment overrides."""
-    runtime_env = os.environ.copy()
-    if env is not None:
-        runtime_env.update(env)
-    if not cleanup_process_group:
-        return subprocess.run(
-            cmd,
-            cwd=str(cwd) if cwd is not None else None,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout,
-            check=False,
-            env=runtime_env,
-        )
-
-    process = subprocess.Popen(
-        cmd,
-        cwd=str(cwd) if cwd is not None else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
-        env=runtime_env,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired as failure:
-        _kill_owned_process_tree(process)
-        try:
-            stdout, stderr = process.communicate(timeout=_STAGE_PROCESS_CLEANUP_GRACE_SECONDS)
-        except subprocess.TimeoutExpired as drain_failure:
-            _kill_owned_process_group(process)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=_STAGE_PROCESS_CLEANUP_GRACE_SECONDS)
-            for stream in (process.stdout, process.stderr):
-                if stream is not None:
-                    with contextlib.suppress(OSError):
-                        stream.close()
-            stdout = _combine_timeout_output(failure.output, drain_failure.output) or ""
-            stderr = _combine_timeout_output(failure.stderr, drain_failure.stderr) or ""
-        raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr) from failure
-    except BaseException:
-        _kill_owned_process_tree(process)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.communicate(timeout=_STAGE_PROCESS_CLEANUP_GRACE_SECONDS)
-        raise
-    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
-
-
 def _prepare_signature_catalog(
     *,
     signature_inputs: list[Path],
@@ -1422,178 +1333,6 @@ def _resolve_toolchain_spec(
     return toolchain
 
 
-def _kvikdos_toolchain_command(
-    kvikdos: Path,
-    out_dir: Path,
-    spec: CompilerToolchain,
-    *,
-    path_dos: tuple[str, ...],
-    environment: tuple[tuple[str, str], ...],
-    program: str,
-) -> list[str]:
-    """Assemble one emulator invocation for a verified toolchain program."""
-    return [
-        str(kvikdos),
-        f"--mount=c:{out_dir}/",
-        f"--mount=e:{spec.toolchain_root}/",
-        "--drive=c",
-        "--cwd-dos=c:\\",
-        *(f"--path-dos={path}" for path in path_dos),
-        *(f"--env={name}={value}" for name, value in environment),
-        f"--prog={program}",
-        program,
-    ]
-
-
-def _dos_case_file(out_dir: Path, name: str) -> Path | None:
-    """Find a DOS-created file regardless of DOSBox name folding."""
-    for candidate in (out_dir / name, out_dir / name.upper(), out_dir / name.lower()):
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _run_dosbox_stage(
-    spec: CompilerToolchain,
-    out_dir: Path,
-    *,
-    tag: str,
-    command_line: str,
-    path_dos: tuple[str, ...],
-    environment: tuple[tuple[str, str], ...],
-    required: tuple[str, ...],
-    timeout: int = 120,
-) -> tuple[bool, str]:
-    """Run one compiler/linker stage under pinned-config DOSBox.
-
-    DOSBox's host exit code only reports the launcher, and it eagerly
-    creates redirect targets even for skipped echoes, so success requires
-    the exact OK marker text with an empty FAIL marker, an error-free tool
-    log, and every required artifact fresh and nonempty.
-    """
-    batch_name = f"{tag}.BAT"
-    out_name = f"{tag}.OUT"
-    ok_name = f"{tag}OK.OUT"
-    fail_name = f"{tag}FL.OUT"
-    for staged in (batch_name, out_name, ok_name, fail_name, *required):
-        stale = _dos_case_file(out_dir, staged)
-        if stale is not None:
-            with contextlib.suppress(OSError):
-                stale.unlink()
-    (out_dir / batch_name).write_bytes(
-        spec.dosbox_batch(
-            tag=tag,
-            command_line=command_line,
-            out_name=out_name,
-            ok_name=ok_name,
-            fail_name=fail_name,
-            path_dos=path_dos,
-            environment=environment,
-        ).encode("ascii")
-    )
-    conf_path = out_dir / "DOSBOX.CFG"
-    conf_path.write_text(spec.dosbox_conf(), encoding="ascii")
-    dosbox = spec.dosbox_executable
-    if dosbox is None:
-        return False, "DOSBox compile backend without a declared executable"
-    command = [
-        str(dosbox),
-        "-noconsole",
-        "-conf", str(conf_path),
-        "-c", f'mount c "{out_dir}"',
-        "-c", f'mount e "{spec.toolchain_root}"',
-        "-c", "c:",
-        "-c", f"call c:\\{batch_name}",
-        "-c", "exit",
-    ]
-    wall_start = time.time()
-    try:
-        proc = _run(command, timeout=timeout, env=dict(spec.dosbox_host_environment))
-    except subprocess.TimeoutExpired:
-        return False, f"{tag}: DOSBox stage timed out after {timeout}s\n"
-    dos_log_path = _dos_case_file(out_dir, out_name)
-    dos_log = dos_log_path.read_text("latin1") if dos_log_path is not None else ""
-    diagnostics: list[str] = []
-    if proc.returncode != 0:
-        diagnostics.append(f"dosbox launcher exit {proc.returncode}")
-    diagnostics.extend(_dosbox_marker_diagnostics(spec, out_dir, tag, ok_name, fail_name))
-    error_lines = [
-        line.strip() for line in dos_log.splitlines()
-        if "error" in line.lower() or "fatal" in line.lower()
-    ]
-    diagnostics.extend(f"{out_name}: {line}" for line in error_lines[:8])
-    diagnostics.extend(_dosbox_artifact_diagnostics(out_dir, required, wall_start))
-    log_parts = [proc.stdout, proc.stderr, dos_log]
-    log_parts.extend(diagnostic + "\n" for diagnostic in diagnostics)
-    return not diagnostics, "".join(log_parts)
-
-
-def _dosbox_marker_diagnostics(
-    spec: CompilerToolchain, out_dir: Path, tag: str, ok_name: str, fail_name: str,
-) -> list[str]:
-    """Require the exact OK marker text and an empty/absent FAIL marker."""
-    problems: list[str] = []
-    ok_path = _dos_case_file(out_dir, ok_name)
-    if ok_path is None:
-        problems.append(f"missing {ok_name} status marker")
-    else:
-        ok_text = ok_path.read_text("latin1").strip()
-        if ok_text != spec.dosbox_ok_marker(tag):
-            problems.append(f"malformed {ok_name} marker content {ok_text!r}")
-    fail_path = _dos_case_file(out_dir, fail_name)
-    if fail_path is not None and fail_path.read_text("latin1").strip():
-        problems.append(f"{fail_name} marker records DOS ERRORLEVEL >= 1")
-    return problems
-
-
-def _dosbox_artifact_diagnostics(
-    out_dir: Path, required: tuple[str, ...], wall_start: float,
-) -> list[str]:
-    """Require every declared stage artifact to be fresh and nonempty."""
-    problems: list[str] = []
-    for name in required:
-        artifact = _dos_case_file(out_dir, name)
-        if artifact is None:
-            problems.append(f"missing artifact {name}")
-        elif artifact.stat().st_size == 0 or artifact.stat().st_mtime < wall_start - 1.0:
-            problems.append(f"stale or empty artifact {name}")
-    return problems
-
-
-def _run_tool_stage(
-    spec: CompilerToolchain,
-    out_dir: Path,
-    *,
-    kvikdos: Path,
-    tag: str,
-    program: str,
-    argv: list[str],
-    command_line: str,
-    path_dos: tuple[str, ...],
-    environment: tuple[tuple[str, str], ...],
-    required: tuple[str, ...],
-    timeout: int = 120,
-) -> tuple[bool, str, str]:
-    """Run one compile/link stage on the profile's verified compile backend."""
-    if spec.compile_backend is CompileBackend.DOSBOX:
-        ok, log = _run_dosbox_stage(
-            spec,
-            out_dir,
-            tag=tag,
-            command_line=command_line,
-            path_dos=path_dos,
-            environment=environment,
-            required=required,
-            timeout=timeout,
-        )
-        return ok, log, "" if ok else f"{tag}: DOS stage produced no success marker\n"
-    command = _kvikdos_toolchain_command(
-        kvikdos, out_dir, spec, path_dos=path_dos, environment=environment, program=program,
-    ) + argv
-    proc = _run(command, timeout=timeout)
-    return proc.returncode == 0, proc.stdout, proc.stderr
-
-
 def _compile_extra_sources(
     spec: CompilerToolchain,
     out_dir: Path,
@@ -1615,7 +1354,7 @@ def _compile_extra_sources(
         if not extra_src.is_file():
             raise ValueError(f"Runtime source not staged in output dir: {extra_src}")
         extra_obj = f"{extra_base}.OBJ"
-        extra_ok, extra_out, extra_err = _run_tool_stage(
+        extra_ok_receipt = _run_tool_stage(
             spec,
             out_dir,
             kvikdos=kvikdos,
@@ -1629,6 +1368,9 @@ def _compile_extra_sources(
             required=(extra_obj,),
             timeout=timeout,
         )
+        extra_ok = extra_ok_receipt.passed
+        extra_out = extra_ok_receipt.stdout
+        extra_err = extra_ok_receipt.stderr
         outputs.append(extra_out)
         stderrs.append(extra_err)
         stage_ok = stage_ok and extra_ok
@@ -1665,7 +1407,7 @@ def _compile_and_link_unlocked(
     for artifact_name in artifact_names:
         with contextlib.suppress(OSError):
             (out_dir / artifact_name).unlink()
-    compile_ok, compile_stdout, compile_stderr = _run_tool_stage(
+    compile_ok_receipt = _run_tool_stage(
         spec,
         out_dir,
         kvikdos=kvikdos,
@@ -1679,6 +1421,9 @@ def _compile_and_link_unlocked(
         required=(obj_name,),
         timeout=stage_timeout,
     )
+    compile_ok = compile_ok_receipt.passed
+    compile_stdout = compile_ok_receipt.stdout
+    compile_stderr = compile_ok_receipt.stderr
     stage_ok = compile_ok
 
     runtime_obj_name = "INERTIA.OBJ"
@@ -1692,7 +1437,7 @@ def _compile_and_link_unlocked(
             msc6_runtime_support_source(gp_runtime_abi, dos_segment_state=True),
             encoding="utf-8",
         )
-        runtime_ok, runtime_compile_stdout, runtime_compile_stderr = _run_tool_stage(
+        runtime_ok_receipt = _run_tool_stage(
             spec,
             out_dir,
             kvikdos=kvikdos,
@@ -1706,6 +1451,9 @@ def _compile_and_link_unlocked(
             required=(runtime_obj_name,),
             timeout=stage_timeout,
         )
+        runtime_ok = runtime_ok_receipt.passed
+        runtime_compile_stdout = runtime_ok_receipt.stdout
+        runtime_compile_stderr = runtime_ok_receipt.stderr
         stage_ok = stage_ok and runtime_ok
         if (out_dir / runtime_obj_name).exists() and runtime_ok:
             runtime_extra_objs = (runtime_obj_name,)
@@ -1716,7 +1464,7 @@ def _compile_and_link_unlocked(
     )
     stage_ok = stage_ok and extra_ok
 
-    link_ok, link_stdout, link_stderr = _run_tool_stage(
+    link_ok_receipt = _run_tool_stage(
         spec,
         out_dir,
         kvikdos=kvikdos,
@@ -1739,6 +1487,9 @@ def _compile_and_link_unlocked(
         required=(exe_name,),
         timeout=stage_timeout,
     )
+    link_ok = link_ok_receipt.passed
+    link_stdout = link_ok_receipt.stdout
+    link_stderr = link_ok_receipt.stderr
     stage_ok = stage_ok and link_ok
 
     map_path = out_dir / map_name
@@ -2103,6 +1854,7 @@ def _run_example(
     toolchain: CompilerToolchain | None = None,
     run_tag: str = "RUN",
 ) -> tuple[bool, int | None, str, str]:
+    """Run one DOS image using the selected runner and explicit host DPMI policy."""
     if toolchain is not None and toolchain.run_backend is CompileBackend.DOSBOX:
         return _run_dosbox_example(
             exe_path, out_dir, toolchain=toolchain, timeout=timeout, run_tag=run_tag,
@@ -2112,6 +1864,8 @@ def _run_example(
         f"--mount=c:{out_dir}/",
         "--drive=c",
         "--cwd-dos=c:\\",
+        *(["--dpmi=off"] if toolchain is not None
+          and toolchain.kvikdos_dpmi_mode is KvikdosDPMIMode.OFF else []),
         "--prog=" + f"c:\\{exe_path.name}",
         f"c:\\{exe_path.name}",
     ]
@@ -2620,6 +2374,53 @@ def _combined_output_refusal_reason(
     return None
 
 
+def _conditional_artifact_dir(
+    artifact_stem: Path | None,
+    binary_target: BinaryFunctionTarget | None,
+    cmd: list[str],
+) -> tuple[Path | None, bool]:
+    """Allocate a fresh per-attempt artifact dir, or flag a stale one to refuse.
+
+    Only binary-target runs with a retained attempt stem request structured
+    emission; a pre-existing directory means earlier-attempt evidence and is
+    recorded for refusal instead of being reused.
+    """
+    if artifact_stem is None or binary_target is None:
+        return None, False
+    artifact_dir = artifact_stem.with_name(f"{artifact_stem.name}.c-artifacts")
+    if artifact_dir.exists():
+        return artifact_dir, True
+    artifact_dir.mkdir(parents=True)
+    cmd.extend(["--output-c-dir", str(artifact_dir)])
+    return artifact_dir, False
+
+
+def _record_conditional_result(
+    profile: dict[str, object],
+    artifact_dir: Path | None,
+    binary_target: BinaryFunctionTarget | None,
+    exe_path: Path,
+    child_returncode: int | None,
+    stale_directory: bool,
+    expected_binary_sha256: str | None,
+) -> None:
+    """Attach the typed conditional transport receipt to the attempt profile.
+
+    This records conditional evidence for a future case consumer; it never
+    changes the legacy acceptance boolean or any clean/passed predicate.
+    """
+    if artifact_dir is None or binary_target is None:
+        return
+    profile["conditional_result"] = bind_conditional_function_artifact(
+        artifact_dir,
+        target=binary_target,
+        binary_path=exe_path,
+        child_returncode=child_returncode,
+        stale_directory=stale_directory,
+        expected_binary_sha256=expected_binary_sha256,
+    ).to_dict()
+
+
 def _decompile_function_with_options(
     exe_path: Path,
     *,
@@ -2658,11 +2459,15 @@ def _decompile_function_with_options(
             raise ValueError("Binary target label does not match selected fixture function")
         cmd.extend(["--addr", hex(binary_target.address), "--ignore-local-sidecar-hints"])
     cmd.append(str(exe_path))
+    artifact_dir, stale_artifact_dir = _conditional_artifact_dir(
+        artifact_stem, binary_target, cmd
+    )
     if decompile_pat_backend is not None:
         cmd.extend(["--pat-backend", decompile_pat_backend])
     if decompile_signature_catalog is not None:
         cmd.extend(["--signature-catalog", str(decompile_signature_catalog)])
 
+    expected_binary_sha256 = binary_image_sha256(exe_path) if artifact_dir is not None else None
     process_timeout = _focused_decompile_process_timeout(decompile_timeout)
     try:
         proc = _run(
@@ -2684,6 +2489,9 @@ def _decompile_function_with_options(
             profile.update(retain_focused_output(artifact_stem, stdout_data, timeout_text))
         profile["timeout"] = True
         profile["acceptance_reason"] = HarnessAcceptanceReason.TIMEOUT.value
+        _record_conditional_result(
+            profile, artifact_dir, binary_target, exe_path, None, stale_artifact_dir, expected_binary_sha256
+        )
         profile["command"] = " ".join(cmd)
         profile["process_timeout_seconds"] = process_timeout
         profile["analysis_timeout_seconds"] = decompile_timeout
@@ -2702,6 +2510,9 @@ def _decompile_function_with_options(
     if artifact_stem is not None:
         profile.update(retain_focused_output(artifact_stem, proc.stdout, proc.stderr))
     profile["returncode"] = proc.returncode
+    _record_conditional_result(
+        profile, artifact_dir, binary_target, exe_path, proc.returncode, stale_artifact_dir, expected_binary_sha256
+    )
     acceptable, reason = _is_decompile_output_acceptable(proc.stdout, proc.stderr, profile)
     profile_reason = reason.value if reason is not None else None
     if acceptable and proc.returncode != 0:
@@ -2941,6 +2752,41 @@ def _attempt_function_decompile(
     )
 
 
+@dataclass(frozen=True)
+class _BatchConditionalBinding:
+    """One request-owned artifact location and source identity before batch execution."""
+
+    artifact_dir: Path
+    stale: bool
+    binary_path: Path
+    binary_sha256: str | None
+
+
+def _batch_conditional_bindings(
+    options: _FunctionDecompileOptions,
+    batch_dir: Path,
+    binary_targets: tuple[BinaryFunctionTarget, ...] | None,
+) -> dict[str, _BatchConditionalBinding]:
+    """Reserve per-job directories without accepting earlier attempt artifacts."""
+    bindings: dict[str, _BatchConditionalBinding] = {}
+    if binary_targets is None:
+        return bindings
+    digest = binary_image_sha256(options.exe_path)
+    for target in binary_targets:
+        artifact_dir, stale = _conditional_artifact_dir(batch_dir / target.name, target, [])
+        assert artifact_dir is not None
+        bindings[target.name] = _BatchConditionalBinding(artifact_dir, stale, options.exe_path, digest)
+    return bindings
+
+
+def _unique_batch_result(
+    raw_results: list[object], function_name: str,
+) -> dict[str, object] | None:
+    """Select exactly one result row, never let a later duplicate hide a failure."""
+    matches = [item for item in raw_results if isinstance(item, dict) and item.get("proc") == function_name]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _try_batch_function_decompiles(
     options: _FunctionDecompileOptions,
     *,
@@ -2957,11 +2803,13 @@ def _try_batch_function_decompiles(
     if not DEFAULT_BATCH_DECOMPILE_PROCS.exists():
         return None
     batch_dir = options.out_dir / f"{Path(options.decompile_c_name).stem}.batch"
+    conditional_bindings = _batch_conditional_bindings(options, batch_dir, binary_targets)
     cmd = _batch_decompile_command(
         options,
         batch_dir=batch_dir,
         fallback_functions=fallback_functions,
         binary_targets=binary_targets,
+        conditional_bindings=conditional_bindings,
     )
     raw_results = _run_batch_decompile_report(
         options,
@@ -2972,14 +2820,16 @@ def _try_batch_function_decompiles(
     )
     if raw_results is None:
         return None
-    results_by_proc = {str(item.get("proc")): item for item in raw_results if isinstance(item, dict)}
     batch_bodies: dict[str, str] = {}
     for function_name in fallback_functions:
-        result = results_by_proc.get(function_name)
+        result = _unique_batch_result(raw_results, function_name)
         if not isinstance(result, dict):
-            function_debug.append(
-                (function_name, function_name, " ".join(cmd), {"acceptance_reason": "batch_missing_proc"})
-            )
+            profile: dict[str, object] = {"acceptance_reason": "batch_missing_or_duplicate_proc"}
+            if function_name in conditional_bindings:
+                profile["conditional_result"] = ConditionalFunctionTransport(
+                    ConditionalTransportStatus.MALFORMED_RECEIPT
+                ).to_dict()
+            function_debug.append((function_name, function_name, " ".join(cmd), profile))
             continue
         body = _accept_batch_result(
             result=result,
@@ -2988,6 +2838,7 @@ def _try_batch_function_decompiles(
             targets=targets,
             binary_targets=binary_targets,
             function_debug=function_debug,
+            conditional_binding=conditional_bindings.get(function_name),
         )
         if body is not None:
             batch_bodies[function_name] = body
@@ -3000,6 +2851,7 @@ def _batch_decompile_command(
     batch_dir: Path,
     fallback_functions: tuple[str, ...],
     binary_targets: tuple[BinaryFunctionTarget, ...] | None,
+    conditional_bindings: dict[str, _BatchConditionalBinding] | None = None,
 ) -> list[str]:
     """Build the batch-decompile command, writing the jobs file for binary targets."""
     cmd = [
@@ -3029,6 +2881,9 @@ def _batch_decompile_command(
         jobs = [
             {
                 "name": target.name,
+                "output_c_dir": str(conditional_bindings[target.name].artifact_dir)
+                if conditional_bindings is not None and not conditional_bindings[target.name].stale
+                else None,
                 "binary": str(options.exe_path),
                 "addr": target.address,
                 "alternate_source_c": False,
@@ -3064,6 +2919,13 @@ def _run_batch_decompile_report(
     function_debug: list[tuple[str, str, str, dict[str, object]]],
 ) -> list[object] | None:
     """Run the batch job and return its result list, recording failures."""
+    report_path = batch_dir / "batch_report.json"
+    if report_path.exists():
+        function_debug.append(("<batch>", "<batch>", " ".join(cmd), {
+            "acceptance_reason": "batch_stale_report",
+            "conditional_result": ConditionalFunctionTransport(ConditionalTransportStatus.STALE_DIRECTORY).to_dict(),
+        }))
+        return None
     timeout = _focused_decompile_process_timeout(options.decompile_timeout) * max(1, job_count)
     try:
         proc = _run(
@@ -3080,7 +2942,6 @@ def _run_batch_decompile_report(
         }
         function_debug.append(("<batch>", "<batch>", " ".join(cmd), timeout_profile))
         return None
-    report_path = batch_dir / "batch_report.json"
     if not report_path.exists():
         function_debug.append(
             (
@@ -3118,6 +2979,7 @@ def _accept_batch_result(
     targets: dict[str, BinaryFunctionTarget],
     binary_targets: tuple[BinaryFunctionTarget, ...] | None,
     function_debug: list[tuple[str, str, str, dict[str, object]]],
+    conditional_binding: _BatchConditionalBinding | None = None,
 ) -> str | None:
     """Score one batch result and extract its body when acceptable."""
     stdout_path = Path(str(result.get("stdout_path", "")))
@@ -3125,6 +2987,14 @@ def _accept_batch_result(
     out_text = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
     err_text = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
     profile = _parse_decompile_profile(_decompile_profile_text(out_text, err_text))
+    if conditional_binding is not None:
+        returncode = result.get("returncode")
+        _record_conditional_result(
+            profile, conditional_binding.artifact_dir, targets.get(function_name),
+            conditional_binding.binary_path,
+            returncode if type(returncode) is int else None,
+            conditional_binding.stale, conditional_binding.binary_sha256,
+        )
     profile["batch_attempt"] = True
     profile["returncode"] = result.get("returncode")
     profile["wall_seconds"] = result.get("wall_seconds")
@@ -3379,6 +3249,7 @@ def _decompile(
     decompile_pat_backend: str | None = None,
     decompile_signature_catalog: Path | None = None,
     frozen_stage_timeout: int | None = None,
+    decompile_declared_input: Path | None = None,
 ) -> tuple[bool, Path, Path, float, dict[str, object]]:
     """Run binary recovery; metadata may select targets, never replace bodies."""
     stage_deadline = _frozen_decompile_deadline(frozen_stage_timeout)
@@ -3393,6 +3264,7 @@ def _decompile(
         decompile_ignore_local_sidecar_hints=decompile_ignore_local_sidecar_hints,
         decompile_pat_backend=decompile_pat_backend,
         decompile_signature_catalog=decompile_signature_catalog,
+        decompile_declared_input=decompile_declared_input,
     )
     profile: dict[str, object] = {
         "decompile_mode": decompile_mode,
@@ -3402,6 +3274,7 @@ def _decompile(
         "force_rizin_8616": decompile_force_rizin_8616,
         "pat_backend": decompile_pat_backend,
         "signature_catalog": str(decompile_signature_catalog) if decompile_signature_catalog is not None else None,
+        "real16_declared_input": str(decompile_declared_input) if decompile_declared_input is not None else None,
         "selected": {},
     }
     candidates = _main_mode_candidates(
@@ -3606,6 +3479,7 @@ def _decompile_base_cmd(
     decompile_ignore_local_sidecar_hints: bool,
     decompile_pat_backend: str | None,
     decompile_signature_catalog: Path | None,
+    decompile_declared_input: Path | None = None,
 ) -> list[str]:
     """Build the shared decompile command prefix with optional evidence flags."""
     cmd = [
@@ -3627,6 +3501,8 @@ def _decompile_base_cmd(
         cmd.extend(["--pat-backend", decompile_pat_backend])
     if decompile_signature_catalog is not None:
         cmd.extend(["--signature-catalog", str(decompile_signature_catalog)])
+    if decompile_declared_input is not None:
+        cmd.extend(["--real16-declared-input", str(decompile_declared_input)])
     return cmd
 
 
@@ -3994,8 +3870,13 @@ def _decompile_and_validate(
     memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
     toolchain: CompilerToolchain | None = None,
     decompile_stage_timeout: int | None = None,
+    decompile_declared_input: Path | None = None,
 ) -> _DecompileValidateResult:
     """Validate generated C under the same toolchain model as the original."""
+    if decompile_declared_input is not None and (
+        decompile_mode != "functions" or decompile_fallback_rebuild is not None
+    ):
+        raise ValueError("Declared entry evidence requires the full function sweep without fixture fallback")
     options = _DecompileValidateOptions(
         exe_path=exe_path,
         out_dir=out_dir,
@@ -4035,6 +3916,7 @@ def _decompile_and_validate(
         decompile_run_timeout=decompile_run_timeout,
         decompile_mode=decompile_mode,
         frozen_stage_timeout=decompile_stage_timeout,
+        decompile_declared_input=decompile_declared_input,
         decompile_cod_path=decompile_cod_path,
         decompile_max_functions=decompile_max_functions,
         decompile_function_discovery_backend=decompile_function_discovery_backend,
@@ -4714,6 +4596,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Optional override for PAT backend.",
     )
     ap.add_argument(
+        "--decompile-real16-declared-input", type=Path, default=None,
+        help="Authenticated binary-bound DOS entry declaration for the full decompiler sweep.",
+    )
+    ap.add_argument(
         "--signature-catalog",
         type=Path,
         default=None,
@@ -4923,6 +4809,7 @@ def _decompile_example(
         decompile_timeout=args.decompile_timeout,
         decompile_run_timeout=args.decompile_run_timeout,
         decompile_stage_timeout=args.stage_timeout,
+        decompile_declared_input=args.decompile_real16_declared_input,
         decompile_mode=args.decompile_mode,
         decompile_cod_path=build.cod_path,
         decompile_max_functions=args.decompile_max_functions,
@@ -5053,12 +4940,32 @@ def _all_examples_ok(results: list[ExampleResult]) -> bool:
     )
 
 
+def _selected_example_sources(args: argparse.Namespace) -> tuple[Path, ...]:
+    """Require one actual source before applying binary-bound entry evidence."""
+    only_set = set(args.only_constructs)
+    sources = tuple(
+        path for path in sorted(args.examples_dir.glob("*.c"))
+        if not only_set or path.stem in only_set
+    )
+    if args.decompile_real16_declared_input is not None and len(sources) != 1:
+        raise ValueError("Declared entry evidence requires exactly one selected source")
+    if args.decompile_real16_declared_input is not None and (
+        args.decompile_mode != "functions" or sources[0].stem in args.skip_constructs
+    ):
+        raise ValueError("Declared entry evidence requires an unskipped full function sweep")
+    return sources
+
+
 def main() -> int:
     """Run the MS C construct build/decompile/rebuild harness."""
     parser = _build_arg_parser()
     args = parser.parse_args()
     try:
-        _args_toolchain(args)
+        source_paths = _selected_example_sources(args)
+        selected_toolchain = _args_toolchain(args)
+        os.environ[TAIL_COMPILER_CONTEXT_ENV] = FrozenCompilerContext.create(
+            selected_toolchain, args.profile_evidence,
+        ).serialize()
     except ValueError as error:
         parser.error(str(error))
     signature_catalog, catalog_ok = _resolve_signature_catalog(args)
@@ -5067,14 +4974,9 @@ def main() -> int:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     results: list[ExampleResult] = []
-    only_set = set(args.only_constructs)
     decompile_skip = set(args.skip_constructs)
-    decompile_idx = 0
 
-    for source_path in sorted(args.examples_dir.glob("*.c")):
-        if only_set and source_path.stem not in only_set:
-            continue
-        decompile_idx += 1
+    for decompile_idx, source_path in enumerate(source_paths, start=1):
         results.append(
             _process_example_source(
                 source_path, args, signature_catalog, decompile_idx, decompile_skip

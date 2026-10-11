@@ -21,10 +21,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import tools.dosunit.tests.test_relational_rotation_public32 as public32
-from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
 
+import tools.dosunit.tests.test_relational_rotation_public32 as public32
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus, proof_status_from_legacy
+from tools.dosunit.tests.test_flat32_comparator_lane import DriverLane, _driver_lane
 
 # Verified against the CS_MODE_32 decoder (see test_stack_slot_flat32 for the
 # replay-evidenced reading): push ebp; mov ebp,esp; push eax; push ecx;

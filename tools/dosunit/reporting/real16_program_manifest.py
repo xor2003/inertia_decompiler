@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from inertia.frontend.real16_dosbox_entry_policy import parse_dosbox_entry_policy
 from tools.dosunit.reporting.real16_program_input_manifest import parse_input_policy
 from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment
 from tools.dosunit.runtime.real16_program_device_info import parse_device_info_policy
@@ -141,6 +142,7 @@ def parse_program_manifest(document: object) -> ProgramManifest:
         parse_video_policy(declared.get("bios_video")),
         parse_video_state_policy(declared.get("bios_video_state")),
         parse_rom(declared.get("rom")),
+        parse_dosbox_entry_policy(declared.get("dosbox_int21_entry")),
     )
     if dict(environment.registers)["eflags"] & 2 == 0:
         raise ValueError("EFLAGS must retain architectural bit1")

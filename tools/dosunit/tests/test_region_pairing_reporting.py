@@ -4,9 +4,9 @@ import json
 from dataclasses import asdict
 
 from tools.dosunit.compare.paired_region_graph import RegionExitKind, RegionNode
-from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.compare.real16_region_proof import RegionProof, RegionProofReason
 from tools.dosunit.compare.region_pairing import propose_region_pairings
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 
 
 def test_search_accounting_survives_public_json_report() -> None:

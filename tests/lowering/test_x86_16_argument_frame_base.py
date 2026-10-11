@@ -1,21 +1,20 @@
 from types import SimpleNamespace
 
-from inertia.ir.analysis.stack_frame_ir import (
-    BPFrameCoordinateEvidence8616,
-    FrameAccessArtifact,
-    FrameCoordinateStats8616,
-    FrameCoordinateStatus8616,
+from inertia.alias.segment_stack_restore import (
+    SegmentStackRestoreArtifact8616,
+    SegmentStackRestoreFact8616,
+    SegmentStackRestoreVerdict8616,
 )
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.simos_86_16 import (
     SimCC8616MSClarge,
     SimCC8616MSCsmall,
 )
-
-from inertia.alias.segment_stack_restore import (
-    SegmentStackRestoreArtifact8616,
-    SegmentStackRestoreFact8616,
-    SegmentStackRestoreVerdict8616,
+from inertia.ir.analysis.stack_frame_ir import (
+    BPFrameCoordinateEvidence8616,
+    FrameAccessArtifact,
+    FrameCoordinateStats8616,
+    FrameCoordinateStatus8616,
 )
 from inertia.lowering.argument_frame_base import (
     FAR_FIRST_ARGUMENT_BP_OFFSET_8616,

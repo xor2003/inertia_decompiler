@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from tests.cli.test_x86_16_cod_samples import _project_from_bytes
 
 

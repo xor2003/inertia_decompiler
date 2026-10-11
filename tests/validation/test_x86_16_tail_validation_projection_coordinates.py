@@ -3,11 +3,11 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
-
 from inertia.validation.tail_validation_fingerprint import (
     _source_arg_location_fingerprint_8616,
 )

@@ -3,9 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 from inertia.cli.cli_string_timeout_fallback import try_render_x86_16_string_timeout_fallback
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 
 class _Memory:

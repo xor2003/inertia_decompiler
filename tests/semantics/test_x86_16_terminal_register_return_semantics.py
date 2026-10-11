@@ -3,8 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from angr.errors import SimEngineError
-import inertia.semantics.terminal_register_returns as terminal_register_returns
 
+import inertia.semantics.terminal_register_returns as terminal_register_returns
 from inertia.semantics.branch_target_return import TerminalAxReturnEffectKind8616
 from inertia.semantics.terminal_register_returns import (
     TerminalAxReturnEvidence8616,

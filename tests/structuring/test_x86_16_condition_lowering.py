@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import (
@@ -12,7 +13,6 @@ from inertia.ir.core import (
     IRValue,
     MemSpace,
 )
-
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.structuring.condition_lowering import (
     condition_origin_tags_8616,

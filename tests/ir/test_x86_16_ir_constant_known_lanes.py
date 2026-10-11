@@ -7,6 +7,7 @@ Only immutable definitions and authoritative register views justify constants.
 from __future__ import annotations
 
 import pytest
+
 from inertia.ir.constant_flow import IRConstantFlow8616
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 from tests.alias.test_x86_16_segment_stack_restore import _lift_function

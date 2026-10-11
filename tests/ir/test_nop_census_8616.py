@@ -14,6 +14,11 @@ from dataclasses import replace
 
 import angr
 import pytest
+
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
 from inertia.ir import IRValue, MemSpace
 from inertia.ir.core import IRFunctionArtifact, IRInstr
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
@@ -28,11 +33,6 @@ from inertia.ir.scalar_instruction_effects import (
     scalar_instruction_effect_8616,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
-)
 from tests.ir.test_segment_call_binding_regression import _CODE_LEAF_RET, _project, _prove
 
 _BASE = 0x1000

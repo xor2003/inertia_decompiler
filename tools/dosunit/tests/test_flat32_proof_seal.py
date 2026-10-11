@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.reporting.flat32_proof_report import run_bound_comparison
 from tools.dosunit.tests.test_flat32_comparator_lane import DRIVER_DIRS
 from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
-
-from tools.dosunit.reporting.flat32_proof_report import run_bound_comparison
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 
 # mov eax,7; ret — arbitrary genuine i386 code; the seal binds bytes, not semantics.
 CODE = bytes.fromhex("b807000000c3")

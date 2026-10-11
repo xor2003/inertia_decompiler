@@ -9,13 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from inertia.structuring.string_codegen_override import render_complete_string_function_8616
-from inertia.semantics.string_instruction_artifact import (
-    build_x86_16_string_instruction_artifact_from_linear_range,
-)
 from inertia.lowering.string_instruction_lowering import (
     build_x86_16_string_intrinsic_artifact,
 )
+from inertia.semantics.string_instruction_artifact import (
+    build_x86_16_string_instruction_artifact_from_linear_range,
+)
+from inertia.structuring.string_codegen_override import render_complete_string_function_8616
 
 __all__ = ["StringTimeoutFallback", "try_render_x86_16_string_timeout_fallback"]
 

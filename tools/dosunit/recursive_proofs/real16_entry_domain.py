@@ -15,10 +15,12 @@ from typing import cast
 
 import z3
 
+from tools.dosunit.compare import real16_call_contracts
 from tools.dosunit.compare import straightline_ssa as S
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus
 from tools.dosunit.contracts.register_state_relations import MachineState
+from tools.dosunit.runtime import real16_mz_load, real16_replay_model
 
 
 class EntryDomainReason(StrEnum):
@@ -130,12 +132,11 @@ def entry_domain_model_hash() -> str:
     This source seal does not prove that supplied effects came from an image.
     """
     stage = Path(__file__).parent
-    dosunit = Path(S.__file__).parent
     paths = (Path(__file__), stage / "real16_entry_domain_proof.py",
              stage / "loaded_byte_native_transition.py", stage / "loaded_byte_image_binding.py",
              stage / 'stack' / "recursive_stack_proofs.py",
-             dosunit / "real16_call_contracts.py", dosunit / "real16_mz_load.py",
-             dosunit / "real16_replay_model.py", Path(S.__file__))
+             Path(real16_call_contracts.__file__), Path(real16_mz_load.__file__),
+             Path(real16_replay_model.__file__), Path(S.__file__))
     description = ["real16-loader-bootstrap-scalar-domain-v2", z3.get_version_string(),
                    *(hashlib.sha256(path.read_bytes()).hexdigest() for path in paths)]
     return hashlib.sha256(canonical_json_bytes(description)).hexdigest()

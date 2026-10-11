@@ -16,6 +16,7 @@ from typing import Protocol, cast
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimType
 from angr.sim_variable import SimStackVariable, SimVariable
+
 from inertia.pipeline.errors import PipelineHardError
 
 from .stack_variable_coordinates import (

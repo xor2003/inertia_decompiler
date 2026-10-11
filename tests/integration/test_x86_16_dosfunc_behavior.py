@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_dosfunc_behavior import assert_dos_free_behavior
 
 _DECLARATIONS = """

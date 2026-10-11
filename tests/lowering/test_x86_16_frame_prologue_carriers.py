@@ -13,6 +13,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.logical_memory_register_transfer import trace_logical_word_register_transfer_8616

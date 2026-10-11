@@ -767,7 +767,9 @@ def _load_cod_mzre_flair_sidecars(
     pat_backend: str | None,
     signature_catalog: Path | None,
     cod_proc_kinds: dict[int, str],
+    signature_code_ranges: dict[int, tuple[int, int]] | None = None,
 ) -> tuple[Path | None, set[int]]:
+    """Load optional labels while preserving binary-verified ranges separately."""
     def _impl() -> tuple[Path | None, set[int]]:
         cod_path = _load_cod_listing_sidecar_8616(
             binary,
@@ -793,6 +795,7 @@ def _load_cod_mzre_flair_sidecars(
             project,
             pat_backend=pat_backend,
             signature_catalog=signature_catalog,
+            signature_code_ranges=signature_code_ranges,
             code_labels=code_labels,
             code_ranges=code_ranges,
             source_formats=source_formats,
@@ -938,7 +941,9 @@ def _load_flair_sidecar_8616(
     code_labels: dict[int, str],
     code_ranges: dict[int, tuple[int, int]],
     source_formats: list[str],
+    signature_code_ranges: dict[int, tuple[int, int]] | None = None,
 ) -> set[int]:
+    """Merge binary matches without deriving verified extents from debug bounds."""
     signature_code_addrs: set[int] = set()
     try:
         flair_code, flair_ranges, flair_formats = _detect_flair_metadata(
@@ -953,6 +958,8 @@ def _load_flair_sidecar_8616(
                 signature_code_addrs.add(addr)
             for addr, span in flair_ranges.items():
                 code_ranges.setdefault(addr, span)
+                if signature_code_ranges is not None:
+                    signature_code_ranges[addr] = span
         source_formats.extend(flair_formats)
     except Exception as exc:
         print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
@@ -986,6 +993,7 @@ def _load_lst_metadata(
         data_labels: dict[int, str] = {}
         code_ranges: dict[int, tuple[int, int]] = {}
         signature_code_addrs: set[int] = set()
+        signature_code_ranges: dict[int, tuple[int, int]] = {}
         cod_proc_kinds: dict[int, str] = {}
         struct_names: list[str] = []
         debug_source_files: list[str] = []
@@ -1078,6 +1086,7 @@ def _load_lst_metadata(
             pat_backend=pat_backend,
             signature_catalog=signature_catalog,
             cod_proc_kinds=cod_proc_kinds,
+            signature_code_ranges=signature_code_ranges,
         )
         function_entry_addrs.update(cod_proc_kinds)
 
@@ -1114,6 +1123,7 @@ def _load_lst_metadata(
             code_ranges=code_ranges,
             function_entry_addrs=frozenset(function_entry_addrs),
             signature_code_addrs=frozenset(signature_code_addrs),
+            signature_code_ranges=signature_code_ranges,
             absolute_addrs=True,
             source_format="+".join(dict.fromkeys(source_formats)) or "sidecars",
             struct_names=tuple(dict.fromkeys(struct_names)),

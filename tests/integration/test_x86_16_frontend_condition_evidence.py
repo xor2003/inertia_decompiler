@@ -7,10 +7,11 @@ from types import SimpleNamespace
 import bitstring
 import pytest
 import pyvex
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 from inertia.ir.condition_ir import ConditionIR, ConditionSource
 from inertia.ir.core import IRBinaryValue, IRCondition, IRValue, MemSpace
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 from inertia.lowering.condition_transfer import collect_typed_conditions_from_emulator_8616
 
 CODE_BASE = 0x4000

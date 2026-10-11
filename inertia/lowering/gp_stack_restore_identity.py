@@ -19,6 +19,7 @@ from inertia.alias.segment_stack_restore import SegmentStackRestoreFact8616
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .gp_register_state import runtime_gp_expression_view_8616, runtime_gp_live_in_name_8616
+from .gp_stack_addressed_byte import addressed_stack_byte_8616
 from .physical_registers import physical_register_name_8616
 from .segment_access_policy import instruction_addrs_from_node_8616
 from .segment_register_state import runtime_segment_name_for_variable_8616
@@ -59,6 +60,14 @@ def matches_gp_restore_stack_bytes_8616(
         return fact.constant_value is not None and _word_local_from_byte_views_8616(codegen, node, fact) is not None
     low = _entry_sp_byte_offset_8616(codegen, recomposition.low)
     high = _entry_sp_byte_offset_8616(codegen, recomposition.high)
+    if high is None:
+        # Third-party codegen projects some byte views as addressed reads.
+        # Syntax is insufficient: the reference still binds through the same
+        # coordinate registry and exact Alias-proven save/restore range below.
+        projection = addressed_stack_byte_8616(recomposition.high, recomposition.low.codegen.project)
+        anchor = None if projection is None else _entry_sp_byte_offset_8616(codegen, projection.local)
+        if projection is not None and anchor is not None:
+            high = anchor + projection.displacement
     return low is not None and high is not None and (low, high) == fact.stack_offsets
 
 

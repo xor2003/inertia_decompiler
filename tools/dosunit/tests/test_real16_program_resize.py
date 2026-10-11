@@ -7,11 +7,15 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from tools.dosunit.tests.test_real16_program_replay import mz
 
-from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment, program_from_mz_bytes
 from tools.dosunit.reporting.real16_program_cli import cmd_replay_program16
-from tools.dosunit.runtime.real16_program_model import ProgramAgreement, ProgramEventKind, ProgramStatus, compare_programs
+from tools.dosunit.runtime.real16_program_boot import ProgramEnvironment, program_from_mz_bytes
+from tools.dosunit.runtime.real16_program_model import (
+    ProgramAgreement,
+    ProgramEventKind,
+    ProgramStatus,
+    compare_programs,
+)
 from tools.dosunit.runtime.real16_program_replay import replay_program
 from tools.dosunit.runtime.real16_program_resize import (
     ResizeAccepted,
@@ -24,6 +28,7 @@ from tools.dosunit.runtime.real16_program_resize import (
     resize_policy_document,
     resize_receipt_complete,
 )
+from tools.dosunit.tests.test_real16_program_replay import mz
 
 MCB = bytes.fromhex("5a9201009f0000b24b56314b50523047")
 POLICY = TailResizePolicy(0x100, MCB)

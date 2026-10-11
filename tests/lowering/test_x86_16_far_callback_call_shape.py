@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.lowering.analysis_helpers import CallTargetKind8616
 from inertia.lowering.call_argument_shape import (
     CallerStackObject8616,
     LogicalArgumentShapeEvidenceSource8616,
@@ -15,9 +16,7 @@ from inertia.lowering.far_callback_call_shape import (
 from inertia.lowering.function_pointer_parameter_evidence import (
     FunctionPointerParameterFact8616,
 )
-
-from inertia.lowering.analysis_helpers import CallTargetKind8616
-from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _caller(*, high_offset: int = -2) -> CallsiteSummary8616:

@@ -17,6 +17,11 @@ import struct
 from dataclasses import replace
 
 import pytest
+
+import tools.dosunit.compare.straightline_ssa as S
+import tools.dosunit.compare.symbolic_terminal as ST
+from tools.dosunit.compare.terminal_fault import FaultGate, _guard_divisor
+from tools.dosunit.reporting.proof_public_domain import OutcomeAdmission
 from tools.dosunit.tests.test_symbolic_terminal import (
     ENTRY,
     STACK,
@@ -28,11 +33,6 @@ from tools.dosunit.tests.test_symbolic_terminal import (
     pe32_bytes,
     pe_environment,
 )
-
-import tools.dosunit.compare.straightline_ssa as S
-import tools.dosunit.compare.symbolic_terminal as ST
-from tools.dosunit.reporting.proof_public_domain import OutcomeAdmission
-from tools.dosunit.compare.terminal_fault import FaultGate, _guard_divisor
 
 # ---------------------------------------------------------------------------
 # Real16 (MZ) divide-error fault outcomes

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import angr
 import capstone
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_aggregate_objects import (
     StackAggregateEvidenceKind8616,

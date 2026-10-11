@@ -3,8 +3,8 @@
 from hashlib import sha256
 
 import pytest
-from tests.cli.test_check_sortd_sidecar_free import _passing_transcript
 
+from tests.cli.test_check_sortd_sidecar_free import _passing_transcript
 from tools.dev.check_sortd_sidecar_free import evaluate_sortd_transcript
 from tools.dev.runmenu_behavior import RunMenuExecutionEvidence, collect_runmenu_execution_evidence
 

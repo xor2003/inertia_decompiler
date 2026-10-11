@@ -16,10 +16,9 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_machine_frame_kind_8616
-
 from inertia.ir.core import IRBlock, IRCallOutputProvenance8616, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.ir.logical_memory_rebase import rebase_logical_memory_prefix_insertions_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_machine_frame_kind_8616
 
 from .call_output_contracts import (
     CallOutputFact8616,

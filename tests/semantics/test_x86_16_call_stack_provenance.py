@@ -1,10 +1,10 @@
 """Exact displacements and refusal boundaries for physical call arguments."""
 
 import pytest
-from inertia.semantics.callsite_summary import CallsitePushExprOp8616
 
 from inertia.semantics.call_stack_effect_contracts import CallStackEffectFailure8616
 from inertia.semantics.call_stack_provenance import stack_address_offset_8616
+from inertia.semantics.callsite_summary import CallsitePushExprOp8616
 
 
 @pytest.mark.parametrize("operation", ["add", CallsitePushExprOp8616.ADD])

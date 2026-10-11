@@ -13,9 +13,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CUnaryOp,
 )
 from angr.sim_type import SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
-
 from inertia.structuring.loop_condition_materialization import (
     materialize_typed_loop_continuation_conditions_8616,
 )

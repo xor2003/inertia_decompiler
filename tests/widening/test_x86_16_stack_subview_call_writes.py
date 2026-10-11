@@ -11,6 +11,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_variable import SimStackVariable
+
+from inertia.alias.stack_memory_ssa import (
+    build_x86_16_stack_memory_ssa_alias_artifact,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import (
     AddressStatus,
@@ -24,10 +28,6 @@ from inertia.ir.core import (
     SegmentOrigin,
 )
 from inertia.ir.ssa_function import build_x86_16_function_ssa
-
-from inertia.alias.stack_memory_ssa import (
-    build_x86_16_stack_memory_ssa_alias_artifact,
-)
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.widening.stack_memory_objects import (
     build_x86_16_stack_memory_object_widening_artifact,

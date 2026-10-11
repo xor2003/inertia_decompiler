@@ -6,7 +6,7 @@
   "purpose": "Finite 32-64 source coverage pilot for 16-bit real-mode DOS C round trips. Planning data only: no cell, source, profile or phase in this file is evidence of a passing round trip, an emitted binary mechanism or a verified compiler configuration.",
   "vocabulary": {
     "scope_status": {
-      "reuse": "scripts/compiler_coverage_manifest.py ScopeStatus",
+      "reuse": "tools/compiler_toolchain/compiler_coverage_manifest.py ScopeStatus",
       "admitted": "required obligation bound to exactly one cell with a selected witness",
       "later": "inventory retained from pilot.json/large.json; no cell selected it in this frozen pilot",
       "excluded": "explicitly out of scope for this plan; reason recorded",
@@ -36,8 +36,8 @@
       "verified": "compiler probe receipt under this exact profile"
     },
     "roundtrip_status": {
-      "reuse": "scripts/compiler_coverage_result.py CoverageOutcome",
-      "note": "per-source and per-cell values aggregate the selected profiles; all selected cases are currently not_attempted",
+      "reuse": "tools/compiler_toolchain/compiler_coverage_result.py CoverageOutcome",
+      "note": "per-source and per-cell values aggregate every selected profile, including unattempted later configurations. The initial sixteen rows were attempted and timed out; their partial-profile results are in .cache/compiler-coverage/first16-independent-20261007/complete.json. No aggregate accepted status is earned.",
       "values": [
         "passed",
         "harness_failed",
@@ -795,7 +795,7 @@
       "id": "char_boundaries",
       "path": "examples/msc6_constructs/char_boundaries.c",
       "state": "existing",
-      "sha256": "51ca9c79248f9150fe0d657e21f0d37990b1bf5a2332b08e6410dd3a9d352e3b",
+      "sha256": "9a8c4b366f9ff5de7881b4b4a7b0aeeaacae87eb7408579b3d0fbd043891a9df",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -812,7 +812,8 @@
         "wtc11-small"
       ],
       "roundtrip": "not_attempted",
-      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
+      "host_oracle_evidence": ".cache/devin-prompts/target-source-compat-20261007/host-receipt.json",
+      "target_original_evidence": ".cache/compiler-coverage/target-source-compat-20261007/final/target-admission-receipt.json"
     },
     {
       "id": "ulong_carry",
@@ -840,7 +841,7 @@
       "id": "long_arith",
       "path": "examples/msc6_constructs/long_arith.c",
       "state": "existing",
-      "sha256": "24301128736c2d991476d3ebb61bb66305d0abd1d8b750435bcc479b9efcaf92",
+      "sha256": "43518a9931246e923885b4653d716d30bdb1f1f1983b347479e113b09e9f30c7",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -857,7 +858,8 @@
         "wtc11-small"
       ],
       "roundtrip": "not_attempted",
-      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
+      "host_oracle_evidence": ".cache/devin-prompts/target-source-compat-20261007/host-receipt.json",
+      "target_original_evidence": ".cache/compiler-coverage/target-source-compat-20261007/final/target-admission-receipt.json"
     },
     {
       "id": "long_shift",
@@ -929,7 +931,7 @@
       "id": "variadic_args",
       "path": "examples/msc6_constructs/variadic_args.c",
       "state": "existing",
-      "sha256": "9e5b37d1daef51ad866bc0c1c366f1f2b25e030a662263130e1a7fb695fd38f6",
+      "sha256": "9522bf6ebf20426dda4dcaa559569d92fe8d39b1ce681503322cbd5af200511a",
       "kind": "runtime_case",
       "batch": null,
       "oracle": "exit_code_255",
@@ -944,7 +946,8 @@
         "wtc11-small"
       ],
       "roundtrip": "not_attempted",
-      "host_oracle_evidence": ".cache/devin-prompts/coverage-more-20261007/resume-review/host-receipt.json"
+      "host_oracle_evidence": ".cache/devin-prompts/target-source-compat-20261007/host-receipt.json",
+      "target_original_evidence": ".cache/compiler-coverage/target-source-compat-20261007/final/target-admission-receipt.json"
     },
     {
       "id": "bounded_recursion",

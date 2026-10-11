@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
@@ -29,13 +30,6 @@ sys.path.insert(0, str(ROOT / "artifacts" / "msc8-z3cmp32"))
 sys.path.insert(0, str(ROOT))
 
 from flat32_adapter import installed
-from tools.dosunit.tests.test_flat32_compose_total_budget import (
-    BASE,
-    OUTPUTS,
-    _Clock,
-    _compare,
-    _project,
-)
 
 import tools.dosunit.compare.flat32_call_lowering as _lowering
 from tools.dosunit.compare.flat32_call_composition import (
@@ -50,6 +44,13 @@ from tools.dosunit.compare.flat32_call_contracts import (
     _register_widths,
 )
 from tools.dosunit.compare.flat32_call_lowering import _lift_function
+from tools.dosunit.tests.test_flat32_compose_total_budget import (
+    BASE,
+    OUTPUTS,
+    _Clock,
+    _compare,
+    _project,
+)
 
 _CHAIN_UNIT = "83c001eb00"
 """One chain unit: ``add eax,1`` then ``jmp +0`` into the next unit (5 bytes)."""

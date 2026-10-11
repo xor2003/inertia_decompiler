@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CReturn, CStatements
 from angr.sim_type import SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.structuring.scalar_return_evidence import (
     materialize_complete_scalar_return_leaves_8616,
 )

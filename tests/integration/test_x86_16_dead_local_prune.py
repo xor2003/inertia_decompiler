@@ -6,10 +6,10 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeInt, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.semantic_cast import CSemanticCast8616
 
 import decompile
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 
 

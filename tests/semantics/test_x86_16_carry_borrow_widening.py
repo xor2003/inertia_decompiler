@@ -6,18 +6,17 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
-from inertia.ir import IRInstr, IRValue, MemSpace
-from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 
 from inertia.alias.carry_borrow_contracts import CarryBorrowOperandRole8616
 from inertia.alias.carry_borrow_projection import (
     CarryBorrowAliasFailure8616,
     project_carry_borrow_aliases_8616,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.ir import IRInstr, IRValue, MemSpace
+from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.semantics.carry_borrow_contracts import (
     CarryBorrowEvidence8616,
     CarryBorrowFailure8616,
@@ -25,6 +24,7 @@ from inertia.semantics.carry_borrow_contracts import (
 )
 from inertia.semantics.carry_borrow_links import analyze_carry_borrow_links_8616
 from inertia.semantics.carry_borrow_ssa import single_source_8616
+from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 from inertia.widening.carry_borrow_pipeline import (
     CarryBorrowWideningPipeline8616,
     apply_carry_borrow_widening_pipeline_8616,

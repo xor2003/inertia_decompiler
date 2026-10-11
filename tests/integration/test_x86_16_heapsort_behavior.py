@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_heapsort_behavior import assert_heapsort_behavior
 
 _SOURCE = """

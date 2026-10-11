@@ -5,9 +5,9 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as c
 from angr.sim_type import SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from tests.integration.test_x86_16_dead_local_prune import _FakeCodegen
 
 import decompile
+from tests.integration.test_x86_16_dead_local_prune import _FakeCodegen
 
 
 @pytest.mark.parametrize("read_position", ["indexed_base", "indexed_subscript", "loop_iterator"])

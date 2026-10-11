@@ -1,6 +1,7 @@
 """Unit-decrement zero tests retain exact equality without ordered rewrites."""
 
 import pytest
+
 from inertia.ir.condition_ir import normalize_condition_fingerprint_algebraic_8616 as normalize
 
 

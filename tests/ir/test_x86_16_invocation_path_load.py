@@ -2,6 +2,7 @@
 from dataclasses import replace
 
 import pytest
+
 import tests.ir.test_x86_16_declared_resize_boundary as native
 
 

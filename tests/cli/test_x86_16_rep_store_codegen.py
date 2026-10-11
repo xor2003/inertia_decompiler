@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from inertia.lowering.gp_word_runtime import (
     coherent_gp_runtime_definitions_8616,
     coherent_gp_runtime_header_8616,

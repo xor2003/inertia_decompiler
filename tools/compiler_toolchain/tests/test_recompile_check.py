@@ -319,3 +319,58 @@ def test_unavailable_recompile_gate_is_diagnostic_and_not_cached(monkeypatch: py
     assert error is None
     assert payloads == [("portable-flat", source), ("msc-dos", source)]
     assert calls == ["portable-flat", "msc-dos", "msc-dos"]
+
+
+def test_silent_probe_reports_command_and_signal_without_syntax_claim(monkeypatch):
+    import inertia.cli.cli_core as cli_core
+
+    source = "unsigned short demo(void) { return 1; }"
+
+    def check(payload, *, target):
+        unavailable = target == "msc-dos"
+        return RecompileCheckResult(
+            outcome=RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE if unavailable else RecompileCheckOutcome.PASSED,
+            target=target,
+            exit_code=-11 if unavailable else 0,
+            compiler="/verified/kvikdos" if unavailable else "gcc",
+            stdout="",
+            stderr="",
+            command=("/verified/kvikdos", "--kvm-check") if unavailable else ("gcc",),
+            checked_payload=payload,
+            checked_payload_hash="same-checked-payload",
+        )
+
+    monkeypatch.setattr(cli_core, "_RECOMPILE_RESULT_CACHE_8616", {})
+    monkeypatch.setattr(cli_core, "check_c_recompiles_8616", check)
+    monkeypatch.setattr(cli_core, "_normalize_gcc_checked_payload_8616", lambda checked, _accepted: checked)
+    payloads, detail = cli_core._collect_recompilation_payloads_8616(source)
+    assert payloads == [("portable-flat", source)]
+    assert detail is not None
+    assert "toolchain unavailable" in detail
+    assert "syntax check failed" not in detail
+    assert "--kvm-check" in detail
+    assert "-11" in detail or "SIGSEGV" in detail
+
+
+@pytest.mark.parametrize("context", ["", "{}", "not-json"])
+def test_invalid_selected_context_cannot_reuse_default_cached_pass(monkeypatch, context):
+    """Explicit invalid profile evidence never inherits ordinary default acceptance."""
+    import inertia.cli.cli_core as cli_core
+    from tools.compiler_toolchain.compiler_profile import TAIL_COMPILER_CONTEXT_ENV
+
+    source = "int demo(void) { return 0; }"
+    monkeypatch.delenv(TAIL_COMPILER_CONTEXT_ENV, raising=False)
+    monkeypatch.setattr(cli_core, "_RECOMPILE_RESULT_CACHE_8616", {})
+    monkeypatch.setattr(cli_core, "_normalize_gcc_checked_payload_8616", lambda checked, _accepted: checked)
+
+    def check(payload, *, target):
+        if target == "msc-dos" and TAIL_COMPILER_CONTEXT_ENV in recompile_check.os.environ:
+            return recompile_check.check_c_recompiles_8616(payload, target=target)
+        return RecompileCheckResult(RecompileCheckOutcome.PASSED, target, 0, "fake", "", "", (), payload, "hash")
+
+    monkeypatch.setattr(cli_core, "check_c_recompiles_8616", check)
+    assert cli_core._collect_recompilation_payloads_8616(source)[1] is None
+    monkeypatch.setenv(TAIL_COMPILER_CONTEXT_ENV, context)
+    payloads, error = cli_core._collect_recompilation_payloads_8616(source)
+    assert payloads == [("portable-flat", source)]
+    assert error is not None and "toolchain unavailable" in error

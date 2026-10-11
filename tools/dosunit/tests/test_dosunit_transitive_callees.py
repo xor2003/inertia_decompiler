@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 import tools.dosunit.compare.straightline_ssa as ssa
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 
 def _chain(tmp_path: Path, changed: bool) -> tuple[Path, Path, dict[str, Any]]:

@@ -6,8 +6,9 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.lowering.stack_prototype_materialization as prototype_lowering
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_prototype_materialization import (
     reconcile_exact_stack_argument_prototype_8616,
 )
@@ -18,7 +19,6 @@ from inertia.lowering.stack_variable_coordinates import (
     refresh_stack_variable_coordinate_cvar_8616,
     stack_variable_coordinate_registry_8616,
 )
-
 from inertia.widening.stack_argument_widths import WideStackArgumentWidthEvidence8616
 from tests.widening.test_x86_16_stack_argument_widths import (
     _closed_one_long_argument_evidence,

@@ -691,6 +691,19 @@ implementation. Each query retains its six-byte interrupt-frame writes,
 preserves register upper halves and the declared flags/segments, applies the
 declared response, and continues at the exact native fallthrough.
 
+DOSBox entry effects are a separate, explicit environment premise. The
+`dosbox_int21_entry` declaration uses kind
+`dosbox_int21_register_save_v1` and the exact environment `psp_segment`.
+For supported version/resize services it records the hardware interrupt frame,
+PSP saved-stack pointer and nine saved register words in native store order.
+Unknown register contents still produce writes and invalidate earlier byte
+facts. Every frame/save byte needs declared memory coverage; runtime SS:SP
+cannot inherit coverage merely from a valid loader stack. Writes into fetched
+code, IVT or authenticated allocator metadata refuse. This premise participates
+in boot, service and replay identities and never certifies that a native handler
+executed. Absence retains the existing frame-only contract. Allocator responses
+remain a separate declared-service obligation.
+
 Ordered `service_events` remain observable even when response registers are
 dead. Event verification starts at the re-derived executable entry, decodes
 complete bounded instruction streams, checks native transfers/successors, and

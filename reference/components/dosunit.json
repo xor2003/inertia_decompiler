@@ -65,11 +65,30 @@
     "tools/dosunit/tests/test_real16_program_video_state.py",
     "tests/frontend/test_replay_capture_cohorts.py",
     "tools/dosunit/tests/test_replay_capture_vectors.py",
-    "tools/dosunit/tests/test_unicorn_engine_bounds.py"
+    "tools/dosunit/tests/test_unicorn_engine_bounds.py",
+    "tools/dosunit/tests/test_real16_declared_input.py",
+    "tools/dosunit/tests/test_real16_dosbox_entry_policy.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_receipt.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_memory.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_policy.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_replay_edges.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_replay.py",
+    "tools/dosunit/tests/test_declared_vector_catalog.py"
   ],
   "focus": [],
   "consumers": [],
-  "quality_sources": [],
-  "routine_tests": [],
+  "quality_sources": [
+    "tools/dosunit/catalog/real16_declared_input.py"
+  ],
+  "routine_tests": [
+    "tools/dosunit/tests/test_real16_declared_input.py",
+    "tools/dosunit/tests/test_real16_dosbox_entry_policy.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_receipt.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_memory.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_policy.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_replay_edges.py",
+    "tools/dosunit/tests/test_real16_dosbox_resize_replay.py",
+    "tools/dosunit/tests/test_declared_vector_catalog.py"
+  ],
   "order": 4
 }

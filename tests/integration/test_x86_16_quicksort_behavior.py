@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_quicksort_behavior import assert_quicksort_behavior
 
 _SOURCE = r'''

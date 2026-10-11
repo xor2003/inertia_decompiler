@@ -16,16 +16,16 @@ from types import SimpleNamespace
 
 import angr
 import pytest
-from inertia.frontend.x86_16.public_api import VEX_BACKEND
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir import IRInstr, IRValue, MemSpace
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lifter_backend import LifterBackend
 from pyvex.expr import Const
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lifter_backend import LifterBackend
+from inertia.frontend.x86_16.public_api import VEX_BACKEND
+from inertia.ir import IRInstr, IRValue, MemSpace
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.semantics.call_stack_allocation import (
     binary_stack_allocation_target_8616,
-    collect_call_stack_allocation_proofs_8616,
+    collect_call_stack_allocation_candidates_8616,
 )
 from inertia.semantics.compiler_helpers import hook_x86_16_known_compiler_helpers_8616
 
@@ -217,7 +217,7 @@ def test_low_word_registry_alias_does_not_substitute_near_call() -> None:
     _assert_near_call_effects(block, project.arch, call_addr)
 
 
-def test_low_word_alias_yields_no_allocation_target_or_proof() -> None:
+def test_low_word_alias_yields_no_allocation_target_or_candidate() -> None:
     """The aliased decoded constant cannot bind helper allocation evidence."""
     caller, call_addr = _near_caller(4, entry=_ALIAS_ENTRY, target=_ALIAS_TARGET)
     project = _project(_blob(((_ALIAS_HELPER, MSC_ANCHKSTK_BYTES), (_ALIAS_ENTRY, caller))))
@@ -229,7 +229,7 @@ def test_low_word_alias_yields_no_allocation_target_or_proof() -> None:
         addr=call_addr,
     )
     assert binary_stack_allocation_target_8616(project, bound) is None
-    assert collect_call_stack_allocation_proofs_8616(project, artifact) == {}
+    assert collect_call_stack_allocation_candidates_8616(project, artifact) == {}
 
 
 def test_unregistered_near_call_keeps_identical_call_effects() -> None:

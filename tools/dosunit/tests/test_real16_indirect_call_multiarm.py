@@ -7,11 +7,11 @@ both arms must contribute full-state callee effects and dependency evidence.
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function
-from tools.dosunit.tests.test_real16_call_composition import _lower
 
 from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
 from tools.dosunit.compare.real16_call_contracts import Real16CallLimits
+from tools.dosunit.tests.test_dosunit_tool import _edge_function
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 # AND CX,10h; OR CH,1; PUSH CX; PUSH 0240h; MOV BP,SP; LCALL [BP]; RET.
 # Selector 0100h/0110h gives linear 1240h/1340h. The loader base is 1000h.

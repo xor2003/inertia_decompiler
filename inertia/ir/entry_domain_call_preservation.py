@@ -18,8 +18,8 @@ default CALL_ON_PATH refusal; nothing here guesses targets, repairs operands,
 or infers return behavior.
 
 A universal request (``invocation_scope=None``) keeps the registry/publishing
-callee route unchanged. A scoped request first authenticates its consuming
-entry and the exact surface that entry owns: a coverage-bound entry binds the
+callee route unchanged. A scoped request authenticates its consuming
+entry through its route before admitting the selected surface: a coverage-bound entry binds the
 identical registered artifact, while a chain-bound entry owns an in-flight raw
 surface resolved only through the frozen scoped owners — raw bundle import,
 scoped view, scoped coverage — and never through the publishing importer. The
@@ -43,6 +43,10 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from capstone import CS_ERR_DETAIL, CsError
 
+from inertia.frontend.x86_16.declared_function_entry import (
+    DeclaredFunctionEntryAdmission8616,
+    DeclaredFunctionEntrySpec8616,
+)
 from inertia.frontend.x86_16.frontend_boundary_transport import (
     capture_function_boundary_8616,
     restore_function_boundary_8616,
@@ -58,6 +62,7 @@ from inertia.frontend.x86_16.frontend_direct_callsite_index import (
 )
 from inertia.frontend.x86_16.frontend_function_boundary import (
     ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
     mapped_entry_function_boundary_8616,
 )
 from inertia.frontend.x86_16.frontend_local_call_evidence import local_call_frame_evidence_8616
@@ -86,11 +91,19 @@ from .function_ir_registry import (
 from .ir_boundary_cfg import (
     IRBoundaryCoverageResult8616,
     prove_ir_boundary_coverage_8616,
-    prove_scoped_ir_boundary_coverage_8616,
 )
 from .near_return_continuation_view import (
     NEAR_RETURN_CONTINUATION_PENDING_KIND_8616,
     prove_scoped_near_return_continuation_view_8616,
+)
+from .raw_boot_blocked_prefix import (
+    RawBootBlockedPrefix8616,
+    raw_boot_blocked_prefix_matches_8616,
+    retain_raw_boot_blocked_prefix_8616,
+)
+from .raw_boot_native_surface_cache import (
+    RawBootNativeSurfaceCache8616,
+    request_raw_boot_native_import_8616,
 )
 from .real16_declared_interrupt8616 import DeclaredInterruptService8616
 from .segment_call_preservation import (
@@ -111,8 +124,9 @@ if TYPE_CHECKING:
         DirectNearCallTargetBinding8616,
     )
 
+    from .declared_selector_invariant import DeclaredSegmentInvariant, DeclaredSelectorCallsite8616
     from .near_return_continuation_view import ScopedNearReturnContinuationView8616
-    from .real16_invocation_domain import Real16InvocationDomain8616
+    from .real16_invocation_domain import Real16CallInvocation8616, Real16InvocationDomain8616
     from .scoped_function_ir_view import ScopedFunctionIRView8616
 
 __all__ = [
@@ -278,12 +292,31 @@ class _PremiseResolution8616:
     in_flight: frozenset[int] = frozenset()
     remaining: int = _ENTRY_PREMISE_MAX_RESOLUTIONS_8616
     deadline: float | None = None
+    blocked_prefixes: dict[tuple[int, int], RawBootBlockedPrefix8616] = field(default_factory=dict)
+    blocked_prefix_reuse_count: int = 0
+    native_imports: RawBootNativeSurfaceCache8616 = field(default_factory=RawBootNativeSurfaceCache8616)
 
 
 class _PremiseResolutionSurface8616(Protocol):
     """Project-owned slot carrying the active premise resolution session."""
 
     _inertia_entry_domain_premise_resolution_8616: object
+
+
+class _CallCollectionPhase8616(StrEnum):
+    """Which staged collection pass a callsite proof is serving.
+
+    ``RECORD_POOL`` is the collector's first pass, run while the caller's
+    own record pool is still being assembled: a selector-window binding
+    refusal keeps its typed binding and defers the caller-domain premise
+    census to the second pass instead of paying a deep caller import that
+    has no complete pool to consume. ``COMPLETE`` is the standalone
+    contract — the premise leg is always attempted — and the collector's
+    second pass, which supplies the assembled pool.
+    """
+
+    RECORD_POOL = "record_pool"
+    COMPLETE = "complete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +350,51 @@ class EntryDomainCallPreservation8616:
     materialized_count: int
     failure_count: int
     invocation_scope: Real16InvocationDomain8616 | None = None
+    selector_binding: DeclaredSelectorCallsite8616 | None = None
+
+    @property
+    def selector_projection(self) -> DeclaredSelectorCallsite8616 | None:
+        """Derive the single selector premise from the record or operand binding."""
+        if self.selector_binding is not None:
+            return self.selector_binding
+        return None if self.binding is None else self.binding.selector_binding
+
+    @property
+    def selector_scope(self) -> DeclaredSegmentInvariant | None:
+        """Retain the distinct declared-selector premise without universalizing it."""
+        projection = self.selector_projection
+        return None if projection is None else projection.scope
+
+    def complete_for_selector(self, scope: DeclaredSegmentInvariant) -> bool:
+        """Consume only selector effects under the identical declared certificate."""
+        from .declared_selector_invariant import consume_declared_selector_callsite_8616
+
+        projection = self.selector_projection
+        if projection is None:
+            return False
+        if (projection.scope is not scope or projection.block is not self.block
+                or projection.instruction is not self.instruction):
+            return False
+        if (projection.callsite_addr != self.callsite_addr or projection.target_addr != self.target_addr
+                or self.invocation_scope is not None):
+            return False
+        if self.binding is not None and self.binding.selector_binding is not projection:
+            return False
+        if _preservation_failure_8616(self) is not None:
+            return False
+        # The symbolic operand owner consumes this identical projection last,
+        # after callee/coverage callbacks. Only pure CS projection follows it.
+        # A CONST operand bypasses binding validation and needs its own consume.
+        operand = self.instruction.args[0] if self.instruction.args else None
+        if isinstance(operand, IRValue) and operand.space is not MemSpace.CONST:
+            return True
+        return consume_declared_selector_callsite_8616(self.boundary.project, projection)
+
+    def preserved_registers_for_selector(self, scope: DeclaredSegmentInvariant) -> tuple[str, ...]:
+        """Project segment preservation without transporting caller GP/SP/memory."""
+        if not self.complete_for_selector(scope):
+            return ()
+        return _callee_preserved_registers_8616(self.callee)
 
     @property
     def required_scope(self) -> Real16InvocationDomain8616 | None:
@@ -325,7 +403,8 @@ class EntryDomainCallPreservation8616:
         Conditional evidence names exactly one required entry provenance:
         the explicitly retained ``invocation_scope`` wins; otherwise the
         caller-domain premise the Semantics binding consumed to discharge
-        this callsite's target. A ``None`` result is universal evidence.
+        this callsite's target. Universal evidence requires both this result
+        and ``selector_scope`` to be absent.
         """
         required = self.invocation_scope
         if required is None and self.binding is not None and self.binding.invocation is not None:
@@ -341,6 +420,8 @@ class EntryDomainCallPreservation8616:
         """Consume conditional preservation only under its authenticated entry."""
         from .real16_invocation_domain import same_real16_entry_scope_8616
 
+        if self.selector_projection is not None:
+            return False
         with segment_call_dependency_traversal_scope_8616():
             required = self.required_scope
             if required is not None and not same_real16_entry_scope_8616(invocation_scope, required):
@@ -369,6 +450,7 @@ class EntryDomainCallPreservation8616:
             "failure": None if self.failure is None else self.failure.value,
             "preserved_registers": list(self.preserved_registers),
             "complete": self.complete,
+            "selector_entry": None if self.selector_scope is None else self.selector_scope.declared_entry,
         }
 
 
@@ -535,6 +617,39 @@ class Real16InvocationSource8616:
     callsite_index: DecodedDirectCallsiteIndex8616
     pending_targets: tuple[int, ...] = ()
     declared_services: tuple[DeclaredInterruptService8616, ...] = ()
+    #: Explicit conditional application entries; never inferred caller edges.
+    function_entries: tuple[DeclaredFunctionEntryAdmission8616, ...] = ()
+
+
+def _function_entries_valid_8616(source: Real16InvocationSource8616) -> bool:
+    """Require immutable, unambiguous declarations before any source use.
+
+    Live image and environment authentication belongs to the scoped domain
+    consumer. This structural check grants no proof or execution reachability.
+    """
+    entries = source.function_entries
+    if type(entries) is not tuple or any(
+        type(entry) is not DeclaredFunctionEntryAdmission8616
+        or type(entry.spec) is not DeclaredFunctionEntrySpec8616
+        or type(entry.spec.entry_segment) is not int
+        or type(entry.spec.entry_offset) is not int
+        for entry in entries
+    ):
+        return False
+    heads = [(entry.spec.entry_segment << 4) + entry.spec.entry_offset for entry in entries]
+    return len(heads) == len(set(heads))
+
+
+def _invocation_source_fields_valid_8616(source: Real16InvocationSource8616) -> bool:
+    """Validate the shared retained-source shape for installation and demand."""
+    services = source.declared_services
+    return (
+        type(source.callsite_index) is DecodedDirectCallsiteIndex8616
+        and source.boot is not None
+        and _function_entries_valid_8616(source)
+        and type(services) is tuple
+        and all(type(service) is DeclaredInterruptService8616 for service in services)
+    )
 
 
 class _Real16InvocationSourceHolder8616(Protocol):
@@ -569,15 +684,7 @@ def install_real16_invocation_source_8616(
     """
     if source is not None and type(source) is not Real16InvocationSource8616:
         raise TypeError("invocation source must be a typed retained record")
-    if source is not None and (
-        type(source.callsite_index) is not DecodedDirectCallsiteIndex8616
-        or source.boot is None
-        or type(source.declared_services) is not tuple
-        or not all(
-            type(service) is DeclaredInterruptService8616
-            for service in source.declared_services
-        )
-    ):
+    if source is not None and not _invocation_source_fields_valid_8616(source):
         raise TypeError("invocation source requires a bound index and boot")
     cast(_Real16InvocationSourceHolder8616, project)._inertia_real16_invocation_source_8616 = (
         source
@@ -654,16 +761,7 @@ def _scoped_invocation_source_8616(
     source = seam(project)
     if source is None:
         return None
-    if (
-        type(source) is not Real16InvocationSource8616
-        or type(source.callsite_index) is not DecodedDirectCallsiteIndex8616
-        or source.boot is None
-        or type(source.declared_services) is not tuple
-        or not all(
-            type(service) is DeclaredInterruptService8616
-            for service in source.declared_services
-        )
-    ):
+    if type(source) is not Real16InvocationSource8616 or not _invocation_source_fields_valid_8616(source):
         raise TypeError("scoped invocation source must be a typed retained record")
     return source
 
@@ -793,19 +891,21 @@ def _edge_invocation_premise_8616(
     if (
         parent is None
         or parent.failure is not None
-        or parent.coverage is None
         or not parent.callsite_call_state
     ):
         return None
     from .real16_invocation_domain import (
         Real16CallChainLink8616,
         Real16EnclosedEntryLink8616,
+        _retained_parent_census_surface_8616,
         prove_real16_chained_invocation_domain_8616,
         prove_real16_enclosed_invocation_domain_8616,
     )
 
-    callsite_artifact = parent.coverage.artifact
-    callsite_boundary = parent.coverage.boundary
+    parent_surface = _retained_parent_census_surface_8616(parent)
+    if parent_surface is None:
+        return None
+    callsite_artifact, callsite_boundary = parent_surface
     if raw_target == callee_artifact.function_addr:
         link: Real16CallChainLink8616 | Real16EnclosedEntryLink8616
         link = Real16CallChainLink8616(
@@ -953,6 +1053,8 @@ def _retry_registered_invocation_premise_8616(
     retry_boot: bool,
 ) -> Real16InvocationDomain8616 | None:
     """Retry one refused caller premise only through available evidence."""
+    if _resolution_deadline_expired_8616(project, resolution.deadline):
+        return None
     rows = source.callsite_index.for_target(head_addr)
     if not rows and not retry_boot:
         return None
@@ -982,6 +1084,439 @@ def _retry_registered_invocation_premise_8616(
     )
 
 
+def _raw_boot_invocation_premise_8616(
+    project: object,
+    head_addr: int,
+    callsite_addr: int,
+    source: Real16InvocationSource8616,
+    resolution: _PremiseResolution8616 | None = None,
+    *,
+    allow_call_records: bool = True,
+) -> Real16InvocationDomain8616 | None:
+    """Attempt source-bound startup census before recursive universal intake.
+
+    A genuine source-bound MZ boot may reach its pending-edge callsite
+    before any registered coverage exists. The raw surface is censused in
+    place and retained only on the returned premise — it is never
+    published to the universal registry. ``None`` means no raw census was
+    available; an attempted census retains its typed result, including a
+    refusal, so the resolver can distinguish missing evidence from a
+    service contract that ordinary intake cannot supply. Expiry is a non-result:
+    never start a native import, freshness snapshot or replay after the deadline.
+    A managed request may retry a call-boundary refusal with independently
+    proved effects of calls on the same census prefix; standalone record-free
+    probes retain their cheap ordinary-call barrier admission.
+    ``allow_call_records=False`` permits only an independent record-free
+    census, including when a later obligation for this boot head is in flight.
+    """
+    deadline = None if resolution is None else resolution.deadline
+    if _resolution_deadline_expired_8616(project, deadline):
+        return None
+    from .real16_boot_entry_link import RawBootEntrySurface8616
+    from .real16_invocation_domain import (
+        Real16InvocationFailure8616,
+        _invocation_boot_evidence_8616,
+        prove_real16_raw_boot_invocation_domain_8616,
+        real16_native_census_import_8616,
+    )
+
+    evidence = _invocation_boot_evidence_8616(source.boot)
+    if (
+        _resolution_deadline_expired_8616(project, deadline)
+        or isinstance(evidence, Real16InvocationFailure8616)
+        or evidence.entry_linear != head_addr
+    ):
+        return None
+    if (
+        registered_function_ir_artifact_8616(project, head_addr).verdict
+        is FunctionIRArtifactVerdict8616.PROVEN
+    ):
+        # A proven registered head keeps its ordinary coverage route; the
+        # raw bootstrap exists only to reach genuine pending-selector
+        # surfaces that cannot publish.
+        return None
+    if _resolution_deadline_expired_8616(project, deadline):
+        return None
+    boundary = _exact_boundary_for_8616(project, head_addr)
+    if (
+        boundary is None or boundary.project is not project or boundary.addr != head_addr
+        or _resolution_deadline_expired_8616(project, deadline)
+    ):
+        return None
+    from .raw_boot_route_admission import RawBootRouteAdmission8616, raw_boot_route_admission_8616
+
+    if (resolution is None or not allow_call_records) and raw_boot_route_admission_8616(project, boundary, callsite_addr) is RawBootRouteAdmission8616.ORDINARY_CALL_BARRIER:
+        return None
+    if _resolution_deadline_expired_8616(project, deadline):
+        return None
+    artifact = (
+        real16_native_census_import_8616(project, boundary)
+        if resolution is None else request_raw_boot_native_import_8616(
+            resolution.native_imports, project, source, boundary, real16_native_census_import_8616,
+            should_abort=lambda: _resolution_deadline_expired_8616(project, deadline),
+        )
+    )
+    if artifact is None or _resolution_deadline_expired_8616(project, deadline):
+        return None
+    premise = prove_real16_raw_boot_invocation_domain_8616(
+        project, RawBootEntrySurface8616(artifact, boundary), callsite_addr,
+        boot=source.boot, boot_recompute=source.boot_recompute,
+        declared_services=source.declared_services,
+    )
+    if allow_call_records:
+        premise = _retry_raw_boot_call_prefix_8616(
+            project, artifact, boundary, callsite_addr, source, resolution, premise,
+        )
+    return None if _resolution_deadline_expired_8616(project, deadline) else premise
+
+
+def _raw_prefix_call_sites_8616(artifact: IRFunctionArtifact, callsite_addr: int) -> frozenset[int]:
+    """Select prior CALL rows using the census's own CFG ancestry relation."""
+    from .real16_invocation_domain import (
+        Real16InvocationFailure8616,
+        _callsite_block_8616,
+        _dangerous_block_addrs_8616,
+    )
+
+    target = _callsite_block_8616(artifact, callsite_addr)
+    if isinstance(target, Real16InvocationFailure8616):
+        return frozenset()
+    ancestors = _dangerous_block_addrs_8616(artifact, target)
+    sites: set[int] = set()
+    for block in artifact.blocks:
+        if block.addr not in ancestors:
+            continue
+        for instruction in block.instrs:
+            if block is target and instruction.addr == callsite_addr:
+                break
+            if instruction.op == "CALL" and type(instruction.addr) is int:
+                sites.add(instruction.addr)
+    return frozenset(sites)
+
+
+def _raw_prefix_records_8616(
+    project: object, artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616, callsite_addr: int,
+    resolution: _PremiseResolution8616,
+) -> tuple[EntryDomainCallPreservation8616, ...]:
+    """Collect exact prefix call records within the existing premise session."""
+    sites = _raw_prefix_call_sites_8616(artifact, callsite_addr)
+    if not sites or _resolution_deadline_expired_8616(project, resolution.deadline):
+        return ()
+    previous = _active_premise_resolution_8616(project)
+    if previous is not None and previous is not resolution:
+        return ()
+    holder = cast(_PremiseResolutionSurface8616, project)
+    if previous is None:
+        holder._inertia_entry_domain_premise_resolution_8616 = resolution
+    try:
+        return collect_entry_domain_call_preservations_8616(
+            project, artifact, boundary,
+            direct_target_resolver=cast(DirectCallTargetResolver8616, _premise_target_resolver_8616(project)),
+            selected_callsites=frozenset(sites),
+        )
+    finally:
+        if previous is None:
+            holder._inertia_entry_domain_premise_resolution_8616 = None
+
+
+def _retry_raw_boot_call_prefix_8616(
+    project: object, artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
+    callsite_addr: int, source: Real16InvocationSource8616,
+    resolution: _PremiseResolution8616 | None, premise: Real16InvocationDomain8616,
+) -> Real16InvocationDomain8616:
+    """Retry only a call-boundary refusal with independently proven prefix effects."""
+    from .real16_boot_entry_link import RawBootEntrySurface8616
+    from .real16_invocation_domain import Real16InvocationFailure8616, prove_real16_raw_boot_invocation_domain_8616
+
+    if (
+        resolution is None
+        or premise.failure is not Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+        or _resolution_deadline_expired_8616(project, resolution.deadline)
+    ):
+        return premise
+    records = _raw_prefix_records_8616(project, artifact, boundary, callsite_addr, resolution)
+    if not records or _resolution_deadline_expired_8616(project, resolution.deadline):
+        return premise
+    return prove_real16_raw_boot_invocation_domain_8616(
+        project, RawBootEntrySurface8616(artifact, boundary), callsite_addr,
+        boot=source.boot, boot_recompute=source.boot_recompute,
+        entry_call_preservations=records, declared_services=source.declared_services,
+    )
+
+
+class _RawBootPremiseStatus8616(StrEnum):
+    """Resolution action for one optional source-bound raw boot census."""
+
+    PROVEN = "proven"
+    REFUSED = "refused"
+    RETRY = "retry"
+
+
+def _request_raw_boot_premise_8616(
+    project: object, head_addr: int, callsite_addr: int,
+    source: Real16InvocationSource8616, resolution: _PremiseResolution8616,
+) -> Real16InvocationDomain8616 | None:
+    """Reuse only unchanged impossible prerequisites within this bounded request."""
+    if _resolution_deadline_expired_8616(project, resolution.deadline):
+        return None
+    key = (head_addr, callsite_addr)
+    blocked = resolution.blocked_prefixes.get(key)
+    if blocked is not None and raw_boot_blocked_prefix_matches_8616(
+        blocked, project, source, head_addr, callsite_addr,
+    ):
+        if _resolution_deadline_expired_8616(project, resolution.deadline):
+            resolution.blocked_prefixes.pop(key, None)
+            return None
+        resolution.blocked_prefix_reuse_count += 1
+        return blocked.premise
+    premise = _raw_boot_invocation_premise_8616(project, head_addr, callsite_addr, source, resolution)
+    if _resolution_deadline_expired_8616(project, resolution.deadline):
+        return None
+    retained = retain_raw_boot_blocked_prefix_8616(project, source, head_addr, callsite_addr, premise)
+    if retained is not None:
+        resolution.blocked_prefixes[key] = retained
+    else:
+        resolution.blocked_prefixes.pop(key, None)
+    return premise
+
+
+def _raw_boot_census_retry_expired_8616(premise: Real16InvocationDomain8616) -> bool:
+    """Check an already exhausted census budget without renewing its deadline.
+
+    An old refusal cannot exhaust a fresh request. Only the current shared
+    traversal's retained deadline can rule out all further census proofs.
+    Entering an absent traversal leaves its deadline unset and permits retry.
+    """
+    from .real16_invocation_domain import Real16InvocationFailure8616
+    from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+
+    if premise.failure is not Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED:
+        return False
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        return bool(deadline_reached_8616(traversal.census_deadline))
+
+
+def _raw_boot_premise_status_8616(
+    project: object,
+    premise: Real16InvocationDomain8616 | None,
+    source: Real16InvocationSource8616,
+    head_addr: int,
+    deadline: float | None,
+) -> _RawBootPremiseStatus8616:
+    """Replay raw evidence and retain only useful registered-intake retries.
+
+    Native re-import cannot supply a missing declared environment or prove
+    an unknown selector. Incoming parent edges may carry different state
+    and therefore retain ordinary registered-coverage recovery. The caller
+    must check its request deadline after this potentially expensive replay.
+    """
+    from .real16_invocation_domain import Real16InvocationFailure8616
+
+    if _resolution_deadline_expired_8616(project, deadline):
+        return _RawBootPremiseStatus8616.REFUSED
+    if premise is None:
+        return _RawBootPremiseStatus8616.RETRY
+    if _raw_boot_census_retry_expired_8616(premise):
+        return _RawBootPremiseStatus8616.REFUSED
+    if premise.complete:
+        return _RawBootPremiseStatus8616.PROVEN
+    if (
+        premise.failure is Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
+        and not source.callsite_index.for_target(head_addr)
+    ):
+        return _RawBootPremiseStatus8616.REFUSED
+    return _RawBootPremiseStatus8616.RETRY
+
+
+def _current_entry_route_status_8616(
+    project: object, source: Real16InvocationSource8616, head_addr: int,
+    deadline: float | None, status: _RawBootPremiseStatus8616,
+) -> _RawBootPremiseStatus8616:
+    """Stop retry intake only when both current entry routes cannot apply.
+
+    Unknown boot evidence retains intake. This is not global unreachability or
+    index completeness: native intake retains separate records and cannot
+    extend this source index. Extraction consumes the shared request budget.
+    """
+    from .real16_invocation_domain import (
+        Real16InvocationFailure8616,
+        _invocation_boot_evidence_8616,
+    )
+
+    if status is not _RawBootPremiseStatus8616.RETRY or _resolution_deadline_expired_8616(project, deadline):
+        return status
+    evidence = _invocation_boot_evidence_8616(source.boot)
+    if _resolution_deadline_expired_8616(project, deadline) or (
+        not isinstance(evidence, Real16InvocationFailure8616)
+        and evidence.entry_linear != head_addr
+        and not source.callsite_index.for_target(head_addr)
+    ):
+        return _RawBootPremiseStatus8616.REFUSED
+    return status
+
+
+def _independent_reentrant_boot_premise_8616(
+    project: object, head_addr: int, callsite_addr: int,
+    source: Real16InvocationSource8616, resolution: _PremiseResolution8616,
+) -> Real16InvocationDomain8616 | None:
+    """Prove an earlier boot prefix without consuming recursive call records.
+
+    The raw owner authenticates the genuine boot head and never publishes
+    universal coverage. Disabling record collection prevents an in-flight
+    obligation from being used as its own premise. A prior unproven CALL still
+    refuses, and the existing request deadline bounds replay and consumption.
+    """
+    if (
+        resolution.remaining <= 0
+        or len(resolution.in_flight) >= _ENTRY_PREMISE_MAX_DEPTH_8616
+        or _resolution_deadline_expired_8616(project, resolution.deadline)
+    ):
+        return None
+    resolution.remaining -= 1
+    premise = _raw_boot_invocation_premise_8616(
+        project, head_addr, callsite_addr, source, resolution, allow_call_records=False,
+    )
+    if premise is None or not premise.complete:
+        return None
+    return None if _resolution_deadline_expired_8616(project, resolution.deadline) else premise
+
+
+def _function_entry_for_head_8616(
+    source: Real16InvocationSource8616, head_addr: int,
+) -> DeclaredFunctionEntryAdmission8616 | None:
+    """Select an explicit entry by exact coordinate, never by a library name."""
+    if not _function_entries_valid_8616(source):
+        raise TypeError("invocation source requires unambiguous typed function entries")
+    return next((entry for entry in source.function_entries
+                 if (entry.spec.entry_segment << 4) + entry.spec.entry_offset == head_addr), None)
+
+
+def _declared_function_premise_8616(
+    project: object,
+    source: Real16InvocationSource8616,
+    admission: DeclaredFunctionEntryAdmission8616,
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    callsite_addr: int,
+    records: tuple[EntryDomainCallPreservation8616, ...] = (),
+    *, deadline: float | None = None,
+) -> Real16InvocationDomain8616 | None:
+    """Replay the declared entry over an exact native surface with no boot walk."""
+    from .real16_invocation_domain import (
+        DeclaredFunctionEntryLink8616,
+        prove_fresh_real16_declared_function_entry_domain_8616,
+    )
+
+    if _resolution_deadline_expired_8616(project, deadline):
+        return None
+    premise = prove_fresh_real16_declared_function_entry_domain_8616(
+        project, DeclaredFunctionEntryLink8616(admission, artifact, boundary),
+        callsite_addr, boot=source.boot, boot_recompute=source.boot_recompute,
+        entry_call_preservations=records, declared_services=source.declared_services,
+    )
+    if _resolution_deadline_expired_8616(project, deadline):
+        return None
+    return premise
+
+
+def _import_declared_function_premise_8616(
+    project: object,
+    source: Real16InvocationSource8616,
+    admission: DeclaredFunctionEntryAdmission8616,
+    callsite_addr: int,
+) -> Real16InvocationDomain8616 | None:
+    """Import only the declared extent without publishing conditional code."""
+    from .real16_invocation_domain import real16_native_census_import_8616
+
+    start, end = admission.spec.range_start, admission.spec.range_end
+    if type(start) is not int or type(end) is not int or not 0 <= start < end <= 0x100000:
+        return None
+    boundary = exact_function_range_boundary_8616(
+        project, start, end,
+    )
+    if boundary is None:
+        return None
+    artifact = real16_native_census_import_8616(project, boundary)
+    if artifact is None:
+        return None
+    return _declared_function_premise_8616(
+        project, source, admission, artifact, boundary, callsite_addr,
+    )
+
+
+def _resolve_registered_surface_8616(
+    project: object,
+    head_addr: int,
+    callsite_addr: int,
+    source: Real16InvocationSource8616,
+    resolution: _PremiseResolution8616,
+    admission: DeclaredFunctionEntryAdmission8616 | None,
+) -> Real16InvocationDomain8616 | None:
+    """Choose explicit entry or boot provenance inside the shared demand guard."""
+    if _resolution_deadline_expired_8616(project, resolution.deadline):
+        return None
+    from .real16_invocation_domain import (
+        Real16InvocationFailure8616,
+        prove_real16_invocation_domain_8616,
+    )
+
+    if admission is not None:
+        # An explicit entry selects its own conditional domain. A refused
+        # declaration cannot silently become a different boot-rooted proof.
+        declared = _import_declared_function_premise_8616(
+            project, source, admission, callsite_addr,
+        )
+        if _resolution_deadline_expired_8616(project, resolution.deadline):
+            return None
+        return declared
+    boot_premise = _request_raw_boot_premise_8616(project, head_addr, callsite_addr, source, resolution)
+    boot_status = _raw_boot_premise_status_8616(
+        project, boot_premise, source, head_addr, resolution.deadline,
+    )
+    boot_status = _current_entry_route_status_8616(
+        project, source, head_addr, resolution.deadline, boot_status,
+    )
+    if _resolution_deadline_expired_8616(project, resolution.deadline):
+        # Raw intake and completeness replay ran native work; an expired session
+        # must not admit its late result or fall into universal intake.
+        return None
+    if boot_status is _RawBootPremiseStatus8616.PROVEN:
+        return boot_premise
+    if boot_status is _RawBootPremiseStatus8616.REFUSED:
+        return None
+    surface = _caller_premise_surface_8616(project, head_addr)
+    if surface is None or _resolution_deadline_expired_8616(project, resolution.deadline):
+        return None
+    artifact, boundary, coverage = surface
+    premise = prove_real16_invocation_domain_8616(
+        project,
+        coverage,
+        callsite_addr,
+        boot=source.boot,
+        boot_recompute=source.boot_recompute,
+        declared_services=source.declared_services,
+    )
+    if _resolution_deadline_expired_8616(project, resolution.deadline):
+        return None
+    if premise.failure is None and premise.complete:
+        return premise
+    return _retry_registered_invocation_premise_8616(
+        project,
+        head_addr,
+        callsite_addr,
+        artifact,
+        boundary,
+        coverage,
+        source,
+        resolution,
+        retry_boot=(
+            premise.failure
+            is Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
+        ),
+    )
+
+
 def _registered_invocation_premise_8616(
     project: object,
     head_addr: int,
@@ -1001,8 +1536,13 @@ def _registered_invocation_premise_8616(
     the same bounded session so cyclic or over-deep caller graphs refuse
     deterministically instead of recursing without bound.
     """
+    admission = _function_entry_for_head_8616(source, head_addr)
     if head_addr in resolution.in_flight:
-        return None
+        if admission is not None:
+            return None
+        return _independent_reentrant_boot_premise_8616(
+            project, head_addr, callsite_addr, source, resolution,
+        )
     if (
         len(resolution.in_flight) >= _ENTRY_PREMISE_MAX_DEPTH_8616
         or resolution.remaining <= 0
@@ -1013,42 +1553,8 @@ def _registered_invocation_premise_8616(
     prior_in_flight = resolution.in_flight
     resolution.in_flight = prior_in_flight | {head_addr}
     try:
-        if _resolution_deadline_expired_8616(project, resolution.deadline):
-            return None
-        surface = _caller_premise_surface_8616(project, head_addr)
-        if surface is None or _resolution_deadline_expired_8616(project, resolution.deadline):
-            return None
-        artifact, boundary, coverage = surface
-        from .real16_invocation_domain import (
-            Real16InvocationFailure8616,
-            prove_real16_invocation_domain_8616,
-        )
-
-        premise = prove_real16_invocation_domain_8616(
-            project,
-            coverage,
-            callsite_addr,
-            boot=source.boot,
-            boot_recompute=source.boot_recompute,
-            declared_services=source.declared_services,
-        )
-        if _resolution_deadline_expired_8616(project, resolution.deadline):
-            return None
-        if premise.failure is None and premise.complete:
-            return premise
-        return _retry_registered_invocation_premise_8616(
-            project,
-            head_addr,
-            callsite_addr,
-            artifact,
-            boundary,
-            coverage,
-            source,
-            resolution,
-            retry_boot=(
-                premise.failure
-                is Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
-            ),
+        return _resolve_registered_surface_8616(
+            project, head_addr, callsite_addr, source, resolution, admission,
         )
     finally:
         resolution.in_flight = prior_in_flight
@@ -1124,6 +1630,12 @@ def _caller_invocation_premise_8616(
     prior_in_flight = resolution.in_flight
     resolution.in_flight = prior_in_flight | {artifact.function_addr}
     try:
+        admission = _function_entry_for_head_8616(source, artifact.function_addr)
+        if admission is not None:
+            return _declared_function_premise_8616(
+                project, source, admission, artifact, boundary, callsite_addr,
+                entry_call_preservations, deadline=resolution.deadline,
+            )
         for row in source.callsite_index.for_target(artifact.function_addr):
             if _resolution_deadline_expired_8616(project, resolution.deadline):
                 return None
@@ -1201,8 +1713,50 @@ def _callee_preserved_registers_8616(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _CallerInstructionPosition8616:
+    """Operation-local identities and slots; these facts grant no proof."""
+
+    artifact: IRFunctionArtifact
+    block: IRBlock
+    instruction: IRInstr
+    blocks: tuple[IRBlock, ...]
+    instructions: tuple[IRInstr, ...]
+    block_index: int
+    instruction_index: int
+
+    def matches(self, artifact: IRFunctionArtifact, block: IRBlock, instruction: IRInstr) -> bool:
+        """Check current exact owners and slots without traversing their streams."""
+        return (
+            artifact is self.artifact and block is self.block and instruction is self.instruction
+            and artifact.blocks is self.blocks and block.instrs is self.instructions
+            and type(self.block_index) is int and type(self.instruction_index) is int
+            and 0 <= self.block_index < len(self.blocks)
+            and 0 <= self.instruction_index < len(self.instructions)
+            and self.blocks[self.block_index] is block
+            and self.instructions[self.instruction_index] is instruction
+        )
+
+
+def _capture_caller_instruction_position_8616(
+    artifact: IRFunctionArtifact, block: IRBlock, instruction: IRInstr,
+) -> _CallerInstructionPosition8616 | None:
+    """Capture membership once before callbacks; malformed owners stay refused."""
+    if type(artifact) is not IRFunctionArtifact or type(block) is not IRBlock:
+        return None
+    if type(instruction) is not IRInstr:
+        return None
+    block_index = next((index for index, row in enumerate(artifact.blocks) if row is block), None)
+    instruction_index = next((index for index, row in enumerate(block.instrs) if row is instruction), None)
+    if block_index is None or instruction_index is None:
+        return None
+    return _CallerInstructionPosition8616(
+        artifact, block, instruction, artifact.blocks, block.instrs, block_index, instruction_index)
+
+
 def _caller_surface_failure_8616(
     result: EntryDomainCallPreservation8616,
+    *, position: _CallerInstructionPosition8616 | None = None,
 ) -> EntryDomainCallPreservationFailure8616 | None:
     """Rebind the caller side by exact object identity and coordinates.
 
@@ -1218,9 +1772,15 @@ def _caller_surface_failure_8616(
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     if result.boundary.addr != result.artifact.function_addr:
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
-    if not any(block is result.block for block in result.artifact.blocks):
-        return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
-    if not any(instr is result.instruction for instr in result.block.instrs):
+    if position is None:
+        # Standalone consumers keep their existing fresh scans and allocate
+        # no temporary position object. Only the synchronous collector retains
+        # a pre-callback position for its repeated reconciliation.
+        member = (any(block is result.block for block in result.artifact.blocks)
+                  and any(instr is result.instruction for instr in result.block.instrs))
+    else:
+        member = position.matches(result.artifact, result.block, result.instruction)
+    if not member:
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     instruction = result.instruction
     if (
@@ -1362,15 +1922,39 @@ def _preservation_failure_8616(
 def _callee_complete_in_scope_8616(
     result: EntryDomainCallPreservation8616, callee: SegmentEffectClosureResult8616,
 ) -> bool:
-    """Authenticate registered transport before consuming conditional callee effects."""
-    from .real16_invocation_domain import real16_scope_crosses_call_8616
+    """Authenticate exact registered or raw transport before consuming effects."""
+    from .real16_invocation_domain import (
+        Real16CallChainLink8616,
+        _retained_parent_census_surface_8616,
+        real16_scope_crosses_call_8616,
+        same_real16_entry_scope_8616,
+    )
 
     callee_scope = callee.state.invocation_scope
     if callee_scope is None:
         return callee.complete
-    caller_scope = result.invocation_scope
-    if caller_scope is None or caller_scope.coverage is None:
+    if result.selector_projection is not None:
         return False
+    caller_scope = result.required_scope
+    if caller_scope is None:
+        return False
+    if caller_scope.coverage is None:
+        link = callee_scope.chain
+        parent_surface = _retained_parent_census_surface_8616(caller_scope)
+        return (
+            type(link) is Real16CallChainLink8616
+            and parent_surface is not None
+            and parent_surface[0] is result.artifact
+            and parent_surface[1] is result.boundary
+            and link.callsite_artifact is result.artifact
+            and link.callsite_boundary is result.boundary
+            and link.parent.callsite_addr == result.callsite_addr
+            and result.entry is not None
+            and _transported_edge_bound_8616(result.boundary.project, link.callsite, result.entry)
+            and same_real16_entry_scope_8616(caller_scope, link.parent)
+            and link.complete
+            and callee.complete_for(callee_scope)
+        )
     if caller_scope.coverage.artifact is not result.artifact:
         return False
     return real16_scope_crosses_call_8616(
@@ -1487,15 +2071,50 @@ def _decoded_entry_for_callsite_8616(
     return entries[0] if len(entries) == 1 else None
 
 
+def _declared_boundary_for_8616(
+    project: object,
+    function_addr: int,
+    admission: DeclaredFunctionEntryAdmission8616,
+) -> ExactFunctionRangeBoundary8616 | None:
+    """Select declared bounds without granting entry or native-byte proof.
+
+    A matching retained census keeps its exact identity. Conflicting retained
+    bounds or an undecodable declaration refuse rather than rediscovering a
+    wider mapped or CFG surface. Consumers still authenticate the declaration
+    and native evidence through the ordinary fresh entry-domain proof.
+    """
+    start, end = admission.spec.range_start, admission.spec.range_end
+    if type(start) is not int or type(end) is not int or not 0 <= start < end:
+        return None
+    retained = registered_decoded_callsite_index_8616(project, function_addr)
+    if retained is not None:
+        boundary = retained.boundary
+        if (
+            boundary.project is not project or boundary.addr != function_addr
+            or boundary.decode_start != start or boundary.decode_end != end
+        ):
+            return None
+        return boundary
+    boundary = exact_function_range_boundary_8616(project, start, end)
+    if boundary is None or boundary.project is not project or boundary.addr != function_addr:
+        return None
+    return boundary
+
+
 def _exact_boundary_for_8616(
     project: object,
     function_addr: int,
 ) -> ExactFunctionRangeBoundary8616 | None:
-    """Resolve the exact frontend boundary for one mapped function entry."""
+    """Prefer explicit declared bounds, then existing function-boundary lookup."""
     # The registry imports the VEX importer, which imports this owner.
     # Boundary lookup is needed only when resolving a live call, after
     # those module contracts have finished initialization.
     from .function_ssa_registry import function_boundary_at_address_8616
+
+    source = _invocation_premise_source_8616(project)
+    admission = None if source is None else _function_entry_for_head_8616(source, function_addr)
+    if admission is not None:
+        return _declared_boundary_for_8616(project, function_addr, admission)
 
     # Reuse the census already retained for this project/head. Rediscovering
     # the same reachable body inside different decode bounds creates a second
@@ -2246,25 +2865,27 @@ def _callee_resolution_guard_failure_8616(
 def _closure_scope_bound_8616(
     project: object, callee_addr: int, scope: Real16InvocationDomain8616 | None,
 ) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
-    """Authenticate a scoped request and return the exact surface it owns.
+    """Select the exact scoped surface; authenticate coverage-bound entries here.
 
     ``None`` means either a universal request (``scope is None``) or a
     refused scope — callers branch on ``invocation_scope is None`` first,
-    so a scoped request returning ``None`` here is a typed refusal, never
-    a fallthrough to the publishing resolver. The whole scope replays
-    once through ``same_real16_entry_scope_8616`` before any retained
-    field is trusted: only an independently authenticated entry may name
-    a callee surface, so a forged link, stale chain, selector
-    coincidence, or address equality without native replay cannot
-    substitute. The anchor rule mirrors the scoped-view owner: a
-    coverage-bound entry consumes its registered ``coverage`` pair,
-    while an in-flight chained or enclosed entry consumes the retained
+    so a scoped request returning ``None`` here refuses rather than using
+    the publishing resolver. Coverage-bound entries authenticate here because
+    their route uses universal coverage. Coverage-free entries only select
+    their retained surface: the scoped route's canonical view authenticates
+    the current entry before producing coverage, and retained hits separately
+    reauthenticate through ``_retained_closure_bound_8616``. Selection itself
+    grants no proof and must never bypass either consuming gate.
+    A coverage-bound entry names its registered coverage pair, while a
+    declared entry names its retained artifact/boundary directly.
+    An in-flight chained or enclosed entry consumes the retained
     link's callee pair — never a re-derived look-alike and never the
     enclosing census surface.
     """
     if scope is None:
         return None
     from .real16_invocation_domain import (
+        DeclaredFunctionEntryLink8616,
         Real16CallChainLink8616,
         Real16EnclosedEntryLink8616,
         Real16InvocationDomain8616,
@@ -2276,7 +2897,7 @@ def _closure_scope_bound_8616(
         or scope.project is not project
     ):
         return None
-    if not same_real16_entry_scope_8616(scope, scope):
+    if scope.coverage is not None and not same_real16_entry_scope_8616(scope, scope):
         return None
     coverage = scope.coverage
     artifact: object
@@ -2288,26 +2909,28 @@ def _closure_scope_bound_8616(
         boundary = coverage.boundary
     else:
         chain = scope.chain
-        if not isinstance(
-            chain, (Real16CallChainLink8616, Real16EnclosedEntryLink8616)
-        ):
+        if type(chain) is DeclaredFunctionEntryLink8616:
+            artifact = chain.artifact
+            boundary = chain.boundary
+        elif isinstance(chain, (Real16CallChainLink8616, Real16EnclosedEntryLink8616)):
+            artifact = chain.callee_artifact
+            boundary = chain.callee_boundary
+        else:
             return None
-        artifact = chain.callee_artifact
-        boundary = chain.callee_boundary
     if (
         type(artifact) is not IRFunctionArtifact
         or type(boundary) is not ExactFunctionRangeBoundary8616
     ):
         return None
-    proven_artifact: IRFunctionArtifact = artifact
-    proven_boundary: ExactFunctionRangeBoundary8616 = boundary
+    selected_artifact: IRFunctionArtifact = artifact
+    selected_boundary: ExactFunctionRangeBoundary8616 = boundary
     if (
-        proven_artifact.function_addr != callee_addr
-        or proven_boundary.addr != callee_addr
-        or proven_boundary.project is not project
+        selected_artifact.function_addr != callee_addr
+        or selected_boundary.addr != callee_addr
+        or selected_boundary.project is not project
     ):
         return None
-    return proven_artifact, proven_boundary
+    return selected_artifact, selected_boundary
 
 
 def _retain_callee_closure_8616(
@@ -2389,10 +3012,12 @@ def _scoped_callee_coverage_8616(
         view = prove_scoped_x86_16_ir_function_view_8616(
             project, bundle, boundary, invocation_scope=scope,
         )
-    coverage = prove_scoped_ir_boundary_coverage_8616(
-        project, boundary, artifact, view,
+    from .ir_boundary_cfg import consume_scoped_ir_boundary_projection_8616
+
+    consumed = consume_scoped_ir_boundary_projection_8616(
+        project, boundary, artifact, view, scope,
     )
-    return coverage if coverage.complete_for(scope) else None
+    return consumed.coverage if consumed.coverage.failure is None and consumed.projection is not None else None
 
 
 def _callee_effect_closure_8616(
@@ -2484,8 +3109,8 @@ def _callee_closure_8616(
     unchanged; ``callsite`` is the independently authenticated decoded
     row for the exact edge being resolved when the request is
     callsite-driven, transported only into the premise-bound import. A
-    scoped request must first authenticate the consuming entry and the
-    exact surface it owns: a coverage-bound entry keeps the registry
+    scoped request must authenticate the consuming entry through its route
+    before admitting the selected surface: a coverage-bound entry keeps the registry
     route and binds the identical registered artifact, while a
     chain-bound entry owns an in-flight raw surface that is resolved only
     through the frozen scoped owners — raw bundle, scoped view, scoped
@@ -2631,8 +3256,20 @@ def _bind_direct_call_target_8616(
     callsite_addr: int | None,
     window: tuple[int, int, tuple[int, ...]] | None,
     entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...],
+    collection_phase: _CallCollectionPhase8616,
+    *, defer_declared_scope: bool = False,
 ) -> tuple[DirectNearCallTargetBinding8616 | None, bool]:
-    """Bind one symbolic CALL target, reporting cooperative expiry separately."""
+    """Bind one symbolic CALL target, reporting cooperative expiry separately.
+
+    A bare ``SELECTOR_WINDOW_UNPROVED`` refusal is the only binding outcome a
+    caller-domain premise can discharge. Under ``RECORD_POOL`` that premise
+    leg is deferred: the caller's record pool is still being assembled, so
+    the premise census has no pool to consume and the collector's second
+    pass retries this exact callsite with the assembled pool. The typed
+    refused binding is returned unchanged — the same result the
+    ``premise is None`` leg produces — so refusal bookkeeping and the
+    retry's selector-window guard are unaffected.
+    """
     if window is None or callsite_addr is None:
         return None, False
     operand = instruction.args[0] if instruction.args else None
@@ -2657,6 +3294,12 @@ def _bind_direct_call_target_8616(
         return None, True
     if binding.failure is not DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED:
         return binding, False
+    if collection_phase is _CallCollectionPhase8616.RECORD_POOL:
+        return binding, False
+    if defer_declared_scope:
+        source = _invocation_premise_source_8616(project)
+        if source is not None and _function_entry_for_head_8616(source, artifact.function_addr) is not None:
+            return binding, False
     premise = _caller_invocation_premise_8616(
         project,
         artifact,
@@ -2682,6 +3325,172 @@ def _bind_direct_call_target_8616(
     )
 
 
+class _RawCalleeRoute8616(StrEnum):
+    """Distinguish refusal-free native intake from authenticated scoped intake."""
+
+    UNIVERSAL_BODY = "universal_body"
+    SCOPED_BODY = "scoped_body"
+    REFUSED = "refused"
+
+
+def _raw_callee_call_scope_8616(
+    project: object,
+    callee_addr: int,
+    callsite: DecodedDirectCallsite8616,
+    caller_scope: Real16InvocationDomain8616,
+    entry_binding: DirectNearCallTargetBinding8616,
+) -> tuple[_RawCalleeRoute8616, Real16InvocationDomain8616 | None]:
+    """Transport a bound caller prefix into the identical raw callee entry.
+
+    The source index authenticates this exact near-CALL row. The conditional
+    callee remains pre-discharge native IR; its entry is a separately proved
+    call-chain domain, never the caller domain relabeled as a callee scope.
+    """
+    from .real16_invocation_domain import (
+        Real16CallChainLink8616,
+        _retained_parent_census_surface_8616,
+        prove_fresh_real16_chained_invocation_domain_8616,
+        real16_native_census_import_8616,
+    )
+
+    source = _invocation_premise_source_8616(project)
+    parent_surface = _retained_parent_census_surface_8616(caller_scope)
+    encoded = callsite.encoded_near_coordinates()
+    if source is None or parent_surface is None or encoded is None or encoded[1] != callee_addr:
+        return _RawCalleeRoute8616.REFUSED, None
+    rows = tuple(
+        row for row in source.callsite_index.for_target(callsite.target_addr)
+        if row.caller_start == callsite.caller_start
+        and _transported_edge_bound_8616(project, row, callsite)
+    )
+    if len(rows) != 1 or caller_scope.callsite_addr != callsite.callsite_addr:
+        return _RawCalleeRoute8616.REFUSED, None
+    boundary = _exact_boundary_for_8616(project, callee_addr)
+    if boundary is None or direct_evidence_deadline_expired_8616(project):
+        return _RawCalleeRoute8616.REFUSED, None
+    artifact = real16_native_census_import_8616(project, boundary)
+    if artifact is None or direct_evidence_deadline_expired_8616(project):
+        return _RawCalleeRoute8616.REFUSED, None
+    if not any(block.refusals for block in artifact.blocks):
+        return _RawCalleeRoute8616.UNIVERSAL_BODY, None
+    link = Real16CallChainLink8616(
+        parent=caller_scope,callsite_index=source.callsite_index,callsite=rows[0],
+        callsite_artifact=parent_surface[0],callsite_boundary=parent_surface[1],
+        call_state=caller_scope.callsite_call_state,callee_artifact=artifact,callee_boundary=boundary,
+        entry_binding=entry_binding,
+    )
+    scope = prove_fresh_real16_chained_invocation_domain_8616(
+        project,None,callee_addr,boot=source.boot,boot_recompute=source.boot_recompute,
+        chain=link,declared_services=source.declared_services,
+    )
+    if direct_evidence_deadline_expired_8616(project) or scope is None:
+        return _RawCalleeRoute8616.REFUSED, None
+    return _RawCalleeRoute8616.SCOPED_BODY, scope
+
+
+
+def _deferred_declared_raw_callee_scope_8616(
+    project: object,
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    block: IRBlock,
+    instruction: IRInstr,
+    callsite: DecodedDirectCallsite8616,
+    callee_addr: int,
+    records: tuple[EntryDomainCallPreservation8616, ...],
+) -> tuple[DirectNearCallTargetBinding8616 | None, _RawCalleeRoute8616, Real16InvocationDomain8616 | None]:
+    """Intake native callee first, then construct a declared caller exactly once."""
+    from inertia.semantics.direct_near_call_target_binding import (
+        _construct_direct_near_call_target_binding_from_decoded_8616,
+    )
+
+    from .real16_invocation_domain import (
+        DeclaredFunctionEntryLink8616,
+        _construct_declared_chained_invocation_domain_8616,
+        _DeclaredCallChainConstruction8616,
+        _DeclaredInvocationConstruction8616,
+        real16_native_census_import_8616,
+    )
+
+    source = _invocation_premise_source_8616(project)
+    admission = None if source is None else _function_entry_for_head_8616(source, artifact.function_addr)
+    if source is None or admission is None:
+        return None, _RawCalleeRoute8616.REFUSED, None
+    rows = tuple(row for row in source.callsite_index.for_target(callsite.target_addr)
+                 if row.caller_start == callsite.caller_start and _transported_edge_bound_8616(project, row, callsite))
+    if len(rows) != 1:
+        return None, _RawCalleeRoute8616.REFUSED, None
+    callee_boundary = _exact_boundary_for_8616(project, callee_addr)
+    if callee_boundary is None or direct_evidence_deadline_expired_8616(project):
+        return None, _RawCalleeRoute8616.REFUSED, None
+    raw = real16_native_census_import_8616(project, callee_boundary)
+    if raw is None or direct_evidence_deadline_expired_8616(project):
+        return None, _RawCalleeRoute8616.REFUSED, None
+    if not any(item.refusals for item in raw.blocks):
+        binding, expired = _bind_direct_call_target_8616(
+            project, artifact, boundary, block, instruction, callsite.callsite_addr,
+            _callsite_window_8616(project, callsite), records, _CallCollectionPhase8616.COMPLETE,
+        )
+        route = (_RawCalleeRoute8616.UNIVERSAL_BODY
+                 if not expired and binding is not None and binding.failure is None
+                 else _RawCalleeRoute8616.REFUSED)
+        return binding, route, None
+
+    def bind(factory: Callable[[], Real16CallInvocation8616 | None]) -> DirectNearCallTargetBinding8616:
+        """Canonical Semantics runs all native gates before IR's owned factory."""
+        return _construct_direct_near_call_target_binding_from_decoded_8616(
+            project, block=block, instruction=instruction, decoded=rows[0], factory=factory,
+        )
+
+    request = _DeclaredCallChainConstruction8616(
+        _DeclaredInvocationConstruction8616(
+            project, DeclaredFunctionEntryLink8616(admission, artifact, boundary),
+            callsite.callsite_addr, source.boot, source.boot_recompute,
+            entry_call_preservations=records, declared_services=source.declared_services,
+        ), source.callsite_index, rows[0], block, raw, callee_boundary, bind,
+    )
+    constructed = _construct_declared_chained_invocation_domain_8616(request)
+    if constructed is None or direct_evidence_deadline_expired_8616(project):
+        return None, _RawCalleeRoute8616.REFUSED, None
+    binding, scope = constructed
+    return binding, _RawCalleeRoute8616.SCOPED_BODY, scope
+
+
+
+def _pending_declared_binding_8616(
+    project: object, artifact: IRFunctionArtifact,
+    binding: DirectNearCallTargetBinding8616 | None, phase: _CallCollectionPhase8616,
+) -> bool:
+    """Restrict deferred intake to an explicit declared selector refusal."""
+    from inertia.semantics.direct_near_call_target_binding import DirectNearCallTargetBindingFailure8616
+
+    if (phase is not _CallCollectionPhase8616.COMPLETE or binding is None
+            or binding.failure is not DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED):
+        return False
+    source = _invocation_premise_source_8616(project)
+    return source is not None and _function_entry_for_head_8616(source, artifact.function_addr) is not None
+
+
+def _resolved_raw_callee_scope_8616(
+    project: object, artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
+    block: IRBlock, instruction: IRInstr, entry: DecodedDirectCallsite8616 | None,
+    candidate_addr: int, binding: DirectNearCallTargetBinding8616 | None,
+    records: tuple[EntryDomainCallPreservation8616, ...], deferred: bool,
+) -> tuple[DirectNearCallTargetBinding8616 | None, _RawCalleeRoute8616, Real16InvocationDomain8616 | None]:
+    """Keep ordinary scope transport unchanged while selecting deferred declared input."""
+    if deferred and entry is not None:
+        constructed, route, scope = _deferred_declared_raw_callee_scope_8616(
+            project, artifact, boundary, block, instruction, entry, candidate_addr, records,
+        )
+        return binding if constructed is None else constructed, route, scope
+    if binding is not None and binding.invocation is not None and entry is not None:
+        route, scope = _raw_callee_call_scope_8616(
+            project, candidate_addr, entry, binding.invocation.premise, binding,
+        )
+        return binding, route, scope
+    return binding, _RawCalleeRoute8616.UNIVERSAL_BODY, None
+
+
 def _resolve_callsite_evidence_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -2693,6 +3502,7 @@ def _resolve_callsite_evidence_8616(
     decoded_by_addr: dict[int, object],
     resolution: _CalleeResolution8616,
     entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...],
+    collection_phase: _CallCollectionPhase8616,
 ) -> tuple[
     DecodedDirectCallsite8616 | None,
     SegmentEffectClosureResult8616 | None,
@@ -2700,7 +3510,7 @@ def _resolve_callsite_evidence_8616(
     EntryDomainCallPreservationFailure8616 | None,
     DirectNearCallTargetBinding8616 | None,
 ] | None:
-    """Resolve callsite, callee closure, and binding before the request deadline."""
+    """Bind the caller target before starting potentially recursive callee proof."""
     callsite_addr = instruction.addr if type(instruction.addr) is int else None
     entry = (
         None
@@ -2710,22 +3520,6 @@ def _resolve_callsite_evidence_8616(
         )
     )
     window = None if entry is None else _callsite_window_8616(project, entry)
-    callee: SegmentEffectClosureResult8616 | None = None
-    callee_addr: int | None = None
-    callee_refusal: EntryDomainCallPreservationFailure8616 | None = None
-    if window is not None:
-        for candidate_addr in window[2]:
-            closure, refusal = _callee_closure_8616(
-                project, candidate_addr, resolution, callsite=entry,
-            )
-            if closure is not None:
-                callee = closure
-                callee_addr = candidate_addr
-                callee_refusal = None
-                break
-            callee_refusal = refusal
-    if direct_evidence_deadline_expired_8616(project):
-        return None
     binding, expired = _bind_direct_call_target_8616(
         project,
         artifact,
@@ -2735,8 +3529,37 @@ def _resolve_callsite_evidence_8616(
         callsite_addr,
         window,
         entry_call_preservations,
+        collection_phase, defer_declared_scope=True,
     )
     if expired:
+        return None
+    callee: SegmentEffectClosureResult8616 | None = None
+    callee_addr: int | None = None
+    callee_refusal: EntryDomainCallPreservationFailure8616 | None = None
+    # A deferred symbolic target cannot identify a callee yet. Its binding
+    # remains on the refusal record so the completed caller pool can retry it.
+    # Constant operands need no symbolic binding and keep their existing route.
+    deferred_declared = _pending_declared_binding_8616(project, artifact, binding, collection_phase)
+    if window is not None and (binding is None or binding.failure is None or deferred_declared):
+        for candidate_addr in window[2]:
+            binding, route, callee_scope = _resolved_raw_callee_scope_8616(
+                project, artifact, boundary, block, instruction, entry, candidate_addr,
+                binding, entry_call_preservations, deferred_declared,
+            )
+            if route is _RawCalleeRoute8616.REFUSED:
+                callee_refusal = EntryDomainCallPreservationFailure8616.CALLEE_INCOMPLETE
+                continue
+            closure, refusal = _callee_closure_8616(
+                project, candidate_addr, resolution, callsite=entry,
+                invocation_scope=callee_scope,
+            )
+            if closure is not None:
+                callee = closure
+                callee_addr = candidate_addr
+                callee_refusal = None
+                break
+            callee_refusal = refusal
+    if direct_evidence_deadline_expired_8616(project):
         return None
     return entry, callee, callee_addr, callee_refusal, binding
 
@@ -2752,6 +3575,7 @@ def prove_entry_domain_call_preservation_8616(
     decoded_by_addr: dict[int, object],
     resolution: _CalleeResolution8616,
     entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    collection_phase: _CallCollectionPhase8616 = _CallCollectionPhase8616.COMPLETE,
 ) -> EntryDomainCallPreservation8616:
     """Produce one bound callsite CS-preservation proof or typed refusal.
 
@@ -2763,6 +3587,9 @@ def prove_entry_domain_call_preservation_8616(
     collected for this caller in the same import session; it feeds the
     chained caller-domain premise consulted only when the Semantics
     binding's all-fetch-windows selector bound cannot discharge the call.
+    ``collection_phase`` defaults to the standalone ``COMPLETE`` contract;
+    the collector's first pass declares ``RECORD_POOL`` to defer that
+    premise leg until the pool exists.
     """
     callsite_addr = instruction.addr if type(instruction.addr) is int else None
     if direct_evidence_deadline_expired_8616(project):
@@ -2778,6 +3605,8 @@ def prove_entry_domain_call_preservation_8616(
             None,
             EntryDomainCallPreservationFailure8616.BUDGET_EXHAUSTED,
         )
+    if type(collection_phase) is not _CallCollectionPhase8616:
+        raise TypeError("collection phase must be a typed collection stage")
     resolved = _resolve_callsite_evidence_8616(
         project,
         artifact,
@@ -2788,6 +3617,7 @@ def prove_entry_domain_call_preservation_8616(
         decoded_by_addr=decoded_by_addr,
         resolution=resolution,
         entry_call_preservations=entry_call_preservations,
+        collection_phase=collection_phase,
     )
     if resolved is None:
         return _budget_exhausted_call_records_8616(
@@ -2932,6 +3762,7 @@ def collect_entry_domain_call_preservations_8616(
     boundary: ExactFunctionRangeBoundary8616,
     *,
     direct_target_resolver: DirectCallTargetResolver8616,
+    selected_callsites: frozenset[int] | None = None,
 ) -> tuple[EntryDomainCallPreservation8616, ...]:
     """Bind every reachable CALL in the in-flight artifact to callee evidence.
 
@@ -2939,12 +3770,16 @@ def collect_entry_domain_call_preservations_8616(
     that cannot produce a complete chain keep their default refusal. The
     callsite index is the retained project-boundary inventory, decoded at
     most once per boundary census.
+    ``selected_callsites`` restricts collection to explicit instruction addresses
+    without rewriting the artifact or granting coverage to omitted calls. The
+    default collects all calls; a prefix consumer still proves its whole path
+    independently and refuses if any necessary call lacks a valid record.
     """
     calls = tuple(
         (block, instruction)
         for block in artifact.blocks
         for instruction in block.instrs
-        if instruction.op == "CALL"
+        if instruction.op == "CALL" and (selected_callsites is None or instruction.addr in selected_callsites)
     )
     if not calls:
         return ()
@@ -2996,15 +3831,20 @@ def collect_entry_domain_call_preservations_8616(
                     project, artifact, boundary, block, instruction,
                     index=index, decoded_by_addr=decoded_by_addr,
                     resolution=resolution,
+                    collection_phase=_CallCollectionPhase8616.RECORD_POOL,
                 )
                 for block, instruction in calls
             )
             # Second pass: only a selector-window refusal may be discharged
             # by a chained caller-domain premise, and the premise census needs
             # the caller's complete in-flight record pool — including records
-            # for callsites ordered after this one — so it runs once all
-            # first-pass records exist. A refused retry keeps the original
-            # typed record rather than doubling the ledger.
+            # for callsites ordered after this one — so the first pass defers
+            # the premise leg entirely and this pass retries once all
+            # first-pass records exist. Each retry receives an immutable pool
+            # snapshot including freshly checked earlier records and all
+            # unchanged later records. Its own slot is replaced only after
+            # proof returns, so no candidate can consume its in-flight result.
+            # A refused retry retains one typed record, not a doubled ledger.
             if (
                 not direct_evidence_deadline_expired_8616(project)
                 and any(
@@ -3015,22 +3855,22 @@ def collect_entry_domain_call_preservations_8616(
                 )
                 and _invocation_premise_source_8616(project) is not None
             ):
-                records = tuple(
-                    prove_entry_domain_call_preservation_8616(
-                        project, artifact, boundary, record.block,
-                        record.instruction,
-                        index=index, decoded_by_addr=decoded_by_addr,
-                        resolution=resolution,
-                        entry_call_preservations=records,
-                    )
+                refreshed_records = list(records)
+                for record_index, record in enumerate(records):
                     if (
                         record.binding is not None
                         and record.binding.failure
                         is _selector_window_binding_failure_8616()
-                    )
-                    else record
-                    for record in records
-                )
+                    ):
+                        refreshed_records[record_index] = prove_entry_domain_call_preservation_8616(
+                            project, artifact, boundary, record.block,
+                            record.instruction,
+                            index=index, decoded_by_addr=decoded_by_addr,
+                            resolution=resolution,
+                            entry_call_preservations=tuple(refreshed_records),
+                            collection_phase=_CallCollectionPhase8616.COMPLETE,
+                        )
+                records = tuple(refreshed_records)
             return records
     finally:
         resolution.in_flight = prior_in_flight

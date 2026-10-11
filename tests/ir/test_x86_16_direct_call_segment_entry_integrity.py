@@ -6,6 +6,17 @@ from dataclasses import replace
 from typing import Any, cast
 
 import pytest
+
+from inertia.alias.segment_stack_restore import (
+    build_x86_16_segment_stack_restore_artifact,
+)
+from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    build_decoded_direct_callsite_index_8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    exact_function_range_boundary_8616,
+)
 from inertia.ir import IRInstr, IRValue, MemSpace
 from inertia.ir.direct_call_segment_entry import (
     DirectCallSegmentEntryCandidate8616,
@@ -16,20 +27,9 @@ from inertia.ir.function_ir_registry import (
     publish_function_ir_artifact_8616,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.alias.segment_stack_restore import (
-    build_x86_16_segment_stack_restore_artifact,
-)
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    build_decoded_direct_callsite_index_8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    exact_function_range_boundary_8616,
-)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.project_loading import _build_project_from_bytes
 
 
 @pytest.mark.parametrize("fault", ["none", "missing-restore-write", "second-restore-write"])

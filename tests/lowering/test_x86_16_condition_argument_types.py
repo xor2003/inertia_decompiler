@@ -7,6 +7,7 @@ from angr.analyses.decompiler.structured_codegen.c import CFunction, CIndexedVar
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
@@ -23,7 +24,6 @@ from inertia.lowering.condition_argument_types import (
     apply_condition_argument_types_8616,
 )
 from inertia.lowering.semantic_cast import CSemanticCast8616
-
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 
 

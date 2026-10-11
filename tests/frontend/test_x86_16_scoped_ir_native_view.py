@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
 import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
 from tools.dosunit.tests.test_x86_16_scoped_native_inputs import _view, world  # noqa: F401
 

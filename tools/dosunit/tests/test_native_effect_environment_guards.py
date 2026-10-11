@@ -9,6 +9,7 @@ import hashlib
 import capstone
 import pytest
 
+from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.contracts.binary_environment import (
     EnvironmentEffect,
     instruction_port_effect,
@@ -16,7 +17,6 @@ from tools.dosunit.contracts.binary_environment import (
 )
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.compare.real16_call_contracts import initial_state
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import bind_real16_mz
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import (
     NativeBindingReason,

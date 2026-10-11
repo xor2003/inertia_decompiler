@@ -234,7 +234,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -294,7 +294,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -353,7 +353,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -414,7 +414,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -480,7 +480,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -548,7 +548,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -612,7 +612,7 @@
    "signature_catalogs": [
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }
@@ -709,7 +709,7 @@
     },
     {
      "path": "examples/compiler_coverage/signatures/lib-msc51s.pat",
-     "sha256": "7becca193264e44b707817a7bd194509f7996f4850c4ad9290afb2c1db53407b",
+     "sha256": "6d2dd10425825b49f9ff495f1977818a8a062bc799ce4ab84fca334e7bfe389e",
      "name": "LIB51S.PAT",
      "provenance": "built by scripts/build_signature_catalog.py from the profile's linked libraries (OMF->PAT via omf_pat); provenance receipt .cache/compiler-coverage/csmith-boundary-20261006/receipt.json"
     }

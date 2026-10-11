@@ -10,9 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
-
 from inertia.ir.core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
+from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
 
 from .interprocedural_storage_contracts import (
     StorageIdentity8616,

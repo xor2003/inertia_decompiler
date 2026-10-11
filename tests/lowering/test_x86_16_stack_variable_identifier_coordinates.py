@@ -4,15 +4,16 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.postprocess.decompiler_postprocess_stage import (
-    _normalize_stack_variable_identifiers_8616,
-)
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
 from inertia.lowering.stack_variable_display_names import (
     reapply_stack_variable_projection_names_8616,
+)
+from inertia.postprocess.decompiler_postprocess_stage import (
+    _normalize_stack_variable_identifiers_8616,
 )
 
 

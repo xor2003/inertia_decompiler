@@ -7,13 +7,12 @@ from types import SimpleNamespace
 from typing import cast
 
 import angr
-import inertia.frontend.x86_16.public_api  # noqa: F401  # installs the compatibility wrappers
 import pyvex
 from angr import ailment
 from angr.analyses.decompiler.clinic import Clinic
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.vex_terminal_jump import TerminalJumpRefusalReason8616
 
+import inertia.frontend.x86_16.public_api  # noqa: F401  # installs the compatibility wrappers
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.clinic_terminal_control import (
     CLINIC_TERMINAL_TRANSPORT_ATTR_8616,
     ClinicTerminalControlRefusal8616,
@@ -21,6 +20,7 @@ from inertia.frontend.x86_16.clinic_terminal_control import (
     record_clinic_terminal_transport_8616,
     transport_terminal_direct_jump_8616,
 )
+from inertia.ir.vex_terminal_jump import TerminalJumpRefusalReason8616
 from tests.fixtures.x86_16_logical_memory_fixtures import FUNCTION_ADDR
 
 

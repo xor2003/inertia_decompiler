@@ -3,19 +3,6 @@
 from types import SimpleNamespace
 
 from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.callee_pointer_contracts import (
-    CalleePointerArgumentEvidence8616,
-    callee_pointer_argument_evidence_by_addr_8616,
-    record_callee_pointer_argument_evidence_8616,
-    transfer_callee_pointer_argument_evidence_8616,
-)
-from inertia.lowering.callee_pointer_evidence import (
-    apply_callee_pointer_argument_evidence_at_address_8616,
-    callee_pointer_argument_indices_at_address_8616,
-    callee_pointer_argument_is_proven_8616,
-    recover_callee_pointer_argument_evidence_at_address_8616,
-)
 from capstone.x86_const import (
     X86_INS_MOV,
     X86_INS_RET,
@@ -29,8 +16,21 @@ from capstone.x86_const import (
     X86_REG_SI,
 )
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.analysis_helpers import (
     seed_wide_stack_prototype_from_binary_address_8616,
+)
+from inertia.lowering.callee_pointer_contracts import (
+    CalleePointerArgumentEvidence8616,
+    callee_pointer_argument_evidence_by_addr_8616,
+    record_callee_pointer_argument_evidence_8616,
+    transfer_callee_pointer_argument_evidence_8616,
+)
+from inertia.lowering.callee_pointer_evidence import (
+    apply_callee_pointer_argument_evidence_at_address_8616,
+    callee_pointer_argument_indices_at_address_8616,
+    callee_pointer_argument_is_proven_8616,
+    recover_callee_pointer_argument_evidence_at_address_8616,
 )
 
 

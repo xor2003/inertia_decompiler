@@ -15,7 +15,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeLong
 from angr.sim_variable import SimStackVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
 from inertia.lowering.stack_variable_coordinates import (
     stack_variable_coordinate_registry_8616,
 )
@@ -26,6 +26,7 @@ from inertia.lowering.wide_call_output_assignments import (
     lower_wide_call_output_stack_assignments_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from tests.fixtures.x86_16_carry_borrow_call_output_support import wide_assignment_fixture
 
 _DESTINATION_ENTRY_SP_OFFSET = -6

@@ -6,6 +6,8 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
+
+import inertia.lowering.ir_segmented_load_carriers as carriers
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -18,7 +20,6 @@ from inertia.ir.function_ir_registry import FunctionIRArtifactVerdict8616
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactVerdict8616
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.lowering.ir_segmented_load_carriers as carriers
 
 
 class _Codegen(SimpleNamespace):
@@ -604,3 +605,35 @@ def test_inserted_assignment_owns_subsequent_read_replay(monkeypatch, existing_d
     )
 
     assert replacements == {}
+
+
+@pytest.mark.parametrize("definition_addrs", [(0x10F,), (0x107, 0x10F), (0x111,)])
+def test_existing_ssa_definition_prevents_speculative_reload_insertion(monkeypatch, definition_addrs):
+    """Origin tags are not dominance proof and cannot erase an SSA definition."""
+    codegen = _Codegen(project=SimpleNamespace(arch=SimpleNamespace()))
+    identity = carriers._RegisterSSAIdentity8616(8, 2, 0x100, "ir_8")
+    variable = SimRegisterVariable(8, 2, ident="ir_8", region=0x100)
+    lhs = structured_c.CVariable(variable, variable_type=SimTypeShort(False), codegen=codegen)
+    read = structured_c.CVariable(variable, variable_type=SimTypeShort(False), codegen=codegen,
+                                 tags={"ins_addr": 0x10F})
+    definition = structured_c.CAssignment(
+        lhs, structured_c.CConstant(0, SimTypeShort(False), codegen=codegen), codegen=codegen,
+        tags={"inertia_source_instruction_addrs": definition_addrs},
+    )
+    codegen.cfunc = SimpleNamespace(
+        addr=0x100,
+        statements=structured_c.CStatements(
+            [definition, structured_c.CReturn(read, codegen=codegen)], codegen=codegen,
+        ),
+    )
+
+    def reject_reload(*_args):
+        pytest.fail("Existing SSA definitions must not be replaced by a physical-register reload")
+
+    monkeypatch.setattr(carriers, "_nearest_linear_logical_fact_8616", reject_reload)
+    result = carriers._materialize_missing_logical_assignments_8616(codegen, {})
+
+    assert not result.identities
+    definitions, _ = carriers._collect_register_def_reads_8616(codegen.cfunc.statements)
+    assert identity in definitions
+    assert codegen.cfunc.statements.statements[0] is definition

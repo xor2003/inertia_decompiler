@@ -7,6 +7,13 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
+from inertia.alias.stack_memory_ssa import (
+    build_x86_16_stack_memory_ssa_alias_artifact,
+)
+from inertia.alias.stack_memory_ssa_contracts import (
+    StackMemoryAliasFactKind8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import (
     AddressStatus,
@@ -43,13 +50,6 @@ from inertia.lowering.stack_storage_evidence import (
 )
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
-)
-
-from inertia.alias.stack_memory_ssa import (
-    build_x86_16_stack_memory_ssa_alias_artifact,
-)
-from inertia.alias.stack_memory_ssa_contracts import (
-    StackMemoryAliasFactKind8616,
 )
 
 

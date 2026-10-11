@@ -1,9 +1,8 @@
 """Layer: tests. Responsibility: keep declared candidate-region boundaries closed."""
 from pathlib import Path
 
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
-
 import tools.dosunit.compare.straightline_ssa as S
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 
 def _lower(tmp_path: Path, body: bytes, size: int, *, declared: bool) -> dict:

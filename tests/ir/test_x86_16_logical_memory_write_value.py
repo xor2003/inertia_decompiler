@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir import IRInstr, IRValue, MemSpace, SSAFunctionArtifact
 from inertia.ir.logical_memory_contracts import (
     IRLogicalMemoryAccess8616,

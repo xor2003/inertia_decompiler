@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+
 from tests.cli.test_batch_decompile_scheduler import batch, scheduler
 
 if TYPE_CHECKING:

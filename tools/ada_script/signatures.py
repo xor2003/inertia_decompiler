@@ -76,7 +76,8 @@ def _collect_candidates(image: bytes, base: int, catalogs: tuple[Path, ...],
             raise FileNotFoundError(f"Signature catalog not found: {catalog}")
         specs = load_cached_pat_regex_specs(catalog, cache_dir)
         for spec in specs:
-            labels, ranges, _ = match_pat_modules(image, base, [spec], backend=backend)
+            pat_match = match_pat_modules(image, base, [spec], backend=backend)
+            labels, ranges = pat_match.code_labels, pat_match.code_ranges
             for address, name in labels.items():
                 if not base <= address < base + len(image):
                     raise ValueError(f"Signature public address outside image: {address:#x} ({catalog})")

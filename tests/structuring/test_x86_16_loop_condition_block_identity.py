@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBreak, CDoWhileLoop, CIfElse, CStatements
-import inertia.postprocess.decompiler_postprocess_typed_conditions as typed_replay
-from tests.structuring.test_x86_16_loop_condition_materialization import _loop_fixture
 
+import inertia.postprocess.decompiler_postprocess_typed_conditions as typed_replay
 from inertia.structuring.loop_condition_materialization import (
     materialize_typed_loop_continuation_conditions_8616,
 )
+from tests.structuring.test_x86_16_loop_condition_materialization import _loop_fixture
 
 
 @pytest.mark.parametrize("evidence", ["proven", "foreign_operand", "unmarked", "interior", "ambiguous", "wrong_cfg"])

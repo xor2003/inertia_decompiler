@@ -4,15 +4,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pytest import MonkeyPatch
+
+from inertia.cli.project_loading import _build_project
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 from inertia.ir.condition_ir import ConditionFailure, ConditionIR
 from inertia.ir.condition_lift_capture import (
     isolated_condition_lift_session_8616,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
-from pytest import MonkeyPatch
-
-from inertia.cli.project_loading import _build_project
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -1,6 +1,7 @@
 """A source-bound invocation is retained only when a CALL target consumes it."""
 from unittest.mock import patch
 
+from inertia.alias.segment_stack_restore import build_x86_16_segment_stack_restore_artifact
 from inertia.ir.direct_call_segment_context import bind_direct_call_segment_context_8616
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.real16_invocation_domain import (
@@ -16,8 +17,6 @@ from tests.ir.test_x86_16_direct_call_segment_entry import (
     exact_function_range_boundary_8616,
     publish_function_ir_artifact_8616,
 )
-
-from inertia.alias.segment_stack_restore import build_x86_16_segment_stack_restore_artifact
 
 
 def _raise_unused_replay(premise: Real16InvocationDomain8616) -> bool:

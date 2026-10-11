@@ -17,6 +17,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
@@ -25,7 +26,6 @@ from inertia.lowering.real_mode_linear import (
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
-
 from inertia.structuring.direct_stack_move_loop_entries import (
     place_direct_stack_move_loop_entry_assignment_8616,
 )

@@ -4,13 +4,13 @@ Responsibility: prove existing relation fixtures through actual PE public driver
 from pathlib import Path
 
 import pytest
+
+from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus, proof_status_from_legacy
 from tools.dosunit.tests.test_flat32_register_regions import CANDIDATE as REGISTER_CANDIDATE
 from tools.dosunit.tests.test_flat32_register_regions import ORACLE as REGISTER_ORACLE
 from tools.dosunit.tests.test_m4_exit_controls import _pe32_report, _save
 from tools.dosunit.tests.test_relational_saved_public32 import CANDIDATE as STACK_CANDIDATE
 from tools.dosunit.tests.test_relational_saved_public32 import ORACLE as STACK_ORACLE
-
-from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus, proof_status_from_legacy
 
 PAIRS = {
     "register": (REGISTER_ORACLE, REGISTER_CANDIDATE),

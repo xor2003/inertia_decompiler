@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 import pyvex
+
 import inertia.frontend.x86_16.lift_86_16 as lift_86_16
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
-
 from tests.frontend.test_x86_16_lift_condition import _FakeInstruction
 
 

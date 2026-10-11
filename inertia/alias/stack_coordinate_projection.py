@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordinateStatus8616
-
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace
 
 from .stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616

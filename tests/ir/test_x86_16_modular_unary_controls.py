@@ -2,6 +2,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
 from inertia.ir.scalar_definitions import ScalarDefinition8616, scalar_definition_key_8616
 from inertia.ir.stack_argument_modular_use_flow import _scalar_use_tainted_8616

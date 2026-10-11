@@ -16,15 +16,6 @@ from types import MappingProxyType
 from typing import Protocol, cast
 
 import angr
-from inertia.semantics.callsite_summary_program import (
-    ProgramCallsiteSummaryEvidence8616,
-    attach_program_callsite_summary_evidence_8616,
-    program_callsite_summary_evidence_8616,
-)
-from inertia.semantics.callsite_summary_program_codec import (
-    program_callsite_summary_evidence_from_record_8616,
-    program_callsite_summary_evidence_record_8616,
-)
 
 from inertia.lowering.callee_callsite_codec import (
     callee_callsite_census_map_from_record_8616,
@@ -34,6 +25,15 @@ from inertia.lowering.callee_callsite_contracts import (
     CalleeCallsiteCensus8616,
     attach_callee_callsite_censuses_8616,
     callee_callsite_censuses_by_addr_8616,
+)
+from inertia.semantics.callsite_summary_program import (
+    ProgramCallsiteSummaryEvidence8616,
+    attach_program_callsite_summary_evidence_8616,
+    program_callsite_summary_evidence_8616,
+)
+from inertia.semantics.callsite_summary_program_codec import (
+    program_callsite_summary_evidence_from_record_8616,
+    program_callsite_summary_evidence_record_8616,
 )
 
 from .cache import _load_cache_json, _recovery_cache_key, _store_cache_json

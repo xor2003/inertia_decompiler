@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import tools.compiler_toolchain.build_msc6_examples as harness
+from tools.compiler_toolchain import compiler_profile
 from tools.compiler_toolchain.msc6_memory_model import MSCMemoryModel
 
 
@@ -13,13 +14,15 @@ from tools.compiler_toolchain.msc6_memory_model import MSCMemoryModel
 def test_model_reaches_application_runtime_and_linker(tmp_path, monkeypatch, model):
     commands = []
 
-    def run(command, *, timeout):
+    def run(command, *, timeout, cleanup_process_group):
+        assert cleanup_process_group is True
         commands.append(command)
+        (tmp_path / "CASE.OBJ").write_bytes(b"test")
         (tmp_path / "CASE.EXE").write_bytes(b"test")
         (tmp_path / "INERTIA.OBJ").write_bytes(b"test")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(harness, "_run", run)
+    monkeypatch.setattr(compiler_profile, "_run", run)
     result = harness._compile_and_link_unlocked(
         tmp_path / "CASE.C", tmp_path, kvikdos=tmp_path / "kvikdos",
         msc6_root=tmp_path / "compiler", obj_name="CASE.OBJ", exe_name="CASE.EXE",

@@ -3,10 +3,10 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import IRInstr, IRRefusal
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-
 from inertia.structuring.wide_call_condition_plan import plan_wide_call_condition_8616
 from tests.lowering.test_x86_16_call_output_stack_objects import _wide_condition_fixture
 

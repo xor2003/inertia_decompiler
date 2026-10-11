@@ -155,7 +155,7 @@ def test_batch_hard_exit_is_a_failed_job_not_the_end_of_the_batch(tmp_path):
     script = r'''
 import os
 import sys
-from scripts import batch_decompile_procs as batch
+from tools.dev import batch_decompile_procs as batch
 
 def cli(argv):
     name = argv[argv.index("--proc") + 1]
@@ -216,3 +216,113 @@ def test_batch_resolves_lazy_cli_in_parent_before_fork(tmp_path, monkeypatch):
     monkeypatch.setattr(batch_decompile_procs, "decompiler_cli", LazyCLI())
     assert batch_decompile_procs.main(["input.exe", "--out-dir", str(tmp_path), "--proc", "first"]) == 0
     assert int(marker.read_text()) == os.getpid()
+
+
+def _write_job_file(tmp_path: Path, jobs: list[dict[str, object]]) -> Path:
+    job_file = tmp_path / "jobs.json"
+    job_file.write_text(json.dumps({"jobs": jobs}, indent=2), encoding="utf-8")
+    return job_file
+
+
+def test_batch_jobs_refuse_shared_output_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Distinct job names must not stream artifacts into one output directory."""
+    shared = tmp_path / "shared-out"
+    job_file = _write_job_file(tmp_path, [
+        {"name": "first", "binary": "input.exe", "output_c_dir": str(shared)},
+        {"name": "second", "binary": "input.exe", "output_c_dir": str(shared)},
+    ])
+    monkeypatch.setattr(batch_decompile_procs.decompiler_cli, "main", lambda _argv: 0)
+    with pytest.raises(SystemExit, match="output director"):
+        batch_decompile_procs.main(["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)])
+
+
+def test_batch_jobs_refuse_aliased_output_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lexical aliases for one canonical directory must collide like equal paths."""
+    job_file = _write_job_file(tmp_path, [
+        {"name": "first", "binary": "input.exe", "output_c_dir": str(tmp_path / "escape" / ".." / "shared-out")},
+        {"name": "second", "binary": "input.exe", "output_c_dir": str(tmp_path / "shared-out")},
+    ])
+    monkeypatch.setattr(batch_decompile_procs.decompiler_cli, "main", lambda _argv: 0)
+    with pytest.raises(SystemExit, match="output director"):
+        batch_decompile_procs.main(["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)])
+
+
+def test_batch_jobs_refuse_symlinked_output_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A symlinked output directory must resolve to its real collision target."""
+    real = tmp_path / "real-out"
+    real.mkdir()
+    link = tmp_path / "link-out"
+    link.symlink_to(real)
+    job_file = _write_job_file(tmp_path, [
+        {"name": "first", "binary": "input.exe", "output_c_dir": str(real)},
+        {"name": "second", "binary": "input.exe", "output_c_dir": str(link)},
+    ])
+    monkeypatch.setattr(batch_decompile_procs.decompiler_cli, "main", lambda _argv: 0)
+    with pytest.raises(SystemExit, match="output director"):
+        batch_decompile_procs.main(["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)])
+
+
+def test_batch_jobs_allow_distinct_output_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Distinct canonical output directories remain valid independent jobs."""
+    job_file = _write_job_file(tmp_path, [
+        {"name": "first", "binary": "input.exe", "output_c_dir": str(tmp_path / "out-a")},
+        {"name": "second", "binary": "input.exe", "output_c_dir": str(tmp_path / "out-b")},
+    ])
+    monkeypatch.setattr(batch_decompile_procs.decompiler_cli, "main", lambda _argv: 0)
+    assert batch_decompile_procs.main(
+        ["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)]
+    ) == 0
+
+
+def test_batch_jobs_allow_absent_output_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Jobs without an explicit output directory keep their streamed artifacts."""
+    job_file = _write_job_file(tmp_path, [
+        {"name": "first", "binary": "input.exe"},
+        {"name": "second", "binary": "input.exe"},
+    ])
+    monkeypatch.setattr(batch_decompile_procs.decompiler_cli, "main", lambda _argv: 0)
+    assert batch_decompile_procs.main(
+        ["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)]
+    ) == 0
+
+
+def test_batch_jobs_still_refuse_duplicate_names_with_distinct_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pre-existing name guard stays authoritative alongside the dir guard."""
+    job_file = _write_job_file(tmp_path, [
+        {"name": "same", "binary": "input.exe", "output_c_dir": str(tmp_path / "out-a")},
+        {"name": "same", "binary": "input.exe", "output_c_dir": str(tmp_path / "out-b")},
+    ])
+    monkeypatch.setattr(batch_decompile_procs.decompiler_cli, "main", lambda _argv: 0)
+    with pytest.raises(SystemExit, match="job names collide"):
+        batch_decompile_procs.main(["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)])
+
+
+@pytest.mark.parametrize("argv,expected", [
+    (["--output-c-dir=a"], "a"),
+    (["--output-c-dir", "a", "--output-c-dir", "b"], "b"),
+    (["--output-c-dir=a", "--output-c-dir=b"], "b"),
+    (["--output-c-dir=a", "--output-c-dir", "b"], "b"),
+    (["--output-c-dir", "a", "--output-c-dir=b"], "b"),
+    (["--output-c-dir=a", "--", "--output-c-dir=b"], "a"),
+    (["--", "--output-c-dir=b"], None),
+    ([], None),
+])
+def test_batch_output_dir_matches_option_semantics(argv: list[str], expected: str | None) -> None:
+    """Canonical collision checks use the effective option, not its first spelling."""
+    job = batch_decompile_procs.BatchDecompileJob("one", Path("input.exe"), argv)
+    assert batch_decompile_procs._job_output_dir(job) == (Path(expected) if expected is not None else None)
+
+
+def test_batch_output_collision_uses_effective_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mixed option forms, last overrides, and relative paths share CLI cwd semantics."""
+    monkeypatch.chdir(tmp_path)
+    first = batch_decompile_procs.BatchDecompileJob("one", Path("input.exe"), [
+        "--output-c-dir=unused", "--output-c-dir", "out",
+    ])
+    second = batch_decompile_procs.BatchDecompileJob("two", Path("input.exe"), [
+        "--output-c-dir=" + str(tmp_path / "out"), "--", "--output-c-dir=ignored",
+    ])
+    with pytest.raises(SystemExit, match="output directories collide"):
+        batch_decompile_procs._refuse_colliding_output_dirs([first, second])
+    second.argv[:] = ["--output-c-dir=out", "--output-c-dir=distinct"]
+    batch_decompile_procs._refuse_colliding_output_dirs([first, second])

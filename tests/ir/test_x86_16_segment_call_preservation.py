@@ -4,6 +4,13 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsite8616,
+    DecodedDirectCallsiteIndex8616,
+    DecodedDirectCallsiteIndexStats8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.ir import (
     IRBlock,
     IRFunctionArtifact,
@@ -20,13 +27,6 @@ from inertia.ir.function_ir_registry import (
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.segment_call_preservation import prove_segment_call_preservation_8616
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsite8616,
-    DecodedDirectCallsiteIndex8616,
-    DecodedDirectCallsiteIndexStats8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 
 def test_callee_resolution_keeps_registry_conflicts_loudly_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +85,6 @@ def test_catalog_free_repeated_callee_collection_retains_contextual_equality(
         SegmentCallPreservationRequest8616,
         refresh_segment_call_preservation_state_8616,
     )
-
     from tests.ir.test_x86_16_direct_call_segment_context import _context
 
     # startup calls main; main calls the same leaf twice, then returns.
@@ -157,16 +156,15 @@ def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch
     assert "ds" in proof.preserved_registers
     assert "es" not in proof.preserved_registers
     if mode == "valid":
-        from inertia.ir.segment_contract import build_x86_16_segment_function_contract
-        from inertia.semantics.segment_call_preservation_stage import (
-            SegmentCallPreservationRequest8616,
-            collect_segment_call_preservations_8616,
-        )
-
         from inertia.frontend.x86_16.frontend_caller_return_use_program import (
             CallerReturnUseProgramEvidence8616,
             CallerReturnUseProgramStats8616,
             CallerReturnUseProgramStatus8616,
+        )
+        from inertia.ir.segment_contract import build_x86_16_segment_function_contract
+        from inertia.semantics.segment_call_preservation_stage import (
+            SegmentCallPreservationRequest8616,
+            collect_segment_call_preservations_8616,
         )
 
         caller_contract = build_x86_16_segment_function_contract(
@@ -181,11 +179,11 @@ def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch
         )
         request = SegmentCallPreservationRequest8616(0x1002, 0x2000)
         import capstone
-        from inertia.semantics.callsite_summary import caller_return_use_program_scope_8616
 
         from inertia.frontend.x86_16.frontend_caller_return_use_program import (
             current_caller_return_use_program_evidence_8616,
         )
+        from inertia.semantics.callsite_summary import caller_return_use_program_scope_8616
 
         decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
         decoder.detail = True

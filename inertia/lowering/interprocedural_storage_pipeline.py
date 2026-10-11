@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
+from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.caller_return_use_contracts import CallerReturnUseEvidence8616
 from inertia.semantics.callsite_summary import caller_return_use_evidence_by_addr_8616
-from inertia.pipeline.errors import PipelineHardError
 
 from .interprocedural_storage_collection_contracts import (
     FunctionInputStorageTrialCollection8616,

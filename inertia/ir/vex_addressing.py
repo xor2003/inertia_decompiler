@@ -177,12 +177,18 @@ def _address_from_parts(
     explicit_segment: str | None = None,
     base_values: tuple[IRValue, ...] = (),
 ) -> IRAddress:
-    """Retain captured base reads separately from their folded displacement."""
+    """Retain captured reads and the producer's explicit segment choice.
+
+    An explicit selector unsupported by the storage-space model remains
+    unknown. Register defaults and contextual hints cannot replace it with
+    another segment: that would change alias identity and the memory effect.
+    """
     explicit_spaces = {"ss": MemSpace.SS, "ds": MemSpace.DS, "es": MemSpace.ES}
-    if explicit_segment in explicit_spaces:
-        space = explicit_spaces[explicit_segment]
-        status = AddressStatus.STABLE
-        segment_origin = SegmentOrigin.PROVEN
+    if explicit_segment is not None:
+        space = explicit_spaces.get(explicit_segment, MemSpace.UNKNOWN)
+        supported = space is not MemSpace.UNKNOWN
+        status = AddressStatus.STABLE if supported else AddressStatus.UNKNOWN
+        segment_origin = SegmentOrigin.PROVEN if supported else SegmentOrigin.UNKNOWN
     else:
         hinted = None if segment_hints is None else segment_hints.get(base)
         if hinted is not None:

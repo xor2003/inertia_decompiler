@@ -9,11 +9,12 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
+
 import inertia.ir.entry_domain_call_preservation as resolver
 import inertia.ir.ir_boundary_cfg as ir_boundary_cfg
 import inertia.ir.real16_invocation_domain as real16_invocation_domain
 import inertia.ir.vex_import as vex_import
+import tools.dosunit.tests.test_x86_16_scoped_native_inputs as native
 from inertia.ir.core import IRRefusal
 from inertia.ir.entry_jump_domain import (
     EntryJumpDomainApplicationStatus8616,

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 import unicorn
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
 from unicorn import UcError
 from unicorn.unicorn_py3.unicorn import Uc
 
@@ -28,6 +27,7 @@ from tools.dosunit.runtime.real16_program_model import (
 )
 from tools.dosunit.runtime.real16_program_replay import replay_program
 from tools.dosunit.runtime.replay_capture_model import CaptureStatus
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 CallerFrame = model.CallerFrame
 FrameKind = model.FrameKind

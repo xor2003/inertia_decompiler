@@ -24,12 +24,13 @@ import angr
 import archinfo
 import capstone
 import pytest
-import inertia.ir.entry_domain_call_preservation as edcp
-from inertia.ir.function_ir_registry import (
-    FunctionIRArtifactVerdict8616,
-    registered_function_ir_artifact_8616,
-)
 
+import inertia.ir.entry_domain_call_preservation as edcp
+from inertia.cli.mz_static_intake import (
+    MzStaticIntakeStatus8616,
+    install_mz_static_invocation_source_8616,
+)
+from inertia.cli.project_loading import _build_project
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     build_boundary_direct_callsite_index_8616,
@@ -49,14 +50,13 @@ from inertia.frontend.x86_16.frontend_local_call_evidence import (
 from inertia.frontend.x86_16.frontend_near_return_continuation import (
     NearCallFramePremise8616,
 )
+from inertia.ir.function_ir_registry import (
+    FunctionIRArtifactVerdict8616,
+    registered_function_ir_artifact_8616,
+)
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
-from inertia.cli.mz_static_intake import (
-    MzStaticIntakeStatus8616,
-    install_mz_static_invocation_source_8616,
-)
-from inertia.cli.project_loading import _build_project
 
 LOAD_SEGMENT = 0x1000
 BASE = LOAD_SEGMENT << 4

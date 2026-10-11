@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import inertia.structuring.decompiler_structuring_stage as stage
-
 from inertia.validation.callsite_completeness import (
     CallsiteCompletenessDeltaReason8616,
     CallsiteCompletenessDeltaVerdict8616,

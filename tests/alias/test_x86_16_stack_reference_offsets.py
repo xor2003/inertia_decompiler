@@ -5,13 +5,13 @@ import pytest
 from angr.ailment.expression import VirtualVariable, VirtualVariableCategory
 from angr.code_location import CodeLocation
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
-import inertia.frontend.x86_16.variable_recovery_compat as variable_recovery_compat
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+import inertia.frontend.x86_16.variable_recovery_compat as variable_recovery_compat
 from inertia.alias.stack_reference_offsets import (
     StackReferenceInvariantError8616,
     stack_reference_displacement_8616,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.variable_recovery_compat import apply_stack_reference_compatibility_8616
 
 

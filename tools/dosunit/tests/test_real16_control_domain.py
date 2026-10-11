@@ -3,19 +3,25 @@
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-from tools.dosunit.tests.test_real16_call_composition import _lower
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_call_composition import compare_real16_with_calls
 from tools.dosunit.compare.real16_call_contracts import FunctionCtx, Real16CallRefusal, prove_terms_equal
 from tools.dosunit.compare.real16_call_control import checked_call_site
-from tools.dosunit.contracts.real16_entry_domain import code_entry_domain
 from tools.dosunit.compare.real16_loop_invariants import check_cutpoint_state, check_physical_successors
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.contracts.real16_entry_domain import code_entry_domain
 from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
 from tools.dosunit.runtime.real16_replay import replay
-from tools.dosunit.runtime.real16_replay_model import CallerFrame, FrameKind, Real16ReplayStatus, Real16Vector, SegOffset
+from tools.dosunit.runtime.real16_replay_model import (
+    CallerFrame,
+    FrameKind,
+    Real16ReplayStatus,
+    Real16Vector,
+    SegOffset,
+)
 from tools.dosunit.ssa.ssa_constant_terms import constant_bitvector
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
+from tools.dosunit.tests.test_real16_call_composition import _lower
 
 
 def _context() -> FunctionCtx:

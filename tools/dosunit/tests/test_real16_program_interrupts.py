@@ -3,8 +3,6 @@
 from dataclasses import replace
 
 import pytest
-from tools.dosunit.tests.test_real16_program_input_integration import input_environment
-from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
 from tools.dosunit.runtime.real16_program_interrupts import InterruptFrame, program_interrupt_frame
@@ -14,6 +12,8 @@ from tools.dosunit.runtime.real16_program_output import OutputPolicy
 from tools.dosunit.runtime.real16_program_replay import replay_program
 from tools.dosunit.runtime.real16_program_version import VersionPolicy
 from tools.dosunit.runtime.real16_replay_model import LinearRange, SegOffset
+from tools.dosunit.tests.test_real16_program_input_integration import input_environment
+from tools.dosunit.tests.test_real16_program_replay import environment, mz
 
 
 def test_returning_service_frame_is_visible_to_following_instructions():

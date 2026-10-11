@@ -7,7 +7,13 @@ from dataclasses import dataclass, replace
 from unittest.mock import patch
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    ExactFunctionRangeBoundary8616,
+    exact_function_range_boundary_8616,
+)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -22,17 +28,11 @@ from inertia.ir.function_ssa_registry import (
 from inertia.ir.stack_argument_scaled_return import (
     ScaledReturnFailure8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.lowering.near_scaled_return_candidate import (
     NearScaledReturnCandidateFailure8616,
     NearScaledReturnCandidateStats8616,
     NearScaledReturnCandidateVerdict8616,
     collect_near_scaled_return_candidate_8616,
-)
-
-from inertia.frontend.x86_16.frontend_function_boundary import (
-    ExactFunctionRangeBoundary8616,
-    exact_function_range_boundary_8616,
 )
 from inertia.semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,

@@ -2,9 +2,9 @@
 
 
 import pytest
-import tools.dosunit.tests.test_symbolic_terminal as fixtures
 
 import tools.dosunit.compare.symbolic_terminal as terminal
+import tools.dosunit.tests.test_symbolic_terminal as fixtures
 
 
 @pytest.mark.parametrize("prefix", ["a100000000", "a10000000031c0"])

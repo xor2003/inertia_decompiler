@@ -5,15 +5,20 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.rustylib.ailment import Tags
-from angr.sim_type import SimTypeChar, SimTypeShort
+from angr.sim_type import SimTypeChar, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
+from inertia.alias.stack_memory_ssa import (
+    build_x86_16_stack_memory_ssa_alias_artifact,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
     FrameCoordinateStats8616,
     FrameCoordinateStatus8616,
 )
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -31,10 +36,6 @@ from inertia.lowering.stack_variable_coordinates import (
 from inertia.lowering.stack_word_load_materialization import (
     StackWordLoadRefusalKind8616,
     materialize_stack_word_load_recompositions_8616,
-)
-
-from inertia.alias.stack_memory_ssa import (
-    build_x86_16_stack_memory_ssa_alias_artifact,
 )
 
 
@@ -152,7 +153,11 @@ def test_stack_word_load_materializes_exact_alias_projection() -> None:
 def test_stack_word_load_uses_tagged_canonical_argument_projection(captured_half) -> None:
     codegen = _Codegen(_alias_artifact((0x1010, 4)))
     owner_variable = SimStackVariable(2, 2, base="bp", name="lhs")
-    owner = structured_c.CVariable(owner_variable, codegen=codegen)
+    owner = structured_c.CVariable(
+        owner_variable,
+        variable_type=SimTypeShort(False).with_arch(codegen.project.arch),
+        codegen=codegen,
+    )
     record_stack_variable_coordinate_projection_8616(
         codegen, variable=owner_variable, cvar=owner,
         bp_offset=4, entry_sp_offset=2, size=2,
@@ -184,6 +189,88 @@ def test_stack_word_load_uses_tagged_canonical_argument_projection(captured_half
     assert result.artifact.complete
     if captured_half is not None:
         assert result.artifact.refusals[0].kind is StackWordLoadRefusalKind8616.CAPTURED_VALUE
+
+
+def test_stack_word_load_pointer_owner_materializes_guest_offset_scalar() -> None:
+    """A pointer-typed word owner yields scalar guest bits, not the host pointer."""
+    source = _alias_artifact((0x1010, -2))
+    codegen = _Codegen(source)
+    cvar, root = _projection(codegen, tags=Tags({"ins_addr": 0x1010}))
+    cvar.variable_type = SimTypePointer(SimTypeShort(False)).with_arch(codegen.project.arch)
+
+    result = materialize_stack_word_load_recompositions_8616(codegen, root)
+
+    assert isinstance(result.root, structured_c.CFunctionCall)
+    assert result.root.callee_target == "PTR_U16"
+    assert result.root.args == [cvar]
+    assert result.changed is True
+    assert result.artifact.complete is True
+    assert result.artifact.stats.materialized_count == 1
+    assert result.artifact.refusals == ()
+
+
+def test_stack_word_load_registered_byte_pair_pointer_uses_scalar_bridge() -> None:
+    codegen = _Codegen(_alias_artifact())
+    owner, _unused = _projection(codegen)
+    owner.variable_type = SimTypePointer(SimTypeShort(False)).with_arch(codegen.project.arch)
+    high_variable = SimStackVariable(-3, 1, base="bp", name="local_3")
+    high = structured_c.CVariable(
+        high_variable,
+        variable_type=SimTypeChar(False).with_arch(codegen.project.arch),
+        codegen=codegen,
+    )
+    root = structured_c.CBinaryOp(
+        "Or",
+        owner,
+        structured_c.CBinaryOp(
+            "Mul",
+            high,
+            structured_c.CConstant(0x100, SimTypeShort(False), codegen=codegen),
+            codegen=codegen,
+        ),
+        codegen=codegen,
+    )
+
+    result = materialize_stack_word_load_recompositions_8616(codegen, root)
+
+    assert isinstance(result.root, structured_c.CFunctionCall)
+    assert result.root.callee_target == "PTR_U16"
+    assert result.root.args == [owner]
+    assert result.changed is True
+    assert result.artifact.complete is True
+
+
+def test_stack_word_load_retains_wider_pointer_owner() -> None:
+    """A pointer wider than one machine word cannot collapse to guest bits."""
+    source = _alias_artifact((0x1010, -2))
+    codegen = _Codegen(source)
+    cvar, root = _projection(codegen, tags=Tags({"ins_addr": 0x1010}))
+    cvar.variable_type = SimTypePointer(SimTypeShort(False)).with_arch(ArchX86())
+
+    result = materialize_stack_word_load_recompositions_8616(codegen, root)
+
+    assert result.root is root
+    assert result.changed is False
+    assert result.artifact.stats.failure_count >= 1
+
+
+def test_instructionless_nonvariable_byte_keeps_projection() -> None:
+    """A byte expression without a canonical variable must refuse, not crash."""
+    codegen = _Codegen(_alias_artifact())
+    _owner, root = _projection(codegen)
+    root.lhs = structured_c.CUnaryOp(
+        "Dereference",
+        structured_c.CConstant(1, SimTypeShort(False), codegen=codegen),
+        codegen=codegen,
+    )
+
+    result = materialize_stack_word_load_recompositions_8616(codegen, root)
+
+    assert result.root is root
+    assert not result.changed
+    assert result.artifact.complete
+    assert result.artifact.stats.failure_count == 1
+    assert result.artifact.refusals[0].kind is StackWordLoadRefusalKind8616.NO_INSTRUCTION_PROVENANCE
 
 
 def test_stack_word_load_materializes_registered_byte_pair_projection() -> None:
@@ -260,11 +347,26 @@ def test_stack_word_load_materializes_argument_through_proven_frame_coordinate()
 
     result = materialize_stack_word_load_recompositions_8616(codegen, root)
 
-    assert result.root is cvar
-    assert result.changed is True
+    # Storage promotion cannot discard the separately loaded high byte while
+    # the formal C value remains an eight-bit argument.
+    assert result.root is root
+    assert result.changed is False
     assert result.artifact.complete is True
     assert variable.size == 2
     assert isinstance(cvar.variable_type, SimTypeChar)
+
+
+@pytest.mark.parametrize("value_type", [None, SimTypeChar(False), SimTypeLong(False)])
+def test_registered_byte_owner_does_not_erase_high_byte(value_type) -> None:
+    """A two-byte storage projection still needs a full-width C value."""
+    codegen = _Codegen(_alias_artifact((0x1010, -2)))
+    owner, root = _projection(codegen, tags={"ins_addr": 0x1010})
+    owner.variable_type = None if value_type is None else value_type.with_arch(codegen.project.arch)
+
+    result = materialize_stack_word_load_recompositions_8616(codegen, root)
+
+    assert result.root is root
+    assert not result.changed
 
 
 def test_stack_word_load_retains_same_owner_without_logical_identity() -> None:

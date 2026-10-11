@@ -14,9 +14,9 @@ from typing import Any, Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
-from inertia.pipeline.errors import PipelineHardError
 
 from inertia.cli.cli_linear_recurrence_state import LinearRecurrenceState
+from inertia.pipeline.errors import PipelineHardError
 
 log: logging.Logger = logging.getLogger(__name__)
 

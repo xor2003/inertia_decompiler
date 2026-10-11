@@ -3,7 +3,8 @@
 Layer: Frontend/angr compatibility.
 Responsibility: project authoritative Semantics allocation, argument cleanup and
 separately pushed return-segment proofs into the native tracker before successor states,
-propagation and variable recovery.
+propagation and variable recovery. Native function-mode tracking consumes the
+originating function manager KB for callee identity, without changing variable KBs.
 Do not recover storage, guess allocations, mutate C or infer helper names.
 """
 
@@ -11,23 +12,22 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import pyvex
 from angr.analyses.stack_pointer_tracker import (
-    Constant,
-    CouldNotResolveException,
-    OffsetVal,
     StackPointerTracker,
     StackPointerTrackerState,
 )
+from angr.knowledge_plugins.functions.function import Function
 
 from inertia.ir import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.semantics.call_stack_allocation import (
     binary_stack_allocation_target_8616,
-    collect_call_stack_allocation_proofs_8616,
+    collect_call_stack_allocation_candidates_8616,
 )
 
+from .function_knowledge_base import function_knowledge_base_8616
 from .stack_tracker_return_segment import (
     NativeMachineCallFrameResult8616,
     _bound_terminal_direct_call_8616,
@@ -75,7 +75,11 @@ def _apply_allocation(
     tracker: StackPointerTracker, vex: pyvex.IRSB,
     state: StackPointerTrackerState, callsite: int | None,
 ) -> None:
-    """Update a returning call's native state only with a matching IR proof."""
+    """Keep guarded allocation identities from becoming scalar SP proofs.
+
+    No authenticated guard-discharge owner currently exists. Retain the CALL
+    while invalidating its scalar stack coordinate; ordinary calls stay intact.
+    """
     if tracker.project.arch.name != "86_16" or vex.jumpkind != "Ijk_Call" or callsite is None:
         return
     sp_offset = tracker.project.arch.sp_offset
@@ -89,24 +93,39 @@ def _apply_allocation(
         return
     bound_block = _bind_proven_call_target_8616(block, instruction, target)
     artifact = IRFunctionArtifact(vex.addr, (bound_block,))
-    proof = collect_call_stack_allocation_proofs_8616(tracker.project, artifact).get(callsite)
-    if proof is None:
-        allocating = any(entry.op == "CALL" and entry.addr == callsite
-                         and binary_stack_allocation_target_8616(tracker.project, entry) is not None
-                         for entry in bound_block.instrs)
-        if allocating:
-            state.put(sp_offset, None, force=True)
+    candidate = collect_call_stack_allocation_candidates_8616(tracker.project, artifact).get(callsite)
+    allocating = candidate is not None or any(
+        entry.op == "CALL" and entry.addr == callsite
+        and binary_stack_allocation_target_8616(tracker.project, entry) is not None
+        for entry in bound_block.instrs
+    )
+    if allocating:
+        state.put(sp_offset, None, force=True)
+
+
+_TRACKER_INIT_PATCHED_8616 = False
+
+
+def _bind_native_stack_tracker_function_kb_8616() -> None:
+    """Retain the explicit native function's KB for tracker callee lookups."""
+    global _TRACKER_INIT_PATCHED_8616
+    if _TRACKER_INIT_PATCHED_8616:
         return
-    try:
-        current = state.get(sp_offset)
-    except CouldNotResolveException:
-        return
-    if isinstance(current, (OffsetVal, Constant)):
-        state.put(sp_offset, current - Constant(proof.allocation_size), force=True)
+    original = StackPointerTracker.__init__
+
+    def _init_8616(self: StackPointerTracker, func: Function | None, *args: object, **kwargs: object) -> None:
+        """Bind the originating manager before upstream analysis begins."""
+        if func is not None and self.project.arch.name == "86_16":
+            self.kb = function_knowledge_base_8616(self.project, func)
+        cast(Any, original)(self, func, *args, **kwargs)
+
+    cast(Any, StackPointerTracker).__init__ = _init_8616
+    _TRACKER_INIT_PATCHED_8616 = True
 
 
 def apply_x86_16_stack_tracker_allocations_8616() -> None:
     """Install the idempotent adapter without changing other architectures."""
+    _bind_native_stack_tracker_function_kb_8616()
     original = cast(_ProcessVex8616, StackPointerTracker._process_vex_irsb)
     if original.__name__ == _PATCH_NAME:
         return

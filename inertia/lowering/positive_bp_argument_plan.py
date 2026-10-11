@@ -16,6 +16,7 @@ from itertools import accumulate
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimType
+
 from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .callee_argument_width_evidence import CalleeArgumentWidthEvidence8616

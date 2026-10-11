@@ -6,7 +6,6 @@ from inertia.structuring.structuring_grouped_refusal_report import (
 from inertia.structuring.structuring_grouping_report import (
     describe_x86_16_structuring_grouping_report_surface,
 )
-
 from inertia.validation.validation_manifest import (
     VALIDATION_FAMILIES,
     VALIDATION_LAYERS,

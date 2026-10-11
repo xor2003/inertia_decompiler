@@ -4,7 +4,6 @@ import struct
 from dataclasses import replace
 
 import pytest
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 from tools.dosunit.runtime.flat32_memory_permissions import DeclaredAccess
 from tools.dosunit.runtime.flat32_replay_model import MemoryRange
@@ -16,6 +15,7 @@ from tools.dosunit.runtime.real16_program_model import (
     ProgramStatus,
     compare_programs,
 )
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 
 ENTRY = 0x401000
 EXIT = 0x70000000

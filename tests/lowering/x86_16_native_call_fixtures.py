@@ -12,7 +12,13 @@ import io
 from dataclasses import dataclass
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    build_boundary_direct_callsite_index_8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactStage8616,
@@ -20,14 +26,8 @@ from inertia.ir.function_ssa_registry import (
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.lowering.call_target_ssa_binder import bind_ssa_call_target_8616
-
-from inertia.frontend.x86_16.frontend_direct_callsite_index import (
-    DecodedDirectCallsiteIndex8616,
-    build_boundary_direct_callsite_index_8616,
-)
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
+from inertia.lowering.call_target_ssa_binder import bind_ssa_call_target_8616
 
 
 @dataclass(frozen=True)

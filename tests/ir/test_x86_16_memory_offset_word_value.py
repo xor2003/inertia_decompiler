@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,

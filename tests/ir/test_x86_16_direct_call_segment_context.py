@@ -5,7 +5,10 @@ from dataclasses import replace
 
 import angr
 import pytest
+
+from inertia.alias.segment_stack_restore import build_x86_16_segment_stack_restore_artifact
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir.core import SegmentOrigin
 from inertia.ir.direct_call_segment_context import bind_direct_call_segment_context_8616
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
@@ -17,9 +20,6 @@ from inertia.ir.segment_effect_closure import (
 from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 from inertia.ir.segment_state_transfer import SegmentValueKind8616
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.alias.segment_stack_restore import build_x86_16_segment_stack_restore_artifact
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from tests.ir.test_x86_16_direct_call_segment_entry import _binary_callsite_index
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.core import IRInstr, IRValue, MemSpace
 from inertia.ir.logical_constant_word_receipt import (
     LogicalConstantWordFailure8616,

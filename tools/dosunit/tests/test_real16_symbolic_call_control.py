@@ -5,7 +5,6 @@ import time
 
 import pytest
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_call_contracts import (
     ComposeSession,
     FunctionCtx,
@@ -14,6 +13,7 @@ from tools.dosunit.compare.real16_call_contracts import (
 )
 from tools.dosunit.compare.real16_call_control import checked_call_site
 from tools.dosunit.compare.real16_control_resolution import ControlResolutionReason, prove_control_destination
+from tools.dosunit.contracts.proof_contracts import ProofStatus
 
 
 def _relative(head: int, displacement: int) -> dict:

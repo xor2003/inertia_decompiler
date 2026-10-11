@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
+
+import inertia.lowering.stack_address_coordinates as stack_address_coordinates
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
@@ -12,7 +14,6 @@ from inertia.ir.analysis.stack_frame_ir import (
     FrameCoordinateStatus8616,
 )
 from inertia.ir.native_stack_anchor import NATIVE_ENTRY_SP_ANCHOR_TAG8616
-import inertia.lowering.stack_address_coordinates as stack_address_coordinates
 from inertia.lowering.stack_frame_projection import entry_sp_offset_for_machine_bp_range_8616
 from inertia.lowering.stack_lowering_from_facts import materialize_stack_cvar_at_offset_from_facts_8616
 from inertia.lowering.stack_variable_coordinates import (

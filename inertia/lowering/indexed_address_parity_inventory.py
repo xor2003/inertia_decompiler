@@ -15,8 +15,6 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.alias.indexed_address_access_classification import (
     classify_indexed_alias_accesses_8616,
 )
@@ -31,6 +29,7 @@ from inertia.ir.indexed_address_copy_evidence import collect_indexed_address_cop
 from inertia.ir.indexed_address_evidence import collect_indexed_address_evidence_8616
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.pipeline.errors import PipelineHardError
 
 from .indexed_address_collector_parity import (
     IndexedAddressCollectorKey8616,

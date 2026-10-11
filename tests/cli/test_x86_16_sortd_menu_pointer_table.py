@@ -7,12 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.segmented_global_loads import (
-    IndexedSegmentedGlobalLoadConsumer8616,
-    IndexedSegmentedGlobalLoadSiteEvidence8616,
-    recover_indexed_segmented_global_load_site_evidence_8616,
-)
 from capstone.x86_const import (
     X86_INS_MOV,
     X86_INS_PUSH,
@@ -27,6 +21,12 @@ from capstone.x86_const import (
     X86_REG_INVALID,
 )
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.segmented_global_loads import (
+    IndexedSegmentedGlobalLoadConsumer8616,
+    IndexedSegmentedGlobalLoadSiteEvidence8616,
+    recover_indexed_segmented_global_load_site_evidence_8616,
+)
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

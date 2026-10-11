@@ -7,14 +7,14 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.gp_stack_local_reload import has_materialized_gp_local_reload_8616
 from inertia.lowering.gp_stack_restore import materialize_gp_stack_restores_8616
 from inertia.pipeline.errors import PipelineHardError
+from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 from tests.lowering.test_x86_16_gp_stack_local_reload import _fixture as reload_fixture
 from tests.lowering.test_x86_16_gp_stack_restore import _artifact, _Codegen
-
-from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 
 
 @pytest.mark.parametrize("offset", [-4, -2, -1, 0])

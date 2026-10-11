@@ -21,14 +21,6 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallsiteReturnUseKind8616,
-)
-from inertia.frontend.x86_16.load_dos_mz import DOSMZ
-from inertia.lowering.segmented_global_loads import SegmentedGlobalLoadStats8616
-from inertia.lowering.segmented_lowering import _SegmentedAccess
 
 import decompile
 import inertia.cli.cache as recovery_cache
@@ -41,13 +33,40 @@ import inertia.cli.decompile_file_summary as file_summary
 import inertia.cli.non_optimized_fallback as non_optimized_fallback
 import inertia.cli.runtime_support as runtime_support
 import inertia.cli.sidecar_cache as sidecar_cache
+import inertia.cli.sidecar_metadata as sidecar_metadata
+import inertia.cli.sidecar_parsers as sidecar_parsers
 import inertia.cli.tail_validation as cli_tail_validation
 from inertia.cli.codeview_nb00 import find_codeview_nb00, parse_codeview_nb00
+from inertia.cli.direct_addr_failure_family import (
+    FailureFamilySnapshot,
+    FailureFamilyState,
+    advance_failure_family_state,
+    build_failure_family_snapshot,
+    failure_family_repeat_reason,
+    remember_failure_family_candidate,
+)
+from inertia.cli.direct_addr_stage_bundle import (
+    DirectAddrStageBundleInput,
+    write_direct_addr_stage_bundle,
+)
 from inertia.cli.fast_tracer import trace_16bit_seed_candidates
 from inertia.cli.flair_extract import list_flair_sig_libraries, match_flair_startup_entry
 from inertia.cli.lst_extract import LSTMetadata, extract_lst_metadata
+from inertia.cli.rizin_discovery import RizinDiscoveryResult, RizinDiscoveryStatus
+from inertia.cli.rizin_evidence import RizinEvidence, RizinEvidenceStatus, RizinFunctionFact
+from inertia.cli.slice_recovery import SliceRecoveryAttemptOutcome
 from inertia.cli.turbo_debug_tdinfo import TDInfoSymbolClass, parse_tdinfo_exe
+from inertia.cli.work_items import FunctionWorkItem
+from inertia.cli.x86_16_exact_slice import mark_function_original_addr
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata, extract_cod_listing_metadata
+from inertia.frontend.x86_16.load_dos_mz import DOSMZ
+from inertia.lowering.segmented_global_loads import SegmentedGlobalLoadStats8616
+from inertia.lowering.segmented_lowering import _SegmentedAccess
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallsiteReturnUseKind8616,
+)
 from inertia.semantics.compiler_helpers import (
     CompilerHelperEvidence8616,
     CompilerHelperEvidenceKind8616,
@@ -64,30 +83,29 @@ from inertia.widening.indexed_global_object_program_ranges import (
 from inertia.widening.indexed_global_object_ranges import (
     BoundedGlobalObjectRangeStats8616,
 )
-import inertia.cli.sidecar_metadata as sidecar_metadata
-import inertia.cli.sidecar_parsers as sidecar_parsers
-from inertia.cli.direct_addr_failure_family import (
-    FailureFamilySnapshot,
-    FailureFamilyState,
-    advance_failure_family_state,
-    build_failure_family_snapshot,
-    failure_family_repeat_reason,
-    remember_failure_family_candidate,
-)
-from inertia.cli.direct_addr_stage_bundle import (
-    DirectAddrStageBundleInput,
-    write_direct_addr_stage_bundle,
-)
-from inertia.cli.rizin_discovery import RizinDiscoveryResult, RizinDiscoveryStatus
-from inertia.cli.rizin_evidence import RizinEvidence, RizinEvidenceStatus, RizinFunctionFact
-from inertia.cli.slice_recovery import SliceRecoveryAttemptOutcome
-from inertia.cli.work_items import FunctionWorkItem
-from inertia.cli.x86_16_exact_slice import mark_function_original_addr
-from tools.signatures.omf_pat import CachedPatRegexSpec, PatModule, PatPublicName, _normalize_pat_backend_choice, ensure_pat_from_omf_input, enumerate_microsoft_lib_dictionary_symbols, enumerate_omf_lib_dictionary_symbols, extract_omf_modules_from_lib, generate_pat_from_omf_lib, generate_pat_from_omf_obj, load_cached_pat_regex_specs, lookup_microsoft_lib_symbol, lookup_omf_lib_symbol, match_pat_modules, parse_microsoft_lib, parse_omf_lib, parse_pat_file
-from tools.signatures.signature_catalog import build_signature_catalog, match_signature_catalog
 from tests.fixtures.x86_16_dosfunc_behavior import assert_dos_free_behavior
 from tests.fixtures.x86_16_setgear_behavior import assert_setgear_behavior
 from tests.fixtures.x86_16_timeout_support import scaled_decompile_timeout
+from tools.signatures.omf_pat import (
+    CachedPatRegexSpec,
+    PatModule,
+    PatPublicName,
+    _normalize_pat_backend_choice,
+    ensure_pat_from_omf_input,
+    enumerate_microsoft_lib_dictionary_symbols,
+    enumerate_omf_lib_dictionary_symbols,
+    extract_omf_modules_from_lib,
+    generate_pat_from_omf_lib,
+    generate_pat_from_omf_obj,
+    load_cached_pat_regex_specs,
+    lookup_microsoft_lib_symbol,
+    lookup_omf_lib_symbol,
+    match_pat_modules,
+    parse_microsoft_lib,
+    parse_omf_lib,
+    parse_pat_file,
+)
+from tools.signatures.signature_catalog import build_signature_catalog, match_signature_catalog
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO_ROOT / "decompile.py"
@@ -2390,8 +2408,11 @@ def test_pick_function_lean_disables_expensive_cfgfast_features(monkeypatch):
 
     assert cfg is expected_cfg
     assert func is expected_func
+    assert captured[0]["kb"]._project is project
+    assert captured[0]["kb"] is not getattr(project, "kb", None)
     assert captured == [
         {
+            "kb": captured[0]["kb"],
             "start_at_entry": False,
             "function_starts": [0x1000],
             "regions": [(0x1000, 0x1100)],
@@ -2439,8 +2460,11 @@ def test_pick_function_lean_can_skip_far_call_extension(monkeypatch):
 
     assert cfg is expected_cfg
     assert func is expected_func
+    assert captured[0]["kb"]._project is project
+    assert captured[0]["kb"] is not getattr(project, "kb", None)
     assert captured == [
         {
+            "kb": captured[0]["kb"],
             "start_at_entry": False,
             "function_starts": [0x1000],
             "regions": [(0x1000, 0x1100)],
@@ -5865,7 +5889,6 @@ def test_coalesce_segmented_word_store_statements_requires_proven_ds_byte_pair(
     """Expression adjacency cannot replace alias identity or a no-wrap proof."""
     from inertia.ir.core import MemSpace
     from inertia.widening import widening_rules
-
     from inertia.widening.segmented_load_identity import (
         SegmentedLoadIdentity8616,
         segmented_load_tags_8616,
@@ -7461,6 +7484,10 @@ def test_register_direct_call_target_function_stubs_registers_linear_and_unbased
         kb=SimpleNamespace(functions=FakeFunctionManager()),
     )
 
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
+
     count = decompile._register_direct_call_target_function_stubs(project, function)
 
     assert count == 2
@@ -7498,6 +7525,10 @@ def test_register_direct_call_target_function_stubs_falls_back_to_capstone_direc
         kb=SimpleNamespace(functions=FakeFunctionManager()),
     )
 
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
+
     count = decompile._register_direct_call_target_function_stubs(project, function)
 
     assert count == 2
@@ -7526,6 +7557,10 @@ def test_register_direct_call_target_function_stubs_preserves_duplicate_callee_c
         "_collect_direct_calls_8616",
         lambda *_args: [(0x1006, 0x140D, 0x1009), (0x1010, 0x140D, 0x1013)],
     )
+
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
 
     count = decompile._register_direct_call_target_function_stubs(project, function)
 
@@ -7945,6 +7980,10 @@ def test_register_direct_call_target_function_stubs_prefers_proven_exact_slice_t
         _inertia_original_linear_delta=0xF1A7,
     )
 
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
+
     count = decompile._register_direct_call_target_function_stubs(project, function)
 
     assert count == 2
@@ -7971,6 +8010,10 @@ def test_register_direct_call_target_function_stubs_refuses_unproved_cod_call_na
         kb=SimpleNamespace(functions=FakeFunctionManager()),
     )
     cod_metadata = SimpleNamespace(call_names=("clock", "aNchkstk"))
+
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
 
     count = decompile._register_direct_call_target_function_stubs(project, function, cod_metadata=cod_metadata)
 
@@ -8016,6 +8059,10 @@ def test_register_direct_call_target_function_stubs_names_binary_signature_stack
         kb=SimpleNamespace(functions=FakeFunctionManager(), labels={}),
     )
 
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
+
     count = decompile._register_direct_call_target_function_stubs(project, function)
 
     assert count == 1
@@ -8057,6 +8104,10 @@ def test_direct_call_stub_consumes_hook_helper_evidence_without_rediscovery(monk
         "_seed_direct_callee_prototype_from_original_project_8616",
         lambda *_args, **_kwargs: False,
     )
+
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
 
     created = decompile._create_or_update_direct_call_stub_8616(
         project=project,
@@ -8113,6 +8164,10 @@ def test_register_direct_call_target_function_stubs_names_raw_original_stack_pro
         ),
         kb=SimpleNamespace(functions=FakeFunctionManager(), labels={}),
     )
+
+    project.kb._project = project
+    project.kb.functions._kb = project.kb
+    function._function_manager = project.kb.functions
 
     count = decompile._register_direct_call_target_function_stubs(project, function)
 
@@ -13967,7 +14022,9 @@ def test_match_pat_modules_labels_unique_generated_function_match():
         tail_bytes=(),
     )
 
-    code_labels, code_ranges, matched_compiler_names = match_pat_modules(image, 0x1000, [module])
+    pat_match = match_pat_modules(image, 0x1000, [module])
+    code_labels, code_ranges, matched_compiler_names = (
+        pat_match.code_labels, pat_match.code_ranges, pat_match.matched_compiler_names)
 
     assert code_labels == {0x1003: "demo_func"}
     assert code_ranges == {0x1003: (0x1003, 0x100F)}
@@ -13995,7 +14052,9 @@ def test_match_pat_modules_accepts_cached_regex_specs(tmp_path):
         "90 90 90 FB FC 52 50 53 55 56 57 06 51 1E 8B EC 36 89 2E DE 00 C5 76 12 AD 89 76 12 8C D7 8E DF 8A CC 98 C3 90"
     )
 
-    code_labels, code_ranges, matched_compiler_names = match_pat_modules(image, 0x1000, specs)
+    pat_match = match_pat_modules(image, 0x1000, specs)
+    code_labels, code_ranges, matched_compiler_names = (
+        pat_match.code_labels, pat_match.code_ranges, pat_match.matched_compiler_names)
 
     assert code_labels == {0x1003: "demo_func"}
     assert code_ranges == {0x1003: (0x1003, 0x100F)}
@@ -14011,14 +14070,16 @@ def test_match_pat_modules_supports_both_explicit_backends(tmp_path):
         "90 90 90 FB FC 52 50 53 55 56 57 06 51 1E 8B EC 36 89 2E DE 00 C5 76 12 AD 89 76 12 8C D7 8E DF 8A CC 98 C3 90"
     )
 
-    py_labels, py_ranges, py_compilers = match_pat_modules(image, 0x1000, specs, backend="python_regex")
-    hs_labels, hs_ranges, hs_compilers = match_pat_modules(image, 0x1000, specs, backend="hyperscan")
+    py_match = match_pat_modules(image, 0x1000, specs, backend="python_regex")
+    hs_match = match_pat_modules(image, 0x1000, specs, backend="hyperscan")
+    py_labels, py_ranges = py_match.code_labels, py_match.code_ranges
+    hs_labels, hs_ranges = hs_match.code_labels, hs_match.code_ranges
 
     assert py_labels == {0x1003: "demo_func"}
     assert py_ranges == {0x1003: (0x1003, 0x100F)}
     assert hs_labels == py_labels
     assert hs_ranges == py_ranges
-    assert py_compilers == hs_compilers == ()
+    assert py_match.matched_compiler_names == hs_match.matched_compiler_names == ()
 
 
 def test_normalize_pat_backend_choice_rejects_unknown_backend():
@@ -14042,7 +14103,8 @@ def test_detect_flair_metadata_forwards_pat_backend(monkeypatch, tmp_path):
     def _fake_startup_pat_match(project_arg, flair_root, *, backend=None):
         recorded["backend"] = backend
         del project_arg, flair_root
-        return {}, {}, ()
+        from tools.signatures.omf_pat import LocalPatMatchResult
+        return LocalPatMatchResult({}, {}, ())
 
     monkeypatch.setattr(sidecar_parsers, "_match_flair_startup_pat_functions", _fake_startup_pat_match)
 
@@ -14142,7 +14204,7 @@ def test_detect_flair_metadata_merges_signature_catalog(monkeypatch, tmp_path):
     monkeypatch.setattr(
         sidecar_parsers,
         "_match_flair_startup_pat_functions",
-        lambda *_args, **_kwargs: ({}, {}, ()),
+        lambda *_args, **_kwargs: sidecar_parsers.LocalPatMatchResult({}, {}, ()),
     )
     monkeypatch.setattr(
         sidecar_parsers,
@@ -14180,12 +14242,13 @@ def test_detect_flair_metadata_searches_startup_pats_across_whole_binary(monkeyp
     monkeypatch.setattr(sidecar_parsers, "flair_signature_root", lambda: tmp_path)
     monkeypatch.setattr(sidecar_parsers, "_load_flair_startup_pat_modules", lambda *_args, **_kwargs: ("module",))
 
-    def _fake_match(image_bytes, base_addr, modules, *, backend=None):
+    def _fake_match(image_bytes, base_addr, modules, *, backend=None, architecture=None):
         seen["image_len"] = len(image_bytes)
         seen["base_addr"] = base_addr
         seen["modules"] = modules
         seen["backend"] = backend
-        return {0x2010: "startup_sig_func"}, {0x2010: (0x2010, 0x2020)}, ()
+        from tools.signatures.omf_pat import LocalPatMatchResult
+        return LocalPatMatchResult({0x2010: "startup_sig_func"}, {0x2010: (0x2010, 0x2020)}, ())
 
     monkeypatch.setattr(sidecar_parsers, "match_pat_modules", _fake_match)
 

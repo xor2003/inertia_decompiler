@@ -17,6 +17,7 @@ import random
 from pathlib import Path
 
 import pytest
+
 import tests.fixtures.replay_capture_test_support as conv
 import tests.fixtures.replay_capture_test_support as m6
 

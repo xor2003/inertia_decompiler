@@ -1,10 +1,10 @@
 """Unpatched real16 region consumer records finite-cover rotation evidence."""
 import pytest
-from tools.dosunit.tests.test_real16_region_proof import _document
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_region_proof import compare_real16_regions
 from tools.dosunit.compare.region_pairing import RegionFormation
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_real16_region_proof import _document
 
 
 @pytest.mark.parametrize('candidate,proved', [

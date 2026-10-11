@@ -9,7 +9,10 @@ never proves a full frontier, callee, frame, pointer or generated-C body.
 from __future__ import annotations
 
 import pytest
+
 import inertia.ir.scalar_instruction_effects as _effects
+import inertia.widening.entry_word_transport as _transport
+from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
 from inertia.ir.core import (
     IRAddress,
     IRBlock,
@@ -22,7 +25,14 @@ from inertia.ir.core import (
 from inertia.ir.scalar_instruction_effects import (
     ScalarInstructionEffectKind8616 as EffectKind,
 )
-import inertia.widening.entry_word_transport as _transport
+from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
+from inertia.widening.entry_word_transport_contracts import EntryWordTransportProof8616
+from inertia.widening.entry_word_transport_contracts import (
+    EntryWordTransportRefusalKind8616 as Refusal,
+)
+from inertia.widening.entry_word_transport_contracts import (
+    EntryWordTransportVerdict8616 as Verdict,
+)
 from tests.fixtures.entry_stack_byte_test_support import (
     ENTRY_8616,
     _capture,
@@ -31,16 +41,6 @@ from tests.fixtures.entry_stack_byte_test_support import (
     _reg,
     _ss_addr,
     _tmp,
-)
-
-from inertia.alias.entry_stack_bytes import prove_entry_stack_bytes_8616
-from inertia.widening.entry_stack_word_values import prove_entry_stack_word_value_8616
-from inertia.widening.entry_word_transport_contracts import EntryWordTransportProof8616
-from inertia.widening.entry_word_transport_contracts import (
-    EntryWordTransportRefusalKind8616 as Refusal,
-)
-from inertia.widening.entry_word_transport_contracts import (
-    EntryWordTransportVerdict8616 as Verdict,
 )
 
 LEFT = 0x105C3

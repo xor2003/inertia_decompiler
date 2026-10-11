@@ -17,11 +17,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import cast
 
-from inertia.semantics.callsite_summary import (
-    CallsiteSummary8616,
-    callsite_machine_frame_kind_8616,
-)
-
 from inertia.ir.core import (
     IRAddress,
     IRBlock,
@@ -33,6 +28,10 @@ from inertia.ir.core import (
 )
 from inertia.ir.frame_memory_accesses import stable_bp_memory_ranges_8616
 from inertia.ir.stack_range_overlap import stack_ranges_may_overlap_8616
+from inertia.semantics.callsite_summary import (
+    CallsiteSummary8616,
+    callsite_machine_frame_kind_8616,
+)
 
 from .bp_call_preservation import BPCallPreservationResult8616, prove_direct_bp_call_preservation_8616
 from .call_register_effects import (
@@ -40,7 +39,7 @@ from .call_register_effects import (
     classify_synthetic_call_register_effect_8616,
 )
 from .call_return_segment import ReturnSegmentFrame8616
-from .call_stack_allocation import CallStackAllocationProof8616, resolve_call_stack_allocation_8616
+from .call_stack_allocation import CallStackAllocationCandidate8616, resolve_call_stack_allocation_8616
 from .call_stack_effect_contracts import (
     CallStackEffectFact8616,
     CallStackEffectFailure8616,
@@ -163,11 +162,11 @@ def _range_contains_bp_offset_8616(address: IRAddress, offset: int) -> bool:
 def _effect_from_summary_8616(
     summary: CallsiteSummary8616,
     ranges: tuple[IRAddress, ...],
-    allocation: CallStackAllocationProof8616 | None = None,
+    allocation: CallStackAllocationCandidate8616 | None = None,
 ) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None]:
     """Classify caller-frame preservation from one authoritative summary."""
     allocation_effect: tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None] | None = (
-        resolve_call_stack_allocation_8616(summary, ranges, allocation)
+        resolve_call_stack_allocation_8616(summary, allocation)
     )
     if allocation_effect is not None:
         return allocation_effect
@@ -299,7 +298,7 @@ def materialize_call_stack_effects_8616(
     summaries: Mapping[int, CallsiteSummary8616],
     *,
     project: object | None = None,
-    allocation_proofs: Mapping[int, CallStackAllocationProof8616] | None = None,
+    allocation_candidates: Mapping[int, CallStackAllocationCandidate8616] | None = None,
     return_segment_frames: Mapping[int, ReturnSegmentFrame8616] | None = None,
 ) -> CallStackEffectArtifact8616:
     """Attach one summary-derived stack effect to every exact IR CALL."""
@@ -340,7 +339,7 @@ def materialize_call_stack_effects_8616(
                     CallStackEffectFailure8616.SUMMARY_MISSING,
                 )
             else:
-                allocation = allocation_proofs.get(instruction.addr) if allocation_proofs is not None else None
+                allocation = allocation_candidates.get(instruction.addr) if allocation_candidates is not None else None
                 effect, failure = _effect_from_summary_8616(summary, ranges, allocation)
                 effect, bp_preservation, target_binding = _with_proven_bp_effect_8616(
                     effect, project, summary, instruction, block,

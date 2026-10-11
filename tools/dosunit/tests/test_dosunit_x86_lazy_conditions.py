@@ -82,9 +82,9 @@ def test_unmodeled_lazy_operations_remain_uninterpreted(cc_op):
 def test_real_binary_zero_condition_has_checked_verdict(driver, case):
     """Both public adapter seams prove ADD/LEA zero parity and reject inversion."""
     import angr
-    from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
     from tools.dosunit.compare.flat32_call_composition import compare_functions_with_calls
+    from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
     original = bytes.fromhex("01d8 0f94c2 0fb6d2 c3")
     equivalent = bytes.fromhex("8d0418 85c0 0f94c2 0fb6d2 c3")

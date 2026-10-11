@@ -5,9 +5,9 @@ import pytest
 
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.memory_invariant_proposals import propose_entry_invariants
+from tools.dosunit.compare.real16_call_contracts import materialize_function
 from tools.dosunit.contracts.memory_state_invariants import MemoryInvariant
 from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
-from tools.dosunit.compare.real16_call_contracts import materialize_function
 
 
 def _input(name, width):

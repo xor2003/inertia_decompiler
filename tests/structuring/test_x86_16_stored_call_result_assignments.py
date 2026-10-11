@@ -4,14 +4,14 @@ import archinfo
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
+from inertia.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
+)
 from inertia.semantics.callsite_summary import (
     CallsiteReturnUseKind8616,
     CallsiteSummary8616,
 )
-from inertia.lowering.stack_variable_coordinates import (
-    record_stack_variable_coordinate_projection_8616,
-)
-
 from inertia.structuring.shared_call_result_aliases import (
     CallResultAliasOwnershipVerdict8616,
     materialize_shared_call_result_aliases_8616,

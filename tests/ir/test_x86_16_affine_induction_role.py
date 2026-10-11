@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from inertia.ir.affine_indexed_address import prove_affine_indexed_address_8616
 from inertia.ir.affine_induction_role import (
     AffineInductionRoleFailure8616,

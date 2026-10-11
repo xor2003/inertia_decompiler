@@ -1,10 +1,9 @@
 """Selection controls over real MZ code and catalogued call closures."""
 from pathlib import Path
 
+from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 from tools.dosunit.tests.test_real16_public_accounting import _catalog
-
-from tools.dosunit.compare.real16_binary_compare import compare_binary16
 
 
 def test_selected_leaf_ignores_unreachable_io(tmp_path: Path) -> None:

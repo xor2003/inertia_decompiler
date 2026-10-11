@@ -1,6 +1,5 @@
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
-
 from inertia.structuring.single_branch_return_orientation import (
     SingleBranchReturnOrientation8616,
     classify_cfg_arm_orientation_8616,

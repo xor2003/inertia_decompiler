@@ -14,7 +14,6 @@ import logging
 from typing import Protocol, cast
 
 from inertia.pipeline.errors import PipelineHardError
-
 from inertia.widening.carry_borrow_pipeline import CarryBorrowWideningPipeline8616
 
 from .carry_borrow_stack_storage import WideCarryBorrowStackArtifact8616

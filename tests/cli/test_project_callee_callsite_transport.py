@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.semantics.callsite_summary_program import (
-    ProgramCallsiteSummaryFact8616,
-    attach_program_callsite_summary_evidence_8616,
-    program_callsite_summary_evidence_8616,
-    program_callsite_summary_evidence_from_facts_8616,
+from inertia.cli.project_evidence_transport import (
+    transfer_callee_callsite_censuses_8616,
+    transfer_program_callsite_summary_evidence_8616,
 )
 from inertia.lowering.callee_callsite_contracts import (
     CalleeCallsiteCensus8616,
@@ -15,10 +12,12 @@ from inertia.lowering.callee_callsite_contracts import (
     attach_callee_callsite_censuses_8616,
     callee_callsite_censuses_by_addr_8616,
 )
-
-from inertia.cli.project_evidence_transport import (
-    transfer_callee_callsite_censuses_8616,
-    transfer_program_callsite_summary_evidence_8616,
+from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.semantics.callsite_summary_program import (
+    ProgramCallsiteSummaryFact8616,
+    attach_program_callsite_summary_evidence_8616,
+    program_callsite_summary_evidence_8616,
+    program_callsite_summary_evidence_from_facts_8616,
 )
 
 

@@ -4,11 +4,11 @@ import argparse
 import json
 
 import pytest
-from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
-from tools.dosunit.tests.test_pe32_program_replay import EXIT, STACK, exit_code
 
 from tools.dosunit.contracts.model import DosUnitError
 from tools.dosunit.reporting.pe32_program_cli import cmd_replay_pe_program
+from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
+from tools.dosunit.tests.test_pe32_program_replay import EXIT, STACK, exit_code
 
 
 def document():

@@ -3,13 +3,13 @@ import json
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
-from tools.dosunit.tests.test_real16_region_proof import _document
 
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.compare.real16_region_proof import compare_real16_regions
 from tools.dosunit.compare.region_pairing import BranchOrientation
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
+from tools.dosunit.tests.test_real16_region_proof import _document
 
 ORIGINAL = "83f90074098d5f01678d49ffebf2c3"
 REVERSED = "83f9007501c38d5f01678d49ffebf1"

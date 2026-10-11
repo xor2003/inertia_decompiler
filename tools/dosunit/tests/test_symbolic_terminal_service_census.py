@@ -24,6 +24,13 @@ import sys
 from collections.abc import Callable
 from dataclasses import replace
 
+from tools.dosunit.compare.symbolic_terminal_real16_services import (
+    ServiceBlockEnding,
+    TerminalServiceEvent,
+    returning_service_census,
+    verify_returning_receipts,
+)
+from tools.dosunit.compare.terminal_memory_effects import TerminalRefusal, TerminalRefusalKind
 from tools.dosunit.contracts.proof_contracts import FactCounters
 from tools.dosunit.runtime.real16_program_model import ProgramEventKind
 from tools.dosunit.runtime.real16_program_version import (
@@ -35,13 +42,6 @@ from tools.dosunit.runtime.real16_program_video import (
     video_query_event_data,
 )
 from tools.dosunit.runtime.real16_replay_model import SegOffset
-from tools.dosunit.compare.symbolic_terminal_real16_services import (
-    ServiceBlockEnding,
-    TerminalServiceEvent,
-    returning_service_census,
-    verify_returning_receipts,
-)
-from tools.dosunit.compare.terminal_memory_effects import TerminalRefusal, TerminalRefusalKind
 
 BASE = 0x10100
 TERMINAL_TARGET = 0xFF000 + 0x21

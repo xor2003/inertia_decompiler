@@ -12,6 +12,10 @@ from __future__ import annotations
 import io
 
 import angr
+
+from inertia.alias.segment_stack_restore import (
+    build_x86_16_segment_stack_restore_artifact,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import (
     AddressStatus,
@@ -30,10 +34,6 @@ from inertia.ir import (
 from inertia.ir.segment_state import SegmentStateArtifact
 from inertia.ir.segment_state_transfer import SegmentRestoreSource
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-
-from inertia.alias.segment_stack_restore import (
-    build_x86_16_segment_stack_restore_artifact,
-)
 
 
 def _const(value: int, size: int = 2) -> IRValue:

@@ -4,17 +4,17 @@ import io
 from types import SimpleNamespace
 
 import angr
+
+from inertia.alias.indexed_address_program import (
+    IndexedAliasFunctionSelection8616,
+    build_indexed_alias_program_evidence_8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
     MemSpace,
     SegmentOrigin,
-)
-
-from inertia.alias.indexed_address_program import (
-    IndexedAliasFunctionSelection8616,
-    build_indexed_alias_program_evidence_8616,
 )
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,

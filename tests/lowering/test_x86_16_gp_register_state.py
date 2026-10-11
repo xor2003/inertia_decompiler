@@ -19,6 +19,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.rustylib.ailment import VirtualVariableCategory
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRAddress, IRInstr, IRValue, MemSpace
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactStage8616
@@ -31,7 +32,6 @@ from inertia.lowering.gp_register_state import (
     runtime_gp_expression_view_8616,
     runtime_gp_name_for_variable_8616,
 )
-
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 
 

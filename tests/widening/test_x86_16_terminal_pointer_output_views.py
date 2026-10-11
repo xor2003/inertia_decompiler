@@ -3,14 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
-from inertia.ir import (
-    AddressStatus,
-    IRAddress,
-    IRValue,
-    MemSpace,
-    SegmentOrigin,
-)
 
 from inertia.alias.register_reaching_source import (
     RegisterReachingSourceResult8616,
@@ -21,6 +13,14 @@ from inertia.alias.terminal_pointer_output_contracts import (
     TerminalPointerAliasFact8616,
     TerminalPointerAliasStats8616,
 )
+from inertia.ir import (
+    AddressStatus,
+    IRAddress,
+    IRValue,
+    MemSpace,
+    SegmentOrigin,
+)
+from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
 from inertia.semantics.terminal_pointer_output_contracts import (
     TerminalPointerOutputDisposition8616,
     TerminalPointerOutputEvidence8616,

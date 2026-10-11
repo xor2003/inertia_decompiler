@@ -16,10 +16,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from capstone import CS_ARCH_X86, CS_MODE_16, Cs
 from capstone.x86_const import X86_OP_IMM
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.semantics.branch_target_return import (
     TerminalAxReturnEffect8616,
     TerminalAxReturnEffectKind8616,

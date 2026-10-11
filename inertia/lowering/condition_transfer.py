@@ -67,6 +67,7 @@ from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactVerdict8616,
     registered_function_ssa_artifact_8616,
 )
+from inertia.pipeline.errors import PipelineHardError
 from inertia.structuring.condition_trace import record_classified_conditions_trace_8616
 
 from .condition_fact_arbitration import resolve_condition_fact_conflicts_8616
@@ -916,6 +917,30 @@ def transfer_typed_conditions_from_emulator_8616(
     return len(unique)
 
 
+def _transfer_condition_owner_8616(project: object, codegen: object, func_addr: int) -> object | None:
+    """Consume the authenticated recovery owner, including private analysis KBs.
+
+    Real native codegen retains the exact recovered ``Function``; the ambient
+    ``project.kb.functions`` may be empty or hold a stale same-address entry.
+    Returning ``None`` keeps the collector's default lookup for address-only
+    codegen. Foreign owners and conflicting addresses must fail loudly instead
+    of substituting another function's evidence.
+    """
+    # Defer the native IR boundary until condition transfer needs its context.
+    from inertia.ir.vex_import import codegen_function_8616
+
+    resolved = codegen_function_8616(project, codegen)
+    if resolved is None:
+        return None
+    if resolved[1] != func_addr:
+        raise PipelineHardError(
+            "condition transfer requested function address differs from recovered owner",
+            layer="lowering", function_addr=func_addr,
+            details={"recovered_address": resolved[1]},
+        )
+    return typing.cast(object, resolved[0])
+
+
 def transfer_typed_conditions_to_codegen_8616(
     project: object,
     func_addr: int,
@@ -933,7 +958,9 @@ def transfer_typed_conditions_to_codegen_8616(
     from inertia.pipeline.contracts import SemanticLaneState
 
     conditions, edge_evidence, ownership_stats, relift_stats = _collect_typed_condition_artifacts_8616(
-        project, func_addr
+        project,
+        func_addr,
+        function=_transfer_condition_owner_8616(project, codegen, func_addr),
     )
     existing_edge_evidence = _dynamic_boundary_attr_8616(codegen, "_inertia_condition_edge_evidence", None)
     if not edge_evidence and isinstance(existing_edge_evidence, (list, tuple)) and existing_edge_evidence:

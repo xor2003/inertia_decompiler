@@ -18,11 +18,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeFixedSizeArray, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
 from inertia.ir.core import SegmentOrigin
 from inertia.ir.segment_state import SegmentRegisterState, SegmentStateArtifact
 from inertia.lowering.semantic_cast import CSemanticCast8616
-from archinfo import ArchX86
-
 from inertia.validation.status_flag_preservation import (
     PackedStatusFlagPreservationEvidence8616,
 )

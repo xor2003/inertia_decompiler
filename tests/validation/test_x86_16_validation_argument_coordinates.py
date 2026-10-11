@@ -4,8 +4,8 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.lowering.stack_variable_coordinates import record_stack_variable_coordinate_projection_8616
 
+from inertia.lowering.stack_variable_coordinates import record_stack_variable_coordinate_projection_8616
 from inertia.validation.tail_validation_fingerprint import (
     _canonical_or_unresolved_stack_fingerprint_8616,
     _cfunc_source_arg_names_by_offset_8616,

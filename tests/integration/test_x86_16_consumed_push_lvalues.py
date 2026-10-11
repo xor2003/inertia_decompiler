@@ -19,11 +19,12 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+from capstone.x86_const import X86_INS_MOV, X86_INS_PUSH
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.real_mode_linear import (
     prune_consumed_call_push_stack_assignments_8616,
 )
-from capstone.x86_const import X86_INS_MOV, X86_INS_PUSH
 
 
 class _Codegen:

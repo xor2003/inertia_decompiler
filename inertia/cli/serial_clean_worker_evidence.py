@@ -14,21 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    caller_return_use_evidence_by_addr_8616,
-    record_caller_return_use_evidence_8616,
-)
-from inertia.semantics.callsite_summary_program import (
-    ProgramCallsiteSummaryEvidence8616,
-    attach_program_callsite_summary_evidence_8616,
-    program_callsite_summary_evidence_8616,
-)
-from inertia.semantics.callsite_summary_program_codec import (
-    program_callsite_summary_evidence_from_record_8616,
-    program_callsite_summary_evidence_record_8616,
-)
-
 from inertia.lowering.callee_callsite_codec import (
     callee_callsite_census_map_from_record_8616,
     callee_callsite_census_map_record_8616,
@@ -54,6 +39,20 @@ from inertia.lowering.callee_pointer_contracts import (
 from inertia.lowering.global_object_source_codec import (
     global_object_source_evidence_from_record_8616,
     global_object_source_evidence_record_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    caller_return_use_evidence_by_addr_8616,
+    record_caller_return_use_evidence_8616,
+)
+from inertia.semantics.callsite_summary_program import (
+    ProgramCallsiteSummaryEvidence8616,
+    attach_program_callsite_summary_evidence_8616,
+    program_callsite_summary_evidence_8616,
+)
+from inertia.semantics.callsite_summary_program_codec import (
+    program_callsite_summary_evidence_from_record_8616,
+    program_callsite_summary_evidence_record_8616,
 )
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,

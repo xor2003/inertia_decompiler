@@ -4,11 +4,11 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
+from tools.dosunit.compare.real16_binary_compare import compare_binary16
 from tools.dosunit.contracts.binary_initial_state import InitialImageReason, compare_initial_images
 from tools.dosunit.contracts.proof_contracts import ProofStatus
-from tools.dosunit.compare.real16_binary_compare import compare_binary16
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 
 def _identity(data: bytes) -> dict:

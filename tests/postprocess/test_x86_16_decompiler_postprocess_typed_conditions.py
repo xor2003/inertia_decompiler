@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import inertia.postprocess.decompiler_postprocess_typed_conditions as typed_condition_postprocess
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CITE,
@@ -20,19 +19,20 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
+import inertia.postprocess.decompiler_postprocess_typed_conditions as typed_condition_postprocess
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.condition_ir import ConditionIR
+from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
+from inertia.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
+)
 from inertia.postprocess.decompiler_postprocess_typed_conditions import (
     _apply_typed_condition_stack_arg_signedness_8616,
     _apply_typed_conditions_to_codegen_8616,
     _build_c_condition_expr,
     _build_c_expr_for_operand,
 )
-from inertia.ir.condition_ir import ConditionIR
-from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
-from inertia.lowering.stack_variable_coordinates import (
-    record_stack_variable_coordinate_projection_8616,
-)
-
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 from tests.fixtures.x86_16_condition_definition_fixtures import install_condition_definition_block
 

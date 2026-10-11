@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Protocol
 
 import networkx as nx
+
 from inertia.pipeline.errors import PipelineHardError
 
 __all__ = (

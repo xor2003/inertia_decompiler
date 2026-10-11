@@ -19,6 +19,7 @@ from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeNum
 from angr.sim_variable import SimTemporaryVariable
 
 from .gp_word_runtime import GP_WORD_RUNTIME_LANES_8616, GPRegisterRuntimeABI8616, gp_runtime_abi_8616
+from .stack_value_projection import project_pointer_storage_value_8616
 from .terminal_return_expressions import _safe_scalar_expression_8616
 
 
@@ -109,3 +110,24 @@ def project_gp_word_assignment_8616(assignment: c.CAssignment) -> c.CAssignment:
     return CGPWordAssignment8616(
         assignment.lhs, assignment.rhs, codegen=assignment.codegen, tags=assignment.tags,
     )
+
+
+def refresh_gp_word_pointer_projection_8616(assignment: c.CAssignment) -> c.CAssignment | None:
+    """Consume a typed pointer substituted into an existing canonical GP write.
+
+    Argument materialization can replace an integer temporary after the first
+    register-lowering pass. Update the canonical effect before validation,
+    rather than inserting a conversion only in the rendered word view.
+    """
+    projection = _word_projection(assignment)
+    if projection is None:
+        return None
+    _, value = projection
+    scalar = project_pointer_storage_value_8616(assignment.codegen, value, 2)
+    if scalar is None or scalar is value:
+        return None
+    rhs = assignment.rhs
+    assert isinstance(rhs, c.CBinaryOp) and isinstance(rhs.rhs, c.CBinaryOp)
+    inserted = c.CBinaryOp("And", scalar, rhs.rhs.rhs, codegen=assignment.codegen)
+    merged = c.CBinaryOp("Or", rhs.lhs, inserted, codegen=assignment.codegen)
+    return c.CAssignment(assignment.lhs, merged, codegen=assignment.codegen, tags=assignment.tags)

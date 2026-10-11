@@ -6,6 +6,7 @@ import subprocess
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 

@@ -12,9 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616, logical_argument_widths_from_callsite_8616
-
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+from inertia.semantics.callsite_summary import CallsiteSummary8616, logical_argument_widths_from_callsite_8616
 
 from .argument_frame_base import proven_first_argument_machine_bp_offset_at_8616
 from .callee_argument_count_evidence import (

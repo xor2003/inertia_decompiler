@@ -1,6 +1,9 @@
 """Do not merge BP-relative storage across contradictory captured BP values."""
 
 import pytest
+
+from inertia.alias.logical_stack_storage_identity import LogicalStackStorageIdentityFailure8616
+from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
 from inertia.ir.analysis.stack_frame_ir import (
     FrameCoordinateStatus8616,
     build_x86_16_ir_frame_access_artifact,
@@ -17,9 +20,6 @@ from inertia.ir.core import (
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.ssa_memory_ranges import StackCoordinateAgreement8616
 from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact
-
-from inertia.alias.logical_stack_storage_identity import LogicalStackStorageIdentityFailure8616
-from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
 
 
 @pytest.mark.parametrize("rebase", ["", "83c502", "bd0020"])

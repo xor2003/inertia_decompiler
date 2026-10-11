@@ -5,6 +5,7 @@ from __future__ import annotations
 import angr
 import pytest
 from angr import options as o
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 

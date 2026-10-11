@@ -2,6 +2,24 @@
 
 from __future__ import annotations
 
+from inertia.alias.indexed_address_access_classification import (
+    classify_indexed_alias_accesses_8616,
+)
+from inertia.alias.indexed_address_access_contracts import (
+    IndexedAliasAccessEvidence8616,
+)
+from inertia.alias.indexed_address_copy_contracts import (
+    IndexedAliasCopyFact8616,
+)
+from inertia.alias.indexed_address_projection import (
+    project_indexed_address_aliases_8616,
+)
+from inertia.alias.indexed_address_range_contracts import (
+    IndexedAliasLoopRangeEvidence8616,
+)
+from inertia.alias.indexed_address_range_projection import (
+    project_indexed_loop_ranges_to_alias_8616,
+)
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import (
     AddressStatus,
@@ -48,25 +66,6 @@ from inertia.ir.logical_memory_write_value import (
     LogicalWordWriteLaneProof8616,
     LogicalWordWriteValueFact8616,
     LogicalWordWriteValueKind8616,
-)
-
-from inertia.alias.indexed_address_access_classification import (
-    classify_indexed_alias_accesses_8616,
-)
-from inertia.alias.indexed_address_access_contracts import (
-    IndexedAliasAccessEvidence8616,
-)
-from inertia.alias.indexed_address_copy_contracts import (
-    IndexedAliasCopyFact8616,
-)
-from inertia.alias.indexed_address_projection import (
-    project_indexed_address_aliases_8616,
-)
-from inertia.alias.indexed_address_range_contracts import (
-    IndexedAliasLoopRangeEvidence8616,
-)
-from inertia.alias.indexed_address_range_projection import (
-    project_indexed_loop_ranges_to_alias_8616,
 )
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,

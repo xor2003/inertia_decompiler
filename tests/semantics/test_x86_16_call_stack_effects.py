@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallsiteArgumentClass8616,
-    CallsiteSummary8616,
+from inertia.alias.partial_register_address_break import (
+    PartialRegisterAddressBreakEvidence8616,
 )
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -24,16 +23,16 @@ from inertia.ir.logical_memory_contracts import (
     empty_ir_logical_memory_artifact_8616,
 )
 from inertia.ir.ssa_function import build_x86_16_function_ssa
-
-from inertia.alias.partial_register_address_break import (
-    PartialRegisterAddressBreakEvidence8616,
-)
 from inertia.semantics.call_stack_effect_contracts import (
     CallStackEffectFailure8616,
     CallStackEffectVerdict8616,
 )
 from inertia.semantics.call_stack_effects import (
     materialize_call_stack_effects_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteArgumentClass8616,
+    CallsiteSummary8616,
 )
 
 

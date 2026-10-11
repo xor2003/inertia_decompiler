@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inertia.frontend.x86_16.coverage_manifest as coverage_manifest
-
 from inertia.frontend.x86_16.coverage_manifest import COMPARE_VERIFIED_MOO_OPCODES
 
 

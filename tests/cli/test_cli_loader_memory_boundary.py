@@ -16,10 +16,10 @@ from pathlib import Path
 import angr
 import archinfo
 import pytest
-from inertia.frontend.x86_16.load_dos_mz import DOSMZ
 from cle.memory import Clemory
 
 import inertia.cli.cli_function_discovery as discovery
+from inertia.frontend.x86_16.load_dos_mz import DOSMZ
 
 _IMAGE_LEN = 0x140
 # Nonzero base keeps linked-base-relative offsets distinct from absolutes.

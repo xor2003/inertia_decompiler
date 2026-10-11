@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from inertia.cli.project_evidence_transport import (
+    transfer_caller_return_use_evidence_8616,
+    transfer_project_evidence_8616,
+)
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
     CallerReturnUseVerdict8616,
     caller_return_use_evidence_by_addr_8616,
     record_caller_return_use_evidence_8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayoutEvidence8616,
 )
@@ -20,10 +23,6 @@ from inertia.widening.indexed_global_object_program_ranges import (
 )
 from inertia.widening.indexed_global_object_ranges import (
     BoundedGlobalObjectRangeStats8616,
-)
-from inertia.cli.project_evidence_transport import (
-    transfer_caller_return_use_evidence_8616,
-    transfer_project_evidence_8616,
 )
 
 

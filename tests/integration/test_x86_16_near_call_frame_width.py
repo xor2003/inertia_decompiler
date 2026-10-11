@@ -2,8 +2,9 @@
 
 import capstone
 import pytest
-import tests.integration.test_x86_16_near_return_continuation as worker
 from angr.block import CapstoneInsn
+
+import tests.integration.test_x86_16_near_return_continuation as worker
 
 
 @pytest.mark.parametrize("wide", [False, True])

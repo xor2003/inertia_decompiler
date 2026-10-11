@@ -7,8 +7,8 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimStruct, SimTypeArray, SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
-from inertia.lowering.gp_register_state import runtime_gp_state_expr_8616
 
+from inertia.lowering.gp_register_state import runtime_gp_state_expr_8616
 from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 from inertia.postprocess.optimization.dce_local_array_reads import is_pure_local_array_read_8616
 from inertia.postprocess.optimization.dce_value_identity import assignment_reads_destination_8616

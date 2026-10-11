@@ -15,22 +15,22 @@ from itertools import repeat
 from pathlib import Path
 
 import pytest
-from inertia.ir.function_ir_registry import (
-    registered_function_ir_artifact_8616,
-)
 
 from inertia.frontend.x86_16.frontend_invocation_inventory import (
     InvocationInventoryBudget8616,
     InvocationInventoryStatus8616,
 )
 from inertia.frontend.x86_16.mz_invocation_source import mz_invocation_source_8616
-from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
-from tools.dosunit.runtime.real16_replay_model import LinearRange
+from inertia.ir.function_ir_registry import (
+    registered_function_ir_artifact_8616,
+)
 from tools.dosunit.catalog.real16_scoped_invocation import (
     DeclaredInvocationStatus8616,
     _authenticated_image_bytes_8616,
     install_declared_invocation_source_8616,
 )
+from tools.dosunit.runtime.real16_program_boot import program_from_mz_bytes
+from tools.dosunit.runtime.real16_replay_model import LinearRange
 from tools.dosunit.tests.test_x86_16_scoped_native_inputs import (
     BASE,
     CALL_RANGES,

@@ -5,11 +5,11 @@ import struct
 from pathlib import Path
 
 import pytest
-from inertia.frontend.x86_16.load_dos_mz import DOSMZHeader
 
 import decompile
 import inertia.cli.project_loading as project_loading
 from inertia.frontend.x86_16.exepack import unpack_exepack
+from inertia.frontend.x86_16.load_dos_mz import DOSMZHeader
 from inertia.frontend.x86_16.mz_image import MZHeaderView
 from inertia.frontend.x86_16.packed_mz import PackerType, detect_packer_in_bytes, unpack_lzexe_091
 

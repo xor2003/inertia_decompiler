@@ -17,17 +17,18 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
+
+import inertia.validation.tail_validation_fingerprint as tail_validation_fingerprint_module
 from inertia.alias.alias_model import _stack_storage_facts_for_segmented_address_8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.semantic_cast import CSemanticCast8616
+from inertia.lowering.stack_variable_binding import StackVariableBinding
+from inertia.lowering.stack_variable_coordinates import record_stack_variable_coordinate_projection_8616
+from inertia.lowering.structured_intrinsics import lower_structured_insert_call_8616
 from inertia.postprocess.decompiler_postprocess_stage import (
     _attach_tail_validation_widened_carrier_provenance_8616,
     _deepcopy_cfunc_for_validation_8616,
 )
-from inertia.lowering.semantic_cast import CSemanticCast8616
-from inertia.lowering.stack_variable_binding import StackVariableBinding
-from inertia.lowering.structured_intrinsics import lower_structured_insert_call_8616
-
-import inertia.validation.tail_validation_fingerprint as tail_validation_fingerprint_module
 from inertia.validation.tail_validation_fingerprint import (
     _canonical_or_unresolved_stack_fingerprint_8616,
     _expr_fingerprint,
@@ -155,6 +156,46 @@ def test_expr_fingerprint_normalizes_stack_word_pair():
     fingerprint = _expr_fingerprint(expr, project)
 
     assert fingerprint == "stack_slot:SS:BP+0x2:size2"
+
+
+def test_word_pair_fingerprint_consumes_proven_machine_bp_coordinates():
+    """Byte variables retain entry-SP offsets while the range identity is BP."""
+    codegen = _DummyCodegen()
+    values = []
+    for entry_offset in (2, 3):
+        variable = SimStackVariable(entry_offset, 1, base="bp")
+        cvar = CVariable(variable, codegen=codegen)
+        record_stack_variable_coordinate_projection_8616(
+            codegen, variable=variable, cvar=cvar,
+            bp_offset=entry_offset + 2, entry_sp_offset=entry_offset, size=1,
+        )
+        values.append(cvar)
+    expression = CBinaryOp(
+        "Or", values[0],
+        CBinaryOp("Shl", values[1], _const(8, codegen), codegen=codegen),
+        codegen=codegen,
+    )
+
+    assert _expr_fingerprint(expression, codegen.project) == "stack_slot:SS:BP+0x4:size2"
+
+
+def test_word_pair_fingerprint_keeps_coordinate_refusal(monkeypatch):
+    """An unresolved projection cannot fall back to a plausible raw offset."""
+    codegen = _DummyCodegen()
+    values = [CVariable(SimStackVariable(offset, 1, base="bp"), codegen=codegen)
+              for offset in (2, 3)]
+    expression = CBinaryOp(
+        "Or", values[0],
+        CBinaryOp("Shl", values[1], _const(8, codegen), codegen=codegen),
+        codegen=codegen,
+    )
+    monkeypatch.setattr(tail_validation_fingerprint_module,
+                        "machine_bp_offset_for_stack_variable_8616",
+                        lambda _codegen, _variable: None)
+
+    assert tail_validation_fingerprint_module._stack_word_pair_fingerprint(
+        expression, codegen.project,
+    ) is None
 
 
 def test_expr_fingerprint_canonicalizes_negated_compare_to_inverted_compare():

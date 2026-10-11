@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_reinitbars_execution import assert_reinitbars_loop_behavior
 
 _BODY = """

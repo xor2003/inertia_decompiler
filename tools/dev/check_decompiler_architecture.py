@@ -284,6 +284,10 @@ _POSTPROCESS_LEGACY_IMPORT_ALLOWLIST: dict[str, frozenset[str]] = {
             # Veto-only edge: a raw taken-branch fact cannot overwrite an
             # already-oriented Structuring loop-continuation contract.
             "inertia.structuring.loop_condition_identity",
+            # Structuring-only polarity delegate: this legacy consumer may
+            # publish a typed guard only with proven operand correspondence.
+            # Remove this edge when the condition consumer migrates.
+            "inertia.structuring.condition_comparison_polarity",
             # Compatibility delegate only: stack operand construction moved
             # out of this legacy module into its Types/Lowering owner.
             "inertia.lowering.condition_stack_value",
@@ -514,6 +518,8 @@ _SEMANTIC_LAYER_POSTPROCESS_IMPORT_ALLOWLIST: dict[str, frozenset[str]] = {
 
 _CLI_ALLOWED_X86_16_IMPORTS = frozenset(
     {
+        # CLI consumes exact third-party Function/manager/KB ownership, not recovered semantics.
+        "inertia.frontend.x86_16.function_knowledge_base",
         "inertia.lowering.analysis_helpers",
         "inertia.lowering.annotations",
         # CLI may report syntax-only C AST cycles; semantic repair remains forbidden here.
@@ -1517,6 +1523,10 @@ _PIPELINE_TIER_CONTRACT: dict[str, tuple[str, ...]] = {
 }
 
 _PROMOTED_TYPED_FILES = (
+    "inertia/ir/frozen_dispatch.py",
+    "inertia/ir/dead_temporary_normalization.py",
+    "inertia/ir/dead_temporary_capture_inputs.py",
+    "inertia/ir/dead_temporary_surface_normalization.py",
     "inertia/__init__.py",
     "inertia/frontend/__init__.py",
     "inertia/frontend/x86_16/__init__.py",
@@ -1956,6 +1966,7 @@ _PROMOTED_TYPED_FILES = (
     "inertia/frontend/x86_16/stack_compat.py",
     "inertia/frontend/x86_16/load_propagation.py",
     "inertia/frontend/x86_16/stack_tracker_allocation.py",
+    "inertia/frontend/x86_16/function_knowledge_base.py",
     "inertia/frontend/x86_16/stack_tracker_return_segment.py",
     "inertia/frontend/x86_16/typehoon_compat.py",
     "inertia/lowering/type_clinic_return_compat.py",

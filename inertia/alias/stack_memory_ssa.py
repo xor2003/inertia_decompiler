@@ -13,13 +13,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.core import IRAddress, IRInstr, IRRefusal, MemSpace
 from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.ir.ssa_memory_contracts import SSAMemoryOverlap8616, SSAMemoryOverlapRelation8616
 from inertia.ir.ssa_memory_ranges import stack_coordinate_agreement_8616
 from inertia.ir.stack_extent_evidence import build_stack_extent_evidence_8616
+from inertia.pipeline.errors import PipelineHardError
 
 from .alias_model_impl import AliasStorageFacts
 from .logical_stack_memory_projection import project_logical_stack_memory_alias_8616

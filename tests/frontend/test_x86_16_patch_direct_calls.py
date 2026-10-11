@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import inertia.lowering.analysis_helpers as analysis_helpers
-
 from inertia.frontend.x86_16.frontend_function_instructions import (
     FunctionInstructionInventory8616,
     FunctionInstructionInventoryStatus8616,

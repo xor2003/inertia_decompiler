@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from inertia.alias.terminal_memory_outputs import (
+    TerminalMemoryAliasFact8616,
+    classify_terminal_memory_output_aliases_8616,
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -37,11 +41,6 @@ from inertia.lowering.interprocedural_storage_transaction import (
     accepted_callsite_storage_binding_8616,
     accepted_function_storage_contract_8616,
     apply_program_storage_resolution_8616,
-)
-
-from inertia.alias.terminal_memory_outputs import (
-    TerminalMemoryAliasFact8616,
-    classify_terminal_memory_output_aliases_8616,
 )
 from inertia.semantics.terminal_memory_output_contracts import (
     TerminalMemoryOutputDisposition8616,

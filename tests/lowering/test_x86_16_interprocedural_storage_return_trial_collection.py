@@ -8,13 +8,8 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
 from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY, Lifter86_16  # noqa: F401
 from inertia.lowering.interprocedural_storage_collection_contracts import (
     FunctionInputStorageTrialCollection8616,
@@ -43,6 +38,12 @@ from inertia.lowering.interprocedural_storage_simtypes import (
 )
 from inertia.lowering.interprocedural_storage_solver import (
     resolve_program_storage_trials_8616,
+)
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
 )
 from tests.lowering.x86_16_native_call_fixtures import retain_native_call_index_8616
 

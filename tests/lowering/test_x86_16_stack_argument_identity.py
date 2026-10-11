@@ -11,6 +11,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.positive_bp_arguments import (
     materialize_positive_bp_arguments_8616,

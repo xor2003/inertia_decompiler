@@ -10,6 +10,8 @@ import argparse
 import os
 from pathlib import Path
 
+from tools.dosunit.catalog.real16_declared_input import read_declared_real16_input_8616
+
 from .catalog_policy import DEFAULT_CATALOG_TIMEOUT, positive_catalog_timeout
 
 __all__ = ["CliArguments", "_build_cli_argument_parser", "parse_cli_arguments"]
@@ -21,8 +23,11 @@ class CliArguments(argparse.Namespace):
     binary: Path
     addr: int | None
     blob: bool
-    base_addr: int
-    entry_point: int
+    base_addr: int = 0x1000
+    entry_point: int = 0x1000
+    _requested_base_addr: int | None
+    _requested_entry_point: int | None
+    real16_declared_input: Path | None = None
     show_asm: bool
     alternate_source_c: bool
     c_target: str
@@ -86,15 +91,24 @@ def _build_cli_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--base-addr",
+        dest="_requested_base_addr",
         type=_parse_int,
-        default=0x1000,
+        default=None,
         help="Base address for blob/.COM loading. Defaults to 0x1000.",
     )
     parser.add_argument(
         "--entry-point",
+        dest="_requested_entry_point",
         type=_parse_int,
-        default=0x1000,
+        default=None,
         help="Entry point for blob/.COM loading. Defaults to 0x1000.",
+    )
+    parser.add_argument(
+        "--real16-declared-input",
+        type=Path,
+        default=None,
+        metavar="DECLARATION_JSON",
+        help="Bind real-mode MZ loading to an explicit DOS boot and service declaration.",
     )
     parser.add_argument(
         "--show-asm",
@@ -360,6 +374,7 @@ def parse_cli_arguments(argv: list[str] | None = None) -> CliArguments:
     parsed = parser.parse_args(argv, namespace=CliArguments())
     if not isinstance(parsed, CliArguments):
         raise TypeError("CLI parser returned an unexpected namespace type")
+    _resolve_declared_load_coordinates_8616(parser, parsed)
     declared = parsed.declared_call_effects
     parsed.declared_call_effects = (
         ()
@@ -367,3 +382,27 @@ def parse_cli_arguments(argv: list[str] | None = None) -> CliArguments:
         else tuple(Path(path) for path in declared)
     )
     return parsed
+
+
+def _resolve_declared_load_coordinates_8616(
+    parser: argparse.ArgumentParser, args: CliArguments,
+) -> None:
+    """Resolve load coordinates, refusing explicit conflicts with declared boot facts."""
+    args.base_addr = args._requested_base_addr if args._requested_base_addr is not None else 0x1000
+    args.entry_point = args._requested_entry_point if args._requested_entry_point is not None else 0x1000
+    if args.real16_declared_input is None:
+        return
+    if args.blob or args.binary.suffix.lower() == ".com" or args.proc is not None:
+        parser.error("--real16-declared-input requires the MZ binary lane; --blob, .COM, and --proc are unsupported")
+    try:
+        declaration = read_declared_real16_input_8616(args.real16_declared_input, args.binary.read_bytes())
+    except (OSError, ValueError) as exc:
+        parser.error(f"--real16-declared-input: {exc}")
+    expected_base = declaration.boot.image.load_segment
+    expected_entry = declaration.boot.entry.linear()
+    if args._requested_base_addr is not None and args._requested_base_addr not in (expected_base, expected_base << 4):
+        parser.error("--base-addr conflicts with --real16-declared-input load segment")
+    if args._requested_entry_point is not None and args.entry_point != expected_entry:
+        parser.error("--entry-point conflicts with --real16-declared-input entry")
+    args.base_addr = expected_base
+    args.entry_point = expected_entry

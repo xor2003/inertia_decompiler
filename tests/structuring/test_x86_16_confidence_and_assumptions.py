@@ -8,6 +8,8 @@ and integration with decompiler output.
 import types
 
 import pytest
+
+from inertia.cli.cli_storage_objects import StorageObjectRefusal
 from inertia.lowering.segmented_memory_reasoning import (
     SegmentAssociation,
     SegmentRegister,
@@ -22,7 +24,6 @@ from inertia.lowering.type_structure_merging import (
     StructRecoveryInfo,
     StructType,
 )
-
 from inertia.structuring.confidence_and_assumptions import (
     ConfidenceLevel,
     ConfidenceMarker,
@@ -36,7 +37,6 @@ from inertia.structuring.confidence_evidence import (
     EvidenceStatus,
     load_confidence_evidence,
 )
-from inertia.cli.cli_storage_objects import StorageObjectRefusal
 
 
 class TestConfidenceLevel:

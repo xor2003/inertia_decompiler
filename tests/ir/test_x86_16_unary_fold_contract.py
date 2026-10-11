@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.ir.real16_edge_feasibility8616 as edge
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.vex_import as vex_import
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRValue
 from inertia.ir.vex_condition_demand import (
     VexConditionDemand8616,

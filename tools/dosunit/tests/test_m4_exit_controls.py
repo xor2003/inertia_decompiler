@@ -11,23 +11,29 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tools.dosunit.compare.flat32_invariant_retry import InvariantSearchReason
+from tools.dosunit.compare.real16_binary_compare import compare_binary16
+from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.runtime.flat32_memory_permissions import DeclaredAccess
+from tools.dosunit.runtime.pe32_program_boot import PeProgramEnvironment, PeProgramMemory, pe_program_from_bytes
+from tools.dosunit.runtime.pe32_program_replay import replay_pe_program
+from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
+from tools.dosunit.runtime.real16_program_model import ProgramStatus
+from tools.dosunit.runtime.real16_replay import replay
+from tools.dosunit.runtime.real16_replay_model import (
+    CallerFrame,
+    FrameKind,
+    Real16ReplayStatus,
+    Real16Vector,
+    SegOffset,
+)
 from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
 from tools.dosunit.tests.test_relational_pe32_public import _image
 from tools.dosunit.tests.test_relational_saved_public32 import EXIT_MUTATION
 from tools.dosunit.tests.test_relational_saved_public32 import ORACLE as SAVED_ORACLE
-
-from tools.dosunit.compare.flat32_invariant_retry import InvariantSearchReason
-from tools.dosunit.runtime.flat32_memory_permissions import DeclaredAccess
-from tools.dosunit.runtime.pe32_program_boot import PeProgramEnvironment, PeProgramMemory, pe_program_from_bytes
-from tools.dosunit.runtime.pe32_program_replay import replay_pe_program
-from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
-from tools.dosunit.compare.real16_binary_compare import compare_binary16
-from tools.dosunit.runtime.real16_mz_load import image_from_mz_bytes
-from tools.dosunit.runtime.real16_program_model import ProgramStatus
-from tools.dosunit.runtime.real16_replay import replay
-from tools.dosunit.runtime.real16_replay_model import CallerFrame, FrameKind, Real16ReplayStatus, Real16Vector, SegOffset
 
 # No rendered-code recovery: these are exact assembled fixture bytes.
 PAIRS = {

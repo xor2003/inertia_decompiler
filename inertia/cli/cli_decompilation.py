@@ -49,10 +49,12 @@ from inertia.cli.cli_semantic_rollback import (
     snapshot_trusted_cfunc_8616,
 )
 from inertia.cli.decompilation_quality import assess_decompiled_c_text
+from inertia.cli.generated_c_artifacts import conditional_tail_snapshot_8616
 from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.project_loading import (
     _build_project_cached,
     _describe_exception,
+    declared_input_path_8616,
 )
 from inertia.cli.recompile_check import check_c_recompiles_8616
 from inertia.cli.recovery_instruction_coverage import collect_exact_instruction_coverage_8616
@@ -124,6 +126,7 @@ from inertia.cli.x86_16_exact_slice import (
 )
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata, extract_cod_proc_metadata
 from inertia.frontend.x86_16.cod_known_objects import known_cod_object_spec
+from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616
 from inertia.frontend.x86_16.render_compat import repair_cfunctioncall_render_targets_8616
 from inertia.ir.status_flag_lift_context import active_status_flag_lift_context_8616
 from inertia.lowering.analysis_helpers import (
@@ -2598,6 +2601,7 @@ def _tail_validation_snapshot_failed_for_cli_rewrite_8616(snapshot: object) -> b
 
     return (
         _tail_validation_snapshot_complete_for_cli_rewrite_8616(snapshot)
+        and not conditional_tail_snapshot_8616(typing.cast(Mapping[str, object], snapshot))
         and not x86_16_tail_validation_snapshot_passed(typing.cast(Mapping[str, object], snapshot))
     )
 
@@ -4029,12 +4033,14 @@ class _DecompileRun8616:
                                                                     self.dec = self.project.analyses.Decompiler(
                                                                         self.function,
                                                                         cfg=self.cfg,
+                                                                        kb=self.cfg.kb,
                                                                         expr_collapse_depth=self.expr_collapse_depth,
                                                                     )
                                                                 else:
                                                                     self.dec = self.project.analyses.Decompiler(
                                                                         self.function,
                                                                         cfg=self.cfg,
+                                                                        kb=self.cfg.kb,
                                                                         options=self.decompiler_options,
                                                                         expr_collapse_depth=self.expr_collapse_depth,
                                                                     )
@@ -6145,6 +6151,7 @@ class _DecompileRun8616:
                 force_blob=False,
                 base_addr=linked_base,
                 entry_point=self.project.entry,
+                real16_declared_input=declared_input_path_8616(self.project),
             )
             attach_lst_metadata_to_project(isolated_project, self.lst_metadata)
             _inherit_tail_validation_runtime_policy(isolated_project, self.project)
@@ -7134,12 +7141,13 @@ def _create_or_update_direct_call_stub_8616(
     fallback_call_name: str | None,
     debug_enabled: bool,
 ) -> bool:
-    """Register one direct callee while preserving binary-proven helper identity."""
+    """Register a callee in its caller's KB, preserving binary-proven identity."""
+    caller_kb = function_knowledge_base_8616(project, function)
 
     def _impl() -> bool:
         try:
             helper_evidence = hook_x86_16_compiler_helper_at_8616(project, candidate)
-            stub = project.kb.functions.function(addr=candidate, create=True)
+            stub = caller_kb.functions.function(addr=candidate, create=True)
             if stub is None:
                 return False
             try:
@@ -7498,7 +7506,7 @@ def _maybe_debug_callsite_returning_8616(project: angr.Project, function: Any) -
                 continue
             callee = None
             with contextlib.suppress(Exception):
-                callee = project.kb.functions.function(addr=target, create=False)
+                callee = function_knowledge_base_8616(project, function).functions.function(addr=target, create=False)
             returning = getattr(callee, "returning", None)
             hooked = project.is_hooked(target) if hasattr(project, "is_hooked") else None
             hook_no_ret = (

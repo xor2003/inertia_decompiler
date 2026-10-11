@@ -4,9 +4,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tools.dosunit.tests.test_flat32_comparator_lane import BASE, DriverLane, _project
-from tools.dosunit.tests.test_flat32_comparator_lane import lane as lane
-from tools.dosunit.tests.test_flat32_stack_domain_cli import TEXT_BASE, _driver_args, _install_fixture, pe32_bytes
 
 import tools.dosunit.compare.flat32_call_execution as execution
 from tools.dosunit.compare.flat32_call_composition import (
@@ -15,6 +12,9 @@ from tools.dosunit.compare.flat32_call_composition import (
     summarize_with_calls,
 )
 from tools.dosunit.compare.flat32_call_contracts import CallCompositionRefusal
+from tools.dosunit.tests.test_flat32_comparator_lane import BASE, DriverLane, _project
+from tools.dosunit.tests.test_flat32_comparator_lane import lane as lane
+from tools.dosunit.tests.test_flat32_stack_domain_cli import TEXT_BASE, _driver_args, _install_fixture, pe32_bytes
 
 FUNCTIONS = {BASE: 13, BASE + 13: 6, BASE + 19: 7}
 

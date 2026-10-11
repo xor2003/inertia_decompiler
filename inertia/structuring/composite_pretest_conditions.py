@@ -191,6 +191,10 @@ def materialize_composite_pretest_conditions_8616(
     record_precision: Callable[[CExpression, CExpression], bool],
 ) -> CompositePretestStats8616:
     """Materialize complete exit predicates without moving any loop statements."""
+    # Every admitted guard needs two distinct facts from this input. With fewer,
+    # even the raw candidate count is zero; no AST scan can add an obligation.
+    if len(typed_conditions) < _MIN_COMPOSITE_FACTS:
+        return CompositePretestStats8616()
     raw_count = classified_count = materialized_count = changed_count = 0
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CWhileLoop):

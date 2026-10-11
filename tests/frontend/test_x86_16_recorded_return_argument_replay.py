@@ -13,10 +13,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
 )
 from angr.sim_type import SimTypeShort
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+
 from inertia.postprocess.decompiler_postprocess_calls import (
     _materialize_callsite_stack_arguments_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from tests.postprocess.test_x86_16_decompiler_postprocess_calls import _empty_codegen, _project
 
 

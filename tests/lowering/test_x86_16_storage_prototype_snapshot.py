@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.authoritative_function_prototypes import (
     authoritative_function_prototype_8616,

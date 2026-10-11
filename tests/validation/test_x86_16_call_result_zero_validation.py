@@ -6,13 +6,13 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CFunctionCall
 from angr.sim_type import SimTypeShort
-from inertia.semantics.callsite_summary import bind_structured_callsite_identity_8616
+
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.condition_zero_input import project_register_zero_input_8616
 from inertia.ir.core import IRValue, MemSpace
-from tests.structuring.test_x86_16_call_return_conditions import _summary, _surface
-
+from inertia.semantics.callsite_summary import bind_structured_callsite_identity_8616
 from inertia.validation.validation_branch_conditions import _proven_call_return_condition_8616
+from tests.structuring.test_x86_16_call_return_conditions import _summary, _surface
 
 
 @pytest.mark.parametrize("operation,constant", [("dec_reg16", 1), ("inc_reg16", 0xffff)])

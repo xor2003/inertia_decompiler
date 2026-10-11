@@ -6,11 +6,14 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, StackFrameSlot
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.ir.core import AddressStatus, MemSpace, SegmentOrigin
+from capstone.x86_const import X86_OP_MEM, X86_REG_BP
+
 import inertia.lowering.stack_lowering as stack_lowering_module
+from inertia.alias.alias_model_impl import AliasStorageFacts, _StackSlotIdentity, _StorageDomainSignature
+from inertia.cli.cli_c_ast_rewrites import _canonicalize_stack_cvar_expr
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, StackFrameSlot
+from inertia.ir.core import AddressStatus, MemSpace, SegmentOrigin
 from inertia.lowering.real_mode_linear import _known_bp_stack_offsets_8616, _ss_probe_enabled_8616
 from inertia.lowering.ss_bp_substitution import substitute_ss_bp_dereferences_with_variables
 from inertia.lowering.stack_lowering import run_stack_lowering_pass_8616
@@ -41,10 +44,7 @@ from inertia.lowering.stack_variable_binding import (
     stable_stack_binding_tags_8616,
 )
 from inertia.pipeline.errors import PipelineHardError
-from capstone.x86_const import X86_OP_MEM, X86_REG_BP
-
-from inertia.alias.alias_model_impl import AliasStorageFacts, _StackSlotIdentity, _StorageDomainSignature
-from inertia.cli.cli_c_ast_rewrites import _canonicalize_stack_cvar_expr
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def test_stack_lowering_result_uses_typed_status_values() -> None:

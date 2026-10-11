@@ -47,7 +47,6 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -85,6 +84,7 @@ from .segment_state_transfer import (
     InstructionStateKey,
     SegmentRegisterState,
 )
+from .source_graph_binding import canonical_source_graph_8616
 from .vex_terminal_jump import (
     TerminalJumpEvidence8616,
     TerminalJumpRefusalReason8616,
@@ -260,31 +260,24 @@ class AdmittedTerminalJump8616:
         }
 
 
-_SOURCE_BINDING_FORMAT_8616 = "entry_jump_domain_source_binding_8616/v1"
-
-
 def _canonical_source_8616(
     function_addr: int, blocks: tuple[IRBlock, ...],
 ) -> str:
     """Serialize the exact artifact surface a domain proof consumes.
 
-    Every owned ``to_dict`` emits its complete field surface — including
-    the provenance fields dataclass equality is instructed to ignore, such
-    as a value's captured ``source_tmp``/``memory_access_insn`` and a
-    condition's ``width_bits`` — so the canonical form distinguishes any
-    changed opcode, operand, temporary identity, effect destination,
-    refusal, successor set, or block membership/order. Block order is
-    significant: reordering the census changes the canonical form.
+    The canonical form is the interned node-table encoding owned by
+    ``source_graph_binding``: every owned field — including the provenance
+    fields dataclass equality is instructed to ignore, such as a value's
+    captured ``source_tmp``/``memory_access_insn`` and a condition's
+    ``width_bits`` — contributes to the shallow node record, so the
+    canonical form distinguishes any changed opcode, operand, temporary
+    identity, effect destination, refusal, successor set, or block
+    membership/order. Shared expression DAG structure is emitted once and
+    referenced by canonical node id, so structurally equal shared and
+    deep-copied DAGs encode identically. Block order is significant:
+    reordering the census changes the canonical form.
     """
-    return json.dumps(
-        {
-            "format": _SOURCE_BINDING_FORMAT_8616,
-            "function_addr": function_addr,
-            "blocks": [block.to_dict() for block in blocks],
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    return canonical_source_graph_8616(function_addr, blocks)
 
 
 def _source_digest_8616(

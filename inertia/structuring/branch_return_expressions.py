@@ -24,16 +24,23 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CExpression,
     CReturn,
     CStatements,
+    CVariable,
 )
 from angr.sim_type import SimTypeLong, SimTypeShort
 
+from inertia.alias.condition_register_storage import storage_from_reaching_source_8616
+from inertia.alias.register_reaching_source import RegisterReachingSourceVerdict8616
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
+from inertia.ir.vex_import import codegen_function_8616
 from inertia.lowering.c_ast_utils import _same_c_expression_8616
+from inertia.lowering.terminal_return_expressions import resolve_current_stack_copy_return_8616
+from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 
 from .condition_lowering import lower_ir_value_to_c_expr_8616
 from .return_chains import (
     BranchTargetReturnBlockResult8616,
+    BranchTargetReturnRegisterState8616,
     BranchTargetReturnScanCallbacks8616,
     branch_target_return_expr_8616,
     scan_branch_target_return_block_8616,
@@ -160,6 +167,29 @@ class _BranchReturnLowering8616:
         return CBinaryOp(op, expression, CConstant(1, SimTypeShort(False), codegen=self.codegen), codegen=self.codegen)
 
 
+def branch_return_register_source_8616(
+    project: object,
+    codegen: object,
+    instruction_addr: int,
+    register: str,
+) -> IRValue | None:
+    """Consume the retained whole-function source proof at an exact native MOV.
+
+    No interior function, branch-entry seed, or incoming return high half is
+    invented. The canonical resolver checks complete current block inventory
+    and all reaching paths, including calls and memory/register clobbers.
+    """
+    resolved = codegen_function_8616(project, codegen)
+    if resolved is None or instruction_addr < 0:
+        return None
+    reaching = recover_register_source_before_instruction_8616(
+        resolved[0], instruction_addr=instruction_addr, register=register,
+    )
+    if reaching.verdict is not RegisterReachingSourceVerdict8616.PROVEN:
+        return None
+    return storage_from_reaching_source_8616(reaching.source, width_bits=16)
+
+
 def recover_branch_target_return_expression_8616(
     project: object,
     codegen: object,
@@ -168,6 +198,15 @@ def recover_branch_target_return_expression_8616(
     """Recover one CFG leaf return expression from classified semantic effects."""
     typed_project = cast(_Project8616, project)
     lowering = _BranchReturnLowering8616(project, codegen)
+    state = BranchTargetReturnRegisterState8616()
+
+    def _reg_copy(instruction_addr: int, register: str) -> CExpression | None:
+        value = branch_return_register_source_8616(project, codegen, instruction_addr, register)
+        if value is None:
+            return None
+        lowered = lower_ir_value_to_c_expr_8616(value, project, codegen)
+        return lowered if isinstance(lowered, CExpression) else None
+
     callbacks = BranchTargetReturnScanCallbacks8616(
         branch_target_imm=branch_target_imm_8616,
         combine_return_expr=lowering.combine,
@@ -176,13 +215,14 @@ def recover_branch_target_return_expression_8616(
         materialize_direct_global_load=lambda _offset, _size: None,
         materialize_ax_alu_imm=lowering.ax_alu_imm,
         materialize_ax_incdec=lowering.ax_incdec,
+        materialize_reg_copy=_reg_copy,
     )
 
     def _load_block(addr: int) -> object:
         return typed_project.factory.block(addr, opt_level=0)
 
     def _scan_block(block: object) -> BranchTargetReturnBlockResult8616:
-        return scan_branch_target_return_block_8616(block, callbacks)
+        return scan_branch_target_return_block_8616(block, callbacks, register_state=state)
 
     result = branch_target_return_expr_8616(target_addr, _load_block, _scan_block)
     return result if isinstance(result, CExpression) else None
@@ -209,6 +249,14 @@ def binary_return_arm_polarity_8616(
     false_value = sole_return_expression_8616(false_body)
     if true_value is None or false_value is None:
         return None
+    if isinstance(true_value, CVariable):
+        resolved = resolve_current_stack_copy_return_8616(true_value.codegen, true_body, false_body, true_value)
+        if resolved is not None:
+            true_value = resolved
+    if isinstance(false_value, CVariable):
+        resolved = resolve_current_stack_copy_return_8616(false_value.codegen, true_body, false_body, false_value)
+        if resolved is not None:
+            false_value = resolved
     taken, fallthrough = condition.taken_target, condition.fallthrough_target
     if taken is None or fallthrough is None or taken == fallthrough:
         return None

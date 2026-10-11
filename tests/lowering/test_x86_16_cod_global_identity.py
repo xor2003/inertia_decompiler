@@ -5,13 +5,13 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.sim_type import SimTypeChar
 from angr.sim_variable import SimMemoryVariable
+from archinfo import ArchX86
+
+from inertia.frontend.x86_16.cod_extract import CODGlobalRef, CODProcMetadata
 from inertia.lowering.cod_global_identity import (
     CodGlobalStorageSurface8616,
     record_cod_global_storage_identities_8616,
 )
-from archinfo import ArchX86
-
-from inertia.frontend.x86_16.cod_extract import CODGlobalRef, CODProcMetadata
 from inertia.lowering.codegen_metadata import GlobalDeclarationArrayExtent8616
 
 

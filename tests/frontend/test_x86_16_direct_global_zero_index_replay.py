@@ -14,14 +14,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.core import MemSpace
-import inertia.lowering.segmented_global_loads as segmented_global_loads
-from inertia.lowering.segmented_global_loads import (
-    DirectSegmentedGlobalLoadEvidence8616,
-    materialize_named_segmented_global_loads_8616,
-    recover_direct_segmented_global_load_evidence_8616,
-)
 from capstone import CS_AC_READ, CS_AC_WRITE
 from capstone.x86_const import (
     X86_INS_ADD,
@@ -34,6 +26,14 @@ from capstone.x86_const import (
     X86_REG_INVALID,
 )
 
+import inertia.lowering.segmented_global_loads as segmented_global_loads
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.core import MemSpace
+from inertia.lowering.segmented_global_loads import (
+    DirectSegmentedGlobalLoadEvidence8616,
+    materialize_named_segmented_global_loads_8616,
+    recover_direct_segmented_global_load_evidence_8616,
+)
 from inertia.structuring.simple_loop_recovery import InsnSummary8616
 
 

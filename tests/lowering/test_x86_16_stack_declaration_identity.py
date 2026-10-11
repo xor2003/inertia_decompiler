@@ -6,6 +6,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.stack_argument_identity import (
     unify_positive_bp_argument_identity_8616,

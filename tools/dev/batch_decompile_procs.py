@@ -330,6 +330,9 @@ def _build_job_argv(raw_job: dict[str, object]) -> list[str]:
     if raw_job.get("brief") is True:
         argv.append("--brief")
     argv.extend(["--timeout", str(timeout)])
+    output_c_dir = _optional_str(raw_job, "output_c_dir")
+    if output_c_dir is not None:
+        argv.extend(["--output-c-dir", output_c_dir])
     _extend_optional_flag_args(argv, raw_job)
     argv.append(str(binary))
     return argv
@@ -456,6 +459,41 @@ def _refuse_colliding_job_names(jobs: Sequence[BatchDecompileJob]) -> None:
         raise SystemExit(f"batch job names collide on shared artifacts: {', '.join(sorted(duplicates))}")
 
 
+def _job_output_dir(job: BatchDecompileJob) -> Path | None:
+    """Read the last output option before ``--``, matching CLI argument semantics."""
+    output_dir: Path | None = None
+    tokens = iter(job.argv)
+    for token in tokens:
+        if token == "--":
+            break
+        if token == "--output-c-dir":
+            value = next(tokens, None)
+            if value is None or value == "--":
+                break
+            output_dir = Path(value)
+        elif token.startswith("--output-c-dir="):
+            output_dir = Path(token.partition("=")[2])
+    return output_dir
+
+
+def _refuse_colliding_output_dirs(jobs: Sequence[BatchDecompileJob]) -> None:
+    """Reject distinct jobs that would emit artifacts into one canonical directory."""
+    owners: dict[Path, str] = {}
+    collisions: set[str] = set()
+    for job in jobs:
+        output_dir = _job_output_dir(job)
+        if output_dir is None:
+            continue
+        canonical = output_dir.resolve()
+        owner = owners.get(canonical)
+        if owner is None:
+            owners[canonical] = job.name
+        else:
+            collisions.add(f"{canonical} (jobs {owner}, {job.name})")
+    if collisions:
+        raise SystemExit(f"batch job output directories collide: {', '.join(sorted(collisions))}")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run focused jobs with bounded isolation and ordered report checkpoints."""
 
@@ -468,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
     jobs = _load_jobs(args.job_file) if args.job_file is not None else []
     jobs = jobs or [_proc_job(args, proc_name) for proc_name in args.proc]
     _refuse_colliding_job_names(jobs)
+    _refuse_colliding_output_dirs(jobs)
     # Resolve the lazy CLI implementation once, before forking any jobs. Only
     # imports are shared: analysis and its hard exits stay in disposable children.
     _ = decompiler_cli.main

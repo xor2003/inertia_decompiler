@@ -9,8 +9,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CUnaryOp,
 )
 from angr.sim_type import SimTypeChar, SimTypePointer
-from inertia.lowering.semantic_cast import CSemanticCast8616
 
+from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.validation.validation_dataflow import validate_structured_def_use_8616
 from inertia.validation.validation_indexed_bytes import indexed_scalar_byte_view_8616
 from tests.validation.test_x86_16_validation_dataflow import _codegen, _const, _local

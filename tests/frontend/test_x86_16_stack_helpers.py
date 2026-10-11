@@ -1,4 +1,5 @@
 import pytest
+
 from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
 from inertia.frontend.x86_16.regs import reg16_t, reg32_t, sgreg_t
 from inertia.frontend.x86_16.stack_helpers import (

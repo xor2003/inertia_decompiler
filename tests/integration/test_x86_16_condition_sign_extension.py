@@ -5,9 +5,10 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
+from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY, _ConditionRegisterValueState8616
 from inertia.ir.condition_value_extensions import sign_extend_condition_value_8616
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
-from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY, _ConditionRegisterValueState8616
 
 DWORD_BYTES = 4
 
@@ -79,8 +80,8 @@ def test_unproven_width_conversion_is_refused(source_size, destination_size):
 def test_signed_extension_ir_projects_to_exact_casts(source_size, destination_size):
     from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CTypeCast
     from angr.sim_type import SimTypeShort
-    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
     from inertia.structuring.condition_binary_value import materialize_binary_ir_value_8616
 
     source = IRValue(MemSpace.DS, offset=0x200, size=source_size, memory_access_size=source_size)

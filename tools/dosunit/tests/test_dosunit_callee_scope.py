@@ -2,9 +2,8 @@
 
 from pathlib import Path
 
-from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
-
 from tools.dosunit.compare.straightline_ssa import compare_ssa_documents, lower_straightline_ssa_document
+from tools.dosunit.tests.test_dosunit_tool import _edge_function, _mz_exe
 
 
 def test_equal_callee_entry_does_not_hide_changed_later_block(tmp_path: Path) -> None:

@@ -3,8 +3,8 @@
 import networkx as nx
 import pytest
 from angr import ailment
-import inertia.frontend.x86_16.call_frame_compat as adapter
 
+import inertia.frontend.x86_16.call_frame_compat as adapter
 from inertia.semantics.call_return_frame_effects import (
     CallReturnFrameEffectCollection8616,
     CallReturnFrameEffectFact8616,

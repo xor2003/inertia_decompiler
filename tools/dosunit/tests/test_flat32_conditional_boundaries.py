@@ -7,11 +7,11 @@ from pathlib import Path
 import angr
 import pytest
 import pyvex
-from tools.dosunit.tests.test_flat32_comparator_lane import BASE, _compare_calls, _driver_lane
 
 import tools.dosunit.compare.straightline_ssa as S
 from tools.dosunit.compare.flat32_call_contracts import CallCompositionRefusal
 from tools.dosunit.compare.flat32_call_lowering import _check_exits
+from tools.dosunit.tests.test_flat32_comparator_lane import BASE, _compare_calls, _driver_lane
 
 
 @pytest.mark.parametrize("driver", ["msc8", "bc5"])

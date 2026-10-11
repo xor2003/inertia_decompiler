@@ -50,14 +50,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimType, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
-from inertia.semantics.call_target_identity import normalize_x86_16_call_target_addr_8616
-from inertia.semantics.callee_name_normalization import normalize_callee_name_8616
-from inertia.semantics.callsite_summary import (
-    CallsiteSummary8616,
-)
-from inertia.semantics.callsite_summary import (
-    summarize_x86_16_callsite as _summarize_x86_16_callsite_fallback,
-)
 
 from inertia.lowering.gp_register_state import runtime_gp_name_for_variable_8616
 from inertia.lowering.segment_register_state import runtime_segment_name_for_variable_8616
@@ -75,6 +67,14 @@ from inertia.postprocess.decompiler_postprocess_utils import (
     _same_c_expression_8616,
     _stack_bp_displacement_8616,
     _structured_codegen_node_8616,
+)
+from inertia.semantics.call_target_identity import normalize_x86_16_call_target_addr_8616
+from inertia.semantics.callee_name_normalization import normalize_callee_name_8616
+from inertia.semantics.callsite_summary import (
+    CallsiteSummary8616,
+)
+from inertia.semantics.callsite_summary import (
+    summarize_x86_16_callsite as _summarize_x86_16_callsite_fallback,
 )
 
 from .validation_additive_terms import flatten_additive_terms_8616 as _flatten_additive_terms_8616
@@ -1811,11 +1811,15 @@ def _global_byte_offset_from_scaled_expr_8616(node: object, project: object) -> 
 
 
 def _stack_byte_offset_from_expr_8616(node: Any, project: Any) -> int | None:
+    """Read byte storage in machine-BP coordinates through its proven owner."""
     def _impl() -> int | None:
         nonlocal node
         node = _strip_validation_casts_and_dirty_aliases_8616(node)
         if isinstance(node, CVariable):
             variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
+            if isinstance(variable, SimStackVariable):
+                machine_offset = machine_bp_offset_for_stack_variable_8616(node.codegen, variable)
+                return machine_offset if isinstance(machine_offset, int) else None
             offset = _dynamic_tail_validation_getattr_8616(variable, "offset", None)
             if isinstance(offset, int):
                 return offset

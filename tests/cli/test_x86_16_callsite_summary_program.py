@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.semantics.callsite_summary_program as program_module
 from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.semantics.callsite_summary_program import (

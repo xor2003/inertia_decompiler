@@ -17,16 +17,16 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.ir.condition_ir import ConditionIR
-import inertia.structuring.call_argument_join_conditions as join_conditions
 from archinfo import ArchX86
 
+import inertia.structuring.call_argument_join_conditions as join_conditions
 from inertia.alias.callsite_stack_merge import (
     CallsitePredecessorStackMerge8616,
     CallsiteRegisterJoin8616,
     CallsiteRegisterJoinTrace8616,
 )
+from inertia.ir.condition_ir import ConditionIR
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.structuring.call_argument_joins import (
     CallArgumentJoinDecision8616,
     materialize_call_argument_joins_8616,

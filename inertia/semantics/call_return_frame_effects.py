@@ -23,8 +23,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol, cast
 
-from inertia.pipeline.errors import PipelineHardError
 from capstone.x86_const import X86_INS_CALL, X86_INS_LCALL
+
+from inertia.pipeline.errors import PipelineHardError
 
 from .call_return_frame_projections import (
     CallReturnFrameEffectKey8616,

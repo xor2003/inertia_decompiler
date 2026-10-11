@@ -5,26 +5,28 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
     CConstant,
+    CIfElse,
     CReturn,
     CStatements,
     CVariable,
 )
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeShort
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from archinfo import ArchX86
+
+import inertia.structuring.branch_return_expressions as branch_return_expressions
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.condition_ir import ConditionIR
+from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.stack_prototype_materialization import (
     materialize_annotated_stack_prototype_8616,
 )
 from inertia.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
-import inertia.structuring.branch_return_expressions as branch_return_expressions
-from archinfo import ArchX86
-
-from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.structuring.branch_return_expressions import (
     branch_target_preserves_return_registers_8616,
     recover_branch_target_return_expression_8616,
@@ -54,6 +56,7 @@ class _Codegen:
     def __init__(self) -> None:
         self._idx = 0
         self.project = SimpleNamespace(arch=ArchX86())
+        self.cstyle_null_cmp = False
 
     def next_idx(self, _kind: str) -> int:
         self._idx += 1
@@ -118,6 +121,98 @@ def test_binary_return_arm_polarity_requires_both_complete_values(inverse, case)
         condition, true_body, false_body, recovered.get,
     )
     assert result is (not inverse if case == "valid" else None)
+
+
+def _current_copy_branch():
+    from inertia.alias.stack_memory_ssa import build_x86_16_stack_memory_ssa_alias_artifact
+    from inertia.ir.ssa_function import build_x86_16_function_ssa
+    from tests.widening.test_x86_16_segmented_load_origins import _lift_function
+
+    codegen = _Codegen()
+    source = build_x86_16_function_ssa(_lift_function(bytes.fromhex("55 8b ec 8b 56 04 8b 5e 06 5d c3")))
+    alias = build_x86_16_stack_memory_ssa_alias_artifact(source)
+    assert alias.complete
+    codegen._inertia_vex_ir_function_ssa = source
+    codegen._inertia_stack_memory_ssa_alias_artifact = alias
+    leaves = [CVariable(SimStackVariable(offset, 2, base="bp"),
+                        variable_type=SimTypeShort(False), codegen=codegen) for offset in (2, 4)]
+    carriers = [CVariable(SimRegisterVariable(register, 2), vvar_id=varid,
+                          variable_type=SimTypeShort(False), codegen=codegen)
+                for register, varid in ((8, 9), (12, 10))]
+    copies = [CAssignment(carrier, leaf, codegen=codegen) for carrier, leaf in zip(carriers, leaves, strict=True)]
+    arms = [CStatements([CReturn(carrier, codegen=codegen)], codegen=codegen) for carrier in carriers]
+    branch = CIfElse([(CConstant(1, SimTypeChar(False), codegen=codegen), arms[0])], arms[1], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=source.function_addr, statements=CStatements([*copies, branch], codegen=codegen))
+    for leaf, bp_offset in zip(leaves, (4, 6), strict=True):
+        record_stack_variable_coordinate_projection_8616(codegen, variable=leaf.variable, cvar=leaf,
+                                                        bp_offset=bp_offset, entry_sp_offset=bp_offset-2, size=2)
+    condition = ConditionIR("eq", 1, 0, taken_target=0x1010, fallthrough_target=0x1020)
+    return codegen, copies, branch, carriers, leaves, arms, condition
+
+
+def test_binary_return_polarity_resolves_current_dominating_stack_copies():
+    _, _, _, _, leaves, arms, condition = _current_copy_branch()
+    assert branch_return_expressions.binary_return_arm_polarity_8616(
+        condition, *arms, {0x1010: leaves[0], 0x1020: leaves[1]}.get) is True
+
+
+@pytest.mark.parametrize("corruption", ["duplicate", "different_variable", "after_branch", "type", "store", "missing_alias", "bypass", "call", "unified_store"])
+def test_current_return_copy_corruption_refuses(corruption):
+    codegen, copies, branch, carriers, leaves, arms, condition = _current_copy_branch()
+    statements = codegen.cfunc.statements.statements
+    if corruption == "duplicate":
+        statements.insert(0, CAssignment(carriers[0], leaves[0], codegen=codegen))
+    elif corruption == "different_variable":
+        copies[0].lhs = CVariable(SimRegisterVariable(8, 2), vvar_id=9,
+                                 variable_type=SimTypeShort(False), codegen=codegen)
+    elif corruption == "after_branch":
+        statements[:] = [branch, *copies]
+    elif corruption == "type":
+        copies[0].rhs.variable_type = SimTypeChar(False)
+    elif corruption == "store":
+        statements.insert(2, CAssignment(leaves[0], CConstant(0, SimTypeShort(False), codegen=codegen), codegen=codegen))
+    elif corruption == "bypass":
+        statements.insert(0, CReturn(CConstant(0, SimTypeShort(False), codegen=codegen), codegen=codegen))
+    elif corruption == "call":
+        from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
+        statements.insert(2, CAssignment(carriers[1], CFunctionCall("effect", None, [], codegen=codegen), codegen=codegen))
+    elif corruption == "unified_store":
+        destination = CVariable(SimRegisterVariable(0, 2), unified_variable=leaves[0].variable,
+                                vvar_id=30, variable_type=SimTypeShort(False), codegen=codegen)
+        statements.insert(2, CAssignment(destination, CConstant(0, SimTypeShort(False), codegen=codegen), codegen=codegen))
+    else:
+        del codegen._inertia_stack_memory_ssa_alias_artifact
+    assert branch_return_expressions.binary_return_arm_polarity_8616(
+        condition, *arms, {0x1010: leaves[0], 0x1020: leaves[1]}.get) is None
+
+
+@pytest.mark.parametrize("corruption", ["leaf_unified", "volatile"])
+def test_current_return_copy_leaf_identity_and_qualifier_refuse(corruption):
+    codegen, copies, _, _, leaves, arms, condition = _current_copy_branch()
+    if corruption == "leaf_unified":
+        copies[0].rhs = CVariable(leaves[0].variable, unified_variable=SimStackVariable(2, 2, base="bp"),
+                                 variable_type=SimTypeShort(False), codegen=codegen)
+    else:
+        copies[0].rhs.variable_type = SimTypeShort(False, qualifier="volatile")
+    assert branch_return_expressions.binary_return_arm_polarity_8616(
+        condition, *arms, {0x1010: leaves[0], 0x1020: leaves[1]}.get) is None
+
+
+@pytest.mark.parametrize("identity", ["variable", "unified"])
+def test_current_copy_refuses_later_ssa_write_to_same_rendered_owner(identity):
+    codegen, _, _, carriers, leaves, arms, condition = _current_copy_branch()
+    if identity == "unified":
+        owner_variable = SimRegisterVariable(8, 2)
+        carriers[0].unified_variable = owner_variable
+        destination = CVariable(SimRegisterVariable(8, 2), unified_variable=owner_variable,
+                                vvar_id=25, variable_type=SimTypeShort(False), codegen=codegen)
+    else:
+        destination = CVariable(carriers[0].variable, vvar_id=25,
+                                variable_type=SimTypeShort(False), codegen=codegen)
+    codegen.cfunc.statements.statements.insert(2, CAssignment(
+        destination, CConstant(0, SimTypeShort(False), codegen=codegen), codegen=codegen))
+    assert branch_return_expressions.binary_return_arm_polarity_8616(
+        condition, *arms, {0x1010: leaves[0], 0x1020: leaves[1]}.get) is None
 
 
 def test_branch_target_return_expression_recovers_signed_ax_immediate() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import pyvex
+
 import inertia.frontend.x86_16.debug as debug
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 

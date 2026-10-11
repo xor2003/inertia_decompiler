@@ -4,12 +4,13 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.postprocess.decompiler_postprocess_typed_conditions import (
-    _apply_signed_stack_arg_types_to_prototype_8616,
-)
+
 from inertia.lowering.condition_stack_operands import _wide_stack_word_projection
 from inertia.lowering.condition_stack_value import complete_storage_signedness_requests_8616
 from inertia.lowering.semantic_cast import CSemanticCast8616
+from inertia.postprocess.decompiler_postprocess_typed_conditions import (
+    _apply_signed_stack_arg_types_to_prototype_8616,
+)
 from tests.postprocess.test_x86_16_decompiler_postprocess_typed_conditions import _codegen, _project
 
 DWORD_BYTES = 4

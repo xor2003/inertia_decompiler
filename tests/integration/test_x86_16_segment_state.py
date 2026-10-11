@@ -13,8 +13,8 @@ from inertia.ir import (
     build_x86_16_segment_state_artifact,
     build_x86_16_typed_string_effect_artifact,
 )
-from inertia.semantics.string_instruction_artifact import StringInstructionArtifact, StringInstructionRecord
 from inertia.lowering.type_array_matching import apply_x86_16_array_expression_matching
+from inertia.semantics.string_instruction_artifact import StringInstructionArtifact, StringInstructionRecord
 
 
 def test_segment_state_tracks_explicit_ds_and_es_writes() -> None:

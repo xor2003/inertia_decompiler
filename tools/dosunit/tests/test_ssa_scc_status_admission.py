@@ -4,9 +4,9 @@ from collections import Counter
 
 import pytest
 
+from tools.dosunit.compare.straightline_ssa import _call_scc_component_result, _scc_gate_summary
 from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.contracts.scc_proof_admission import admit_scc_statuses, scc_status_counters
-from tools.dosunit.compare.straightline_ssa import _call_scc_component_result, _scc_gate_summary
 
 
 @pytest.mark.parametrize("unproved", ["conditional", "unknown", "refused", "unsupported", "unmapped", "unexpected"])

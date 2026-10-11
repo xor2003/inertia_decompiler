@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
-
 from inertia.frontend.x86_16.emulator import Emulator
 from inertia.frontend.x86_16.processor import Processor
 

@@ -4,9 +4,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 import tools.dosunit.compare.straightline_ssa as S
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _mz_exe
 
 
 @pytest.mark.parametrize("count,expected", [(4, 0xFFFF0), (32, 0), (255, 0)])

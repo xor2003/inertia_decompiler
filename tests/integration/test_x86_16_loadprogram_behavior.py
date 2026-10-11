@@ -8,6 +8,7 @@ cross-mode compile-rejection controls proving the declaration discriminates.
 from pathlib import Path
 
 import pytest
+
 from tests.fixtures.x86_16_loadprogram_behavior import LoadProgramAbi, assert_loadprogram_behavior
 
 _CORRECT_SOURCE = r'''

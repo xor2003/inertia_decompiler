@@ -30,9 +30,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimType, SimTypeFunction, SimTypeInt, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.semantic_cast import CSemanticCast8616
-
 from inertia.validation.tail_validation import (
     X86_16TailValidationSummary,
     collect_x86_16_tail_validation_summary,

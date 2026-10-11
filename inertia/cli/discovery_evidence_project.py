@@ -12,7 +12,7 @@ from typing import Protocol, cast
 import angr
 
 from inertia.cli.lst_extract import LSTMetadata
-from inertia.cli.project_loading import _build_project_cached
+from inertia.cli.project_loading import _build_project_cached, declared_input_path_8616
 
 
 class _DiscoverySignaturePolicy(Protocol):
@@ -42,6 +42,7 @@ def _copy_signature_policy(source: angr.Project, target: angr.Project) -> None:
             data_labels={},
             code_labels={addr: name for addr, name in metadata.code_labels.items() if addr in addresses},
             code_ranges={addr: span for addr, span in metadata.code_ranges.items() if addr in addresses},
+            signature_code_ranges=dict(metadata.signature_code_ranges),
             signature_code_addrs=addresses, absolute_addrs=metadata.absolute_addrs,
             source_format=metadata.source_format,
         )
@@ -66,6 +67,7 @@ def isolated_discovery_evidence_project_8616(project: angr.Project) -> angr.Proj
             force_blob=False,
             base_addr=linked_base,
             entry_point=entry_point,
+            real16_declared_input=declared_input_path_8616(project),
         )
     except (OSError, ValueError):
         return project

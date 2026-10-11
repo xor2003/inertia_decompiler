@@ -68,10 +68,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimType, SimTypeChar, SimTypeFunction, SimTypeInt, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.structuring.condition_call_effects import classify_condition_call_effects_8616
-from inertia.structuring.condition_trace import record_materialized_condition_trace_8616
-from inertia.pipeline.contracts import SemanticLaneState
-from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import (
@@ -83,10 +79,16 @@ from inertia.lowering.condition_stack_value import complete_storage_signedness_r
 from inertia.lowering.condition_stack_value import (
     materialize_condition_stack_value_8616 as _build_stack_operand_expr_8616,
 )
+from inertia.pipeline.contracts import SemanticLaneState
 from inertia.postprocess.decompiler_postprocess_utils import (
     _iter_c_nodes_deep_8616,
     _same_c_expression_8616,
     _structured_codegen_node_8616,
+)
+from inertia.structuring.condition_call_effects import classify_condition_call_effects_8616
+from inertia.structuring.condition_comparison_polarity import (
+    ConditionComparisonPolarity8616,
+    condition_comparison_polarity_8616,
 )
 from inertia.structuring.condition_lowering import (
     attach_condition_segment_access_provenance_8616,
@@ -97,6 +99,8 @@ from inertia.structuring.condition_lowering import (
     materialize_indexed_segmented_condition_value_8616,
 )
 from inertia.structuring.condition_register_expression import condition_register_expression_8616
+from inertia.structuring.condition_trace import record_materialized_condition_trace_8616
+from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 
 __all__ = [
     "_apply_typed_condition_stack_arg_signedness_8616",
@@ -1426,6 +1430,22 @@ def _condition_replacement_allowed_8616(cond: object) -> bool:
     return not classify_condition_call_effects_8616(cond).has_semantic_call
 
 
+def _requires_comparison_polarity_proof_8616(cond: object) -> bool:
+    """Return whether a structured comparison guard needs operand polarity proof.
+
+    A plain relational/equality ``Cmp*`` guard already encodes a structured
+    orientation: its true arm may serve the source branch's fallthrough, so
+    republishing the typed taken predicate without proof flips the branch.
+    Flag/tmp carriers and CITE wrappers do not encode operand correspondence
+    and keep their existing carrier-polarity path.
+    """
+    return (
+        isinstance(cond, CBinaryOp)
+        and str(_dynamic_typed_condition_getattr_8616(cond, "op", "")).startswith("Cmp")
+        and not _is_flag_based_condition_node(cond)
+    )
+
+
 def _materialize_typed_condition_8616(
     cond: object, key: tuple[Any, ...], ctx: _TypedConditionApplyCtx8616
 ) -> object | None:
@@ -1445,6 +1465,14 @@ def _materialize_typed_condition_8616(
     carrier_polarity = _typed_condition_carrier_polarity_8616(cond)
     if carrier_polarity is False:
         new_cond = CUnaryOp("Not", new_cond, tags=dict(new_cond.tags), codegen=ctx.codegen)
+    elif carrier_polarity is None and _requires_comparison_polarity_proof_8616(cond):
+        polarity = condition_comparison_polarity_8616(
+            cond, new_cond, same_expression=_same_c_expression_8616
+        )
+        if polarity is ConditionComparisonPolarity8616.UNKNOWN:
+            return None
+        if polarity is ConditionComparisonPolarity8616.INVERTED:
+            new_cond = CUnaryOp("Not", new_cond, tags=dict(new_cond.tags), codegen=ctx.codegen)
     record_materialized_condition_trace_8616(ctx.project, ctx.codegen, key, new_cond)
     return cast(object, new_cond)
 

@@ -3,13 +3,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 import inertia.ir.entry_domain_call_preservation as owner
 import inertia.ir.vex_import as vex_import
-from inertia.ir.core import IRBlock, IRFunctionArtifact, IRRefusal
-
 import tests.integration.test_x86_16_near_return_continuation as native
 from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
 from inertia.frontend.x86_16.frontend_function_boundary import mapped_entry_function_boundary_8616
+from inertia.ir.core import IRBlock, IRFunctionArtifact, IRRefusal
 
 
 @pytest.mark.parametrize("stale_boot", [False, True])

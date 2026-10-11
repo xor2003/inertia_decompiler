@@ -9,13 +9,14 @@ from typing import Any, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
+
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.stack_argument_scaled_return import (
     FarScaledReturnFailure8616,
     ScaledReturnVerdict8616,
     prove_stack_argument_far_scaled_return_8616,
 )
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.lowering.far_return_expression_binding import (
     FarReturnExpressionBindingFailure8616,
     FarReturnExpressionBindingVerdict8616,

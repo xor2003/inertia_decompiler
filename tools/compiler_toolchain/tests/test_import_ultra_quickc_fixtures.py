@@ -3,11 +3,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from tools.compiler_toolchain import import_ultra_quickc_fixtures as ultra_qc
 from tools.compiler_toolchain.generated_c_contracts import (
     BranchBodyEffectsRequirement,
     GeneratedCContract,
 )
-from tools.compiler_toolchain import import_ultra_quickc_fixtures as ultra_qc
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

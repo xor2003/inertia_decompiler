@@ -5,11 +5,11 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+
+from tools.dosunit.dosunit import main
 from tools.dosunit.tests.test_pe32_program_cli import arguments as pe_arguments
 from tools.dosunit.tests.test_pe32_program_replay import exit_code
 from tools.dosunit.tests.test_real16_program_cli import arguments as mz_arguments
-
-from tools.dosunit.dosunit import main
 
 
 def invoke(bits, args, extra=()):

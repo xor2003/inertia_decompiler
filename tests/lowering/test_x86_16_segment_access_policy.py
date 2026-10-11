@@ -15,8 +15,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.structuring.decompiler_structuring_stage import _build_decompiler_structuring_passes
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.segment_contract import (
     SegmentAccessFact,
@@ -42,6 +42,7 @@ from inertia.lowering.segmented_memory_lowering import (
     SegmentedMemoryExpr,
     _near_pointer_arg_access_8616,
 )
+from inertia.structuring.decompiler_structuring_stage import _build_decompiler_structuring_passes
 
 
 class _Codegen:

@@ -6,16 +6,12 @@ import io
 from types import SimpleNamespace
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.caller_return_use_contracts import (
-    CallerReturnUseFact8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-)
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import IRValue, MemSpace
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.lowering.interprocedural_storage_contracts import (
     StorageDefinitionKind8616,
     StorageIdentity8616,
@@ -30,6 +26,11 @@ from inertia.lowering.interprocedural_storage_return_pointer_witness import (
 )
 from inertia.lowering.interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeVerdict8616,
+)
+from inertia.semantics.caller_return_use_contracts import (
+    CallerReturnUseFact8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
 )
 
 CALLER_ADDR = 0x1000

@@ -11,10 +11,10 @@ import archinfo
 import pytest
 import pyvex
 import z3
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 import tools.dosunit.compare.straightline_ssa as S
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from tools.dosunit.tests.test_flat32_comparator_lane import _driver_lane
 
 
 @contextmanager

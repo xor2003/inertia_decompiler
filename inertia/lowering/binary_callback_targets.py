@@ -16,11 +16,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
 
-from inertia.semantics.callsite_summary import (
-    CallsiteSummary8616,
-    callsite_summary_inventory_8616,
-    summarize_x86_16_callsite,
-)
 from capstone import CsError, CsInsn
 from capstone.x86_const import (
     X86_INS_CALL,
@@ -35,6 +30,12 @@ from capstone.x86_const import (
     X86_REG_BP,
     X86_REG_INVALID,
     X86_REG_SP,
+)
+
+from inertia.semantics.callsite_summary import (
+    CallsiteSummary8616,
+    callsite_summary_inventory_8616,
+    summarize_x86_16_callsite,
 )
 
 from .function_pointer_parameter_evidence import (

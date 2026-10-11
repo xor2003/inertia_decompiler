@@ -10,6 +10,10 @@ binary-free; the native POINT.EXE replay stays in external diagnostics.
 
 from __future__ import annotations
 
+from inertia.alias.entry_stack_byte_contracts import (
+    EntryStackByteProof8616,
+    EntryStackByteRefusalKind8616,
+)
 from inertia.ir.core import (
     AddressStatus,
     IRAddress,
@@ -20,11 +24,6 @@ from inertia.ir.core import (
     IRValue,
     MemSpace,
     SegmentOrigin,
-)
-
-from inertia.alias.entry_stack_byte_contracts import (
-    EntryStackByteProof8616,
-    EntryStackByteRefusalKind8616,
 )
 
 ENTRY_8616: int = 0x105BC

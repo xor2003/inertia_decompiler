@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import inertia.semantics.segment_function_summary as segment_summary
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir import build_x86_16_segment_state_artifact
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
@@ -12,6 +13,13 @@ from inertia.ir.segment_contract import (
     build_x86_16_segment_function_contract,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.lowering.analysis_helpers import (
+    CallTargetKind8616,
+    CallTargetSeed,
+    collect_direct_far_call_targets,
+    collect_neighbor_call_targets,
+    resolve_direct_call_target_from_block,
+)
 from inertia.semantics.segment_function_summary import (
     SegmentControlTransferDistance8616,
     SegmentControlTransferFact8616,
@@ -19,15 +27,6 @@ from inertia.semantics.segment_function_summary import (
     apply_x86_16_segment_function_summary,
     build_x86_16_segment_control_transfers,
     join_x86_16_segment_function_summaries,
-)
-
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from inertia.lowering.analysis_helpers import (
-    CallTargetKind8616,
-    CallTargetSeed,
-    collect_direct_far_call_targets,
-    collect_neighbor_call_targets,
-    resolve_direct_call_target_from_block,
 )
 from tests.ir.test_segment_call_binding_regression import _project
 

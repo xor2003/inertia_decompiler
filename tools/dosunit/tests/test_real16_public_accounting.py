@@ -12,10 +12,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _edge_function, _mz_exe
-
-from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.compare.real16_binary_compare import compare_binary16
+from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.tests.test_dosunit_tool import _edge_catalog, _edge_function, _mz_exe
 
 MODULE = "demo.exe"
 

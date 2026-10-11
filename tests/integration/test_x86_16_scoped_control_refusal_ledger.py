@@ -11,10 +11,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-import tests.integration.test_x86_16_scoped_control_obligations as fixture
+
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.scoped_control_obligations as joint
 import inertia.ir.vex_import as vex_import
+import tests.integration.test_x86_16_scoped_control_obligations as fixture
 from inertia.ir.near_return_continuation_view import (
     ScopedNearReturnContinuationViewFailure8616,
 )

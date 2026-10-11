@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
-
 from inertia.structuring.condition_rendering import (
     render_condition_ir_8616,
     render_condition_ir_native_8616,

@@ -18,10 +18,10 @@ import angr
 import archinfo
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
 import tools.dosunit.catalog.binary_callee_region_scan as R
 import tools.dosunit.compare.straightline_ssa as S
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from tools.dosunit.catalog.binary_callee_region_split import prefix_edge_verdict
 
 _ARCH = archinfo.ArchX86()

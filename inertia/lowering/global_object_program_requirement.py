@@ -126,6 +126,10 @@ class _RequirementCensus8616:
     ) -> None:
         """Count local facts that alone require the catalog."""
         for function_evidence in local_program.functions:
+            # Access classification already projects upstream address refusals
+            # exactly once. Retain that census here without double-counting
+            # the same failure in address, copy, or range projections.
+            self.raw_count += len(function_evidence.accesses.refusals)
             for fact in function_evidence.accesses.facts:
                 reason = None
                 if fact.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED:
@@ -139,6 +143,11 @@ class _RequirementCensus8616:
                 self.raw_count += 1
                 self.normalized_count += 1
                 self.classified_count += 1
+        # An unavailable selected function is retained failure evidence: it
+        # enters the raw census but can never be normalized or classified, so
+        # it must surface through failure_count instead of reading as "no
+        # facts, nothing required".
+        self.raw_count += len(local_program.refusals)
 
     def scan_callsites(
         self,

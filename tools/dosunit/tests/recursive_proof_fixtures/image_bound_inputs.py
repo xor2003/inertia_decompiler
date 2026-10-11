@@ -11,10 +11,10 @@ from typing import NamedTuple
 
 import capstone
 import pytest
-from tools.dosunit.tests.recursive_proof_fixtures.entry_domain_inputs import DEFAULT_BOOTSTRAP, _setup
 
 from tools.dosunit.contracts.model import canonical_json_bytes
 from tools.dosunit.contracts.proof_contracts import ProofStatus
+from tools.dosunit.contracts.register_state_relations import MachineState
 from tools.dosunit.recursive_proofs.loaded_byte_image_binding import BoundReal16Load
 from tools.dosunit.recursive_proofs.loaded_byte_relation_proof import LoadedRelationProof
 from tools.dosunit.recursive_proofs.real16_entry_domain import native_effect_hash
@@ -31,7 +31,7 @@ from tools.dosunit.recursive_proofs.real16_image_bound_native_proof import (
 )
 from tools.dosunit.recursive_proofs.real16_native_effect_binding import NativeBlockRequest
 from tools.dosunit.recursive_proofs.recursive_joint_contracts import JointSystem
-from tools.dosunit.contracts.register_state_relations import MachineState
+from tools.dosunit.tests.recursive_proof_fixtures.entry_domain_inputs import DEFAULT_BOOTSTRAP, _setup
 
 
 class Inputs(NamedTuple):

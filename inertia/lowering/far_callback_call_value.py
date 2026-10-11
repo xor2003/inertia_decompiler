@@ -13,8 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-
 from inertia.ir.core import MemSpace
 from inertia.ir.logical_memory_contracts import IRLogicalMemoryAccess8616, IRMemoryAccessKind8616
 from inertia.ir.logical_memory_write_value import LogicalWordWriteValueArtifact8616
@@ -24,6 +22,7 @@ from inertia.ir.logical_word_read_reaching_value import (
     trace_logical_word_read_values_8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .call_argument_shape import exact_far_callback_call_shape_evidence_8616
 from .function_pointer_parameter_evidence import FunctionPointerParameterFact8616

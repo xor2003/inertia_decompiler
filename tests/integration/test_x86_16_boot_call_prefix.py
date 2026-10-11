@@ -8,22 +8,22 @@ from functools import partial
 
 import angr
 import pytest
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
 import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.vex_import as vi
-from inertia.ir.function_ir_registry import (
-    publish_function_ir_artifact_8616,
-)
-from inertia.ir.ir_boundary_cfg import (
-    prove_ir_boundary_coverage_8616,
-)
-
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     build_boundary_direct_callsite_index_8616,
 )
 from inertia.frontend.x86_16.frontend_function_boundary import (
     exact_function_range_boundary_8616,
+)
+from inertia.ir.function_ir_registry import (
+    publish_function_ir_artifact_8616,
+)
+from inertia.ir.ir_boundary_cfg import (
+    prove_ir_boundary_coverage_8616,
 )
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,

@@ -6,11 +6,11 @@ import angr
 import pytest
 import pyvex
 from angr.analyses.stack_pointer_tracker import OffsetVal, Register
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from pyvex.const import get_type_size, is_int_ty
 from pyvex.lifting.util.syntax_wrapper import VexValue
 from pyvex.lifting.util.vex_helper import IRSBCustomizer, Type
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.processor import Processor
 from inertia.frontend.x86_16.regs import reg16_t, reg32_t
 

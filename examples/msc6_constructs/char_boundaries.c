@@ -49,7 +49,11 @@ int sc_lt_uc(int av, int bv)
 
     a = (signed char)av;
     b = (unsigned char)bv;
-    return a < b;
+    /* With plain a < b, the pinned MSC51 and BC31 default profiles
+     * exited 16 for (-1, 255), unlike the host C89 result. Explicit
+     * int casts make the intended widening and signed comparison
+     * explicit without relying on their legacy promotion behavior. */
+    return (int)a < (int)b;
 }
 
 int main(void)

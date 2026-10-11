@@ -27,13 +27,14 @@ from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
 from capstone.x86_const import (
     X86_INS_ADD,
     X86_OP_IMM,
     X86_OP_REG,
     X86_REG_SP,
 )
+
+from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
 
 log: logging.Logger = logging.getLogger(__name__)
 

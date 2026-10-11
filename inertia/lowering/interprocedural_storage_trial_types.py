@@ -13,16 +13,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from inertia.semantics.callsite_summary import (
-    CallsiteArgumentClass8616,
-    CallsitePushSourceKind8616,
-    CallsiteSummary8616,
-)
-
 from inertia.ir.core import IRAddress, MemSpace
 from inertia.ir.logical_memory_contracts import (
     IRLogicalMemoryArtifact8616,
     IRMemoryAccessKind8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallsiteArgumentClass8616,
+    CallsitePushSourceKind8616,
+    CallsiteSummary8616,
 )
 
 from .callee_pointer_evidence import CalleePointerArgumentEvidence8616

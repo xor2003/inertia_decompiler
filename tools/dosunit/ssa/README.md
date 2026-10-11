@@ -38,3 +38,9 @@ explicit-only comparison, normalization maps require solving even if raw
 expressions or machine-code hashes match. The legacy engine helpers alias
 these exact functions. Layout inference and proof orchestration remain in
 the engine; their per-invocation policy comes from `../contracts/comparison.py`.
+
+`flag_scan.py` distinguishes reachable abstract flag helpers from incomplete
+expression coverage. It visits shared compound nodes once with a bounded DFS.
+Dangling/cyclic references and exhausted scans remain incomplete; the comparator
+reports `x86_flag_scan_incomplete`, not invented `uninterpreted_x86_flags`
+evidence. An independently complete, helper-free mismatch still fails.

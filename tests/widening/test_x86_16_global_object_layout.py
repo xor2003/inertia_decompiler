@@ -14,6 +14,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeChar, SimTypeShort, TypeRef
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.lowering.global_declarations import (
@@ -34,7 +35,6 @@ from inertia.lowering.segmented_global_loads import (
     reapply_proven_named_global_aggregate_types_8616,
     stack_aggregate_field_projection_facts_8616,
 )
-
 from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,
     GlobalObjectLayoutEvidence8616,

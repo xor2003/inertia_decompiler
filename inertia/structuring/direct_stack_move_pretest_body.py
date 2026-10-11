@@ -21,12 +21,12 @@ from enum import Enum
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from inertia.pipeline.errors import PipelineHardError
 
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
 )
+from inertia.pipeline.errors import PipelineHardError
 
 from .direct_stack_move_loop_evidence import (
     boundary_tuple_8616,

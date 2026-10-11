@@ -15,9 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
-from inertia.pipeline.errors import PipelineHardError
-
 from inertia.ir.condition_ir import (
     ConditionIR,
     ConditionRegisterBindingIR,
@@ -25,6 +22,8 @@ from inertia.ir.condition_ir import (
     condition_sort_key_8616,
 )
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
+from inertia.pipeline.errors import PipelineHardError
+from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
 
 from .condition_register_storage import (
     storage_from_reaching_source_8616 as _storage_from_reaching_source_8616,

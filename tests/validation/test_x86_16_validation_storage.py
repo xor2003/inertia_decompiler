@@ -21,6 +21,8 @@ from angr.sim_type import (
     TypeRef,
 )
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
+from archinfo import ArchX86
+
 from inertia.ir.core import MemSpace
 from inertia.lowering.segmented_global_loads import (
     IndexedGlobalStackAggregateCopyFact8616,
@@ -43,8 +45,6 @@ from inertia.lowering.storage_identity_facts import (
     global_storage_identity_facts_8616,
     record_global_storage_identity_fact_8616,
 )
-from archinfo import ArchX86
-
 from inertia.validation.tail_validation import (
     X86_16TailValidationSummary,
     build_x86_16_tail_validation_cached_result,

@@ -554,9 +554,8 @@ def alias_facts_for_ir_address_8616(addr: object) -> AliasStorageFacts | AliasFa
     """
 
     def _impl() -> AliasStorageFacts | AliasFailure | None:
-        from inertia.pipeline.errors import PipelineHardError
-
         from inertia.ir.core import AddressStatus, IRAddress, MemSpace, is_stack_address_8616
+        from inertia.pipeline.errors import PipelineHardError
 
         if not isinstance(addr, IRAddress):
             return None

@@ -5,11 +5,11 @@ import subprocess
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CBinaryOp, CTypeCast, CUnaryOp, CVariable
 from angr.sim_type import SimTypeFixedSizeArray, SimTypeShort
+
+from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.real_mode_linear import (
     lower_stable_ss_linear_stack_dereferences_8616,
 )
-
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from tests.lowering.test_x86_16_segmented_stack_alias import (
     _codegen,
     _const,

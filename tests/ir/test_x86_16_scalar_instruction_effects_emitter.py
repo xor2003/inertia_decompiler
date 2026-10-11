@@ -12,16 +12,17 @@ from dataclasses import replace
 import archinfo
 import pytest
 import pyvex
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from pyvex.const import vex_int_class
+from pyvex.lifting.util.vex_helper import IRSBCustomizer
+
 import inertia.ir.scalar_instruction_effects as _EFFECTS
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRCondition, IRInstr, IRValue, MemSpace
 from inertia.ir.vex_condition_demand import (
     VexConditionDemand8616,
     VexConditionDemandStats8616,
 )
 from inertia.ir.vex_import import _stmt_to_instr
-from pyvex.const import vex_int_class
-from pyvex.lifting.util.vex_helper import IRSBCustomizer
 
 
 def test_native_neg_widening_product_has_only_explicit_effects() -> None:

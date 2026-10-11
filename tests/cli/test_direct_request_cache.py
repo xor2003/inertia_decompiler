@@ -16,9 +16,9 @@ import inertia.cli.direct_request_cache as direct_cache
 import inertia.cli.direct_request_fast_path as direct_fast_path
 import inertia.cli.direct_request_identity as direct_identity
 import inertia.cli.function_cache_context as function_cache_context
-from inertia.validation.tail_validation import x86_16_tail_validation_snapshot_passed
 from inertia.cli.cli_arg_parser import CliArguments
 from inertia.cli.direct_addr_failure_family import build_failure_family_snapshot
+from inertia.validation.tail_validation import x86_16_tail_validation_snapshot_passed
 
 
 def _args(binary: Path) -> CliArguments:

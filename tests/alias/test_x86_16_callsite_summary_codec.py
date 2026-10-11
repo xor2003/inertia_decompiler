@@ -3,6 +3,16 @@ from __future__ import annotations
 import json
 
 import pytest
+
+from inertia.alias.callsite_stack_merge import (
+    CallsitePredecessorStackMerge8616,
+    CallsitePushTrace8616,
+    CallsiteRegisterJoin8616,
+    CallsiteRegisterJoinTrace8616,
+)
+from inertia.alias.partial_register_address_break import (
+    PartialRegisterAddressBreakEvidence8616,
+)
 from inertia.semantics.caller_return_use_contracts import (
     CallsiteReturnUseKind8616,
 )
@@ -13,16 +23,6 @@ from inertia.semantics.callsite_summary import (
 from inertia.semantics.callsite_summary_codec import (
     callsite_summary_from_record_8616,
     callsite_summary_record_8616,
-)
-
-from inertia.alias.callsite_stack_merge import (
-    CallsitePredecessorStackMerge8616,
-    CallsitePushTrace8616,
-    CallsiteRegisterJoin8616,
-    CallsiteRegisterJoinTrace8616,
-)
-from inertia.alias.partial_register_address_break import (
-    PartialRegisterAddressBreakEvidence8616,
 )
 
 

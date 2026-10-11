@@ -2,8 +2,8 @@
 
 import pytest
 from angr.sim_type import SimTypeInt, SimTypeShort
-from inertia.lowering.semantic_cast import CSemanticCast8616
 
+from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.structuring.condition_materialization import materialize_condition_ir_expression_8616
 from inertia.validation.validation_condition_storage_views import condition_storage_views_match_8616
 from tests.validation.test_x86_16_validation_loop_condition_ir import (

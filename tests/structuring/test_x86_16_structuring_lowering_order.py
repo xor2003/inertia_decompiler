@@ -3,16 +3,189 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-import inertia.structuring.decompiler_structuring_stage as stage
 
+import inertia.structuring.decompiler_structuring_stage as stage
 from inertia.structuring.pass_effects import (
     StructuringLoweringReplayImpact8616,
     structuring_lowering_replay_impact_after_changes_8616,
     structuring_return_closure_requires_segment_replay_8616,
 )
+from tests.ir.test_declared_entry_pipeline_attach import installed_leaf as installed_leaf
+
+
+def test_standalone_stack_semantics_always_prepares_once(monkeypatch):
+    """Independent consumers cannot inherit another operation's preparation."""
+    calls = []
+    monkeypatch.setattr(stage, '_prepare_structuring_stack_semantics_8616', lambda *args: calls.append('prepare'))
+    monkeypatch.setattr(stage, '_lower_prepared_structuring_stack_semantics_8616', lambda *args: calls.append('lower') or False)
+    assert not stage._apply_structuring_stable_stack_semantics_8616(object(), object())
+    assert not stage._apply_structuring_stable_stack_semantics_8616(object(), object())
+    assert calls == ['prepare', 'lower', 'prepare', 'lower']
+
+
+@pytest.mark.parametrize('mutation', [None, 'source', 'ir', 'ssa', 'effects', 'outputs', 'projection',
+                                     'indexed_ir', 'indexed_alias', 'stack_alias', 'context'])
+def test_local_prefix_reuse_requires_unchanged_native_projections(installed_leaf, monkeypatch, mutation):
+    """A genuine native prefix can be reused only until an owned input changes."""
+    project, codegen, _ = installed_leaf
+    prepared = stage._prepare_structuring_stack_semantics_8616(project, codegen)
+    assert prepared is not None
+    assert prepared.matches(project, codegen)
+    fields = {
+        'source': '_inertia_raw_vex_ir_artifact_8616',
+        'ir': '_inertia_vex_ir_artifact',
+        'ssa': '_inertia_vex_ir_function_ssa',
+        'effects': '_inertia_call_stack_effect_artifact_8616',
+        'outputs': '_inertia_call_output_artifact_8616',
+        'projection': '_inertia_call_semantic_projection_8616',
+        'indexed_ir': '_inertia_indexed_address_evidence_8616',
+        'indexed_alias': '_inertia_indexed_address_alias_evidence_8616',
+        'stack_alias': '_inertia_stack_memory_ssa_alias_artifact',
+        'context': '_inertia_declared_entry_pipeline_8616',
+    }
+    if mutation is not None:
+        field = fields[mutation]
+        setattr(codegen, field, replace(getattr(codegen, field)))
+    calls = []
+
+    def prepare(*args):
+        calls.append('prepare')
+
+    monkeypatch.setattr(stage, '_prepare_structuring_stack_semantics_8616', prepare)
+    monkeypatch.setattr(stage, '_lower_prepared_structuring_stack_semantics_8616', lambda *args: calls.append('lower') or False)
+    assert not stage._continue_structuring_stack_semantics_8616(project, codegen, prepared)
+    assert calls == (['lower'] if mutation is None else ['prepare', 'lower'])
+
+
+def test_baseline_prefix_prepares_once_before_segment_consumers(installed_leaf, monkeypatch):
+    """The actual baseline orchestration passes its local receipt to lowering."""
+    project, codegen, _ = installed_leaf
+    calls = []
+    original = stage._prepare_structuring_stack_semantics_8616
+
+    def prepare(*args):
+        calls.append('prepare')
+        return original(*args)
+
+    class ReachedLowering(Exception):
+        pass
+
+    def continuation(selected_project, selected_codegen, receipt):
+        assert selected_project is project and selected_codegen is codegen
+        assert receipt is not None and receipt.matches(project, codegen)
+        calls.append('continue')
+        raise ReachedLowering
+
+    monkeypatch.setattr(stage, '_prepare_structuring_stack_semantics_8616', prepare)
+    monkeypatch.setattr(stage, '_continue_structuring_stack_semantics_8616', continuation)
+    for owner, name in (
+        (stage._segment_stack_restore, 'apply_x86_16_segment_stack_restore_artifact'),
+        (stage._segment_stack_restore, 'apply_x86_16_stack_register_restore_artifact_8616'),
+        (stage, 'prune_proven_segment_stack_restore_carriers_8616'),
+        (stage, 'apply_pipeline_segment_state_8616'),
+        (stage._segment_contract, 'apply_x86_16_segment_function_contract'),
+        (stage._segment_function_summary, 'apply_x86_16_segment_function_summary'),
+    ):
+        monkeypatch.setattr(owner, name, lambda *args: False)
+    with pytest.raises(ReachedLowering):
+        stage._prime_validation_pipeline_prefix_8616(project, codegen)
+    assert calls == ['prepare', 'continue']
+
+
+def test_baseline_removes_legacy_duplicate_native_producers(installed_leaf, monkeypatch):
+    """Restoring only the old continuation doubles all five native producers."""
+    project, codegen, _ = installed_leaf
+    counts = {}
+    producers = (
+        (stage._vex_ir, 'apply_x86_16_vex_ir_artifact'),
+        (stage._indexed_address_ir, 'apply_x86_16_indexed_address_evidence_8616'),
+        (stage, 'apply_x86_16_call_stack_effects_8616'),
+        (stage._indexed_address_aliases, 'apply_x86_16_indexed_address_aliases_8616'),
+        (stage._stack_memory_ssa, 'apply_x86_16_stack_memory_ssa_alias_artifact'),
+    )
+    for owner, name in producers:
+        real = getattr(owner, name)
+
+        def counted(*args, _name=name, _real=real):
+            counts[_name] = counts.get(_name, 0) + 1
+            return _real(*args)
+
+        monkeypatch.setattr(owner, name, counted)
+    for owner, name in (
+        (stage._segment_stack_restore, 'apply_x86_16_segment_stack_restore_artifact'),
+        (stage._segment_stack_restore, 'apply_x86_16_stack_register_restore_artifact_8616'),
+        (stage, 'prune_proven_segment_stack_restore_carriers_8616'),
+        (stage, 'apply_pipeline_segment_state_8616'),
+        (stage._segment_contract, 'apply_x86_16_segment_function_contract'),
+        (stage._segment_function_summary, 'apply_x86_16_segment_function_summary'),
+    ):
+        monkeypatch.setattr(owner, name, lambda *args: False)
+
+    class ReachedLowering(Exception):
+        pass
+
+    def stop(*args):
+        raise ReachedLowering
+
+    monkeypatch.setattr(stage, '_lower_prepared_structuring_stack_semantics_8616', stop)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(stage, '_continue_structuring_stack_semantics_8616',
+                       lambda p, c, prepared: stage._apply_structuring_stable_stack_semantics_8616(p, c))
+        with pytest.raises(ReachedLowering):
+            stage._prime_validation_pipeline_prefix_8616(project, codegen)
+    assert set(counts.values()) == {2}
+    assert len(counts) == 5
+    counts.clear()
+    with pytest.raises(ReachedLowering):
+        stage._prime_validation_pipeline_prefix_8616(project, codegen)
+    assert set(counts.values()) == {1}
+    assert len(counts) == 5
+
+
+@pytest.mark.parametrize('mode', ['current', 'legacy', 'effects', 'alias', 'context'])
+def test_baseline_retains_original_prefix_receipt_through_lowering_replay(installed_leaf, monkeypatch, mode):
+    """One baseline shares its original receipt; changed inputs still reprepare."""
+    project, codegen, _ = installed_leaf
+    prepared_receipts = []
+    actual_prepare = stage._prepare_structuring_stack_semantics_8616
+
+    def prepare(p, c):
+        receipt = actual_prepare(p, c)
+        assert receipt is not None
+        prepared_receipts.append(receipt)
+        return receipt
+
+    def prefix(p, c):
+        receipt = stage._prepare_structuring_stack_semantics_8616(p, c)
+        mutations = {'effects': '_inertia_call_stack_effect_artifact_8616',
+                     'alias': '_inertia_stack_memory_ssa_alias_artifact',
+                     'context': '_inertia_declared_entry_pipeline_8616'}
+        if mode in mutations:
+            field = mutations[mode]
+            setattr(c, field, replace(getattr(c, field)))
+        return False, receipt
+
+    def replay(p, c, *, prepared=None):
+        assert prepared is prepared_receipts[0]
+        if mode == 'legacy':
+            return stage._apply_structuring_stable_stack_semantics_8616(p, c)
+        return stage._continue_structuring_stack_semantics_8616(p, c, prepared)
+
+    monkeypatch.setattr(stage, '_prepare_structuring_stack_semantics_8616', prepare)
+    monkeypatch.setattr(stage, '_prime_validation_pipeline_prefix_8616', prefix)
+    monkeypatch.setattr(stage, '_replay_structuring_lowering_before_validation_8616', replay)
+    monkeypatch.setattr(stage, '_lower_prepared_structuring_stack_semantics_8616', lambda *args: False)
+    for name in ('_repair_structuring_switch_loop_exit_returns_8616',
+                 '_materialize_structuring_terminal_call_result_return_8616',
+                 '_prime_terminal_return_shape_8616', '_prime_return_closure_segment_replay_8616',
+                 '_prime_validation_pipeline_suffix_8616'):
+        monkeypatch.setattr(stage, name, lambda *args: False)
+    assert not stage._prime_structuring_validation_semantics_8616(project, codegen)
+    assert len(prepared_receipts) == (1 if mode == 'current' else 2)
 
 
 def test_direct_stack_ownership_observes_typed_conditions(monkeypatch) -> None:

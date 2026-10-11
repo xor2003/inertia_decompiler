@@ -5,11 +5,12 @@ from types import SimpleNamespace
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimRegisterVariable
+
+import inertia.lowering.ir_segmented_load_carriers as carriers
 from inertia.ir.core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactVerdict8616
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
-import inertia.lowering.ir_segmented_load_carriers as carriers
 
 
 def _select(monkeypatch, blocks, predecessors, *, same_block=False):

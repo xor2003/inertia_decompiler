@@ -20,6 +20,7 @@ from inertia.alias.indexed_address_program import (
 )
 from inertia.lowering.global_object_program_requirement import (
     GlobalObjectProgramRequirementEvidence8616,
+    GlobalObjectProgramRequirementVerdict8616,
     collect_global_object_program_requirement_8616,
 )
 from inertia.widening.global_object_layout import (
@@ -312,6 +313,12 @@ def prepare_direct_indexed_alias_program_context_8616(
         )
     target_surface = cast(_ProjectProgramSurface8616, target_project)
     target_surface._inertia_global_object_program_requirement_8616 = requirement
+    if requirement.verdict is GlobalObjectProgramRequirementVerdict8616.UNKNOWN_REFUSE:
+        return IndexedAliasProgramContextResult8616(
+            IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE,
+            local_program,
+            requirement,
+        )
     direct_cache_key = direct_global_object_cache_key_8616(
         source_project,
         binary_path,

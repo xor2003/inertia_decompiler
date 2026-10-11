@@ -18,9 +18,9 @@ from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CITE, CConstant, CExpression
 from angr.sim_type import SimTypeShort
-from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from inertia.ir.condition_ir import ConditionIR
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .condition_materialization import (
     condition_chain_successors_8616,

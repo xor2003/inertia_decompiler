@@ -29,9 +29,50 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+from capstone.x86_const import (
+    X86_GRP_JUMP,
+    X86_GRP_RET,
+    X86_INS_ADC,
+    X86_INS_ADD,
+    X86_INS_CALL,
+    X86_INS_CBW,
+    X86_INS_CDQ,
+    X86_INS_DEC,
+    X86_INS_IDIV,
+    X86_INS_INC,
+    X86_INS_LCALL,
+    X86_INS_MOV,
+    X86_INS_OR,
+    X86_INS_POP,
+    X86_INS_PUSH,
+    X86_INS_RET,
+    X86_INS_RETF,
+    X86_INS_SAR,
+    X86_INS_SHL,
+    X86_INS_SUB,
+    X86_OP_IMM,
+    X86_OP_MEM,
+    X86_OP_REG,
+    X86_REG_AL,
+    X86_REG_AX,
+    X86_REG_BP,
+    X86_REG_BX,
+    X86_REG_CS,
+    X86_REG_CX,
+    X86_REG_DI,
+    X86_REG_DS,
+    X86_REG_DX,
+    X86_REG_INVALID,
+    X86_REG_SI,
+    X86_REG_SP,
+)
+
+import inertia.cli.recompile_check as recompile_check
+import inertia.lowering.real_mode_linear as real_mode_linear
+import inertia.lowering.segmented_memory_lowering as segmented_memory_lowering
+from inertia.cli.cli_arg_parser import _build_cli_argument_parser
+from inertia.cli.recompile_check import check_c_recompiles_8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.postprocess.decompiler_postprocess_stage import _is_direct_stack_update_materialization_delta_8616
 from inertia.ir import (
     AddressStatus,
     IRAddress,
@@ -49,8 +90,6 @@ from inertia.ir import (
     build_x86_16_function_ssa,
     build_x86_16_segment_state_artifact,
 )
-import inertia.lowering.real_mode_linear as real_mode_linear
-import inertia.lowering.segmented_memory_lowering as segmented_memory_lowering
 from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveExpressionOp8616,
@@ -97,53 +136,14 @@ from inertia.lowering.storage_identity_facts import (
 )
 from inertia.pipeline.architecture_guard import assert_final_c_quality_8616
 from inertia.pipeline.contracts import PipelineHardError, assert_pipeline_contracts_8616
-from capstone.x86_const import (
-    X86_GRP_JUMP,
-    X86_GRP_RET,
-    X86_INS_ADC,
-    X86_INS_ADD,
-    X86_INS_CALL,
-    X86_INS_CBW,
-    X86_INS_CDQ,
-    X86_INS_DEC,
-    X86_INS_IDIV,
-    X86_INS_INC,
-    X86_INS_LCALL,
-    X86_INS_MOV,
-    X86_INS_OR,
-    X86_INS_POP,
-    X86_INS_PUSH,
-    X86_INS_RET,
-    X86_INS_RETF,
-    X86_INS_SAR,
-    X86_INS_SHL,
-    X86_INS_SUB,
-    X86_OP_IMM,
-    X86_OP_MEM,
-    X86_OP_REG,
-    X86_REG_AL,
-    X86_REG_AX,
-    X86_REG_BP,
-    X86_REG_BX,
-    X86_REG_CS,
-    X86_REG_CX,
-    X86_REG_DI,
-    X86_REG_DS,
-    X86_REG_DX,
-    X86_REG_INVALID,
-    X86_REG_SI,
-    X86_REG_SP,
-)
-
-import inertia.cli.recompile_check as recompile_check
+from inertia.postprocess.decompiler_postprocess_stage import _is_direct_stack_update_materialization_delta_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.structuring.direct_stack_move_loop_entries import (
     materialize_direct_stack_move_loop_entry_ownership_8616,
     place_direct_stack_move_loop_entry_assignment_8616,
 )
 from inertia.validation.validation_dataflow import validate_structured_def_use_8616
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
-from inertia.cli.cli_arg_parser import _build_cli_argument_parser
-from inertia.cli.recompile_check import check_c_recompiles_8616
 
 
 class _DummyCodegen:
@@ -9870,10 +9870,11 @@ def test_callee_saved_frame_evidence_deduplicates_and_rejects_post_pop_write(mon
 
 def test_prune_frame_round_trip_before_explicit_register_update(monkeypatch):
     """Prune SI stack transport while retaining the later INC assignment."""
+    from capstone.x86_const import X86_INS_INC
+
     from inertia.lowering.callee_saved_frame import (
         CalleeSavedFramePairSemantics8616,
     )
-    from capstone.x86_const import X86_INS_INC
 
     project, codegen = _project()
     local = CVariable(

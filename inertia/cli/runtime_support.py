@@ -3154,11 +3154,17 @@ def run_with_timeout_in_daemon_thread[TimeoutResultT](
 
     Main-thread callers may request the process alarm when timed-out work must
     stop instead of continuing in an abandoned daemon thread.
+    Optional stack sampling covers either lane and is cancelled when work ends.
     """
     timeout_seconds = max(1, timeout)
     if prefer_process_alarm and threading.current_thread() is threading.main_thread():
-        with analysis_timeout(timeout_seconds):
-            return func()
+        stack_dump_sec = _enable_thread_stack_dump_8616()
+        try:
+            with analysis_timeout(timeout_seconds):
+                return func()
+        finally:
+            if stack_dump_sec is not None:
+                faulthandler.cancel_dump_traceback_later()
     completed = threading.Event()
     result_box: dict[str, object] = {}
 

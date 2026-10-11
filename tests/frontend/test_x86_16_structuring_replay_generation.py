@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import inertia.semantics.callsite_summary as callsite_summary
 import inertia.lowering.direct_stack_replay as replay_generation
+import inertia.semantics.callsite_summary as callsite_summary
 from inertia.pipeline.structured_ast_generation import (
     StructuredAstGeneration8616,
 )

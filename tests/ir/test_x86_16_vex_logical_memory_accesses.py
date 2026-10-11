@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pyvex
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir import MemSpace
 from inertia.ir.logical_memory_capture import collect_accesses_for_function

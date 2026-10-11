@@ -7,8 +7,8 @@ from typing import Any, cast
 import angr
 import pytest
 from angr.analyses.calling_convention.fact_collector import FactCollector
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.call_frame_compat import _FactCollectorBoundary8616
 from inertia.semantics.call_return_frame_effects import CallReturnFrameEffectRole8616
 from inertia.semantics.call_return_segment import (

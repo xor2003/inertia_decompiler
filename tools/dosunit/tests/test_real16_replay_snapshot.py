@@ -3,11 +3,11 @@
 import hashlib
 
 import pytest
-from tools.dosunit.tests.test_real16_replay_cli import _mz, _run_cli, _vector
 
-import tools.dosunit.runtime.real16_replay as real16_replay
 import tools.dosunit.reporting.real16_replay_cli as real16_replay_cli
+import tools.dosunit.runtime.real16_replay as real16_replay
 from tools.dosunit.contracts.model import DosUnitError
+from tools.dosunit.tests.test_real16_replay_cli import _mz, _run_cli, _vector
 
 
 def test_transient_second_binary_read_refuses_before_report(monkeypatch, tmp_path):
