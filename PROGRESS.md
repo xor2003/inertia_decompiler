@@ -12604,3 +12604,31 @@ Next seam: synchronous final CALL binding/consumption batching; persistent
 identity shortcuts are rejected because detached native rows and deliberate
 same-object mutations require fresh whole-graph checks. Evidence:
 .cache/selector-canonical-current/call-only-{red,green,lint,mypy,main,phases}.log.
+
+## ada_script: root launcher `./ada.py` + global README tool docs (2026-10-20)
+
+- New root wrapper `ada.py` (exec 0775) forwards `tools.ada_script.cli.main`
+  in the thin dosunit/z3func style; no second parser, no semantics.
+- New `tools/ada_script/tests/test_root_launcher.py`: `--help` exit0 with
+  `--backend`/`--signature-catalog`/`--runtime` visible; invalid option exit2
+  with usage+error on stderr. Registered in reference/components/ada_script.json
+  and the flattened reference/test-components.json projection.
+- README.md: new "Standalone Tool Commands" section (ada/z3func/dosunit table,
+  help commands, ADA feature summary, ADA vs IDA Pro factual comparison);
+  expanded Z3 Function Comparator intro (discover/make-mapping/ssa/compare-ssa,
+  bounded refusals/timeouts/counterexamples); new DOSUnit Concrete Harness
+  section (fixture orchestration vs libkvikdos real execution);
+  libdosbox deterministic frame-by-frame
+  comparison paragraph in workflow step 6; removed Deark decoder sentence
+  from Install.
+- tools/ada_script/README.md: documents the `./ada.py` root launcher.
+- Review hardening: launcher subprocess timeout=60; invalid-option regression
+  passes `unused.exe` positional so unknown-option rejection is proven before
+  image open; ADA-vs-IDA intro reworded (feature comparison, not benchmark);
+  DOSUnit real-execution restricted to libkvikdos backend.
+- Regression: tools/ada_script/tests owned files + ada signature integration —
+  44 passed baseline; launcher tests red-then-green; final focused run 2/2
+  passed. Direct mypy clean on ada.py; z3func/dosunit exec smokes exit 0.
+- Gate: `quality-hard` exited 2 at linters-hard/mypy-dev — 68 typing errors
+  across 22 unowned files (9 in-flight modified, 5 untracked, 8 baseline);
+  no owned files implicated. Pre-existing/in-flight debt, not repaired.

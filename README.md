@@ -50,11 +50,10 @@ behaviorally checked C is more useful than attractive but unverified pseudocode.
 
 ## Install
 
-PKLITE-packed MZ inputs use the optional native [Deark](https://github.com/jsummers/deark)
-decoder (`deark` on PATH or `INERTIA_DEARK_PATH`). Function catalog recovery has
-its own `--catalog-timeout` budget, defaulting to 60 seconds. See
-[catalog, unpacking and DOS-tool setup](reference/pr1-adoption.md) for limitations
-and installation hints. Required compiler checks are not silently skipped.
+Function catalog recovery has its own `--catalog-timeout` budget, defaulting
+to 60 seconds. See [catalog, unpacking and DOS-tool setup](reference/pr1-adoption.md)
+for limitations and installation hints. Required compiler checks are not
+silently skipped.
 
 The repo is tested against the angr stack pinned in [pyproject.toml](pyproject.toml).
 
@@ -78,6 +77,64 @@ building a wheel requires a C compiler and Python development headers. Installed
 packages use that verified bundle rather than the repository build cache.
 Normal startup rejects missing or stale builds. Select
 `INERTIA_VEX_BACKEND=python` only when explicitly requesting interpretation.
+
+## Standalone Tool Commands
+
+Three executable root wrappers expose the standalone tools. Activate the
+virtualenv (`source .venv/bin/activate`) or call `.venv/bin/python`
+explicitly; the wrappers do not install dependencies or re-exec interpreters.
+
+| Command | Implementation | Purpose |
+| --- | --- | --- |
+| `./ada.py` | `tools.ada_script.cli` | Annotated DOS disassembly reports (ASM/LST/SQLite) |
+| `./z3func.py` | `tools.dosunit.dosunit` | Static SSA/Z3 and concrete function comparison |
+| `./dosunit.py` | `tools.dosunit.dosunit` | Same command implementation as `./z3func.py`, under the DOSUnit name |
+
+`./z3func.py` and `./dosunit.py` share one command implementation and
+subcommand set; only the displayed program name differs. Inspect each
+interface from an activated environment:
+
+```bash
+./ada.py --help
+./z3func.py --help
+./dosunit.py --help
+```
+
+### ADA: annotated DOS disassembly
+
+ADA (`./ada.py`, package `tools/ada_script`) produces annotated assembly
+listings and a queryable analysis database for DOS MZ/USE16 executables; PE,
+NE, LE and LX payloads behind an MZ stub are refused. It disassembles with
+Capstone by default or an explicitly selected Rizin backend
+(`--backend rizin`), imports a supported subset of IDC scripts and
+libdosbox-style runtime JSON traces, and proposes library names through the
+shared PAT signature matcher — naming evidence, not proof. Analysis adds
+code/data cross-references and automatic data and string discovery, then
+emits `GAME.asm`, `GAME.lst`, `analysis.db`, a Markdown report and
+`signatures.json`:
+
+```bash
+./ada.py /path/GAME.EXE --work-dir .cache/ada/game --full --xrefs
+```
+
+Use a fresh `--work-dir` per binary: the loader recreates `analysis.db` on
+each run. ADA emits annotated assembly artifacts only; C generation belongs
+to the separate Inertia decompiler, and ADA results are not semantic
+verification. See the [component README](tools/ada_script/README.md) for the
+full option and evidence contract.
+
+### ADA vs IDA Pro
+
+ADA is a narrow batch tool; IDA Pro is a broad interactive disassembler.
+This is a feature comparison, not a benchmark or measured head-to-head
+evaluation. Neither produces a semantic-equivalence proof.
+
+| Aspect | ADA (`./ada.py`) | IDA Pro |
+| --- | --- | --- |
+| Focus | DOS MZ/USE16 batch analysis reports | Interactive multiarchitecture disassembly and database |
+| Interface | CLI with SQLite `analysis.db` plus `.asm`/`.lst` artifacts | Interactive navigation, types and database views |
+| Extensibility | Supported IDC subset, runtime JSON import, shared PAT-library naming | IDAPython, full IDC, FLIRT signatures, plugin and debugger ecosystems |
+| Output | Annotated assembly and report artifacts (generated C belongs to the separate Inertia decompiler) | Hex-Rays decompiler availability depends on processor module and license |
 
 ## DOS Game Reconstruction Workflow
 
@@ -409,6 +466,16 @@ input, graphics, sound, saving/loading and exit as applicable. Reset resources
 between original/candidate runs and record scenario coverage. Preserve the
 live guest-memory contract of `m2c::m` when using libdosbox.
 
+You can use libdosbox as a deterministic emulator to compare the original and
+reconstructed program frame by frame. Give both runs the same initial machine
+state, game assets, emulator settings and input/timing schedule; align
+captures at emulated frame boundaries and compare framebuffer bytes or
+recorded frame hashes, retaining the first mismatch together with the input
+log so the divergence can be replayed. Determinism holds for a fixed setup,
+not unconditionally for every input or configuration, and matching frames
+are scenario evidence, not a universal equivalence proof. This is a workflow
+step, not a built-in DOSUnit frame-diff command.
+
 Track independent per-function build, instruction-match, symbolic-proof and
 concrete-test statuses, plus whole-game scenario results. Missing/unmapped
 functions stay in the denominator. See the
@@ -548,7 +615,17 @@ The decompiler also has an internal MS C 5.1 local-variable hash diagnostic. It 
 
 ## Z3 Function Comparator
 
-`./z3func.py` is the main static and concrete function-comparison tool. `./dosunit.py` exposes the same flow for compatibility.
+`./z3func.py` is the main static and concrete function-comparison tool.
+`./dosunit.py` exposes the same flow for compatibility.
+
+The static path catalogs function boundaries and metadata with `discover`,
+proposes oracle/candidate correspondence with `make-mapping`, lowers bounded
+slices to SSA form with `ssa` and checks paired slices with `compare-ssa`
+(`compare-ssa-batched` splits large selections into per-process batches).
+Comparison is process-bounded and reports proved equivalence separately from
+refusals, timeouts and counterexamples; retained counterexamples replay
+against concrete vectors later. No single result is an automatic acceptance
+verdict.
 
 Typical static SSA comparison:
 
@@ -605,6 +682,21 @@ Other useful comparator subcommands:
 - `gen-vectors`, `record-oracle`, `compare`: concrete-vector comparison through the runtime backend.
 - `compare-data`: compare loaded MZ data ranges after relocation.
 - `summarize`: print result rollups.
+
+## DOSUnit Concrete Harness
+
+`./dosunit.py` runs the concrete-execution half of the same command
+implementation as `./z3func.py`. The harness generates bounded input vectors
+(`gen-vectors`), records oracle outputs on the original executable
+(`record-oracle`), replays them against a candidate (`compare`) and renders
+failures (`report-failures`).
+
+Two backend classes matter. The `fixture` backend exercises orchestration
+without executing the real DOS image, while `libkvikdos` runs the binary
+through kvikdos and therefore needs usable KVM and a native compiler to build
+its cached wrapper from `kvikdos.c`. Backend failure is not candidate
+equivalence, and a passing batch is evidence for the tested vectors only —
+not an automatic acceptance claim.
 
 ## Debugger
 

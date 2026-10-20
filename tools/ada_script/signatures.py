@@ -110,9 +110,12 @@ def _name_candidate(conn: sqlite3.Connection, address: int, name: str,
     conn.execute("UPDATE functions SET name=? WHERE start=?", (name, address))
     if any(candidate.function_start for candidate in candidates):
         # A module extent is not a proven function end. Let analysis recover it.
+        # Name-only evidence in a non-executable segment must not seed code --
+        # signature names land on data variables too (END.EXE overlay globals).
+        # The functions row alone names the byte; the region gate still emits
+        # code here when real call/jump/seed evidence exists.
         conn.execute("INSERT OR IGNORE INTO functions(start,end,name,flags) VALUES(?,?,?,0)",
                      (address, address, name))
-        conn.execute("INSERT OR IGNORE INTO code_seeds(addr) VALUES(?)", (address,))
 
 
 def apply_signatures(conn: sqlite3.Connection, *, image: bytes, base: int,

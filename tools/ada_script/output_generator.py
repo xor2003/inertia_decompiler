@@ -1,17 +1,17 @@
 """Layer: optional assembly output.
 
-Responsibility: render analyzed DOS bytes as IDA-style listings and UASM source.
+Responsibility: render analyzed DOS bytes as listings and UASM source.
 
-IDA-style listing (.lst) and assembly (.asm) generator.
+Listing (.lst) and assembly (.asm) generator.
 
 Renders the analysis database into a flat listing closely following the
-IDA Pro .lst format:
+classic disassembler .lst format:
 
     seg000:0016
     seg000:0016 loc_10016:
     seg000:0016                 mov     word ptr [bp+var_4+2], 0
 
-Column conventions (measured from IDA output):
+Column conventions:
   * "segname:offset" prefix where offset = addr - (seg_base << 4)
   * instruction/data text starts at absolute column 24 when unlabeled
   * labels occupy a 16-char field starting right after the prefix, so a
@@ -27,9 +27,10 @@ import re
 import zlib
 from typing import Any, ClassVar
 
+from tools.ada_script.database import Database
 from tools.ada_script.utils import logger
 
-# IDA attribute flag bits -> "Attributes:" words
+# Function attribute flag bits -> "Attributes:" words
 FUNC_ATTRS = [
     (0x01, 'noreturn'), (0x02, 'far'), (0x04, 'library function'),
     (0x08, 'static'), (0x10, 'bp-based frame'), (0x40, 'hidden'),
@@ -57,7 +58,7 @@ _NEAR_BRANCH = {
 
 # element size implied by an auto-name prefix (byte_/word_/dword_/...)
 _PREFIX_SZ = {'byte': 1, 'word': 2, 'dword': 4, 'qword': 8,
-              'fword': 6, 'tbyte': 10}
+              'fword': 6, 'tbyte': 10, 'seg': 2}
 _DECL_SZ = {'db': 1, 'dw': 2, 'dd': 4, 'dq': 8, 'dt': 10, 'df': 6}
 _SZ_KW = {1: 'byte', 2: 'word', 4: 'dword', 8: 'qword',
           6: 'fword', 10: 'tbyte'}
@@ -68,9 +69,10 @@ _EQU_TYPES = {'byte_': 'byte ptr', 'word_': 'word ptr',
               'tbyte_': 'tbyte ptr', 'fword_': 'fword ptr'}
 
 
-def ida_num(value, force_hex=False):
+def fmt_num(value: int, force_hex: bool = False) -> str:
+    """Format a number for listings: decimal <10, else hex with h suffix."""
     if value < 0:
-        return '-' + ida_num(-value, force_hex)
+        return '-' + fmt_num(-value, force_hex)
     if value < 10 and not force_hex:
         return str(value)
     s = f"{value:X}"
@@ -80,13 +82,16 @@ def ida_num(value, force_hex=False):
 
 
 class OutputGenerator:
-    def __init__(self, db, filename='input.exe'):
+    """Listing/assembly renderer: DB contents -> .lst/.asm text."""
+
+    def __init__(self, db: Database, filename: str = 'input.exe') -> None:
+        """Bind the analysis database and source filename."""
         self.db = db
         self.filename = filename
         self._load()
 
     # ------------------------------------------------------------------ load
-    def _load(self):
+    def _load(self) -> None:
         c = self.db.conn
         self.segments = [
             {'start': s, 'end': e, 'base': base or (s >> 4), 'class': cls or '',
@@ -101,6 +106,7 @@ class OutputGenerator:
         # for them so the emitted image is complete
         img_end = self.db.image_base + self.db.image_size
         self.img_hi = img_end
+        self._defined_syms = set()
         if img_end and self.segments:
             gaps = []
             prev = self.db.image_base
@@ -126,10 +132,10 @@ class OutputGenerator:
                       for s, e, n, f in c.execute(
                           "SELECT start, end, name, flags FROM functions")}
         self.func_starts = sorted(self.funcs)
-        self.names = {a: n for a, n in c.execute(
-            "SELECT addr, name FROM symbols WHERE auto=0")}
-        self.labels = {a: n for a, n in c.execute(
-            "SELECT addr, name FROM symbols")}  # explicit + auto
+        self.names = dict(c.execute(
+            "SELECT addr, name FROM symbols WHERE auto=0"))
+        self.labels = dict(c.execute(
+            "SELECT addr, name FROM symbols"))  # explicit + auto
         self._label_addrs = sorted(self.labels)
         self._name2addr = {n: a for a, n in self.labels.items()}
         # func names are operands too (call sub_XXXX) but live in the
@@ -142,8 +148,8 @@ class OutputGenerator:
                       in c.execute(
                           "SELECT addr, size, mnem, op_str, asm_str, db_bytes "
                           "FROM instructions WHERE type='code'")}
-        self.comments = {a: cm for a, cm in c.execute(
-            "SELECT addr, comment FROM comments")}
+        self.comments = dict(c.execute(
+            "SELECT addr, comment FROM comments"))
         self.extra = {}
         for a, ln, cm in c.execute(
                 "SELECT addr, line, comment FROM extra_comments "
@@ -157,10 +163,10 @@ class OutputGenerator:
         for f, off, n, sz in c.execute(
                 "SELECT func_start, offset, name, size FROM frame_vars"):
             self.frame_vars.setdefault(f, {})[off] = (n, sz or 2)
-        self.relocs = {a: p for a, p in c.execute(
-            "SELECT addr, offset FROM relocations")}
-        self.strucs = {i: n for i, n in c.execute(
-            "SELECT id, name FROM strucs")}
+        self.relocs = dict(c.execute(
+            "SELECT addr, offset FROM relocations"))
+        self.strucs = dict(c.execute(
+            "SELECT id, name FROM strucs"))
         self.struc_members = {}
         for sn, mo, msz, mn in c.execute(
                 "SELECT s.name, m.offset, m.size, m.name FROM struc_members m "
@@ -205,9 +211,10 @@ class OutputGenerator:
                 if re.match(r'^[A-Za-z_?@$][\w?@$.]*$', op):
                     self.branch_lbls.add(op)
 
-        # sorted structural boundaries for gap/align detection
+        # sorted structural boundaries for gap/align detection; relocation
+        # sites are boundaries too -- a relocated word is always its own item
         self.bounds = sorted(set(self.funcs) | set(self.data_items)
-                             | set(self.labels))
+                             | set(self.labels) | set(self.relocs))
         # instruction addr -> next insn addr (fallthrough check)
         self.insn_addrs = sorted(self.insns)
         # funcs whose start lies strictly inside another func's range cannot
@@ -221,17 +228,19 @@ class OutputGenerator:
                     break
 
     # ------------------------------------------------------------- helpers
-    def seg_of(self, addr):
+    def seg_of(self, addr: int) -> dict | None:
+        """Segment row containing a linear address, or None when unmapped."""
         for s in self.segments:
             if s['start'] <= addr < s['end']:
                 return s
         return None
 
-    def prefix(self, seg, addr):
+    def prefix(self, seg: dict, addr: int) -> str:
+        """seg:offset display prefix for a linear address in seg."""
         off = addr - ((seg['base'] or (seg['start'] >> 4)) << 4)
         return f"{seg['name']}:{off:04X}"
 
-    def _func_of(self, addr):
+    def _func_of(self, addr: int) -> int | None:
         i = bisect.bisect_right(self.func_starts, addr) - 1
         if i < 0:
             return None
@@ -241,7 +250,7 @@ class OutputGenerator:
             return f
         return None
 
-    def _xref_src(self, fr):
+    def _xref_src(self, fr: int) -> str:
         f = self._func_of(fr)
         if f is not None:
             lbl = self.labels.get(fr)
@@ -257,7 +266,7 @@ class OutputGenerator:
             return f"{seg['name']}+{off:X}"
         return f"{fr:X}"
 
-    def _xref_texts(self, addr):
+    def _xref_texts(self, addr: int) -> list[str]:
         """Return list of comment strings for xrefs pointing at addr."""
         refs = self.xrefs_to.get(addr)
         if not refs:
@@ -277,18 +286,26 @@ class OutputGenerator:
         return lines
 
     @staticmethod
-    def _nf(name):
-        """IDA name field: short names pad to column 16, long names get a
+    def _nf(name: str) -> str:
+        """Name field: short names pad to column 16, long names get a
         separating space so the directive doesn't glue onto the name."""
         return f"{name:<16}" if len(name) < 16 else name + ' '
 
+    def _def(self, name: str) -> bool:
+        """Record a symbol definition; False when already emitted.
+        uasm rejects a second definition (label + equ of the same name)."""
+        if name in self._defined_syms:
+            return False
+        self._defined_syms.add(name)
+        return True
+
     @staticmethod
-    def _cmt_lines(text):
+    def _cmt_lines(text: str) -> list[str]:
         """Normalize a (possibly multi-line) comment into ';'-prefixed lines."""
         return [ln if ln.startswith(';') else '; ' + ln
                 for ln in str(text).splitlines()]
 
-    def _annotate(self, line, p, addr):
+    def _annotate(self, line: str, p: str, addr: int) -> str:
         """Append comments/xrefs to a built line (p = seg:off prefix)."""
         cmts = []
         if addr in self.comments:
@@ -301,13 +318,13 @@ class OutputGenerator:
                 line += '\n' + p.ljust(col) + extra
         return line
 
-    def _tag(self, addr, size):
+    def _tag(self, addr: int, size: int) -> str:
         """`; @IMG_OFF:LEN` marker for asmfix-style reassembly checks --
         image offset of the first byte + emitted byte count."""
         return f' ; @{addr - self.db.image_base:X}:{size}'
 
     # ------------------------------------------------------------- segments
-    def _seg_decl(self, seg, name=None, asm=False):
+    def _seg_decl(self, seg: dict, name: str | None = None, asm: bool = False) -> str:
         align = {0: 'abs', 1: 'byte', 2: 'word', 3: 'para',
                  4: 'page', 5: 'dword', 6: 'qword'}.get(seg['align'], 'byte')
         comb = {0: 'private', 2: 'public', 4: 'public', 5: 'stack',
@@ -327,19 +344,19 @@ class OutputGenerator:
         return (f"{self._nf(name or seg['name'])}segment {align} "
                 f"{comb} '{cls}' use16")
 
-    def _seg_type_comment(self, seg):
+    def _seg_type_comment(self, seg: dict) -> str:
         if seg['type'] == 'stack' or seg['class'] == 'STACK':
             return 'Uninitialized'
         return 'Pure code' if seg['exec'] else 'Pure data'
 
     # ------------------------------------------------------------- data
-    def _raw(self, addr, size):
+    def _raw(self, addr: int, size: int) -> bytes | None:
         fo = self.db.file_offset(addr)
         if fo is None or fo >= len(self.db.binary):
             return None
         return self.db.binary[fo:fo + size]
 
-    def _struc_init(self, raw, members):
+    def _struc_init(self, raw: bytes, members: list) -> str | None:
         """Render one struc instance as `<v, v, ..>` from its raw bytes.
         Byte-array members become quoted strings (uasm zero-pads); returns
         None when a member's content can't be expressed in <>."""
@@ -349,7 +366,7 @@ class OutputGenerator:
             if len(mr) < msz:
                 return None
             if msz in (1, 2, 4):
-                vals.append(ida_num(int.from_bytes(mr, 'little')))
+                vals.append(fmt_num(int.from_bytes(mr, 'little')))
             else:
                 body = mr.split(b'\0')[0]
                 if body and all(32 <= b < 127 and b != 39 for b in body):
@@ -359,14 +376,15 @@ class OutputGenerator:
                     vals.append(f"{msz} dup(0)")
                 else:
                     vals.append('{' + ','.join(
-                        ida_num(b) for b in mr) + '}')
+                        fmt_num(b) for b in mr) + '}')
         return '<' + ', '.join(vals) + '>'
 
-    def _data_body(self, addr, size, kind, count, p='', asm=False):
+    def _data_body(self, addr: int, size: int, kind: str, count: int,
+                       p: str = '', asm: bool = False) -> str | list:
         """Return the directive text (without label) for a data item.
 
         Strings split at non-printable runs onto continuation `db` lines the
-        way IDA does; `p` is the seg:off prefix for those continuations.
+        way listings do; `p` is the seg:off prefix for those continuations.
         """
         raw = self._raw(addr, size * max(count, 1))
         uninit = raw is None
@@ -387,7 +405,7 @@ class OutputGenerator:
                     if sbuf is not None:
                         cur.append("'" + sbuf + "'")
                         sbuf = None
-                    cur.append(ida_num(b))
+                    cur.append(fmt_num(b))
             if sbuf is not None:
                 cur.append("'" + sbuf + "'")
             if cur:
@@ -403,7 +421,7 @@ class OutputGenerator:
             sname = kind.split(':', 1)[1]
             members = sorted(self.struc_members.get(sname) or [])
             if members and not uninit and raw:
-                # real per-instance initializers, like IDA's `S <'x', 1, ..>`
+                # real per-instance initializers, like `S <'x', 1, ..>`
                 out = []
                 for i in range(count):
                     init = self._struc_init(
@@ -423,36 +441,26 @@ class OutputGenerator:
         if count > 1:
             d = {1: 'db', 2: 'dw', 4: 'dd'}.get(size, 'db')
             if uninit:
-                return f"{d} {ida_num(count, True)} dup(?)"
+                return f"{d} {fmt_num(count, True)} dup(?)"
             elems = [int.from_bytes(raw[i * size:(i + 1) * size], 'little')
                      for i in range(count)]
             if len(set(elems)) == 1:
-                return f"{d} {ida_num(count, True)} dup({ida_num(elems[0])})"
+                return f"{d} {fmt_num(count, True)} dup({fmt_num(elems[0])})"
             # non-uniform array: list every element (dup would emit v1
-            # only); wrap onto continuation lines like IDA does
+            # only); wrap onto continuation lines like listings do
             per = 16 if size == 1 else 8
             chunks = [elems[i:i + per] for i in range(0, count, per)]
-            out = f"{d} " + ','.join(ida_num(v) for v in chunks[0])
+            out = f"{d} " + ','.join(fmt_num(v) for v in chunks[0])
             for cont in chunks[1:]:
                 out += '\n' + p + ' ' * max(1, 26 - len(p)) + \
-                    f"{d} " + ','.join(ida_num(v) for v in cont)
+                    f"{d} " + ','.join(fmt_num(v) for v in cont)
             return out
         d = {1: 'db', 2: 'dw', 4: 'dd', 8: 'dq'}.get(size, 'db')
         if uninit:
             return f"{d} ?"
         # word holding a relocated segment value -> 'dw seg name'
         if addr in self.relocs and size == 2:
-            tgt = self.relocs[addr]
-            seg = self.seg_of(tgt)
-            if asm:
-                # relocs[a] is the linear base the stored para points at --
-                # a mandatory chunk boundary, so the chunk starting exactly
-                # there reproduces the original stored value
-                cn = self._chunk_for(tgt) or \
-                    (self._nf(seg['name']) if seg else None)
-                return f"dw seg {cn}" if cn else \
-                    f"dw {ida_num(int.from_bytes(raw[:2], 'little'))}"
-            return f"dw seg {seg['name']}" if seg else f"dw {ida_num(tgt)}"
+            return self._reloc_seg_word(addr, asm, raw)
         val = int.from_bytes(raw[:size], 'little')
         # explicit offset override: op_plain_offset(ea, n, base)
         if size in (2, 4):
@@ -463,11 +471,11 @@ class OutputGenerator:
                 if asm and size == 2:
                     # a near offset word is never relocated -- emitting the
                     # original value is byte-exact and needs no fixup frame
-                    return f"dw {ida_num(val, True)}"
+                    return f"dw {fmt_num(val, True)}"
                 tgt = (ovr[0] + val) & 0xFFFFFFFF
                 nm = self.labels.get(tgt)
                 return f"{d} offset {nm}" if nm else \
-                    f"{d} offset {ida_num(val, True)}"
+                    f"{d} offset {fmt_num(val, True)}"
         # heuristic: word value + ds lands on a named location -> offset
         if size == 2:
             base = self._sreg_at(addr, 'ds')
@@ -475,14 +483,17 @@ class OutputGenerator:
                 tgt = base * 16 + val
                 if tgt in self.names:
                     if asm:
-                        return f"dw {ida_num(val, True)}"
+                        return f"dw {fmt_num(val, True)}"
                     return f"dw offset {self.names[tgt]}"
         if size == 4:
             lo, hi = val & 0xFFFF, val >> 16
-            # far pointer: stored high word is a para relative to load base
+            # far pointer: stored high word is a para relative to load
+            # base -- claim a seg:off pointer only when the MZ header
+            # relocated the seg half; a matching paragraph alone is not
+            # evidence (relocations come from the header, never guessed)
             seg = next((s for s in self.segments
                         if (s['base'] << 4) == self.db.image_base + hi * 16),
-                       None)
+                       None) if addr + 2 in self.relocs else None
             if seg:
                 t = (seg['base'] << 4) + lo
                 nm = self.labels.get(t)
@@ -496,16 +507,16 @@ class OutputGenerator:
                         self._nf(seg['name'])
                     head = 'label dword\n' + ' ' * 24 \
                         if self.labels.get(addr) else ''
-                    return (f"{head}dw {ida_num(lo, True)}\n"
+                    return (f"{head}dw {fmt_num(lo, True)}\n"
                             f"{'':24}dw seg {cn}")
                 if nm:
                     return f"dd {nm}"
                 if self.seg_of(t):
-                    return f"dd {seg['name']}:{ida_num(lo, True)}"
-            return f"dd {ida_num(val, True)}"
-        return f"{d} {ida_num(val)}"
+                    return f"dd {seg['name']}:{fmt_num(lo, True)}"
+            return f"dd {fmt_num(val, True)}"
+        return f"{d} {fmt_num(val)}"
 
-    def _sreg_at(self, addr, reg):
+    def _sreg_at(self, addr: int, reg: str) -> int:
         seg = self.seg_of(addr)
         if seg and (seg['start'], reg) in self.sregs:
             return self.sregs[(seg['start'], reg)]
@@ -513,18 +524,104 @@ class OutputGenerator:
             "SELECT value FROM config WHERE key='default_ds'").fetchone()
         return int(row[0]) if row and reg == 'ds' else None
 
-    def _byte_line(self, addr):
+    def _reloc_seg_word(self, addr: int, asm: bool,
+                        raw: bytes | None) -> str:
+        """`dw seg <name>` for a relocated segment word. In asm mode the
+        chunk starting at the pointed base reproduces the stored para;
+        without a chunk there the literal stored value is emitted."""
+        tgt = self.relocs[addr]
+        seg = self.seg_of(tgt)
+        if asm:
+            # relocs[a] is the linear base the stored para points at --
+            # a mandatory chunk boundary, so the chunk starting exactly
+            # there reproduces the original stored value
+            cn = self._chunk_for(tgt) or \
+                (self._nf(seg['name']) if seg else None)
+            if cn:
+                return f"dw seg {cn}"
+            if raw and len(raw) >= 2:
+                return f"dw {fmt_num(int.from_bytes(raw[:2], 'little'))}"
+            return f"dw {fmt_num(tgt)}"
+        return f"dw seg {seg['name']}" if seg else f"dw {fmt_num(tgt)}"
+
+    def _byte_line(self, addr: int) -> str:
         raw = self._raw(addr, 1)
         if raw is None:
             return 'db ?'
         b = raw[0]
-        line = 'db ' + ida_num(b).rjust(4)
+        line = 'db ' + fmt_num(b).rjust(4)
         if 32 <= b < 127:
             line += f" ; {chr(b)}"
         return line
 
+    def _run_end(self, seg: dict, chunks: list, chunk_i: int,
+                 addr: int, asm: bool) -> int:
+        """End of the unexplored-byte run starting at `addr`: the next
+        structural boundary (item/label/func), segment end, and -- in asm
+        mode, where a `dup` run must not span an `ends`/`segment` pair --
+        the current chunk's boundary."""
+        i = bisect.bisect_right(self.bounds, addr)
+        nxt = self.bounds[i] if i < len(self.bounds) else seg['end']
+        nxt = min(nxt, seg['end'])
+        if asm and chunk_i + 1 < len(chunks):
+            nxt = min(nxt, chunks[chunk_i][2])
+        return nxt
+
+    def _uninit_lines(self, addr: int, nxt: int,
+                      label: str | None, p: str) -> list[str]:
+        """Past-image (`?`) run [addr, nxt): reserve it as `dup(?)` so
+        segment extents (BSS tail, stack) survive the rebuild; the label
+        on the run start is positional.  Width-prefixed names keep their
+        type via `label`; names without one stay word-sized the way
+        `equ` aliases were, so `mov [lbl], r16` still type-checks."""
+        run = nxt - addr
+        out = []
+        if label:
+            decl = self._decl_fix(label, 'db')
+            if decl is None and \
+                    label.split('_')[0] not in _PREFIX_SZ and \
+                    not label.startswith(('loc_', 'sub_', 'start')):
+                decl = f"{self._nf(label)} label word"
+            if decl:
+                out.append(f"{p} {decl}")
+                label = None
+        body = 'db ?' if run == 1 else f"db {fmt_num(run, True)} dup(?)"
+        if label:
+            out.append(f"{p} {self._nf(label)}{body}"
+                       + self._tag(addr, run))
+        else:
+            out.append(f"{p}{' ' * max(1, 24 - len(p))}{body}"
+                       + self._tag(addr, run))
+        return out
+
+    def _unexplored_body(self, addr: int, nxt: int,
+                         asm: bool) -> tuple[str, int]:
+        """`db`/`dw` body and length for unexplored bytes at `addr`: a
+        relocated segment word renders `dw seg <name>` like a data item;
+        everything else packs as a byte run."""
+        if addr in self.relocs and addr + 2 <= nxt:
+            return self._reloc_seg_word(addr, asm, self._raw(addr, 2)), 2
+        return self._byte_run_line(addr, nxt)
+
+    def _byte_run_line(self, addr: int, nxt: int) -> tuple[str, int]:
+        """`db` body for unexplored bytes at `addr`: identical leading
+        bytes pack as `N dup(v)` (the listing packs any repeat run this
+        way); anything else is a single byte. Returns (body, length)."""
+        raw = self._raw(addr, nxt - addr)
+        if not raw:
+            run = nxt - addr
+            return ('db ?' if run == 1
+                    else f"db {fmt_num(run, True)} dup(?)"), run
+        v = raw[0]
+        run = 1
+        while run < len(raw) and raw[run] == v:
+            run += 1
+        if run < 2:
+            return self._byte_line(addr), 1
+        return f"db {fmt_num(run, True)} dup({fmt_num(v)})", run
+
     # ------------------------------------------------------------- render
-    def _func_header(self, seg, addr, fv):
+    def _func_header(self, seg: dict, addr: int, fv: dict) -> list[str]:
         """Emit the subroutine banner block; returns list of lines."""
         p = self.prefix(seg, addr)
         lines = [p, f"{p} ; {BANNER}", p]
@@ -544,6 +641,7 @@ class OutputGenerator:
         if self._is_public(addr):
             lines.append(f"{p}{' ' * max(1, 24 - len(p))}public {fv['name']}")
         body = f"{self._nf(fv['name'])}proc {'far' if fv['flags'] & 2 else 'near'}"
+        self._defined_syms.add(fv['name'])
         lines.append(self._annotate(f"{p} {body}", p, addr))
         # frame var equates
         fvmap = self.frame_vars.get(addr)
@@ -555,11 +653,11 @@ class OutputGenerator:
                       8: 'qword ptr'}.get(vsz, 'word ptr')
                 sign = '-' if off < 0 else ' '
                 lines.append(f"{p} {self._nf(nm)}= {sz} {sign}"
-                             f"{ida_num(abs(off))}")
+                             f"{fmt_num(abs(off))}")
             lines.append(p)
         return lines
 
-    def _is_public(self, addr):
+    def _is_public(self, addr: int) -> bool:
         if addr == self.entry:
             return True
         if addr not in self.names:
@@ -573,7 +671,7 @@ class OutputGenerator:
                 return True
         return False
 
-    def _seg_chunks(self, seg):
+    def _seg_chunks(self, seg: dict) -> list[tuple[str, int, int]]:
         """Split a >64K segment into <=64K chunks.
 
         MASM caps a segment at 64K; the original binary's oversized regions
@@ -596,8 +694,7 @@ class OutputGenerator:
         points = set(mand)
         # every mandatory point must be a boundary; between them, add
         # splits so no chunk exceeds 64K
-        queue = [seg['start']] + mand + [seg['end']]
-        queue = sorted(set(queue))
+        queue = sorted({seg['start'], *mand, seg['end']})
         for i in range(len(queue) - 1):
             lo, hi = queue[i], queue[i + 1]
             while hi - lo > 0x10000:
@@ -609,9 +706,10 @@ class OutputGenerator:
         points.add(seg['start'])
         pts = sorted(points)
         return [(f"{seg['name']}_{i}", s, e)
-                for i, (s, e) in enumerate(zip(pts, pts[1:] + [seg['end']]), 1)]
+                for i, (s, e) in enumerate(
+                    zip(pts, [*pts[1:], seg['end']], strict=True), 1)]
 
-    def _sreg_paras(self):
+    def _sreg_paras(self) -> set[int]:
         """All paras loaded into segment registers anywhere (sreg ranges)."""
         ps = getattr(self, '_sreg_para_set', None)
         if ps is None:
@@ -619,7 +717,7 @@ class OutputGenerator:
                 v for _a, r, v in self.sreg_events if v >= 0}
         return ps
 
-    def _segname2chunk_map(self):
+    def _segname2chunk_map(self) -> dict[str, str]:
         """Logical segment name -> first physical chunk name, for
         >64K segments split into multiple asm segments."""
         m = getattr(self, '_segname2chunk', None)
@@ -630,7 +728,7 @@ class OutputGenerator:
                 if len(self._seg_chunks(sg)) > 1}
         return m
 
-    def _chunk_for(self, lin):
+    def _chunk_for(self, lin: int) -> str | None:
         """Name of the physical chunk containing linear address `lin`
         (only inside >64K split segments); else None."""
         cr = getattr(self, '_chunk_ranges', None)
@@ -646,11 +744,11 @@ class OutputGenerator:
                 return n
         return None
 
-    def _chunk_seg_refs(self, text):
+    def _chunk_seg_refs(self, text: str) -> str:
         """`seg segXXX` operand on a split segment: the big name doesn't
         exist in the .asm -- resolve to the first physical chunk so the
         stored para equals the original segment base."""
-        def rep(m):
+        def rep(m: re.Match) -> str:
             cn = self._segname2chunk_map().get(m.group(1))
             return 'seg ' + cn if cn else m.group(0)
         return re.sub(r'seg (seg\w+)', rep, text)
@@ -693,7 +791,7 @@ class OutputGenerator:
             addr = self.db.image_base
         last_addr = addr
 
-        def close_func(at_addr):
+        def close_func(at_addr: int) -> None:
             nonlocal cur_func
             fv = self.funcs[cur_func]
             ep = self.prefix(seg, at_addr)
@@ -752,15 +850,24 @@ class OutputGenerator:
                     lines.append(f"{p} {cl}")
             # function start: close a still-open function first (a func with
             # unknown end would otherwise swallow the next proc header)
-            if addr in self.funcs and addr not in self.nested \
-                    and cur_func is not None:
-                close_func(addr)
-                prev_break = True
             if addr in self.funcs and addr not in self.nested:
+                if cur_func is not None:
+                    close_func(addr)
+                    prev_break = True
                 fv = self.funcs[addr]
-                lines += self._func_header(seg, addr, fv)
-                cur_func = addr
-                prev_break = False
+                # only open a proc when the function actually emitted
+                # instructions in [f, end): a name-only entry over data
+                # (gated in the analyzer) must not wrap its `db` in
+                # proc/endp -- the name would collide with the data label
+                e = fv['end'] if fv['end'] > addr else seg['end']
+                fi = bisect.bisect_right(self.func_starts, addr)
+                if fi < len(self.func_starts):
+                    e = min(e, self.func_starts[fi])
+                ii = bisect.bisect_left(self.insn_addrs, addr)
+                if ii < len(self.insn_addrs) and self.insn_addrs[ii] < e:
+                    lines += self._func_header(seg, addr, fv)
+                    cur_func = addr
+                    prev_break = False
             # label line for named/auto labels at code addrs (not func start)
             label = self.labels.get(addr)
             if addr in self.nested and not label:
@@ -773,18 +880,14 @@ class OutputGenerator:
                 # `::` (not `:`) in .asm: a single-colon label inside a
                 # proc is procedure-local in masm/uasm, which breaks
                 # cross-proc self-modifying-code refs like `cs:loc_x+7`
-                lines.append(self._annotate(
-                    f"{p} {label}{'::' if asm else ':'}", p, addr))
+                if not asm or self._def(label):
+                    lines.append(self._annotate(
+                        f"{p} {label}{'::' if asm else ':'}", p, addr))
             if asm and self.img_hi and addr >= self.img_hi:
-                # beyond the file's image the bytes are uninitialized --
-                # `db ?` still advances the segment (and uasm stores
-                # zeros for it), which would overshoot the original size
-                if label:
-                    # labels into the uninitialized tail are still
-                    # referenced by stored offsets -- define them
-                    lines.append(f"{p} {self._nf(label)} equ "
-                                 f"{self._equ_expr(label, addr - self.img_hi, addr in self.funcs)}")
-                addr += 1
+                nxt = self._run_end(seg, chunks, chunk_i, addr, asm)
+                lines += self._uninit_lines(addr, nxt, label, p)
+                last_addr = addr
+                addr = nxt
                 continue
             # item body
             if is_code:
@@ -806,9 +909,10 @@ class OutputGenerator:
                         mid.setdefault(lb, self.funcs[lb]['name'])
                         i += 1
                     for la in sorted(mid):
-                        lines.append(
-                            f"{p} {self._nf(mid[la])} equ "
-                            f"{self._equ_expr(mid[la], la - addr, la in self.funcs)}")
+                        if self._def(mid[la]):
+                            lines.append(
+                                f"{p} {self._nf(mid[la])} equ "
+                                f"{self._equ_expr(mid[la], la - addr, la in self.funcs)}")
                 if asm and exact_code_bytes and not dbh and size == 5:
                     raw = self._raw(addr, size)
                     if raw and raw[0] in (0x9A, 0xEA):
@@ -821,12 +925,12 @@ class OutputGenerator:
                         if rc:
                             pad = ' ' * max(1, 24 - len(p))
                             lines.append(self._annotate(
-                                f"{p}{pad}db {ida_num(raw[0])} "
+                                f"{p}{pad}db {fmt_num(raw[0])} "
                                 f"; {mnem} {ops}" + self._tag(addr, 1),
                                 p, addr))
                             lines.append(
                                 f"{p}{pad}dw "
-                                f"{ida_num(raw[1] | (raw[2] << 8))}"
+                                f"{fmt_num(raw[1] | (raw[2] << 8))}"
                                 + self._tag(addr + 1, 2))
                             lines.append(f"{p}{pad}dw seg {rc}"
                                          + self._tag(addr + 3, 2))
@@ -871,9 +975,8 @@ class OutputGenerator:
                         and not re.search(
                             r'\be(ax|bx|cx|dx|si|di|bp|sp)\b', eff_ops))
                     if (ambiguous_memory_width or unsized_descriptor
-                            or two_operand_fxch or size_prefix_loss):
-                        if raw:
-                            dbh = raw.hex()
+                            or two_operand_fxch or size_prefix_loss) and raw:
+                        dbh = raw.hex()
                 if asm and dbh:
                     # uasm cannot reproduce the original encoding --
                     # emit the exact bytes, with the insn as a comment
@@ -926,7 +1029,7 @@ class OutputGenerator:
                     for off in range(0, len(raw), 16):
                         run = raw[off:off + 16]
                         body = ('db ' + ','.join(
-                            ida_num(x) for x in run)
+                            fmt_num(x) for x in run)
                             + self._tag(la := addr + off, len(run)))
                         lines += self._mid_equs(la, la + len(run), la, p)
                         lbl = self.labels.get(la)
@@ -952,7 +1055,7 @@ class OutputGenerator:
                     for off in range(0, len(raw), 16):
                         run = raw[off:off + 16]
                         body = ('db ' + ','.join(
-                            ida_num(x) for x in run)
+                            fmt_num(x) for x in run)
                             + self._tag(la := addr + off, len(run)))
                         lines += self._mid_equs(la, la + len(run), la, p)
                         lbl = self.labels.get(la)
@@ -980,13 +1083,15 @@ class OutputGenerator:
                         mid.setdefault(lb, self.funcs[lb]['name'])
                         i += 1
                     for la in sorted(mid):
-                        lines.append(
-                            f"{p} {self._nf(mid[la])} equ "
-                            f"{self._equ_expr(mid[la], la - addr, la in self.funcs)}")
+                        if self._def(mid[la]):
+                            lines.append(
+                                f"{p} {self._nf(mid[la])} equ "
+                                f"{self._equ_expr(mid[la], la - addr, la in self.funcs)}")
                 if asm and label in self.branch_lbls:
                     # jump target on a db item: uasm needs a code-typed
                     # label, so emit `name::` then the unlabeled data
-                    lines.append(f"{p} {label}::")
+                    if self._def(label):
+                        lines.append(f"{p} {label}::")
                     label = None
                 body = self._data_body(addr, size, kind, count, p, asm=asm)
                 if label and asm:
@@ -1017,9 +1122,9 @@ class OutputGenerator:
                         # uasm rejects `align`/`even` in use16 segments:
                         # emit the literal padding bytes instead
                         if len(set(gap)) == 1:
-                            body = f"db {len(gap)} dup({ida_num(gap[0])})"
+                            body = f"db {len(gap)} dup({fmt_num(gap[0])})"
                         else:
-                            body = 'db ' + ','.join(ida_num(b) for b in gap)
+                            body = 'db ' + ','.join(fmt_num(b) for b in gap)
                         lines.append(
                             f"{p}{' ' * max(1, 24 - len(p))}{body}"
                             + self._tag(addr, len(gap)))
@@ -1029,23 +1134,29 @@ class OutputGenerator:
                     addr = nxt
                     continue
             if asm and label in self.branch_lbls:
-                lines.append(f"{p} {label}::")
+                if self._def(label):
+                    lines.append(f"{p} {label}::")
                 label = None
             if label and asm:
                 decl = self._decl_fix(label, 'db')
                 if decl:
                     lines.append(f"{p} {decl}")
                     label = None
+            # pack identical-byte runs (`?` fill, zero fill, repeats) as
+            # `N dup(v)` -- a labeled byte inside a run is a boundary, so
+            # every name still lands on its own address
+            body, run = self._unexplored_body(
+                addr, self._run_end(seg, chunks, chunk_i, addr, asm), asm)
             if label:
-                line = f"{p} {self._nf(label)}{self._byte_line(addr)}"
+                line = f"{p} {self._nf(label)}{body}"
             else:
-                line = f"{p}{' ' * max(1, 24 - len(p))}{self._byte_line(addr)}"
+                line = f"{p}{' ' * max(1, 24 - len(p))}{body}"
             if asm:
-                line += self._tag(addr, 1)
+                line += self._tag(addr, run)
             lines.append(self._annotate(line, p, addr))
             prev_break = False
             last_addr = addr
-            addr += 1
+            addr += run
 
         # close open function
         if cur_func is not None:
@@ -1060,7 +1171,8 @@ class OutputGenerator:
         return lines
 
     # ---------------------------------------------------------------- main
-    def generate_lst(self, output_file='output.lst'):
+    def generate_lst(self, output_file: str = 'output.lst') -> None:
+        """Write the .lst listing projection of the analysis database."""
         md5 = hashlib.md5(self.db.binary).hexdigest().upper()
         crc = zlib.crc32(self.db.binary) & 0xFFFFFFFF
         first = self.segments[0] if self.segments else {
@@ -1072,7 +1184,7 @@ class OutputGenerator:
         out = []
         out.append(f"{p0} ;")
         out.append(f"{p0} ; +{'-' * 73}+")
-        out.append(f"{p0} ; |      This file was generated by Ada Script (IDA-style)      |")
+        out.append(f"{p0} ; |                 This file was generated by Ada Script                  |")
         out.append(f"{p0} ; +{'-' * 73}+")
         out.append(f"{p0} ;")
         out.append(f"{p0} ; Input MD5    : {md5}")
@@ -1088,6 +1200,8 @@ class OutputGenerator:
         out.append(f"{p0}                 {cpu}")
         if mmx:
             out.append(f"{p0}                 .mmx")
+            # uasm gates the packed-integer opcodes behind .xmm as well
+            out.append(f"{p0}                 .xmm")
         out.append(f"{p0}                 .model large")
         out.append(p0)
         stem = re.sub(r'\W+', '_', self.filename.rsplit('.', 1)[0])
@@ -1135,7 +1249,7 @@ class OutputGenerator:
         'pascal', 'syscall', 'instr', 'echo', 'error', 'exit',
     }
 
-    def _asm_renames(self):
+    def _asm_renames(self) -> dict[str, str]:
         """Build name rewrites needed to keep the .asm assemblable.
 
         Two collision classes:
@@ -1150,13 +1264,13 @@ class OutputGenerator:
         global_names = list(dict.fromkeys(
             list(self.labels.values())
             + [f['name'] for f in self.funcs.values()]
-            + [n for n in self.strucs.values()]
+            + list(self.strucs.values())
             + [mn for en in self.enum_names.values() for mn in en]))
         for nm in global_names:
             used.add(nm)
         funcnames = {f['name'] for f in self.funcs.values()}
 
-        def fresh(base):
+        def fresh(base: str) -> str:
             i = 1
             new = f"{base}_{i}"
             while new in used:
@@ -1214,7 +1328,7 @@ class OutputGenerator:
             '|'.join(re.escape(n) for n in frame_rn) + r')\b') \
             if frame_rn else None
 
-    def _asm_line(self, s):
+    def _asm_line(self, s: str) -> str:
         """Apply asm-only name rewrites to a stripped line."""
         m = re.match(r'(\s*)(\w+)(\s*=\s*(?:byte|word|dword|qword) ptr .*)', s)
         if m and m.group(2) in self._frm_rn:
@@ -1238,7 +1352,7 @@ class OutputGenerator:
                     lambda mo: self._lbl_rn[mo.group(0)], m2.group(2)))
         return s
 
-    def _asm_preamble(self):
+    def _asm_preamble(self) -> list[str]:
         """Equates/struc definitions needed by the .asm (enum constants,
         struct types used by `Name <0>` data declarations)."""
         out = []
@@ -1267,7 +1381,7 @@ class OutputGenerator:
                 if nm in seen:
                     continue
                 seen.add(nm)
-                out.append(f"{rn.get(nm, nm)} equ {ida_num(val, True)}")
+                out.append(f"{rn.get(nm, nm)} equ {fmt_num(val, True)}")
         if seen:
             out.append('')
         return out
@@ -1278,8 +1392,8 @@ class OutputGenerator:
         r'lss|arpl|enter|leave|insd|outsd|lodsd|stosd|scasd|cmpsd|movsd|'
         r'iretd|jecxz)\b')
     _RE_486 = re.compile(r'\b(?:invd|wbinvd|invlpg|cmpxchg|xadd|bswap)\b')
-    def _equ_expr(self, name, delta, is_code=False):
-        d = f"$+{ida_num(delta)}"
+    def _equ_expr(self, name: str, delta: int, is_code: bool = False) -> str:
+        d = f"$+{fmt_num(delta)}"
         rn = getattr(self, '_lbl_rn', {})
         if is_code or rn.get(name, name) in self.branch_lbls or \
                 name in self.branch_lbls or \
@@ -1290,7 +1404,7 @@ class OutputGenerator:
         t = _EQU_TYPES.get(name.split('_')[0] + '_', 'word ptr')
         return f"{t} ({d})"
 
-    def _decl_fix(self, name, body):
+    def _decl_fix(self, name: str, body: str) -> str | None:
         """`name label <type>` when the auto-name prefix (word_/byte_/...)
         disagrees with the emitted directive -- otherwise uasm resolves
         `seg:name` references at the directive's size, not the prefix's."""
@@ -1300,7 +1414,7 @@ class OutputGenerator:
             return f"{self._nf(name)} label {_SZ_KW[want]}"
         return None
 
-    def _mid_equs(self, lo, hi, base, p):
+    def _mid_equs(self, lo: int, hi: int, base: int, p: str) -> list[str]:
         """`equ $+delta` lines for labels/func-starts strictly inside
         (lo, hi); `base` is the address `$` resolves to at that point."""
         out = []
@@ -1313,8 +1427,9 @@ class OutputGenerator:
             mid.setdefault(lb, self.funcs[lb]['name'])
             k += 1
         for la in sorted(mid):
-            out.append(f"{p} {self._nf(mid[la])} equ "
-                       f"{self._equ_expr(mid[la], la - base, la in self.funcs)}")
+            if self._def(mid[la]):
+                out.append(f"{p} {self._nf(mid[la])} equ "
+                           f"{self._equ_expr(mid[la], la - base, la in self.funcs)}")
         return out
 
     _RE_MMX = re.compile(
@@ -1322,7 +1437,7 @@ class OutputGenerator:
         r'packus|punpck|pmul|pmadd|psra|psrl|psll|por|pxor|pand|pandn)\w*\b|'
         r'\b(?:fcmov|fcomi|fucomi)\w*\b')
 
-    def _cpu_level(self):
+    def _cpu_level(self) -> tuple[str, bool]:
         """Minimum CPU directive for the decoded instruction set."""
         is386 = is486 = mmx = False
         for _s, mnem, ops, _a, _d in self.insns.values():
@@ -1344,6 +1459,7 @@ class OutputGenerator:
     ) -> None:
         """Write MASM source; exact mode keeps original bytes where needed."""
         self._asm_renames()
+        self._defined_syms = set()
         # use16 segments keep 16-bit addressing under any cpu directive;
         # emit the lowest level that covers the decoded instruction set
         # no .model: it creates an empty DGROUP and silently assumes
@@ -1354,7 +1470,9 @@ class OutputGenerator:
         out = ['; Generated by Ada Script', f'; Source: {self.filename}']
         if not exact_code_bytes:
             out.append('; Mnemonic view: instruction bytes may reassemble differently or fail')
-        out += ['', cpu] + (['.mmx'] if mmx else []) + ['']
+        # .mmx alone does not enable the padd/pand/... opcodes in uasm --
+        # the packed-integer forms are gated behind the SSE .xmm switch too
+        out += ['', cpu] + (['.mmx', '.xmm'] if mmx else []) + ['']
         out += self._asm_preamble()
         covered = []
         for seg in self.segments:
@@ -1365,7 +1483,7 @@ class OutputGenerator:
                 # keeps `assume ss:`/`dw seg` valid without re-emitting
                 # the bytes
                 out.append(f"{self._nf(seg['name'])} segment at "
-                           f"{ida_num(seg['start'] >> 4)}")
+                           f"{fmt_num(seg['start'] >> 4)}")
                 out.append(f"{self._nf(seg['name'])} ends")
                 continue
             covered.append((seg['start'], seg['end']))

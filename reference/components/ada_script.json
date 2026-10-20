@@ -14,10 +14,12 @@
   "tests": [
     "tests/integration/test_ada_signature_integration.py",
     "tools/ada_script/tests/test_cli.py",
+    "tools/ada_script/tests/test_data_discovery.py",
     "tools/ada_script/tests/test_error_reporting.py",
     "tools/ada_script/tests/test_grammar.py",
     "tools/ada_script/tests/test_idc_engine.py",
-    "tools/ada_script/tests/test_mz_parser.py"
+    "tools/ada_script/tests/test_mz_parser.py",
+    "tools/ada_script/tests/test_root_launcher.py"
   ],
   "focus": [],
   "consumers": [],

@@ -5,7 +5,7 @@ from tools.ada_script.analyzer import Analyzer
 
 
 class CapstoneBackend:
-    """Capstone-based analyzer producing IDA-style labeled disassembly.
+    """Capstone-based analyzer producing assembler-style labeled disassembly.
 
     Disassembles executable regions (IDC-defined or discovered), resolves
     jump/call/data references into labels, applies operand overrides and

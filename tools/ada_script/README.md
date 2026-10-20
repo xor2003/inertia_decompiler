@@ -14,7 +14,10 @@ With a uv-managed environment, use
 
 The analyzer, backends, database, tests and upstream provenance live in this
 package. The command is `inertia-ada` or `python -m tools.ada_script`; no external
-checkout or import-path mutation is needed.
+checkout or import-path mutation is needed. The executable root wrapper
+`./ada.py` forwards the same `tools.ada_script.cli` entry point; run it from an
+activated virtualenv or through `.venv/bin/python ada.py`, since the wrapper
+does not install dependencies or re-exec interpreters.
 The integrated CLI supports IDC (`--idc-script`), runtime JSON (`--runtime`),
 Capstone/Rizin backends, `--full`, `--classify`, `--xrefs`, and report `--output`.
 Rizin is selected explicitly with `--backend rizin`; Capstone does not silently
@@ -30,6 +33,16 @@ builder used by Inertia is selected. `--signature-catalog` accepts repeatable
 PAT paths, and `--pat-backend` selects `python_regex`, `hyperscan`, or `auto`.
 Use the existing signature catalog builder to convert OMF OBJ/LIB inputs.
 `--no-signatures` or `INERTIA_DISABLE_SIGNATURES=1` disables naming.
+
+After code disassembly the analyzer runs automatic data discovery
+(`data_discovery.py`): data references create `db`/`dw`/`dd`/`dq` items
+sized by operand width, non-executable segments are swept for
+NUL-terminated and Pascal strings
+(minimum 5/3 content chars, printable+TAB/LF/CR/ESC alphabet, relocation
+and segment boundaries are never spanned), word items whose value
+resolves inside the image render as `dw offset label`, and `lea`
+produces an offset xref without creating an item. Evidence counters land
+in `stats` (`data_items_auto`, `data_strings_auto`).
 
 Outputs: `GAME.asm`, `GAME.lst`, `analysis.db`, `analysis.md`, `signatures.json`
 and a reusable `signature-cache/`. Relative `--output` paths are resolved under

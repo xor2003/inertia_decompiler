@@ -1,4 +1,8 @@
-"""Capstone-based analyzer producing IDA-style labeled disassembly.
+"""Capstone-based analyzer producing assembler-style labeled disassembly.
+
+Layer: tools/ada_script analyzer.
+Responsibility: load segment/symbol context, discover code regions,
+disassemble them with Capstone, and persist instructions/xrefs/data refs.
 
 Pipeline inside this module:
   1. Load analysis context from the DB (segments, functions, names, data
@@ -17,7 +21,7 @@ import bisect
 import logging
 import re
 
-from capstone import CS_AC_WRITE, CS_ARCH_X86, CS_MODE_16, Cs
+from capstone import CS_AC_WRITE, CS_ARCH_X86, CS_MODE_16, Cs, CsInsn
 from capstone import x86_const as _cx86
 from capstone.x86 import (
     X86_OP_IMM,
@@ -45,6 +49,7 @@ from capstone.x86 import (
     X86_REG_SI,
     X86_REG_SP,
     X86_REG_SS,
+    X86Op,
 )
 from capstone.x86_const import (
     X86_GRP_FPU,
@@ -88,6 +93,8 @@ from capstone.x86_const import (
     X86_INS_RETFQ,
     X86_INS_XCHG,
 )
+
+from tools.ada_script.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -213,11 +220,11 @@ CALL_IDS = {X86_INS_CALL, X86_INS_LCALL}
 JMP_IDS = {X86_INS_JMP, X86_INS_LJMP}
 BRANCH_IDS = JCC_IDS | LOOP_IDS | JMP_IDS | CALL_IDS | {X86_INS_JCXZ}
 
-# Opcodes that encode a short (rel8) displacement -> IDA prints "short".
+# Opcodes that encode a short (rel8) displacement -> the listing prints "short".
 SHORT_JMP_OPS = {0xEB} | set(range(0x70, 0x80))
 LOOP_OPS = set(range(0xE0, 0xE4))
 
-# mnemonics where an immediate may be an address offset (IDA only renders
+# mnemonics where an immediate may be an address offset (the listing only renders
 # "offset X" when the value was provably used as an address)
 OFFSET_MNEMS = {X86_INS_MOV, X86_INS_LEA, X86_INS_LES, X86_INS_LDS}
 
@@ -225,13 +232,13 @@ OFFSET_MNEMS = {X86_INS_MOV, X86_INS_LEA, X86_INS_LES, X86_INS_LDS}
 SREG_REGS = {X86_REG_ES, X86_REG_CS, X86_REG_SS, X86_REG_DS,
              X86_REG_FS, X86_REG_GS}
 
-# IDA's mnemonic spelling differs from capstone's for these; also capstone
+# Listing mnemonic spelling differs from capstone's for these; also capstone
 # decodes opcode 99h as `cdq` even in 16-bit mode (it is `cwd`, and uasm
 # .286 doesn't know `cdq`).  Same for `cwde`/`cbw`.
 MNEM_MAP = {'ret': 'retn', 'jae': 'jnb', 'xlatb': 'xlat',
             'cdq': 'cwd', 'cwde': 'cbw'}
 
-# string / implicit-operand instructions: IDA prints the bare mnemonic
+# string / implicit-operand instructions: print the bare mnemonic
 # shift/rotate instructions with implicit count 1 (D0/D1 encodings)
 SHIFT_IMPLICIT = {'rcl', 'rcr', 'rol', 'ror', 'shl', 'sal', 'shr', 'sar'}
 
@@ -253,10 +260,10 @@ _STRSEG_FORMS = {
 }
 
 
-def ida_num(value, force_hex=False):
-    """Format a number like IDA: decimal <10, else 0-prefixed hex with h."""
+def fmt_num(value: int, force_hex: bool = False) -> str:
+    """Format a number for listings: decimal <10, else 0-prefixed hex with h."""
     if value < 0:
-        return '-' + ida_num(-value, force_hex)
+        return '-' + fmt_num(-value, force_hex)
     if value < 10 and not force_hex:
         return str(value)
     s = f"{value:X}"
@@ -265,9 +272,9 @@ def ida_num(value, force_hex=False):
     return s + 'h'
 
 
-def sanitize_str_name(data: bytes):
-    """IDA-style a<Name> label from string bytes, or None for opaque strings
-    (single chars / punctuation get asc_<addr> in IDA)."""
+def sanitize_str_name(data: bytes) -> str | None:
+    """Auto a<Name> label from string bytes, or None for opaque strings
+    (single chars / punctuation get asc_<addr>)."""
     out = []
     cap = True
     alnum = 0
@@ -285,7 +292,15 @@ def sanitize_str_name(data: bytes):
 
 
 class Analyzer:
-    def __init__(self, binary, db, full=False, classify=False, xrefs=False):
+    """Disassembly driver: segments/regions -> instructions, refs, labels.
+
+    binary is the mapped load image; db is the analysis database carrying
+    segments, functions, names and relocations and receiving the results.
+    """
+
+    def __init__(self, binary: bytes, db: Database, full: bool = False,
+                 classify: bool = False, xrefs: bool = False) -> None:
+        """Bind the image bytes and analysis database for the pipeline."""
         self.binary = binary
         self.db = db
         self.full = full
@@ -309,6 +324,7 @@ class Analyzer:
         self.op_ovr_any = {}      # addr -> list[(kind,arg)] for 0x80-flagged
         self.sregs = {}           # (seg_start, reg) -> value
         self.sreg_ranges = []     # (start, reg, value) sorted
+        self._mand_bases = None   # cached segment-base paragraphs set
         self.enum_members = {}    # enum_id -> {value: name}
         self.relocs = {}          # addr -> pointed seg base
         self.frame_vars = {}      # func -> {offset: name}
@@ -332,7 +348,7 @@ class Analyzer:
         self._load_context()
 
     # ------------------------------------------------------------------ ctx
-    def _load_context(self):
+    def _load_context(self) -> None:
         c = self.db.conn
         for s, e, base, cls, typ, exe, name in c.execute(
                 "SELECT start_addr, end_addr, base, class, type, executable, name "
@@ -399,13 +415,14 @@ class Analyzer:
             f['name'] for f in self.funcs.values()}
 
     # ------------------------------------------------------------- segments
-    def seg_of(self, addr):
+    def seg_of(self, addr: int) -> dict | None:
+        """Segment row containing a linear address, or None when unmapped."""
         for s in self.segments:
             if s['start'] <= addr < s['end']:
                 return s
         return None
 
-    def _in_chunked(self, addr):
+    def _in_chunked(self, addr: int) -> bool:
         """True when addr's segment is physically split in the .asm:
         either it exceeds 64K (uasm segment limit) or an interior para was
         used as a segment base (sreg value / relocation target) and becomes
@@ -416,14 +433,9 @@ class Analyzer:
             return False
         if s['end'] - s['start'] > 0x10000:
             return True
-        ps = getattr(self, '_mand_bases', None)
-        if ps is None:
-            ps = self._mand_bases = {
-                v << 4 for _a, _r, v in self.sreg_ranges if v >= 0
-            } | set(self.relocs.values())
-        return any(s['start'] < b < s['end'] for b in ps)
+        return any(s['start'] < b < s['end'] for b in self._mand_bases_set())
 
-    def _fix_target(self, addr, raw):
+    def _fix_target(self, addr: int, raw: int) -> int:
         """Capstone computes near-branch targets without 16-bit IP wraparound.
         The real target wraps inside the current CS segment paragraph."""
         seg = self.seg_of(addr)
@@ -432,11 +444,12 @@ class Analyzer:
         csbase = (seg['base'] or (seg['start'] >> 4)) << 4
         return csbase + ((raw - csbase) & 0xFFFF)
 
-    def seg_name(self, addr):
+    def seg_name(self, addr: int) -> str:
+        """Name of the segment containing addr ('seg' when unmapped)."""
         s = self.seg_of(addr)
         return s['name'] if s else 'seg'
 
-    def sreg_value(self, addr, reg):
+    def sreg_value(self, addr: int, reg: str) -> int:
         """Default/implied segment register value (paragraph) at addr."""
         # explicit split_sreg_range wins: ranges start at each row, run to the
         # next row for the same reg.
@@ -469,7 +482,7 @@ class Analyzer:
         return -1
 
     # ------------------------------------------------------------- labels
-    def label_at(self, addr, kind=None):
+    def label_at(self, addr: int, kind: str | None = None) -> str | None:
         """Return the display name for addr, creating an auto label if needed."""
         if addr in self.names:
             return self.names[addr]
@@ -492,6 +505,8 @@ class Analyzer:
             nm = f"word_{addr:X}"
         elif kind == 'dword':
             nm = f"dword_{addr:X}"
+        elif kind == 'qword':
+            nm = f"qword_{addr:X}"
         elif kind == 'str':
             nm = None  # handled by caller with content
         else:
@@ -501,7 +516,7 @@ class Analyzer:
             nm = self.auto_names[addr]
         return nm
 
-    def _unique(self, nm, addr):
+    def _unique(self, nm: str, addr: int) -> str:
         """Ensure auto names are unique (uasm rejects duplicate symbols)."""
         if self.auto_names.get(addr) == nm:
             return nm
@@ -512,11 +527,11 @@ class Analyzer:
         self.used_names.add(nm)
         return nm
 
-    def _register_data_ref(self, target, size, xtype, from_addr):
+    def _register_data_ref(self, target: int, size: int, xtype: str, from_addr: int) -> None:
         self.data_refs.setdefault(target, set()).add((size, xtype))
         self.xrefs.append((from_addr, target, xtype))
 
-    def _is_stringy(self, addr):
+    def _is_stringy(self, addr: int) -> bool:
         fo = self.db.file_offset(addr)
         if fo is None:
             return False
@@ -524,10 +539,10 @@ class Analyzer:
         return len(run) >= 4 and all(32 <= b < 127 for b in run[:4])
 
     # ---------------------------------------------------------- discovery
-    def _region_boundaries(self, seg):
+    def _region_boundaries(self, seg: dict) -> list[int]:
         """Sorted set of addrs in segment that force an item boundary."""
         b = {seg['start'], seg['end']}
-        for a, (sz, k, cnt) in self.data_items.items():
+        for a, (sz, _k, cnt) in self.data_items.items():
             if seg['start'] <= a < seg['end']:
                 b.add(a)
                 b.add(min(a + sz * max(cnt, 1), seg['end']))
@@ -543,29 +558,66 @@ class Analyzer:
                 b.add(a)
         return sorted(b)
 
-    def _estimate_func_end(self, start):
+    def _mand_bases_set(self) -> set[int]:
+        """Paragraph-aligned addresses used as real-mode segment bases:
+        segment-register range values and relocation targets.  Inside a
+        merged segment these mark the true interior segment boundaries."""
+        ps = self._mand_bases
+        if ps is None:
+            ps = self._mand_bases = {
+                v << 4 for _a, _r, v in self.sreg_ranges if v >= 0
+            } | set(self.relocs.values())
+        return ps
+
+    def _has_code_evidence(self, f: int, fv: dict) -> bool:
+        """Hard code evidence for a function entry: entry point, explicit
+        seed, relocation-backed call/jump target, or a real extent."""
+        return f == self.entry or f in self.seeds or \
+            f in self.call_refs or f in self.code_refs or fv['end'] > f
+
+    def _reloc_far(self, insn: CsInsn) -> bool:
+        """True when a direct far call/jmp has a relocation on its segment
+        word (the last two bytes of a ptr16:16 immediate) -- proof the
+        operand is a linker-resolved code pointer, not table data."""
+        return insn.address + insn.size - 2 in self.relocs
+
+    def _estimate_func_end(self, start: int) -> int:
         """End of a function with unknown extent: next structural boundary."""
         seg = self.seg_of(start)
         if not seg:
             return start + 1
         heads = [seg['end']]
+        # a function never spans a real-mode segment base: inside a merged
+        # segment the interior mandatory bases are the true ends
+        heads += [b for b in self._mand_bases_set()
+                  if start < b < seg['end']]
         heads += [a for a in self.data_items if start < a < seg['end']]
         heads += [f for f in self.funcs if start < f < seg['end']]
         heads += [a for a in self.names if start < a < seg['end']]
         return min(heads)
 
-    def _compute_code_regions(self):
+    def _compute_code_regions(self) -> list:
         """Return sorted list of [start, end) code intervals to disassemble."""
         regions = []
         covered = []  # sorted list of (start,end) occupied intervals
 
-        # 1) function ranges are code
+        # 1) function ranges are code. In a non-executable segment a bare
+        # name is not enough -- signature/symbol hits land on data variables
+        # too (e.g. END.EXE's overlay globals).  A name-only entry with no
+        # extent and no code evidence stays data; relocation-backed call
+        # and jump targets, runtime seeds, the entry point, and entries
+        # with a real extent still emit code (overlays and dgroup-alias
+        # code paragraphs are real).
         for f, fv in sorted(self.funcs.items()):
+            seg = self.seg_of(f)
+            if seg is not None and not seg['exec'] and \
+                    not self._has_code_evidence(f, fv):
+                continue
             e = fv['end'] if fv['end'] > f else self._estimate_func_end(f)
             regions.append([f, e, f])
             covered.append((f, e))
 
-        def in_covered(a):
+        def in_covered(a: int) -> bool:
             return any(s <= a < e for s, e in covered)
 
         # 2) each create_insn seed starts a code run ending at the next head
@@ -601,29 +653,34 @@ class Analyzer:
         regions.sort()
         return regions
 
-    def _recursive_descent(self):
+    def _recursive_descent(self) -> list:
         """No IDC info: trace code from the entry point."""
         entry = self.entry
         regions = []
         visited = set()
         work = [entry]
+        evidenced = set()  # reloc-backed far targets allowed into non-exec
         entry_seg = self.seg_of(entry)
         while work:
             a = work.pop()
             if a in visited:
                 continue
             seg = self.seg_of(a)
-            if not seg or (not seg['exec'] and
+            if not seg or (not seg['exec'] and a not in evidenced and
                            (entry_seg is None or
                             seg['start'] != entry_seg['start'])):
                 continue
             visited.add(a)
-            # linear sweep until a break in control flow
+            # linear sweep until a break in control flow; a mandatory base
+            # ends the sweep too -- no code run crosses a real seg boundary
+            seg_end = min(
+                [seg['end']] +
+                [b for b in self._mand_bases_set() if b > a])
             cur = a
             start = a
             while True:
                 fo = self.db.file_offset(cur)
-                if fo is None or cur >= seg['end'] or cur in self.data_items:
+                if fo is None or cur >= seg_end or cur in self.data_items:
                     break
                 insn = next(self.md.disasm(self.binary[fo:fo + 16], cur, count=1), None)
                 if insn is None:
@@ -634,29 +691,43 @@ class Analyzer:
                 tgt = None
                 if insn.operands and insn.operands[0].type == X86_OP_IMM:
                     tgt = self._fix_target(insn.address, insn.operands[0].imm)
+                if iid in (X86_INS_LCALL, X86_INS_LJMP) and \
+                        len(insn.operands) >= 2 and \
+                        insn.operands[1].type == X86_OP_IMM:
+                    tgt = self.base + insn.operands[0].imm * 16 + \
+                        insn.operands[1].imm
                 if iid in CALL_IDS:
-                    if tgt and tgt >= self.base:
+                    tseg = self.seg_of(tgt) if tgt is not None else None
+                    # a near call from proven code is itself evidence;
+                    # a far call needs the linker relocation on its seg word
+                    strong = tseg is not None and (tseg['exec'] or
+                        iid == X86_INS_CALL or self._reloc_far(insn))
+                    if tgt and tgt >= self.base and strong:
                         if tgt not in self.funcs:
                             self.funcs[tgt] = {'end': tgt, 'name': f"sub_{tgt:X}",
                                                'flags': 0, 'auto': True}
                             work.append(tgt)
+                            evidenced.add(tgt)
                         self.call_refs.add(tgt)
                     continue
                 if iid in RET_IDS or iid == X86_INS_HLT:
                     break
-                if iid == X86_INS_JMP or iid == X86_INS_LJMP:
+                if iid in (X86_INS_JMP, X86_INS_LJMP):
                     if tgt:
+                        if iid == X86_INS_JMP or self._reloc_far(insn):
+                            evidenced.add(tgt)
                         work.append(tgt)
                     break
                 if iid in JCC_IDS or iid in LOOP_IDS:
                     if tgt:
+                        evidenced.add(tgt)  # relative branch: proven code
                         work.append(tgt)
                     continue
             regions.append([start, cur, start])
         return regions
 
     # ---------------------------------------------------------- disassembly
-    def _disasm_region(self, start, end, func_start):
+    def _disasm_region(self, start: int, end: int, func_start: int | None) -> None:
         """Linear-capstone a region; store decoded insns."""
         stop_heads = sorted(set(self.data_items) | set(self.funcs))
         cur = start
@@ -694,28 +765,51 @@ class Analyzer:
             cur += insn.size
 
     # ---------------------------------------------------------- references
-    def _scan_refs(self):
+    def _scan_refs(self) -> None:
         for inst in self.instructions:
             insn = inst['insn']
             addr = inst['addr']
             iid = insn.id
             ops = insn.operands
             tgt = None
-            if iid in BRANCH_IDS and ops and ops[0].type == X86_OP_IMM:
+            if iid in (X86_INS_LCALL, X86_INS_LJMP) and len(ops) >= 2 and \
+                    ops[0].type == X86_OP_IMM and ops[1].type == X86_OP_IMM:
+                # ptr16:16 operand: ops[0] is the (relocation-relative)
+                # segment, ops[1] the offset -- never _fix_target() this,
+                # the target lives in a different segment, not the
+                # caller's CS
+                tgt = self.base + ops[0].imm * 16 + ops[1].imm
+            elif iid in BRANCH_IDS and ops and ops[0].type == X86_OP_IMM:
                 tgt = self._fix_target(addr, ops[0].imm)
             if iid in CALL_IDS:
                 tseg = self.seg_of(tgt) if tgt is not None else None
-                if tgt is not None and tgt >= self.base and tseg and tseg['exec']:
-                    self.call_refs.add(tgt)
-                    if tgt not in self.funcs:
-                        self.funcs[tgt] = {'end': tgt, 'name': f"sub_{tgt:X}",
-                                           'flags': 0, 'auto': True}
+                if tgt is not None and tgt >= self.base and tseg:
                     self.xrefs.append(
                         (addr, tgt, 'fcall' if iid == X86_INS_LCALL else 'call'))
+                    # a call target in a non-executable segment is code
+                    # evidence only when the call is proven real: a near
+                    # call's caller is already decoded code so its relative
+                    # target is code too, while a far call needs a linker
+                    # relocation on its seg word (last two bytes).  A bare
+                    # `9A` byte pattern is jump-table data, not a call.
+                    if tseg['exec'] or iid == X86_INS_CALL or \
+                            self._reloc_far(insn):
+                        self.call_refs.add(tgt)
+                        if tgt not in self.funcs:
+                            self.funcs[tgt] = {'end': tgt,
+                                               'name': f"sub_{tgt:X}",
+                                               'flags': 0, 'auto': True}
             elif iid in JMP_IDS or iid in JCC_IDS or iid in LOOP_IDS:
                 if tgt is not None and self.base <= tgt < 0x110000:
-                    self.code_refs.add(tgt)
                     self.xrefs.append((addr, tgt, 'jmp'))
+                    tseg = self.seg_of(tgt)
+                    # near branches are relative to proven code and may
+                    # legitimately cross the computed segment boundary;
+                    # a direct `jmp far` into non-executable space needs
+                    # the same relocation evidence as a far call.
+                    if tseg is None or tseg['exec'] or \
+                            iid != X86_INS_LJMP or self._reloc_far(insn):
+                        self.code_refs.add(tgt)
             # memory operands -> data refs
             sreg_dst = ops and ops[0].type == X86_OP_REG and \
                 ops[0].reg in SREG_REGS and ops[0].reg != X86_REG_SP
@@ -736,7 +830,10 @@ class Analyzer:
                 if tseg and tseg['exec']:
                     continue  # points into code: could be jump table; skip
                 size = op.size if getattr(op, 'size', 0) else 0
-                xtype = 'w' if (op.access & CS_AC_WRITE) else 'r'
+                # lea takes the address, not the value: an offset ref that
+                # labels the target but must never create a data item there
+                xtype = 'o' if iid == X86_INS_LEA else \
+                    ('w' if (op.access & CS_AC_WRITE) else 'r')
                 self._register_data_ref(target, size or 1, xtype, addr)
                 # word loaded into a segment register -> `seg_XXXX` label
                 if iid == X86_INS_MOV and sreg_dst and opi == 1:
@@ -748,7 +845,7 @@ class Analyzer:
                 if b in self.relocs:
                     self.reloc_words.add(b)
 
-    def _mem_seg(self, insn, mem_op):
+    def _mem_seg(self, insn: CsInsn, mem_op: X86Op) -> str:
         for p in insn.prefix:
             if p in SEG_PREFIX:
                 return SEG_PREFIX[p]
@@ -757,22 +854,22 @@ class Analyzer:
         return 'ds'
 
     # ------------------------------------------------------------ rendering
-    def _op_num(self, value, ovr_kind):
+    def _op_num(self, value: int, ovr_kind: str | None) -> str:
         if ovr_kind == 'dec':
             return str(value)
         if ovr_kind == 'char' and 32 <= value < 127:
             return f"'{chr(value)}'"
-        return ida_num(value)
+        return fmt_num(value)
 
-    def _seg_by_para(self, para):
+    def _seg_by_para(self, para: int) -> dict | None:
         for s in self.segments:
             if s['base'] == para or (s['start'] >> 4) == para:
                 return s
         return None
 
-    def _ptr_needed(self, insn, opi):
+    def _ptr_needed(self, insn: CsInsn, opi: int) -> bool:
         """True when no register operand disambiguates the memory size."""
-        # push/pop are inherently word-sized: IDA omits the ptr keyword
+        # push/pop are inherently word-sized: the ptr keyword is omitted
         if insn.id in (X86_INS_PUSH, X86_INS_POP):
             return False
         # a shift/rotate count operand (cl or imm) is not the accessed
@@ -784,7 +881,7 @@ class Analyzer:
             o.type == X86_OP_REG for j, o in enumerate(insn.operands)
             if j != opi)
 
-    def _acc_size(self, insn, op):
+    def _acc_size(self, insn: CsInsn, op: X86Op) -> int:
         """Access width in bytes; les/lds/lcall/ljmp read a far pointer."""
         acc = op.size if getattr(op, 'size', 0) else 0
         if insn.id in (X86_INS_LES, X86_INS_LDS, X86_INS_LCALL, X86_INS_LJMP):
@@ -792,11 +889,11 @@ class Analyzer:
         return acc
 
     @staticmethod
-    def _sz_kw(acc):
+    def _sz_kw(acc: int) -> str:
         return {1: 'byte', 2: 'word', 4: 'dword', 6: 'fword',
                 8: 'qword', 10: 'tbyte'}.get(acc)
 
-    def _asm_ptr(self, cur, acc, decl_sz):
+    def _asm_ptr(self, cur: str, acc: int, decl_sz: int) -> str:
         """uasm: ptr keyword is mandatory when access size differs from the
         declared item size (e.g. `push` of a byte var, word load of a db)."""
         if cur or not (decl_sz and acc and acc != decl_sz):
@@ -804,7 +901,8 @@ class Analyzer:
         d = self._sz_kw(acc)
         return (d + ' ptr ') if d else cur
 
-    def _mem_bp(self, inst, insn, opi, op, segname, ptr_kw):
+    def _mem_bp(self, inst: dict, insn: CsInsn, opi: int, op: X86Op,
+                        segname: str, ptr_kw: str) -> str:
         """[bp+..] operand: render stack var names and typed equate sizes."""
         m = op.mem
         disp = m.disp
@@ -820,10 +918,10 @@ class Analyzer:
         if fname:
             inner += '+' + fname
         elif disp:
-            inner += ('+' if disp >= 0 else '-') + ida_num(abs(disp))
+            inner += ('+' if disp >= 0 else '-') + fmt_num(abs(disp))
         if m.index:
             inner += '+' + insn.reg_name(m.index)
-        # ptr keyword rules (IDA vs uasm): push/pop never show it;
+        # ptr keyword rules (listing vs uasm): push/pop never show it;
         # `byte ptr` is dropped when a byte register pins the size;
         # the .asm must add it back whenever the access size differs
         # from the equate's declared size (typed `var = word ptr N`)
@@ -855,8 +953,9 @@ class Analyzer:
             inst.setdefault('asm_ops_map', {})[opi] = atxt
         return txt
 
-    def _mem_off_ovr(self, inst, insn, opi, m, base, index,
-                     ovr, any_ovr, segname, ptr_kw):
+    def _mem_off_ovr(self, inst: dict, insn: CsInsn, opi: int, m: dict,
+                         base: str, index: str, ovr: tuple | None,
+                         any_ovr: bool, segname: str, ptr_kw: str) -> str | None:
         """op_plain_offset on the displacement: target = base + u16(disp).
         Returns the rendered operand or None when no offset override."""
         off_base = ovr[1] if ovr and ovr[0] == 'offset' else None
@@ -890,7 +989,7 @@ class Analyzer:
         return (ptr_kw + ' ' if ptr_kw and self._ptr_needed(insn, opi)
                 else '') + (segname or '') + expr
 
-    def _mem_target(self, insn, op, addr):
+    def _mem_target(self, insn: CsInsn, op: X86Op, addr: int) -> tuple[str, int | None]:
         """(seg_name, linear target) of a displacement via sreg tracking."""
         seg = self._mem_seg(insn, op)
         sval = self.sreg_value(addr, seg)
@@ -898,8 +997,9 @@ class Analyzer:
             if (sval is not None and sval >= 0) else None
         return seg, target
 
-    def _mem_indexed(self, inst, insn, opi, op, seg, target, inner,
-                     segname, ptr_kw):
+    def _mem_indexed(self, inst: dict, insn: CsInsn, opi: int,
+                         op: X86Op, seg: str, target: int | None, inner: str,
+                         segname: str, ptr_kw: str) -> str | None:
         """`label[reg]` form for base/index+disp.  Returns text or None."""
         m = op.mem
         dsz = insn.encoding.disp_size if insn.encoding else 0
@@ -938,13 +1038,13 @@ class Analyzer:
             # Emit the numeric displacement to keep the byte-identical
             # modrm (the label form stays in the .lst).
             num = inner + ('+' if m.disp >= 0 else '-') + \
-                ida_num(abs(m.disp))
+                fmt_num(abs(m.disp))
             atxt = np + (segname or '') + f"[{num}]"
         elif self._in_chunked(target):
             # chunked-seg label: symbolic form resolves against the wrong
             # frame -- emit the stored displacement numerically
             num = inner + ('+' if m.disp >= 0 else '-') + \
-                ida_num(abs(m.disp))
+                fmt_num(abs(m.disp))
             atxt = np + (segname or '') + f"[{num}]"
         elif self.seg_of(target) is not None:
             tseg = self.seg_of(target)
@@ -954,7 +1054,7 @@ class Analyzer:
                 # uasm would emit the label's offset in its own frame,
                 # which differs from the stored displacement -- numeric
                 num = inner + ('+' if m.disp >= 0 else '-') + \
-                    ida_num(abs(m.disp))
+                    fmt_num(abs(m.disp))
                 atxt = np + (segname or '') + f"[{num}]"
             else:
                 # uasm needs an explicit seg on a label operand; a
@@ -972,13 +1072,14 @@ class Analyzer:
             # label is beyond every segment: never declared,
             # so the .asm must use the numeric displacement
             num = inner + ('+' if m.disp >= 0 else '-') + \
-                ida_num(abs(m.disp))
+                fmt_num(abs(m.disp))
             atxt = np + (segname or '') + f"[{num}]"
         if atxt is not None:
             inst.setdefault('asm_ops_map', {})[opi] = atxt
         return p + (segname or '') + f"{lbl}[{inner}]"
 
-    def _mem_disp(self, inst, insn, opi, op, segname, ptr_kw):
+    def _mem_disp(self, inst: dict, insn: CsInsn, opi: int, op: X86Op,
+                       segname: str, ptr_kw: str) -> str:
         """Pure [disp] operand: resolve through the effective segment."""
         m = op.mem
         addr = inst['addr']
@@ -986,7 +1087,7 @@ class Analyzer:
         if target is not None and target >= self.base:
             lbl, decl_sz, is_code = self._mem_label(target)
             if lbl is not None:
-                # IDA prints "X ptr" when access size differs from the
+                # print "X ptr" when access size differs from the
                 # declared item size, or when size can't be inferred
                 acc = self._acc_size(insn, op)
                 ptr = ''
@@ -1011,9 +1112,9 @@ class Analyzer:
                     # label sits in a physically split segment: uasm would
                     # resolve it chunk-relative, not against the frame the
                     # original used -- emit the stored displacement, exactly
-                    # like IDA's `ds:3810h` numeric form
+                    # like the `ds:3810h` numeric form
                     atxt = np + (segname or f"{seg}:") + \
-                        ida_num(m.disp & 0xFFFF)
+                        fmt_num(m.disp & 0xFFFF)
                     inst['db_bytes'] = insn.bytes
                 elif self.seg_of(target) is not None:
                     tseg = self.seg_of(target)
@@ -1025,22 +1126,22 @@ class Analyzer:
                         # label's offset in its own frame differs from
                         # the stored displacement -- numeric
                         atxt = np + (segname or '') + \
-                            f"[{ida_num(m.disp & 0xFFFF)}]"
+                            f"[{fmt_num(m.disp & 0xFFFF)}]"
                         inst['db_bytes'] = insn.bytes
                     else:
                         atxt = ap + (segname or f"{seg}:") + lbl
                 else:
                     atxt = np + (segname or '') + \
-                        f"[{ida_num(m.disp & 0xFFFF)}]"
+                        f"[{fmt_num(m.disp & 0xFFFF)}]"
                     inst['db_bytes'] = insn.bytes
                 inst.setdefault('asm_ops_map', {})[opi] = atxt
                 return ptr + (segname or '') + lbl
         segp = segname or f"{seg}:"
         inst['db_bytes'] = insn.bytes
         return (ptr_kw + ' ' if ptr_kw else '') + \
-            f"{segp}{ida_num(m.disp)}"
+            f"{segp}{fmt_num(m.disp)}"
 
-    def _render_mem(self, inst, insn, opi, op):
+    def _render_mem(self, inst: dict, insn: CsInsn, opi: int, op: X86Op) -> str:
         m = op.mem
         addr = inst['addr']
         ovr = self.op_ovr.get((addr, opi))
@@ -1106,21 +1207,22 @@ class Analyzer:
         elif base or index:
             dsz = insn.encoding.disp_size if insn.encoding else 0
             if m.disp or dsz == 2:
-                # IDA renders a resolvable displacement as `label[reg]`
+                # render a resolvable displacement as `label[reg]`
                 seg, target = self._mem_target(insn, op, addr)
                 r = self._mem_indexed(inst, insn, opi, op, seg, target,
                                       inner, segname, ptr_kw)
                 if r is not None:
                     return r
                 inner += ('+' if m.disp >= 0 else '-') + \
-                    ida_num(abs(m.disp))
+                    fmt_num(abs(m.disp))
         else:
             return self._mem_disp(inst, insn, opi, op, segname, ptr_kw)
 
         ptr = ptr_kw + ' ' if ptr_kw and self._ptr_needed(insn, opi) else ''
         return ptr + (segname or '') + '[' + inner + ']'
 
-    def _numeric_mem(self, insn, opi, m, segname, ptr_kw):
+    def _numeric_mem(self, insn: CsInsn, opi: int, m: dict,
+                         segname: str, ptr_kw: str) -> str:
         """Numeric mem operand for the assemblable .asm output."""
         inner = ''
         if m.base:
@@ -1131,9 +1233,9 @@ class Analyzer:
                 inner += f"*{m.scale}"
         if inner:
             if m.disp:
-                inner += ('+' if m.disp >= 0 else '-') + ida_num(abs(m.disp))
+                inner += ('+' if m.disp >= 0 else '-') + fmt_num(abs(m.disp))
         elif m.disp:
-            inner = ida_num(m.disp & 0xFFFF)
+            inner = fmt_num(m.disp & 0xFFFF)
         far_mem = insn.id in (X86_INS_LES, X86_INS_LDS,
                               X86_INS_LCALL, X86_INS_LJMP)
         if far_mem:
@@ -1143,7 +1245,7 @@ class Analyzer:
         return ((ptr_kw + ' ') if ptr_kw else '') + \
             (segname or '') + '[' + inner + ']'
 
-    def _stkvar_size(self, func, disp):
+    def _stkvar_size(self, func: int, disp: int) -> int:
         """Size of the var enclosing disp (for ptr emission decisions)."""
         sizes = self.frame_sz.get(func, {})
         if disp in sizes:
@@ -1153,7 +1255,7 @@ class Analyzer:
                 return sz
         return 0
 
-    def _stkvar_name(self, func, disp):
+    def _stkvar_name(self, func: int, disp: int) -> str | None:
         """Name for a bp-relative stack operand: declared or auto var."""
         fv = self.frame_vars.get(func, {})
         if disp in fv:
@@ -1165,14 +1267,14 @@ class Analyzer:
                 base = fv.get(off)
                 if base:
                     d = disp - off
-                    return base + (f"+{ida_num(d)}" if d else '')
+                    return base + (f"+{fmt_num(d)}" if d else '')
         finfo = self.funcs.get(func)
         far = bool(finfo and finfo['flags'] & 2)
         args_base = 6 if far else 4
         if disp >= args_base:
             return f"arg_{disp - args_base:X}"
         if disp >= 0:
-            # saved bp / return-address zone: IDA names it var_sN only for
+            # saved bp / return-address zone: name it var_sN only for
             # slots covered by the frame's frregs (saved registers) size
             fr = self.frames.get(func)
             if fr and disp >= args_base - fr[1]:
@@ -1180,7 +1282,7 @@ class Analyzer:
             return None
         return f"var_{-disp:X}"
 
-    def _mem_label(self, target):
+    def _mem_label(self, target: int) -> tuple[str | None, int, bool]:
         """(label, declared_size, is_code) for an absolute memory target,
         or (None, 0, False).  is_code marks loc_/sub_-style labels that
         uasm emits as `::` near labels -- they always need an explicit
@@ -1197,7 +1299,7 @@ class Analyzer:
                 if lbl is None:
                     lbl = self.auto_names.setdefault(a, f"asc_{a:X}")
                 if d:
-                    lbl = f"{lbl}+{ida_num(d, True)}"
+                    lbl = f"{lbl}+{fmt_num(d, True)}"
                 # 'str' size is the string length; the emitted element is db
                 return lbl, (1 if k == 'str' else sz), False
         # labels not on a data item are emitted as `equ $+n`/`db` lines in
@@ -1213,15 +1315,15 @@ class Analyzer:
             code = (target - off) in self.covered or \
                 (target - off) in self.funcs
             if off:
-                return f"{nm}+{ida_num(off, True)}", \
+                return f"{nm}+{fmt_num(off, True)}", \
                     2 if code else self._lbl_size(nm, target), code
             return nm, 2 if code else self._lbl_size(nm, target), code
         return None, 0, False
 
-    def _offset_expr(self, target):
+    def _offset_expr(self, target: int) -> str | None:
         """Render a linear target for op_plain_offset: struct-member or label.
 
-        Parenthesizes composite expressions the way IDA does:
+        Parenthesizes composite expressions the way listings do:
         `(stru_X.member+d)[si]` vs plain `name[si]`.
         """
         di = self._di_sorted
@@ -1239,14 +1341,14 @@ class Analyzer:
                     expr = sname
                     rem = delta
                 if rem:
-                    expr += f"+{ida_num(rem, True)}"
+                    expr += f"+{fmt_num(rem, True)}"
                 return f"({expr})" if '+' in expr else expr
         lbl, _, _ = self._mem_label(target)
         if lbl is None:
             return None
         return f"({lbl})" if '+' in lbl else lbl
 
-    def _struc_member_at(self, sname, delta):
+    def _struc_member_at(self, sname: str, delta: int) -> tuple[str | None, int]:
         """(member_name, remainder) for byte delta inside struct sname."""
         best_off, best_name = -1, None
         for off, _sz, mname in self.struc_members.get(sname, []):
@@ -1256,16 +1358,16 @@ class Analyzer:
             return None, delta
         return best_name, delta - best_off
 
-    def _struc_member_name(self, sid, off):
+    def _struc_member_name(self, sid: int, off: int) -> str | None:
         row = self.db.conn.execute(
             "SELECT name FROM struc_members WHERE struc_id=? AND offset=?",
             (sid, off)).fetchone()
         return row[0] if row else None
 
-    def _data_kind_for(self, size):
+    def _data_kind_for(self, size: int) -> str | None:
         return {1: 'byte', 2: 'word', 4: 'dword'}.get(size, 'byte')
 
-    def _lbl_size(self, nm, target):
+    def _lbl_size(self, nm: str, target: int) -> int:
         """Size the generator will declare for a label: its name prefix
         (byte_/word_/...) if any, else word for `equ` aliases past the
         image end (uasm sizes untyped equs as words) and byte for `db`
@@ -1276,7 +1378,7 @@ class Analyzer:
             return p
         return 2 if target >= self.image_end else 1
 
-    def _nearest_label_below(self, target):
+    def _nearest_label_below(self, target: int) -> tuple[str, int] | None:
         """Label for target inside a known data item (label+ofs form)."""
         key = len(self.names) + len(self.auto_names) + len(self.data_items)
         if getattr(self, '_lbl_key', None) != key:
@@ -1296,7 +1398,7 @@ class Analyzer:
         lbl = self.label_at(a)
         return (lbl, target - a) if lbl else None
 
-    def _render_op(self, inst, insn, opi, op):
+    def _render_op(self, inst: dict, insn: CsInsn, opi: int, op: X86Op) -> str:
         addr = inst['addr']
         ovr = self.op_ovr.get((addr, opi))
         iid = insn.id
@@ -1320,14 +1422,14 @@ class Analyzer:
                     if lbl:
                         inst.setdefault('asm_ops_map', {})[opi] = \
                             'near ptr ' + lbl
-                    return lbl or ida_num(val)
+                    return lbl or fmt_num(val)
                 fv = self.funcs.get(val)
                 if fv is not None:
                     lbl = fv['name']
                 else:
                     lbl = self.label_at(val, 'loc')
                 short = bool(insn.bytes) and insn.bytes[0] in SHORT_JMP_OPS
-                lbltxt = lbl or ida_num(val)
+                lbltxt = lbl or fmt_num(val)
                 # asm: bare label lets uasm auto-fit short/near (drift-safe),
                 # `near ptr` pins the original near form so it can't shrink;
                 # loop/jcxz are short-only -- no near form exists for them
@@ -1353,7 +1455,7 @@ class Analyzer:
                 # an imm8 can't carry a word-sized `seg` fixup; the reloc
                 # word runs into the next insn's bytes -- emit verbatim
                 inst['db_bytes'] = insn.bytes
-                return ida_num(val, True)
+                return fmt_num(val, True)
             if is_seg:
                 seg = self._seg_by_para(val + (self.base >> 4)) or \
                     self._seg_by_para(val)
@@ -1368,7 +1470,7 @@ class Analyzer:
                     if rt:
                         seg = self.seg_of(rt)
                 return f"seg {seg['name']}" if seg else \
-                    ida_num(val + (self.base >> 4), True)
+                    fmt_num(val + (self.base >> 4), True)
             # explicit offset override: op_plain_offset(ea, n, base)
             off_ovr = ovr[1] if ovr and ovr[0] == 'offset' else None
             if off_ovr is not None:
@@ -1384,11 +1486,11 @@ class Analyzer:
                         # the physical chunk base, not the segment frame the
                         # original stored -- emit the original imm verbatim
                         inst.setdefault('asm_ops_map', {})[opi] = \
-                            ida_num(val, True)
+                            fmt_num(val, True)
                     if delta:
-                        return f"(offset {lbl}+{ida_num(delta)})"
+                        return f"(offset {lbl}+{fmt_num(delta)})"
                     return f"offset {lbl}"
-                return f"offset {ida_num(val, True)}"
+                return f"offset {fmt_num(val, True)}"
             # heuristic offset: only for load/store-addr mnemonics, only for
             # word-sized operands (a byte imm can't hold a pointer), only
             # when the target is a named location or a string
@@ -1400,7 +1502,7 @@ class Analyzer:
                     if self._offset_worthy(t):
                         if self._in_chunked(t):
                             inst.setdefault('asm_ops_map', {})[opi] = \
-                                ida_num(val, True)
+                                fmt_num(val, True)
                         lbl = self.label_at(t)
                         return lbl if iid == X86_INS_PUSH \
                             else f"offset {lbl}"
@@ -1410,12 +1512,12 @@ class Analyzer:
 
         return insn.op_str
 
-    def _offset_label(self, target):
+    def _offset_label(self, target: int) -> tuple[str | None, int]:
         """(label, delta) for an `offset` operand: the exact name, else the
         containing data item's label plus a delta (`(offset item+600h)`)."""
         if target in self.names:
             return self.label_at(target), 0
-        # inside a data item -> `itemname+delta` (IDA style); auto names at
+        # inside a data item -> `itemname+delta`; auto names at
         # mid-item addresses are synthetic and must not win over this form
         i = bisect.bisect_right(self._di_sorted, target) - 1
         if i >= 0:
@@ -1427,7 +1529,7 @@ class Analyzer:
             return self.label_at(target), 0
         return None, 0
 
-    def _offset_worthy(self, target):
+    def _offset_worthy(self, target: int) -> bool:
         """True when an immediate should render as `offset name`: the target
         must be an explicitly-named location or a string item."""
         if target in self.names:
@@ -1446,7 +1548,8 @@ class Analyzer:
         (0x05, 0x0D, 0x15, 0x1D, 0x25, 0x2D, 0x35, 0x3D,  # acc-imm16 -> 83 ib
          0x68, 0x69, 0x81))                              # push/imul/grp1 iw->ib
 
-    def render(self, inst):
+    def render(self, inst: dict) -> str:
+        """Operand text for one decoded instruction with labels resolved."""
         insn = inst['insn']
         ops = insn.operands
         iid = insn.id
@@ -1482,13 +1585,13 @@ class Analyzer:
             if 'db_bytes' not in inst and lead + 1 < insn.size:
                 opc, modrm = insn.bytes[lead], insn.bytes[lead + 1]
                 regf = modrm & 0x38
-                if opc == 0xFF and modrm >= 0xC0 and \
-                        regf in (0x00, 0x08, 0x30) or \
-                        opc == 0x8F and modrm >= 0xC0 and regf == 0 or \
-                        opc in (0xC6, 0xC7) and modrm >= 0xC0 and \
-                        regf == 0 or \
-                        opc in (0xF6, 0xF7) and modrm >= 0xC0 and \
-                        regf in (0x00, 0x08):
+                if (opc == 0xFF and modrm >= 0xC0 and \
+                        regf in (0x00, 0x08, 0x30)) or \
+                        (opc == 0x8F and modrm >= 0xC0 and regf == 0) or \
+                        (opc in (0xC6, 0xC7) and modrm >= 0xC0 and \
+                        regf == 0) or \
+                        (opc in (0xF6, 0xF7) and modrm >= 0xC0 and \
+                        regf in (0x00, 0x08)):
                     # uasm always picks the single-byte register form:
                     # inc/dec/push reg -> 40+/48+/50+, pop reg -> 58+,
                     # mov reg,imm -> B0+/B8+, test acc,imm -> A8/A9
@@ -1535,14 +1638,14 @@ class Analyzer:
                 # a 66h/67h prefix only survives reassembly when the insn
                 # genuinely uses a 32-bit operand/address; a redundant one
                 # is silently dropped by uasm
-                if 0x66 in leadb and not (
+                if (0x66 in leadb and not (
                         mnem.split()[-1] in _DWORD_MNEMS or any(
-                            o.type == X86_OP_REG and
-                            (insn.reg_name(o.reg) or '') in _EREGS or
-                            o.type == X86_OP_MEM and o.size in (4, 6)
-                            for o in ops)) or \
-                        0x66 in leadb and \
-                        mnem.split()[-1] in _SYS_FIXED_MNEMS:
+                            (o.type == X86_OP_REG and
+                            (insn.reg_name(o.reg) or '') in _EREGS) or
+                            (o.type == X86_OP_MEM and o.size in (4, 6))
+                            for o in ops))) or \
+                        (0x66 in leadb and \
+                        mnem.split()[-1] in _SYS_FIXED_MNEMS):
                     inst['db_bytes'] = insn.bytes
                 # a call/jmp through a 32-bit operand loses its 66h --
                 # uasm won't emit it for a control-flow instruction even
@@ -1633,7 +1736,7 @@ class Analyzer:
             else:
                 inst['asm_ops'] = (insn.reg_name(ops[1].reg) + ', ' +
                                    insn.reg_name(ops[0].reg))
-        # far indirect call/jmp through memory: IDA renders `call dword ptr X`
+        # far indirect call/jmp through memory: render `call dword ptr X`
         if iid in (X86_INS_LCALL, X86_INS_LJMP) and len(ops) == 1 and \
                 ops[0].type == X86_OP_MEM:
             inst['mnem'] = 'call' if iid == X86_INS_LCALL else 'jmp'
@@ -1664,7 +1767,7 @@ class Analyzer:
                 return f"far ptr {self.label_at(target, 'sub')}"
             # uasm can't encode a numeric-seg far pointer -> raw bytes
             inst['db_bytes'] = insn.bytes
-            return f"far ptr {ida_num(segv)}:{ida_num(offv)}"
+            return f"far ptr {fmt_num(segv)}:{fmt_num(offv)}"
         if not ops:
             inst['mnem'] = MNEM_MAP.get(mnem, mnem)
             if mnem == 'int1' or \
@@ -1703,8 +1806,8 @@ class Analyzer:
             return ''
         inst['mnem'] = MNEM_MAP.get(mnem, mnem)
         parts = [self._render_op(inst, insn, i, o) for i, o in enumerate(ops)]
-        # shifts/rotates encode count 1 implicitly (capstone omits it, MASM
-        # and IDA print it)
+        # shifts/rotates encode count 1 implicitly (capstone omits it,
+        # assemblers print it)
         if mnem.split()[-1] in SHIFT_IMPLICIT and len(parts) == 1:
             parts.append('1')
         amap = inst.get('asm_ops_map')
@@ -1730,7 +1833,7 @@ class Analyzer:
         return ', '.join(parts)
 
     # ---------------------------------------------------------------- main
-    def _compute_frame_vars(self):
+    def _compute_frame_vars(self) -> None:
         """Derive stack variables for bp-frame functions and persist them.
 
         Declared (IDC) vars keep their names; undeclared accessed offsets get
@@ -1762,7 +1865,7 @@ class Analyzer:
                 szs[off] = sz
                 spans.append((off, sz))
 
-            def covered(d, spans=spans):
+            def covered(d: int, spans: list = spans) -> bool:
                 return any(o <= d < o + s for o, s in spans)
 
             # locals (negative disp), most negative first so a dword at -4
@@ -1782,7 +1885,7 @@ class Analyzer:
                 fv[d] = f"arg_{d - args_base:X}"
                 szs[d] = sz
                 spans.append((d, sz))
-            # saved-regs zone (IDA var_sN): accessed slots covered by frregs
+            # saved-regs zone (var_sN): accessed slots covered by frregs
             frregs = self.frames.get(f, (0, 0, 0))[1]
             for d in sorted(a for a in access if 0 <= a < args_base):
                 if d >= args_base - frregs and not covered(d):
@@ -1794,7 +1897,8 @@ class Analyzer:
                     "(func_start, offset, name, size) VALUES (?, ?, ?, ?)",
                     (f, off, nm, szs.get(off, 2)))
 
-    def analyze(self):
+    def analyze(self) -> None:
+        """Run the analysis: code regions -> disassembly -> refs -> items."""
         # Iterate: call targets discovered while scanning become new regions.
         for _pass in range(4):
             regions = self._compute_code_regions()
@@ -1807,6 +1911,12 @@ class Analyzer:
                 self._disasm_region(start, end, fstart)
             self._scan_refs()
         logger.info(f"Disassembled {len(self.instructions)} instructions")
+
+        # Automatic data discovery: unexplored bytes reached by data refs
+        # become db/dw/dd items or strings; data segments are swept for
+        # NUL-terminated and Pascal strings (see data_discovery.py)
+        from tools.ada_script.data_discovery import discover_data_items
+        discover_data_items(self)
 
         # associate each instruction with its containing function (frame vars)
         franges = sorted(
@@ -1850,9 +1960,12 @@ class Analyzer:
                 continue
             size = max(s for s, _ in kinds)
             kind = self._data_kind_for(size)
+            it = self.data_items.get(t)
+            if it and it[1] in ('byte', 'word', 'dword', 'qword'):
+                kind = it[1]  # label prefix matches the discovered item
             self.label_at(t, kind)
         # auto-name string items (a<Name>)
-        for a, (sz, k, cnt) in self.data_items.items():
+        for a, (sz, k, _cnt) in self.data_items.items():
             if k == 'str' and a not in self.names and a not in self.auto_names:
                 data = self.db.read_bytes(a, min(sz, 60)) or b''
                 nm = sanitize_str_name(data.split(b'\0')[0])

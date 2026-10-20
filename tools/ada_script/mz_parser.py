@@ -4,7 +4,7 @@ from collections import Counter
 from tools.ada_script.database import Database
 from tools.ada_script.utils import handle_error
 
-# Linear base address at which IDA loads an MZ load module (1000h:0000).
+# Linear base address at which the MZ load module is mapped (1000h:0000).
 LOAD_BASE = 0x10000
 
 
