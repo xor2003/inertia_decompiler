@@ -120,6 +120,7 @@
     "tests/cli/test_function_ir_ssa_source_scope.py",
     "tests/cli/test_function_work_item_contract.py",
     "tests/cli/test_function_worker_policy.py",
+    "tests/cli/test_gdb_symbol_export.py",
     "tests/cli/test_generated_c_artifacts.py",
     "tests/cli/test_generated_c_function_extraction.py",
     "tools/compiler_toolchain/tests/test_generated_c_indexed_argument_contract.py",

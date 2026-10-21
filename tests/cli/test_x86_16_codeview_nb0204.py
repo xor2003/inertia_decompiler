@@ -285,3 +285,56 @@ def test_parse_nb08_uses_cv4_directory_reader():
     assert parsed is not None
     assert parsed.version == "NB08"
     assert parsed.code_labels[0x1000 + (1 << 4) + 0x40] == "main"
+
+
+def test_parse_nb05_interim_segmap_translates_pub_and_line_segments():
+    """LINK 5.x interim layout: 0x123 pubs, 0x127 srcmodule, 0x12d segmap.
+
+    Segment fields in pub records and line tables are 1-based indices into
+    sstSegMap rather than paragraphs; each entry contributes frame*16+offset.
+    """
+    pubs = _symbol_record(
+        CodeViewSymbolType.S_PUB16,
+        struct.pack("<HHH", 0x40, 2, 0x0011) + _pstr("_main"),
+    )
+
+    segmap = struct.pack("<HH", 2, 2)
+    segmap += struct.pack("<HHHHHHII", 0, 0, 0, 0x10, 0, 0, 0x0000, 0x0020)
+    segmap += struct.pack("<HHHHHHII", 0, 0, 0, 0x20, 0, 0, 0x0008, 0x0080)
+
+    src = bytearray()
+    src.extend(struct.pack("<HH", 1, 1))
+    src.extend(struct.pack("<I", 20))
+    src.extend(struct.pack("<II", 2, 0x80))
+    src.extend(struct.pack("<H", 1))
+    src.extend(struct.pack("<H", 0))
+    file_base = len(src)
+    assert file_base == 20
+    src.extend(struct.pack("<HHI", 1, 0, 0))
+    line_base_patch = len(src) - 4
+    src.extend(struct.pack("<II", 2, 0x80))
+    src.extend(_pstr("m.c"))
+    while len(src) % 4:
+        src.append(0)
+    line_base = len(src)
+    struct.pack_into("<I", src, line_base_patch, line_base)
+    src.extend(struct.pack("<HHIH", 2, 1, 0x40, 7))
+
+    image = _build_cv4_image(
+        b"NB05",
+        [
+            (0x0120, 1, b""),
+            (0x0123, 1, b"\x01\x00\x00\x00" + pubs),
+            (0x0127, 1, bytes(src)),
+            (0x012D, 0xFFFF, segmap),
+        ],
+    )
+
+    parsed = parse_codeview_nb0204_bytes(image, load_base_linear=0x1000)
+
+    assert parsed is not None
+    expected = 0x1000 + (0x20 << 4) + 0x08 + 0x40
+    assert parsed.code_labels[expected] == "main"
+    assert parsed.line_map[expected] == (7, 0)
+    assert parsed.segments[1].frame == 0x20
+    assert parsed.segments[1].offset == 0x08

@@ -77,8 +77,11 @@ _SYMBOL_SUBSECTIONS = {
     CodeViewSubsectionType.SST_SYMBOLS,
     CodeViewSubsectionType.SST_ALIGN_SYM,
     CodeViewSubsectionType.SST_GLOBAL_SYM,
+    0x0123,  # Interim LINK 5.x per-module pub/proc stream (NB02..NB05)
     0x0129,
 }
+_CV4_SEGMAP_SUBSECTION = 0x012D  # sstSegMap: logical segment index -> frame/offset/size
+_SEGMAP_ENTRY_SIZE = 20
 _HASHED_PUBLIC_SUBSECTIONS = {0x012A}
 _CV4_TYPE_SUBSECTIONS = {0x012B}
 _CV4_FIRST_TYPE_INDEX = 0x1000
@@ -112,6 +115,16 @@ class CodeViewSymbol:
 
 
 @dataclass(frozen=True)
+class CodeViewSegment:
+    """One sstSegMap entry mapping a logical segment index to an image location."""
+
+    index: int  # 1-based segment index used by symbol and line records
+    frame: int  # paragraph inside the loaded image
+    offset: int  # byte offset of the segment contribution inside the frame
+    size: int  # byte size of the segment contribution
+
+
+@dataclass(frozen=True)
 class CodeViewNB0204Info:
     """Parsed CodeView NB02/NB04/NB08/NB09 debug metadata."""
 
@@ -127,6 +140,7 @@ class CodeViewNB0204Info:
     type_record_names: tuple[str, ...] = ()
     type_members: tuple[_nb00.CodeViewNB00TypeMember, ...] = ()
     debug_identifiers: tuple[str, ...] = ()
+    segments: tuple[CodeViewSegment, ...] = ()  # sstSegMap entries, index-ordered
 
 
 def find_codeview_nb0204(data: bytes, *, signatures: list[bytes] | None = None) -> tuple[str, int] | None:
@@ -197,6 +211,7 @@ def _parse_label_subsection_8616(
     subsection_type: int,
     blob: bytes,
     load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
 ) -> bool:
     """Parse label/symbol producing subsections; return False if not handled."""
     if subsection_type in _PUBLIC_SUBSECTIONS:
@@ -208,7 +223,13 @@ def _parse_label_subsection_8616(
     if subsection_type in _SYMBOL_SUBSECTIONS:
         syms = _parse_symbol_records(blob)
         _materialize_symbol_records(
-            syms, sink.code_labels, sink.data_labels, sink.procedures, sink.stack_variables, load_base_linear
+            syms,
+            sink.code_labels,
+            sink.data_labels,
+            sink.procedures,
+            sink.stack_variables,
+            load_base_linear,
+            seg_map,
         )
         sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
         return True
@@ -218,12 +239,46 @@ def _parse_label_subsection_8616(
         return True
     if subsection_type == CodeViewSubsectionType.SST_SRCMODULE:
         parsed_source_files, parsed_line_map = _parse_source_module_lines(
-            blob, load_base_linear=load_base_linear
+            blob, load_base_linear=load_base_linear, seg_map=seg_map
         )
+        file_base_index = len(sink.source_files)
         sink.source_files.extend(parsed_source_files)
-        sink.line_map.update(parsed_line_map)
+        for addr, (line, file_index) in parsed_line_map.items():
+            sink.line_map[addr] = (
+                line,
+                file_index + file_base_index if file_index >= 0 else -1,
+            )
         return True
     return False
+
+
+def _parse_segmap_8616(
+    data: bytes, directory_entries: list[dict[str, int]]
+) -> dict[int, CodeViewSegment]:
+    """Parse the global sstSegMap subsection into index -> CodeViewSegment."""
+    seg_map: dict[int, CodeViewSegment] = {}
+    for entry in directory_entries:
+        if entry["type"] != _CV4_SEGMAP_SUBSECTION:
+            continue
+        offset = entry["offset"]
+        size = entry["size"]
+        if offset + size > len(data):
+            continue
+        blob = data[offset : offset + size]
+        if len(blob) < 4:
+            continue
+        seg_count = struct.unpack_from("<H", blob, 0)[0]
+        pos = 4
+        for index in range(1, seg_count + 1):
+            if pos + _SEGMAP_ENTRY_SIZE > len(blob):
+                break
+            _flags, _ovl, _group, frame, _iseg_name, _iclass, seg_off, seg_size = struct.unpack_from(
+                "<HHHHHHII", blob, pos
+            )
+            seg_map[index] = CodeViewSegment(index=index, frame=frame, offset=seg_off, size=seg_size)
+            pos += _SEGMAP_ENTRY_SIZE
+        break
+    return seg_map
 
 
 def _parse_legacy_subsection_8616(
@@ -254,8 +309,10 @@ def _parse_legacy_subsection_8616(
             sink.legacy_modules.get(entry["module"]),
             load_base_linear=load_base_linear,
         )
+        file_base_index = len(sink.source_files)
         sink.source_files.extend(parsed_source_files)
-        sink.line_map.update(parsed_line_map)
+        for addr, (line, file_index) in parsed_line_map.items():
+            sink.line_map[addr] = (line, file_index + file_base_index)
     elif subsection_type == _nb00.CodeViewSubsectionType.SYMBOLS:
         sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
 
@@ -302,6 +359,11 @@ def parse_codeview_nb0204_bytes(data: bytes, *, load_base_linear: int = 0) -> Co
         # Parse subsection directory
         directory_entries = _parse_subsection_directory(data, debug_base, debug_offset)
 
+        # Interim NB02/NB04/NB05 images map logical segment indices through
+        # sstSegMap (module 0xffff) for both symbol and line addresses. It can
+        # appear after the module subsections, so scan it up front.
+        seg_map = _parse_segmap_8616(data, directory_entries)
+
         for entry in directory_entries:
             offset = entry["offset"]
             size = entry["size"]
@@ -311,7 +373,7 @@ def parse_codeview_nb0204_bytes(data: bytes, *, load_base_linear: int = 0) -> Co
 
             blob = data[offset : offset + size]
             subsection_type = entry["type"]
-            if not _parse_label_subsection_8616(sink, subsection_type, blob, load_base_linear):
+            if not _parse_label_subsection_8616(sink, subsection_type, blob, load_base_linear, seg_map):
                 _parse_legacy_subsection_8616(sink, entry, subsection_type, blob, load_base_linear)
 
         _apply_legacy_publics_8616(sink, load_base_linear)
@@ -329,6 +391,7 @@ def parse_codeview_nb0204_bytes(data: bytes, *, load_base_linear: int = 0) -> Co
             type_record_names=tuple(dict.fromkeys(sink.type_record_names)),
             type_members=tuple(sink.type_members),
             debug_identifiers=tuple(dict.fromkeys(sink.debug_identifiers)),
+            segments=tuple(seg_map.values()) if seg_map else (),
         )
 
     except (struct.error, ValueError, IndexError):
@@ -550,9 +613,10 @@ def _materialize_symbol_record_8616(
     procedures: list[CodeViewSymbol],
     stack_variables: dict[str, list[CodeViewSymbol]],
     load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
 ) -> None:
     """Route one parsed symbol into its label/procedure/stack bucket."""
-    linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear)
+    linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear, seg_map=seg_map)
     if sym.is_procedure():
         procedures.append(sym)
         if sym.name and linear is not None:
@@ -583,10 +647,11 @@ def _materialize_symbol_records(
     procedures: list[CodeViewSymbol],
     stack_variables: dict[str, list[CodeViewSymbol]],
     load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
 ) -> None:
     for sym in syms:
         _materialize_symbol_record_8616(
-            sym, code_labels, data_labels, procedures, stack_variables, load_base_linear
+            sym, code_labels, data_labels, procedures, stack_variables, load_base_linear, seg_map
         )
 
 
@@ -633,11 +698,19 @@ def _read_pascal_string(blob: bytes, offset: int, end: int) -> str:
     return blob[start:stop].decode("ascii", errors="ignore")
 
 
-def _symbol_linear_addr(symbol: CodeViewSymbol, *, load_base_linear: int) -> int | None:
+def _symbol_linear_addr(
+    symbol: CodeViewSymbol,
+    *,
+    load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
+) -> int | None:
     if symbol.offset < 0:
         return None
     if symbol.segment is None:
         return load_base_linear + symbol.offset
+    if seg_map is not None and symbol.segment in seg_map:
+        seg = seg_map[symbol.segment]
+        return load_base_linear + (seg.frame << 4) + seg.offset + symbol.offset
     return load_base_linear + (symbol.segment << 4) + symbol.offset
 
 
@@ -651,6 +724,8 @@ def _collect_source_line_pairs_8616(
     line_base: int,
     line_map: dict[int, tuple[int, int]],
     load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
+    file_index: int = 0,
 ) -> None:
     """Collect offset/line pairs from one segment's line table."""
     if line_base + 4 > len(blob):
@@ -663,8 +738,12 @@ def _collect_source_line_pairs_8616(
     pair_offset += pair_count * 4
     lines = struct.unpack_from(f"<{pair_count}H", blob, pair_offset) if pair_count else ()
     for code_offset, source_line in zip(offsets, lines, strict=False):
-        linear = load_base_linear + (segment << 4) + code_offset
-        line_map[linear] = (source_line, 0)
+        if seg_map is not None and segment in seg_map:
+            seg = seg_map[segment]
+            linear = load_base_linear + (seg.frame << 4) + seg.offset + code_offset
+        else:
+            linear = load_base_linear + (segment << 4) + code_offset
+        line_map[linear] = (source_line, file_index)
 
 
 def _parse_source_file_record_8616(
@@ -673,6 +752,7 @@ def _parse_source_file_record_8616(
     source_files: list[str],
     line_map: dict[int, tuple[int, int]],
     load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
 ) -> None:
     """Parse one source file record's name and per-segment line tables."""
     if file_base + 6 > len(blob):
@@ -686,21 +766,26 @@ def _parse_source_file_record_8616(
     line_bases = struct.unpack_from(f"<{file_segment_count}I", blob, file_offset) if file_segment_count else ()
     file_offset += file_segment_count * 4
     file_offset += file_segment_count * 8
+    file_index = -1
     if file_offset < len(blob):
         name_length = blob[file_offset]
         name_start = file_offset + 1
         name_end = name_start + name_length
         if name_length and name_end <= len(blob):
             source_files.append(blob[name_start:name_end].decode("ascii", errors="ignore"))
+            file_index = len(source_files) - 1
 
     for line_base in line_bases:
-        _collect_source_line_pairs_8616(blob, line_base, line_map, load_base_linear)
+        _collect_source_line_pairs_8616(
+            blob, line_base, line_map, load_base_linear, seg_map, file_index
+        )
 
 
 def _parse_source_module_lines(
     blob: bytes,
     *,
     load_base_linear: int,
+    seg_map: dict[int, CodeViewSegment] | None = None,
 ) -> tuple[list[str], dict[int, tuple[int, int]]]:
     source_files: list[str] = []
     line_map: dict[int, tuple[int, int]] = {}
@@ -721,7 +806,9 @@ def _parse_source_module_lines(
             offset += 2
 
         for file_base in file_bases:
-            _parse_source_file_record_8616(blob, file_base, source_files, line_map, load_base_linear)
+            _parse_source_file_record_8616(
+                blob, file_base, source_files, line_map, load_base_linear, seg_map
+            )
     except (struct.error, ValueError):
         return source_files, line_map
     return source_files, line_map

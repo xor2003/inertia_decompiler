@@ -15,7 +15,7 @@ CodeView is a legacy debug information format used by many DOS-era C compilers. 
 | NB00     | `NB00`    | Early/legacy  | Very early Microsoft C               |
 | **NB02** | `NB02`    | DOS era       | Turbo C v1–v2, Microsoft C v1–v3    |
 | **NB04** | `NB04`    | DOS era ✓     | Microsoft C v5/v6, Turbo C++        |
-| NB05     | `NB05`    | Transitional  | Late DOS / early Windows            |
+| **NB05** | `NB05`    | Transitional ✓| LINK 5.3x / Microsoft C v6–v7 (late DOS) |
 
 **Primary target for DOS games: NB04** (most common in compiled binaries)
 
@@ -242,6 +242,54 @@ struct S_GPROC16 {
     char name[...];          // Null-terminated name
 };
 ```
+
+### NB05 / LINK 5.x interim layout
+
+NB05 trailers emitted by Microsoft LINK 5.31+ (e.g. retail F-14 `F14R.EXE`)
+use CV4-style *per-module* subsection values that differ from the legacy
+NB02/NB04 table. The parser dispatches on the actual observed values:
+
+| Type     | Meaning                                   | Producer      |
+|----------|-------------------------------------------|---------------|
+| `0x120`  | Module record                             | per module    |
+| `0x121`  | Types                                     | per module    |
+| `0x123`  | `sstAlignSym` — publics/procs (S_PUB16…) | per module    |
+| `0x124`  | Locals/params (`mprintf(fmt,args)`)       | per module    |
+| `0x127`  | `sstSrcModule` — source/line tables       | per module    |
+| `0x12d`  | `sstSegMap` — global segment map          | module `0xffff` |
+
+#### `sstSegMap` (`0x12d`)
+
+LINK 5.x NB05 stores segment references as **1-based indices** into the
+segment map, not as paragraphs. The map starts with
+`uint16 seg_count, entry_count` followed by 20-byte entries:
+
+```c
+struct SegMapEntry {           // 20 bytes
+    uint16_t flags, ovl, group;
+    uint16_t frame;            // paragraph inside the loaded image
+    uint16_t seg_name, class_name;
+    uint32_t offset;           // contribution offset within frame
+    uint32_t size;             // contribution size
+};
+```
+
+Every `segment` field in `0x123` symbol records and `0x127` line tables is
+such an index; the linear address is:
+
+```
+linear = load_base + (entry.frame << 4) + entry.offset + record_offset
+```
+
+Verified against `F14RUN.MAP` (`_AdiCrt` seg 2:0 → frame `0x1e`+off `0xc`
+= `0x1ec` = MAP `001E:000C`).
+
+#### Per-file line attribution
+
+`0x127` srcmodule records carry one file record per source file; the
+parser tags each `line_map` row with the file's index into
+`info.source_files` (`-1` when the file name could not be decoded), which
+the DWARF exporter turns into per-file `info line` attribution.
 
 ---
 

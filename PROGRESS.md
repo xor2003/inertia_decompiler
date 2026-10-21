@@ -1,3 +1,28 @@
+## 2026-10-21 — cli: NB05/CV4 debug-info decode fix + gdb ELF symbol export
+
+`inertia/cli/codeview_nb02_nb04.py` now handles the LINK 5.x interim
+subsection layout found in real NB05 trailers (F-14 retail F14R.EXE and
+rebuilt F14RUN.EXE): `0x123` per-module public/proc symbol stream,
+`0x12d` `sstSegMap` (segment-index -> frame/offset translation for both
+symbol records and srcmodule line tables), and per-file line attribution
+in `line_map` values. Verified against F14RUN.MAP (e.g. `_AdiCrt`
+seg2:0 -> frame 0x1e+off 0xc = 0x1ec, matching MAP `001E:000C`).
+
+New `inertia/cli/gdb_symbol_export.py` exports NBxx/TDINFO metadata as a
+minimal ELF32 object: `.symtab` with FUNC/OBJECT symbols `.text`-relative
+(add-symbol-file relocatable or baked via `--base`), plus DWARF v2
+`.debug_line`/`.debug_info`/`.debug_abbrev` when line rows exist.
+Verified live against libdosbox gdbserver on both retail F14R.EXE and
+rebuilt F14RUN.EXE: `break LoadOverlay` hits, `info symbol $pc` returns
+`astart`/`LoadOverlay + 3`, `info line` reports
+`Line 70 of "D:\MONOPRIN.C"` (retail source attribution).
+
+Tests: 4 new exporter tests + 1 NB05 segmap regression test;
+lint-iteration clean. libdosbox side: workflow documented in
+`docs/debug-gdb.md` (tool repo: github.com/xor2003/inertia_decompiler;
+`qOffsets` already returns absolute-address semantics, no stub change
+needed).
+
 - dosunit ABI-compose exponential fix (ongoing): `_merge_abi_states` used plain `==` on shared SSA term DAGs — O(root-to-leaf paths), the true cause of the multi-hour s0–s2 batch stalls (MemoryError was a symptom). New `_abi_terms_equal` memoizes on (id,id) pairs (O(DAG nodes)); compared roots pinned for cache validity; provisional entries rewind on mismatch/deadline. Deadline checks now inside `_compose_block_outputs`/`_merge_abi_states`/`_abi_terms_equal` loops (was per-block only → minutes of overshoot). Verified: stalled s0/s1/s2 batch-1 docs compose in 4s/28s/101s; `de_doit`/`check_user` refuse `compose_budget_exceeded` at 90s. Committed 204cdb1fb. 205 tests pass, 4 pre-existing fails. Full-corpus shards relaunched with `--resume` (run_shards.sh reboot-safe); s3 backfilled `oracle_ssa` tags so its 3 completed batches resume-skip; s0–s2 re-running timed-out batches.
 
 - decompiler_postprocess_calls.py flatten+split (ongoing): mega `_materialize_callsite_stack_arguments_8616` dissolved into `_CallsiteStackArgsMaterializer8616` class via scope-aware AST transform; all nested `_impl` wrappers flattened to module fns (closure vars as kw-only params, binding-site dominance safety); manual phase splits for prune_consumed_segmented_stack_byte_arg_stores (94->0), ordered_callsite_pairs (79->0), attach_callsite_summaries (31->0), refresh_callsite_summary_node_ids (33->0), apply_callsite_summary_to_node (27->0), callsite seed/prototype paths; promoted findings 153->98; owning tests 178+2 pre-existing verified per batch.

@@ -546,7 +546,7 @@ Metadata sidecars are optional but useful:
 
 - `.COD` and `.LST`: procedure ranges, labels, local names, and source-backed hints.
 - `.MAP`: public symbols and layout.
-- CodeView NB00/NB02/NB04/NB08/NB09: debug names, procedures, stack variables, source files, line maps, type names, and member records where supported.
+- CodeView NB00/NB02/NB04/NB05/NB08/NB09: debug names, procedures, stack variables, source files, line maps, type names, and member records where supported. NB05 (LINK 5.3x interim layout, e.g. late-DOS Microsoft C v6/v7 games) is decoded via its `sstSegMap`, per-module public (`0x123`) and srcmodule (`0x127`) subsections, with per-file line attribution.
 - TDInfo: Borland/Turbo Debugger symbols, stack/register/constant symbols, compact type descriptors, structs, unions, and enums.
 - `.pat`, `.obj`, `.lib`: library signature matching.
 
@@ -555,6 +555,36 @@ Inspect embedded debug metadata directly:
 ```bash
 ./dump_debug_info.py PROGRAM.EXE
 ```
+
+#### Export debug info as a GDB symbol file
+
+`inertia.cli.gdb_symbol_export` converts embedded NBxx CodeView or TDInfo
+metadata into a minimal ELF32 object that any GDB remote stub can load —
+useful for real-mode debugging under emulators (e.g. libdosbox's
+`gdbserver`):
+
+```bash
+python3 -m inertia.cli.gdb_symbol_export GAME.EXE --base 0x1a10 -o game.elf
+```
+
+`--base` is the linear address where the MZ image is loaded
+(`(load_segment << 4)`, normally `PSP+0x10` paragraphs). The ELF carries a
+`.symtab` (FUNC/OBJECT, `.text`-relative) plus DWARF v2
+`.debug_line`/`.debug_info`/`.debug_abbrev` when the binary has line
+records. In GDB:
+
+```gdb
+set architecture i8086
+maint set target-async off
+target remote localhost:1234
+add-symbol-file game.elf 0    # or the load base if --base 0 was used
+info symbol $eip              # named functions, e.g. "LoadOverlay + 3"
+info line *0x401d4            # 'Line 70 of "D:\MONOPRIN.C" ...'
+```
+
+Verified on retail and rebuilt F-14 binaries against libdosbox's GDB stub
+(see `docs/debug-gdb.md` in that repository). `info line` needs a baked
+`--base`; use `--no-lines` to emit only the symbol table.
 
 More format detail lives in [CODEVIEW_SUPPORT.md](CODEVIEW_SUPPORT.md), [DOS_COMPILER_SUPPORT.md](DOS_COMPILER_SUPPORT.md), [NE_WIN16_SUPPORT.md](NE_WIN16_SUPPORT.md), and [NE_LOADER_INTEGRATION_VERIFIED.md](NE_LOADER_INTEGRATION_VERIFIED.md).
 
