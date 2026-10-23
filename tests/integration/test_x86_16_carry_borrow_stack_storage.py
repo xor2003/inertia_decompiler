@@ -371,3 +371,48 @@ def test_corrupted_high_byte_value_flow_retains_destination_refusal() -> None:
     assert resolution.failure is CarryBorrowDestinationAliasFailure8616.VALUE_FLOW_MISMATCH
     assert len(stack_alias.facts) == 4 and stack_alias.complete
     assert pipeline.destination_aliases.stats.complete and pipeline.storage_widening.stats.complete
+
+
+def test_stage_outputs_require_real_widening_publications() -> None:
+    """Actual Widening artifacts qualify; raw SSA or lookalikes cannot replace them."""
+    from inertia.structuring.decompiler_structuring_stage import _completed_widening_outputs_8616
+
+    stack_alias, pipeline = _pipeline(_ADJACENT_STORES)
+    codegen = _FakeCodegen(stack_alias, pipeline)
+    outputs = _completed_widening_outputs_8616(codegen)
+    assert outputs is not None
+    assert outputs[0] is pipeline
+    assert outputs[1] is codegen._inertia_stack_memory_object_widening_artifact
+    assert _completed_widening_outputs_8616(
+        SimpleNamespace(_inertia_vex_ir_function_ssa=pipeline.source_ssa)
+    ) is None
+    assert _completed_widening_outputs_8616(SimpleNamespace(
+        _inertia_carry_borrow_widening_pipeline_8616=SimpleNamespace(source_ssa=pipeline.source_ssa),
+        _inertia_stack_memory_object_widening_artifact=outputs[1],
+    )) is None
+
+
+def test_stage_outputs_reject_foreign_alias_lineage() -> None:
+    """Two valid artifact sets cannot be mixed across Alias source identities."""
+    from inertia.structuring.decompiler_structuring_stage import _completed_widening_outputs_8616
+
+    stack_alias, pipeline = _pipeline(_ADJACENT_STORES)
+    foreign_alias, _foreign_pipeline = _pipeline(_ADJACENT_STORES)
+    assert foreign_alias is not stack_alias
+    codegen = _FakeCodegen(foreign_alias, pipeline)
+    assert _completed_widening_outputs_8616(codegen) is None
+
+
+def test_real_widening_artifacts_are_publishable_without_dropping_outputs() -> None:
+    """Real producer results must be representable even when source currentness is unknown."""
+    from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
+    from inertia.pipeline.function_readiness import record_function_stage_evidence_8616
+
+    stack_alias, pipeline = _pipeline(_ADJACENT_STORES)
+    codegen = _FakeCodegen(stack_alias, pipeline)
+    evidence = record_function_stage_evidence_8616(
+        codegen.project, stack_alias.function_addr, FunctionLifecycleStage8616.WIDENING,
+        producer="test_real_widening_outputs",
+        outputs=(pipeline, codegen._inertia_stack_memory_object_widening_artifact),
+    )
+    assert evidence.failure is None

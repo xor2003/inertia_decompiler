@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any, cast
 
 _RIZIN_FUNCTION_ANALYSIS_COMMAND = "aa;aflj"
 
@@ -152,7 +153,8 @@ def _optional_int(raw: object) -> int | None:
     if raw is None:
         return None
     try:
-        return int(raw)
+        # Dynamic JSON boundary: rizin payload fields arrive untyped.
+        return int(cast(Any, raw))
     except Exception:
         return None
 

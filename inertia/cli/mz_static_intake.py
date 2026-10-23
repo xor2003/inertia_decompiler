@@ -413,7 +413,10 @@ class MzStaticIntakeRequest8616:
         retained = getattr(
             project, "_inertia_mz_static_invocation_request_8616", None
         )
-        if retained is not self:
+        # Compare a typed receiver alias so "is not" against the Any-typed
+        # retained slot cannot narrow self to Any for the rest of the demand.
+        receiver = self
+        if retained is not receiver:
             self._scoped_source = None
             self._scoped_source_evidence = None
             return None
@@ -637,7 +640,7 @@ def _declared_boot_binding_8616(
         for service in declared_services
     ):
         return None
-    return (declared_boot, declared_boot_recompute, declared_services)
+    return (declared_surface, declared_boot_recompute, declared_services)
 
 
 def _authenticated_mz_surface_or_refusal_8616(

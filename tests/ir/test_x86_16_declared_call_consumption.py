@@ -15,7 +15,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import angr
+
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.declared_external_call_evidence import (
+    DeclaredExternalCallRegistry8616,
+    declared_external_call_registry_8616,
+)
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
+    SyntheticCallStubRegistry8616,
+)
 from inertia.ir.core import (
     IRFunctionArtifact,
     IRInstr,
@@ -30,14 +38,6 @@ from inertia.ir.segment_state_transfer import (
     transfer_block_with_instruction_states,
 )
 from inertia.semantics.segment_function_summary import SegmentFunctionSummary8616
-
-from inertia.frontend.x86_16.declared_external_call_evidence import (
-    DeclaredExternalCallRegistry8616,
-    declared_external_call_registry_8616,
-)
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
-    SyntheticCallStubRegistry8616,
-)
 from tests.fixtures.x86_16_declared_call_fixture import BASE, world
 
 

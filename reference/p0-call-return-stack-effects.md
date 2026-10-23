@@ -1,5 +1,191 @@
 # Numeric SP Across Returning Calls
 
+## Current call-context replay checkpoint (2026-10-19)
+
+The native cohort now passes all 12 controls with current final-AST input checks:
+ten framed near/far/stack-argument cases and two programs that compile both real
+generated functions. Machine execution and generated C agree, both generated
+functions' tail snapshots pass, and upper ESP survives. The numeric-SP pair also
+checks four additional machine boundaries and every 16-bit entry word in C.
+This is a native integration checkpoint; the six-area goal and broad gates
+remain open.
+
+Required behavior is now explicit at the owning boundaries:
+
+- C argument values undergo standard array/function pointer conversion before
+  capture. Source-backed argument replay opens authenticated original arguments,
+  then binds changed arguments again before validation. Unchanged replay retains
+  the root, native call identities and temporary IDs; corrupted contexts refuse.
+- Rendering retains the chosen native prototype, declaration provenance and
+  target identity when repairing copied metadata or choosing an address label.
+  Names do not prove an address or project. Foreign targets are not promoted.
+- Discarded results have a required no-value conversion that survives hidden
+  cosmetic casts. A void declaration cannot supply a required scalar value,
+  including through coherently forged wrapper metadata.
+- Runtime segment-carrier materialization inspects casts to find helpers and
+  changes only proved segment arguments. It retains all surrounding and unrelated
+  casts. Before the fix, an unrelated narrowing expression changed from 9029 to
+  74565 in compiled C; the same bug erased the call context's void category.
+
+Evidence is under `.cache/devin-prompts/function-readiness-20261016/`:
+`parent-void-context-native-review.json`, `parent-void-context-native.xml` and
+`parent-void-context-native-artifacts/`. The unchanged production/native-source
+fingerprint is `63b3525b6e7dff4bb0a75ba104436c47342001953a0cf19d46c38d63dc7b8242`
+(2188 files). The native run passed 12 tests with two workers in 306.89 seconds;
+the Lowering-focused suite passed 321. These are acceptance observations, not a
+controlled speedup claim. Exact preimage comparisons retain 43 existing MyPy
+diagnostics in the large call/structuring surface and 55 in the segment owner,
+with no added diagnostics; neither comparison is a green broad typing gate.
+
+## Earlier source-position and runtime-input checkpoint (2026-10-18)
+
+Source-proved scalar returns now consume an immutable word-sized entry-SP
+capture in Types. The saved candidate passes all ten original near/far,
+mixed-width and upper-ESP machine-versus-C controls. The final conservative
+scope guards have a selected near-case native rerun and 300 focused test passes.
+
+The saved pre-binding two-function control fails: CALL a callee that copies
+SP to AX, add one, and RET. With initial ESP=0x12348000, machine AX is 0x7fff;
+executing both generated functions yields 0x8001. The callee sees the caller's
+entry value instead of its own entry SP=0x7ffe. Both local tail snapshots report
+stable. That observation is insufficient for cross-function input acceptance.
+
+`inertia/alias/call_stack_positions.py` owns the new derived positional proof:
+caller-before, callee-entry and caller-after offsets relative to caller entry
+SP, interpreted modulo 16 bits. The canonical stack transfer observes the
+instruction-entry state and physical frame preparation; it does not run a
+second stack simulator. Authenticated frame width and callee net transfer
+remain owned by `IRCallStackCoordinates8616`. Callee-entry includes the frame
+push once; caller-after includes RET-N but excludes a later caller ADD SP.
+Unknown incoming positions, missing CFG edges, changed CALL/callee evidence
+and conflicting physical preparation refuse. Saved position proofs require
+fresh reproduction from current source. Types consumes these positions in the
+runtime-input candidate below; Alias itself does not emit C bindings.
+
+The Types owner `entry_stack_pointer_capture.py` now shares one immutable local
+between return proofs and call-position requirements. It checks the active IR
+publication by identity, freshly reproduces every retained use, validates the
+actual initializer and single-write lifetime, and canonically merges new uses.
+The strict AST snapshot retains both function scope and all use fields. A
+source requirement stored in that capture alone is not an emitted call-input
+binding.
+
+The current `lowering/call_stack_inputs.py` candidate emits a binding at the
+original C call's expression position. It copies side-effect-free arguments
+before changing SP, sets the callee-entry word from the immutable entry capture,
+executes the original call once, retains its typed result, and restores the
+source-proved caller-after word before yielding that result. Each SP assignment
+preserves the current upper ESP bits. Whole-function preflight keeps unsupported
+or unproved contexts intact and records a typed refusal; classified publication
+failures are hard errors. Evidence counts distinguish refusal from a failed
+materialization.
+
+`validation/validation_call_stack_inputs.py` independently checks the current
+source, active emitted tree, capture lifetime, variable declarations, argument
+and result order, and both word/upper-ESP equations. The equations are proved
+with bitvectors rather than accepted from the producer marker. Only verified
+contexts have a pure logical view for existing call validators. Missing or
+invalid bindings remain semantic failures in tail validation and its cache
+descriptor. The actual AST and its binding fields stay in strict snapshots.
+
+Scoped controls pass: 69 source/capture/input tests, 14 coordinate tests,
+152 related source/callee/transport tests and 281 tail-validation tests;
+scoped typing passes. Deliberate mutations cover
+SP equations, upper bits, ordering, result transport, capture, declarations,
+project/root scope and signed casts. These results do not replace the real
+two-function machine-versus-generated-C control. That stronger control now
+passes: both generated functions compile with gcc `-std=c99 -Werror -O2`, return
+32767, and retain upper ESP=4660. Local tail snapshots pass as well. The 2,186
+production Python/native files have identical before/after fingerprints
+(`936daf61e5aeb58a8883956cf3d9d35691be01d931edcd524b9bf245771d4c0c`).
+The original scoped review is `parent-call-input-accepted-review.json` under
+the receipt directory below. A strengthened run adds four real machine inputs
+at word-wrap/sign boundaries, retains the original full-value comparison, and
+checks the same generated C over all 65,536 architectural AX16 return words.
+It passes in 75.34s on the same production generation; full harness and machine
+oracles are saved in `parent-call-input-boundaries-review.json`. The exhaustive
+C sweep uses the instruction law; it is not 65,536 machine executions. Earlier
+candidates timed out; the original scoped pass took 237.47s. These timings do
+not establish a controlled speedup. Near/far/RET-N variants, argument-class
+coverage, performance and the current full pipeline remain acceptance work.
+
+Source fingerprints still read current producer code/defaults/captures and
+module contents. Nested collection encoding has bounded hash nodes, and module
+hashing streams identical content. A coordinate observation shares the fresh
+callee-body proof already reproduced by its source check; a later observation
+rechecks currency. Tests reject changed module bytes with unchanged size/mtime,
+and changed callee bytes after a successful coordinate observation.
+
+Remaining runtime ABI obligations:
+
+- Declare and consume architectural numeric SP inputs separately from C
+  stack locals and abstract return control. Do not infer the value from a
+  mutable runtime ESP read after a call.
+- Bind the callee's required entry-SP value at the actual generated call
+  execution point using the source position. Preserve argument evaluation,
+  conditional execution, call count, return value, and live upper ESP.
+- Model caller-after SP using the independently proved body/RET effect;
+  frame width, RET-N purge and later caller cleanup must stay distinct.
+- Validate the actual emitted binding and its source requirement. A tag or
+  stable opaque-call comparison alone cannot prove the architectural input.
+- Run the two actual generated functions against machine execution as well
+  as the ten scalar controls. Unknown or unsupported bindings remain explicit
+  refusals, never semantic success.
+
+Current receipts live under
+`.cache/devin-prompts/function-readiness-20261016/parent-call-input-*`,
+`parent-coordinate-observe-*`, `parent-call-position-*` and
+`parent-numeric-types-*`. The full six-area goal and broad gates remain open.
+
+## Earlier input-provenance investigation (2026-10-18)
+
+At the earlier baseline, native near/far numeric-SP controls failed compiled-C execution:
+machine AX is 32766, while generated C returns 4294967294. This is an open
+regression subsequently addressed for these scalar controls. Their success
+does not close the cross-function obligation above. The retained input version must not be replaced with mutable
+runtime ESP after CALL without proof that its value survives that boundary.
+
+The current source-bound SSA registry proves ESP, EBP and EAX live-ins. A
+separate native Clinic observation finds register virtual variable 1 at offset
+16, width 16, with no native SSA definition; its remaining use is after CALL.
+Variable 2 at offset 20 is likewise upward-exposed. Neither appears in the
+native variable manager's input inventory or vvar bindings, even with special
+variables included. The native AIL variable-recovery engine explicitly treats
+architectural SP as a value without a recovered variable. An existing manager
+input lookup therefore cannot authenticate these missing identities.
+
+An earlier proposed native-input route would publish source-bound native input identities in the
+owning Alias stage, before Widening and Types consume them. The frontend may
+adapt native SSA expressions and definition/use coordinates; Alias must own
+the input classification. Bind exact virtual-variable identity, physical
+storage, width, definition census, complete graph and current source generation.
+Reuse the native allocation publication and graph binding where applicable;
+its manager inventory alone does not cover SP. Missing coverage, conflicting
+identities, phi definitions or changed source must refuse. Native upward
+exposure is an input candidate, not evidence that an implicit call preserved
+the register. Bind original value/read provenance and call effects separately.
+Absence of an assignment in the final C AST is insufficient evidence.
+
+Lowering must consume that input proof together with independent call effects.
+Known zero SP effects can justify an unchanged runtime lane only in the absence
+of preceding local writes. Unknown or nonzero effects cannot be relabeled zero.
+A proven entry value that outlives mutable architectural state needs an entry
+capture. Linked PUSH-CS/near-CALL/far-RET frames require their existing consumed
+frame evidence; adjusting their SP arithmetic in cleanup would bypass the
+owning frontend contract.
+
+Acceptance remains all ten original numeric-SP cases, checked against machine
+execution and compiled generated C, with preserved upper ESP, call count and
+tail validation. Add independent refusals for unknown call effects, expired or
+forged input identities, missing native definition coverage, phi/conflicting identities
+and source mutation. The original callee-body cleanup obligation, including a
+plain RET after manual stack adjustment, remains part of stack-effect acceptance.
+
+Source observations and failures are retained in
+`.cache/devin-prompts/function-readiness-20261016/parent-numeric-sp-metadata.{jsonl,log}`
+and `parent-sp-native-input-registry.json`. These are diagnostic observations,
+not a published native input proof or a fixed-function claim.
+
 ## Default-Pipeline Checkpoint (2026-09-09)
 
 Follow-up execution repair: `return_near32` and `return_far32` still cleared

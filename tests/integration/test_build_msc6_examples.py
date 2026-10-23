@@ -8,6 +8,7 @@ from threading import Barrier, Lock
 
 import pytest
 
+import tools.compiler_toolchain.build_msc6_examples as example_builder
 import tools.compiler_toolchain.verify_msc_example_runtime_gate as runtime_gate
 import tools.dev.batch_decompile_procs as batch_decompile_procs
 from tools.compiler_toolchain.build_msc6_examples import (
@@ -1465,6 +1466,128 @@ def _emit_conditional_artifacts(
     )
 
 
+def test_sweep_attempt_artifacts_are_fresh_and_preserve_refusal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Repeated attempts cannot reuse old records or promote child exit five."""
+    directories: list[Path] = []
+
+    def run_candidate(
+        cmd: list[str], _candidate: dict[str, object], **_kwargs: object,
+    ) -> tuple[subprocess.CompletedProcess[str], dict[str, object], bool]:
+        directory = Path(cmd[cmd.index("--output-c-dir") + 1])
+        assert directory.is_dir() and not tuple(directory.iterdir())
+        directories.append(directory)
+        (directory / "retained.result.json").write_text("{}")
+        return subprocess.CompletedProcess(cmd, 5, "", ""), {"returncode": 5}, False
+
+    monkeypatch.setattr(example_builder, "_run_decompile_candidate", run_candidate)
+    attempts: list[dict[str, object]] = []
+    for _ in range(2):
+        proc, profile, acceptable = example_builder._record_decompile_attempt(
+            attempts, 1, ["python", "decompile.py"], tmp_path / "INPUT.EXE",
+            {"kind": "max-functions", "value": 10}, decompile_mode="functions",
+            decompile_run_timeout=60, decompile_timeout=10, decompile_max_functions=10,
+            stage_deadline=None, force_rizin=False, artifact_parent=tmp_path / "outputs",
+        )
+        assert not acceptable and proc.returncode == 5
+        assert profile["artifact_dir"] == attempts[-1]["artifact_dir"]
+    assert directories[0] != directories[1]
+    assert all((directory / "retained.result.json").exists() for directory in directories)
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_declared_sweep_rebuilds_exact_conditional_payload_without_passing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ready: bool,
+) -> None:
+    """The normal harness freezes first and rebuilds without promoting a premise."""
+    from tools.compiler_toolchain.compiler_profile import FrozenCompilerContext
+    from tools.compiler_toolchain.conditional_case_composition import (
+        CaseCompositionStatus,
+        ConditionalCaseComposition,
+        FrozenCaseCompositionInput,
+    )
+    from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget
+
+    target = BinaryFunctionTarget("sub_10010", 0x10010)
+    context = FrozenCompilerContext("test", "small", "/test", "/test/evidence", "d" * 64, "e" * 64)
+    contract = FrozenCaseCompositionInput((target,), target, "f" * 64, (), b"exit=255", context, 0x10000)
+    payload = "int sub_10010(void) { return 255; }"
+    composition = ConditionalCaseComposition(
+        CaseCompositionStatus.CONDITIONAL_READY, ((target, payload),),
+        ((target.address, '{"status":"conditional"}'),), contract,
+    )
+    if not ready:
+        composition = ConditionalCaseComposition(CaseCompositionStatus.INVENTORY_REFUSED)
+    order: list[str] = []
+
+    def prepare(*_args: object) -> object:
+        order.append("freeze")
+        return object()
+
+    def decompile(*_args: object, **_kwargs: object) -> tuple:
+        assert order == ["freeze"]
+        order.append("decompile")
+        return False, tmp_path / "stdout.c", tmp_path / "stderr.log", 1.0, {"returncode": 5}
+
+    def rebuild(_options: object, source: Path, _profile: dict, *, main_address: int) -> tuple:
+        assert ready, "incomplete inventories must never reach compilation"
+        assert order == ["freeze", "decompile"]
+        assert source.read_text() == payload + "\n"
+        assert main_address == target.address
+        return True, "", "", "", "", 255, "", ""
+
+    monkeypatch.setattr(example_builder, "_prepare_declared_sweep", prepare)
+    monkeypatch.setattr(example_builder, "_decompile", decompile)
+    monkeypatch.setattr(example_builder, "_compose_retained_sweep", lambda *_args: composition)
+    monkeypatch.setattr(example_builder, "_rebuild_and_run", rebuild)
+    result = _decompile_and_validate(
+        tmp_path / "INPUT.EXE", tmp_path, kvikdos=tmp_path / "kvikdos",
+        msc6_root=tmp_path / "compiler", decompile_py=tmp_path / "decompile.py",
+        decompile_timeout=60, decompile_run_timeout=600, decompile_mode="functions",
+        decompile_cod_path=None, decompile_max_functions=0, expected_exit_code=255,
+        decompile_declared_input=tmp_path / "entry.json",
+    )
+    assert result[0] is False
+    if not ready:
+        assert result[3:6] == (False, False, None)
+        return
+    assert result[3:6] == (True, True, 255)
+    report = json.loads(result[-1])
+    assert report["returncode"] == 5
+    assert report["conditional_case"]["unconditional_acceptance"] is False
+    assert report["conditional_case"]["premises"] == [
+        {"address": target.address, "premise": {"status": "conditional"}},
+    ]
+
+
+def test_declared_request_refusal_cannot_fall_back_to_ordinary_acceptance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A rejected declared scope must stop before any ordinary sweep starts."""
+    from tools.compiler_toolchain.compiler_profile import TAIL_COMPILER_CONTEXT_ENV, FrozenCompilerContext
+    from tools.compiler_toolchain.conditional_case_request import ConditionalCaseRequest, ConditionalCaseRequestStatus
+
+    context = FrozenCompilerContext("test", "small", "/test", "/test/evidence", "d" * 64, "e" * 64)
+    monkeypatch.setenv(TAIL_COMPILER_CONTEXT_ENV, context.serialize())
+    monkeypatch.setattr(example_builder, "prepare_conditional_case_request", lambda **_kwargs: ConditionalCaseRequest(
+        ConditionalCaseRequestStatus.CLOSURE_REFUSED, detail="pending native target",
+    ))
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("refused request must not start an ordinary accepted sweep")
+
+    monkeypatch.setattr(example_builder, "_decompile", forbidden)
+    with pytest.raises(ValueError, match=r"closure_refused.*pending native target"):
+        _decompile_and_validate(
+            tmp_path / "INPUT.EXE", tmp_path, kvikdos=tmp_path / "kvikdos",
+            msc6_root=tmp_path / "compiler", decompile_py=tmp_path / "decompile.py",
+            decompile_timeout=60, decompile_run_timeout=600, decompile_mode="functions",
+            decompile_cod_path=None, decompile_max_functions=0, expected_exit_code=255,
+            decompile_declared_input=tmp_path / "entry.json",
+        )
+
+
 def _focused_conditional_kwargs(tmp_path: Path, **overrides: object) -> dict[str, object]:
     from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget
 
@@ -1748,7 +1871,6 @@ def test_conditional_transport_binds_source_and_all_phases(
 def test_conditional_transport_serializes_detached_premises(tmp_path: Path) -> None:
     """Changing a report projection must not mutate the retained transport."""
     from tools.compiler_toolchain.conditional_function_receipt import bind_conditional_function_artifact
-
     from tools.compiler_toolchain.msc6_function_targets import BinaryFunctionTarget
 
     image = tmp_path / "COMPARE16.EXE"
@@ -1835,3 +1957,45 @@ def test_batch_conditional_transport(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         )
         assert later is None
         assert later_debug[0][3]["conditional_result"]["status"] == "stale_directory"
+
+
+def test_rebuild_includes_owned_integer_and_boolean_headers_without_changing_bodies(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Validated standalone fragments receive the legacy target declarations."""
+    from tools.compiler_toolchain.compiler_profile import MSCMemoryModel
+
+    fragment = 'uint16_t helper(uint16_t value) { return (uint16_t)(value + 1); }\n'
+    fragment += 'int main(void) { bool valid = true; return valid ? helper(254) : 1; }\n'
+    source = tmp_path / 'validated.c'
+    source.write_text(fragment)
+    options = example_builder._DecompileValidateOptions(
+        exe_path=tmp_path / 'INPUT.EXE', out_dir=tmp_path, kvikdos=tmp_path / 'runner',
+        msc6_root=tmp_path / 'compiler', decompile_py=tmp_path / 'decompile.py',
+        decompile_timeout=60, decompile_run_timeout=60, decompile_stage_timeout=None,
+        decompile_mode='functions', decompile_cod_path=None, decompile_max_functions=0,
+        expected_exit_code=255, expected_stdout_contains=None, runtime_source_names=(),
+        decompile_safe_names=('GEN.C', 'GEN.OBJ', 'GEN.EXE', 'GEN.MAP'),
+        decompile_function_discovery_backend='auto', decompile_seed_engine='auto',
+        decompile_rizin_timeout=8, decompile_force_rizin_8616=False,
+        decompile_ignore_local_sidecar_hints=True, decompile_pat_backend=None,
+        decompile_signature_catalog=None, decompile_fallback_rebuild=None,
+        memory_model=MSCMemoryModel.SMALL, toolchain=None,
+    )
+    profile: dict[str, object] = {}
+
+    def compile_source(path: Path, output: Path, **kwargs: object) -> tuple:
+        payload = path.read_text()
+        assert payload == '#include "STDINT.H"\n#include "STDBOOL.H"\n' + fragment
+        assert source.read_text() == fragment
+        assert kwargs['runtime_support'] is True
+        example_builder._ensure_msvc6_compat_headers(output)
+        assert '#ifndef _STDINT_H' in (output / 'STDINT.H').read_text()
+        assert '#ifndef _STDBOOL_H' in (output / 'STDBOOL.H').read_text()
+        assert profile['recompiled_source_sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+        return False, '', '', '', ''
+
+    monkeypatch.setattr(example_builder, '_compile_and_link', compile_source)
+    result = example_builder._rebuild_and_run(options, source, profile, main_address=0x1000)
+    assert result[0] is False
+    assert result[5] is None

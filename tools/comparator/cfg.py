@@ -7,20 +7,24 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from functools import partial
 from typing import Any
 
 import angr
 import archinfo
 import pyvex
 
-from tools.dosunit.compare import straightline_ssa as S
-from tools.dosunit.architectures.flat32 import _FLAT32_REGS as REG32
-from tools.dosunit.architectures.flat32 import flat32_register_architecture
-from tools.dosunit.architectures.flat32_control import finish_flat32_control
+from tools.dosunit.architectures.flat32 import _FLAT32_REGS, flat32_register_architecture
 from tools.dosunit.architectures.flat32_cfg_lifting import CfgLiftingRefusal, lift_cfg_block
+from tools.dosunit.architectures.flat32_cfg_summary import (
+    cfg_control_word_instruction,
+    cfg_repeat_instruction,
+    lower_cfg_block,
+)
+from tools.dosunit.architectures.flat32_control_word import NativeX87Instruction
+from tools.dosunit.compare import straightline_ssa as S
 
 ARCH: archinfo.ArchX86 = archinfo.ArchX86()
+REG32: dict[int, tuple[str, int]] = _FLAT32_REGS
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,8 @@ class Block:
     address: int
     irsb: pyvex.IRSB
     successors: tuple[int, ...]
+    repeat_instructions: list[dict[str, Any]] | None = None
+    control_word_instruction: NativeX87Instruction | None = None
 
 
 class CfgRefusal(ValueError):
@@ -109,12 +115,18 @@ def discover(project: angr.Project, start: int, size: int, max_blocks: int) -> d
             raise CfgRefusal(error.reason.value) from error
         from tools.dosunit.contracts.binary_environment import requires_environment_contract
 
-        if requires_environment_contract(irsb):
+        control_word = cfg_control_word_instruction(project, irsb)
+        if control_word is None and requires_environment_contract(irsb):
             raise CfgRefusal("external_environment_contract_required")
         if not isinstance(irsb, pyvex.IRSB):
             raise CfgRefusal("non_vex_lifter")
-        successors = direct_successors(irsb)
-        blocks[address] = Block(address, irsb, successors)
+        repeated = cfg_repeat_instruction(project, irsb)
+        # A native x87 or REP summary replaces the whole VEX block: its own
+        # fallthrough is the only successor, and VEX EmWarn/exit edges of the
+        # erased projection are not architectural edges.
+        successors = (address + irsb.size,) if (repeated is not None or control_word is not None) \
+            else direct_successors(irsb)
+        blocks[address] = Block(address, irsb, successors, repeated, control_word)
         pending.extend(successors)
     return blocks
 
@@ -154,11 +166,11 @@ def lower_blocks(
     functions: list[dict[str, Any]] = []
     for index, address in enumerate(addresses):
         block = blocks[address]
-        observed = outputs if block.irsb.jumpkind == "Ijk_Ret" else tuple(name for name, _ in REG32.values())
-        body = S._lower_irsb(
-            block.irsb, output_regs=observed, max_assignments_per_function=4096,
-            architecture=flat32_register_architecture(),
-            block_finisher=partial(finish_flat32_control, control_targets=targets),
+        observed = outputs if block.irsb.jumpkind == "Ijk_Ret" else tuple(name for name, _ in flat32_register_architecture().registers)
+        body = lower_cfg_block(
+            block.irsb, output_regs=observed, control_targets=targets,
+            repeat_instructions=block.repeat_instructions,
+            control_word_instruction=block.control_word_instruction,
         )
         if isinstance(body, S.LowerFailure):
             raise CfgRefusal(f"{body.reason}: {body.message}")

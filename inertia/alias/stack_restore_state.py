@@ -21,19 +21,39 @@ class StackRestoreState8616:
     sp_delta: int | None
     stack_bytes: tuple[tuple[int, SegmentStackByteOrigin8616], ...] = ()
     bp_delta: int | None = None
+    register_offsets: tuple[tuple[str, int], ...] = ()
+    register_constants: tuple[tuple[str, int], ...] = ()
 
     def byte_map(self) -> dict[int, SegmentStackByteOrigin8616]:
         """Return a mutable byte map for one block transfer."""
         return dict(self.stack_bytes)
+
+    def register_offset_map(self) -> dict[str, int]:
+        """Copy the live general-register coordinates entering one block."""
+        return dict(self.register_offsets)
+
+    def register_constant_map(self) -> dict[str, int]:
+        """Copy proven numeric register values entering one block.
+
+        These are plain constants seeded from authenticated entry evidence or
+        propagated by constant flow; they are never SP-relative coordinates.
+        """
+        return dict(self.register_constants)
 
 
 def stack_restore_state_8616(
     sp_delta: int | None,
     stack_bytes: dict[int, SegmentStackByteOrigin8616],
     bp_delta: int | None = None,
+    register_offsets: dict[str, int] | None = None,
+    register_constants: dict[str, int] | None = None,
 ) -> StackRestoreState8616:
     """Freeze one deterministic Alias stack state."""
-    return StackRestoreState8616(sp_delta, tuple(sorted(stack_bytes.items())), bp_delta)
+    return StackRestoreState8616(
+        sp_delta, tuple(sorted(stack_bytes.items())), bp_delta,
+        tuple(sorted(register_offsets.items())) if register_offsets is not None else (),
+        tuple(sorted(register_constants.items())) if register_constants is not None else (),
+    )
 
 
 def join_stack_restore_states_8616(states: tuple[StackRestoreState8616, ...]) -> StackRestoreState8616:
@@ -52,4 +72,16 @@ def join_stack_restore_states_8616(states: tuple[StackRestoreState8616, ...]) ->
         for offset in common_offsets
         if all(byte_map[offset] == predecessor_maps[0][offset] for byte_map in predecessor_maps[1:])
     }
-    return stack_restore_state_8616(sp_delta, common_bytes, bp_delta)
+    register_maps = tuple(state.register_offset_map() for state in states)
+    common_registers = {
+        register: offset for register, offset in register_maps[0].items()
+        if all(register_map.get(register) == offset for register_map in register_maps[1:])
+    }
+    constant_maps = tuple(state.register_constant_map() for state in states)
+    common_constants = {
+        register: word for register, word in constant_maps[0].items()
+        if all(constant_map.get(register) == word for constant_map in constant_maps[1:])
+    }
+    return stack_restore_state_8616(
+        sp_delta, common_bytes, bp_delta, common_registers, common_constants,
+    )

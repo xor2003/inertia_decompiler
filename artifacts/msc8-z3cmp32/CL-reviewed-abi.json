@@ -1,0 +1,153 @@
+{
+  "schema": "dosunit.flat32_abi_observation.v1",
+  "functions": {
+    "sub_19123": {
+      "return_bits": 0,
+      "private_stack_bytes": 0
+    },
+    "sub_1CC77": {
+      "return_bits": 32,
+      "private_stack_bytes": 32
+    },
+    "sub_1F890": {
+      "return_bits": 32,
+      "private_stack_bytes": 4
+    },
+    "sub_1FA80": {
+      "return_bits": 32,
+      "private_stack_bytes": 8
+    },
+    "sub_1D70B": {
+      "return_bits": 32,
+      "private_stack_bytes": 0
+    },
+    "sub_1DC10": {
+      "return_bits": 32,
+      "private_stack_bytes": 4
+    },
+    "sub_1FD10": {
+      "return_bits": 32,
+      "private_stack_bytes": 4,
+      "entry_memory_ranges": [
+        {
+          "address": 163808,
+          "width": 32,
+          "min": 0,
+          "max": 64
+        }
+      ]
+    },
+    "sub_20A20": {
+      "return_bits": 32,
+      "private_stack_bytes": 8,
+      "entry_memory_ranges": [
+        {
+          "address": 163808,
+          "width": 32,
+          "min": 0,
+          "max": 64
+        }
+      ]
+    },
+    "sub_1D5C0": {
+      "return_bits": 32,
+      "private_stack_bytes": 28,
+      "entry_memory_ranges": [
+        {
+          "address": 162672,
+          "width": 32,
+          "min": 0,
+          "max": 0
+        }
+      ]
+    },
+    "sub_210C0": {
+      "return_bits": 32,
+      "private_stack_bytes": 28,
+      "entry_memory_ranges": [
+        {
+          "address": 162672,
+          "width": 32,
+          "min": 0,
+          "max": 0
+        }
+      ]
+    },
+    "sub_1A3F5": {
+      "return_bits": 32,
+      "private_stack_bytes": 36,
+      "entry_memory_ranges": [
+        {
+          "address": 162672,
+          "width": 32,
+          "min": 0,
+          "max": 0
+        }
+      ]
+    },
+    "sub_1D600": {
+      "return_bits": 32,
+      "private_stack_bytes": 20
+    },
+    "sub_20FE0": {
+      "return_bits": 32,
+      "private_stack_bytes": 8
+    },
+    "sub_1D55D": {
+      "return_bits": 32,
+      "private_stack_bytes": 12
+    },
+    "sub_17F16": {
+      "return_bits": 32,
+      "private_stack_bytes": 20,
+      "entry_memory_ranges": [
+        {
+          "address": 153728,
+          "width": 32,
+          "min": 3095132,
+          "max": 3095132
+        }
+      ]
+    },
+    "sub_19AAE": {
+      "return_bits": 0,
+      "private_stack_bytes": 8
+    },
+    "HandlerRoutine": {
+      "return_bits": 32,
+      "private_stack_bytes": 4
+    },
+    "sub_1FC90": {
+      "return_bits": 32,
+      "private_stack_bytes": 20,
+      "entry_memory_ranges": [
+        {
+          "address": 163808,
+          "width": 32,
+          "min": 0,
+          "max": 64
+        }
+      ]
+    },
+    "sub_1FB00": {
+      "return_bits": 32,
+      "private_stack_bytes": 16,
+      "entry_memory_ranges": [
+        {
+          "address": 163808,
+          "width": 32,
+          "min": 0,
+          "max": 64
+        }
+      ]
+    },
+    "sub_1A15C": {
+      "return_bits": 32,
+      "private_stack_bytes": 4
+    },
+    "sub_19C1F": {
+      "return_bits": 0,
+      "private_stack_bytes": 0
+    }
+  }
+}

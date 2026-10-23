@@ -67,6 +67,7 @@
     "tools/dev/test_pipeline.py"
   ],
   "quality_sources": [
+    "tools/dev/build_cython_source_graph.py",
     "tools/dev/__init__.py",
     "tools/dev/component_catalog.py",
     "tools/dev/component_catalog_cli.py",

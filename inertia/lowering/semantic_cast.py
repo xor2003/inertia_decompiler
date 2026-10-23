@@ -1,8 +1,8 @@
 """Render casts whose conversion is part of proven machine semantics.
 
 Layer: Types/Lowering.
-Responsibility: distinguish required width/signedness conversions from angr's
-optional cosmetic casts so generated C preserves binary value semantics.
+Responsibility: distinguish required width, signedness and no-value conversions
+from angr's optional cosmetic casts so generated C preserves proven semantics.
 Byte conversions use explicit signedness; plain C char is target-dependent,
 and native SimTypeChar's unnamed representation loses its signed flag.
 Consumes alias, widening, and typed facts.

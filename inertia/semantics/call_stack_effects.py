@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import cast
 
 from inertia.ir.core import (
     IRAddress,
@@ -40,6 +39,7 @@ from .call_register_effects import (
 )
 from .call_return_segment import ReturnSegmentFrame8616
 from .call_stack_allocation import CallStackAllocationCandidate8616, resolve_call_stack_allocation_8616
+from .call_stack_coordinates import prove_call_stack_coordinates_8616
 from .call_stack_effect_contracts import (
     CallStackEffectFact8616,
     CallStackEffectFailure8616,
@@ -109,7 +109,7 @@ class CallStackEffectArtifact8616:
 
 def _stable_bp_ranges_8616(artifact: IRFunctionArtifact) -> tuple[IRAddress, ...]:
     """Consume both logical operands and exact execution cells from typed IR."""
-    return cast("tuple[IRAddress, ...]", stable_bp_memory_ranges_8616(artifact))
+    return stable_bp_memory_ranges_8616(artifact)
 
 
 def _refused_effect_8616(
@@ -293,6 +293,41 @@ def _with_proven_bp_effect_8616(
     return (replace(effect, bp_preserved=True) if body.complete else effect), body, binding
 
 
+def _with_return_frame_and_coordinates_8616(
+    effect: IRCallStackEffect8616,
+    failure: CallStackEffectFailure8616 | None,
+    summary: CallsiteSummary8616,
+    instruction: IRInstr,
+    block: IRBlock,
+    *,
+    project: object | None,
+    frame: ReturnSegmentFrame8616 | None,
+) -> IRCallStackEffect8616:
+    """Apply the linked-return adjustment and attach the coordinate proof.
+
+    The coordinate decomposition is the independently evidenced source for the
+    owned SP projection: a proven ``net_sp_delta`` derives ``net_stack_delta``
+    instead of the summary's conflated cleanup hint, while partial contracts
+    keep their per-field refusals attached to the effect. A refused
+    project-bearing proof cannot leave the caller-cleanup-conflated guess in
+    place: without proven callee evidence the post-call SP is unknown.
+    """
+    if failure is None and frame is not None and frame.callsite_addr == instruction.addr:
+        adjustment = frame.additional_return_bytes
+        if adjustment is not None and effect.net_stack_delta is not None:
+            effect = replace(effect, net_stack_delta=effect.net_stack_delta + adjustment)
+    if project is None:
+        return effect
+    coordinates = prove_call_stack_coordinates_8616(
+        project, summary, instruction=instruction, block=block, return_frame=frame,
+    )
+    if coordinates.has_proven_sp_delta:
+        effect = replace(effect, net_stack_delta=coordinates.net_sp_delta)
+    elif coordinates.refusals:
+        effect = replace(effect, net_stack_delta=None)
+    return replace(effect, stack_coordinates=coordinates)
+
+
 def materialize_call_stack_effects_8616(
     artifact: IRFunctionArtifact,
     summaries: Mapping[int, CallsiteSummary8616],
@@ -345,10 +380,10 @@ def materialize_call_stack_effects_8616(
                     effect, project, summary, instruction, block,
                 )
                 frame = return_segment_frames.get(instruction.addr) if return_segment_frames is not None else None
-                if failure is None and frame is not None and frame.callsite_addr == instruction.addr:
-                    adjustment = frame.additional_return_bytes
-                    if adjustment is not None and effect.net_stack_delta is not None:
-                        effect = replace(effect, net_stack_delta=effect.net_stack_delta + adjustment)
+                effect = _with_return_frame_and_coordinates_8616(
+                    effect, failure, summary, instruction, block,
+                    project=project, frame=frame,
+                )
             if instruction.call_stack_effect is not None and instruction.call_stack_effect != effect:
                 effect, failure = _refused_effect_8616(
                     ranges,

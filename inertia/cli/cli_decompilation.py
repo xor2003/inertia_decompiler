@@ -120,14 +120,21 @@ from inertia.cli.tail_validation import (
     tail_validation_snapshot_for_function_run as _tail_validation_snapshot_for_function_run,
 )
 from inertia.cli.telemetry import annotate_current_span, span, trace_function
+from inertia.cli.work_items import (
+    TerminalDecompileFailure8616,
+)
 from inertia.cli.x86_16_exact_slice import (
     function_original_addr,
     mark_function_original_addr,
+)
+from inertia.frontend.x86_16.analysis_failures import (
+    guard_angr_analysis_hard_failure_passthrough as _guard_angr_analysis_hard_failure_passthrough,
 )
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata, extract_cod_proc_metadata
 from inertia.frontend.x86_16.cod_known_objects import known_cod_object_spec
 from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616
 from inertia.frontend.x86_16.render_compat import repair_cfunctioncall_render_targets_8616
+from inertia.ir.native_import_surface_cache import native_import_request_8616
 from inertia.ir.status_flag_lift_context import active_status_flag_lift_context_8616
 from inertia.lowering.analysis_helpers import (
     sanitize_direct_call_sites_8616,
@@ -336,7 +343,6 @@ from .cli_c_text_postprocess import (
     _prune_invalid_simple_function_prototypes_text,
     _prune_non_lvalue_arithmetic_assignments,
     _prune_parameter_shadow_declarations_text,
-    _prune_standalone_stack_probe_calls_text,
     _prune_trailing_generic_return_text,
     _prune_undefined_fragment_carrier_assignments_text,
     _prune_unused_local_declarations_text,
@@ -682,7 +688,10 @@ def _extract_cod_metadata_for_function_8616(
             name_candidates.append(f"_{function_name}")
         else:
             name_candidates.append(function_name.lstrip("_"))
-    cod_path = Path(active_lst_metadata.cod_path)
+    cod_path_str = active_lst_metadata.cod_path
+    if not cod_path_str:
+        return None
+    cod_path = Path(cod_path_str)
     cache = getattr(project, "_inertia_sidecar_cod_metadata_cache", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -690,7 +699,9 @@ def _extract_cod_metadata_for_function_8616(
     for candidate in name_candidates:
         cache_key = (str(cod_path), candidate, proc_kind)
         if cache_key in cache:
-            return cache[cache_key]
+            # Cache values are written below from extract_cod_proc_metadata;
+            # the dynamic project slot cannot prove that through getattr.
+            return cast(CODProcMetadata | None, cache[cache_key])
         try:
             metadata = extract_cod_proc_metadata(cod_path, candidate, proc_kind)
         except Exception as ex:
@@ -2622,7 +2633,7 @@ def _validated_rewrite_refusal_needs_render_refresh_8616(live_snapshot: object) 
 def _emit_optional_source_sidecar_c_block(
     binary_path: Path | None,
     function_name: str | None,
-    c_text: str,
+    c_text: str | None,
     *,
     alternate_source_c: bool,
     c_header: str,
@@ -3507,7 +3518,7 @@ def _call_node_stack_probe_candidates_8616(node: object, target_addr: object, ra
     if isinstance(callee_addr, int):
         candidates.add(callee_addr)
         candidates.add(callee_addr & 0xFFFF)
-    normalized_name = normalize_callee_name_8616(raw_name)
+    normalized_name = normalize_callee_name_8616(raw_name if isinstance(raw_name, str) else None)
     if isinstance(normalized_name, str):
         match = re.fullmatch(r"sub_([0-9a-fA-F]+)", normalized_name)
         if match is not None:
@@ -3605,10 +3616,16 @@ def _decompile_function(
     deadline: float | None = None,
     failure_family_state: FailureFamilyState | None = None,
 ) -> tuple[str, str]:
-    """Decompile one recovered function under bounded typed pipeline guards."""
-    return _DecompileRun8616(
-        project, cfg, function, timeout, api_style, binary_path, cod_metadata, synthetic_globals, lst_metadata, enable_structured_simplify, enable_postprocess, allow_isolated_retry, deadline, failure_family_state,
-    ).run_8616()
+    """Run one worker-local function with bounded, source-checked raw imports.
+
+    Nested consumers share only native lifting records during this call;
+    proof checks remain independent. The existing request releases records
+    on return, exception or timeout and retains its native freshness gates.
+    """
+    with native_import_request_8616():
+        return _DecompileRun8616(
+            project, cfg, function, timeout, api_style, binary_path, cod_metadata, synthetic_globals, lst_metadata, enable_structured_simplify, enable_postprocess, allow_isolated_retry, deadline, failure_family_state,
+        ).run_8616()
 
 
 class _DecompileRun8616:
@@ -4006,6 +4023,7 @@ class _DecompileRun8616:
             with (  # noqa: SIM117
                 active_structuring_function_8616(self.project, self.function),
                 _guard_angr_basepointeroffset_codegen_support(),
+                _guard_angr_analysis_hard_failure_passthrough(),
             ):
                 with _guard_angr_peephole_expr_bitwidth_assertion(self.project):
                     with _guard_angr_variable_recovery_binop_sub_size_mismatch(self.project):
@@ -4049,6 +4067,10 @@ class _DecompileRun8616:
                                                         return _stop
         except _AnalysisTimeout:
             return self._decompiler_timeout_lane_8616()
+        except PipelineHardError:
+            # Terminal pipeline contract failure: skip identical-invariant
+            # retries and let the top-level boundary emit an honest failure.
+            raise
         except Exception as ex:
             typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
             if os.environ.get("INERTIA_DEBUG_DECOMPILER_ERRORS_TRACEBACK"):
@@ -5647,7 +5669,7 @@ class _DecompileRun8616:
 
 
     def phase_text_normalize_8616(self) -> tuple[str, str] | None:
-        """Phase of ``_decompile_function`` spanning original lines 5623-5746."""
+        """Normalize rendered output while retaining generated standalone calls."""
         self.rendered_text = _prepend_recovered_callsite_prototypes_8616(self.rendered_text, self.dec.codegen)
         _debug_dump_calls_8616("post-recovered-callsite-prototypes", self.rendered_text, self.debug_call_addr)
         if self.api_style in ("msc", "compiler"):
@@ -5662,7 +5684,6 @@ class _DecompileRun8616:
             cod_metadata=self.effective_cod_metadata,
             codegen=self.dec.codegen,
         )
-        self.formatted = _prune_standalone_stack_probe_calls_text(self.formatted)
         if self.effective_cod_metadata is not None:
             self.pre_score = _expected_call_presence_score_8616(self._pre_helper_format_text, self.effective_cod_metadata)
             self.post_score = _expected_call_presence_score_8616(self.formatted, self.effective_cod_metadata)
@@ -5775,7 +5796,7 @@ class _DecompileRun8616:
         return None
 
     def phase_final_cleanup_8616(self) -> tuple[str, str] | None:
-        """Phase of ``_decompile_function`` spanning original lines 5747-5823."""
+        """Apply final output cleanups without pruning generated calls by name."""
         self.pre_final_text_cleanup = self.formatted
         _emit_c_stage_trace(
             self.project,
@@ -5842,11 +5863,10 @@ class _DecompileRun8616:
             self.formatted = _dedupe_conflicting_extern_variable_declarations_text(self.formatted)
             self.formatted = _prune_invalid_simple_function_prototypes_text(self.formatted)
             self.formatted = _prune_unused_local_declarations_text(self.formatted)
-            self.formatted = _prune_standalone_stack_probe_calls_text(self.formatted)
         return None
 
     def _finish_format_and_quality_8616(self) -> tuple[str, str] | None:
-        """Select recovered C, normalize it, and enforce final quality/telemetry."""
+        """Retain emitted calls through output selection, formatting and quality checks."""
         self.formatted = _select_evidence_recovered_c_8616(
             self.formatted,
             self.evidence_recovered_c,
@@ -5860,7 +5880,6 @@ class _DecompileRun8616:
         self.formatted = _dedupe_duplicate_local_declarations_text(self.formatted)
         self.formatted = _hoist_c89_local_declarations_text(self.formatted)
         self.formatted = _prune_unused_local_declarations_text(self.formatted)
-        self.formatted = _prune_standalone_stack_probe_calls_text(self.formatted)
 
         _emit_c_stage_trace(
             self.project,
@@ -6150,6 +6169,7 @@ class _DecompileRun8616:
                 str(Path(self.binary_path)),
                 force_blob=False,
                 base_addr=linked_base,
+                base_addr_is_linear=True,
                 entry_point=self.project.entry,
                 real16_declared_input=declared_input_path_8616(self.project),
             )
@@ -6747,7 +6767,7 @@ def _original_callee_name_for_target_8616(
     span_label = normalize_callee_name_8616(_sidecar_enclosing_label_8616(metadata, original_target))
     if _helper_overrides_generic_name_8616(helper_name, span_label):
         return helper_name
-    return typing.cast(str | None, span_label)
+    return span_label
 
 
 def _callee_names_equivalent_8616(left: str | None, right: str | None) -> bool:
@@ -7887,6 +7907,18 @@ def _preferred_expr_collapse_depth(
     return sys.maxsize
 
 
+def _pipeline_hard_error_context_8616(ex: PipelineHardError) -> str:
+    """Render the typed layer/function/details context carried by a hard failure."""
+    context_parts: list[str] = []
+    if ex.layer:
+        context_parts.append(f"layer={ex.layer}")
+    if ex.function_addr is not None:
+        context_parts.append(f"function={ex.function_addr:#x}")
+    if ex.details is not None:
+        context_parts.append(f"details={ex.details!r}")
+    return f" ({'; '.join(context_parts)})" if context_parts else ""
+
+
 @cast(Callable[..., Any], trace_function(name="function.decompile_with_stats"))
 def _decompile_function_with_stats(
     project: angr.Project,
@@ -7902,7 +7934,7 @@ def _decompile_function_with_stats(
     enable_postprocess: bool = True,
     allow_isolated_retry: bool = True,
     failure_family_state: FailureFamilyState | None = None,
-) -> tuple[str, str, str | None, int, int, float]:
+) -> tuple[str, str, str | None, int, int, float, TerminalDecompileFailure8616 | None]:
     block_count, byte_count = _function_complexity(function)
     effective_timeout = _effective_decompile_timeout_8616(
         project,
@@ -7923,6 +7955,7 @@ def _decompile_function_with_stats(
     sys.stdout.flush()
     start = time.perf_counter()
     deadline = time.monotonic() + max(1, effective_timeout)
+    terminal_failure: TerminalDecompileFailure8616 | None = None
     try:
         status, payload = _decompile_function(
             project,
@@ -7947,7 +7980,13 @@ def _decompile_function_with_stats(
         detail = str(ex)
         if detail.startswith("function leaked unresolved stack locals into final C"):
             detail = f"{function.name} leaked unresolved stack locals into final C"
-        payload = f"Pipeline contract violation: {detail}"
+        payload = f"Pipeline contract violation: {detail}{_pipeline_hard_error_context_8616(ex)}"
+        terminal_failure = TerminalDecompileFailure8616(
+            message=str(ex),
+            layer=ex.layer,
+            function_addr=ex.function_addr,
+            details=ex.details,
+        )
     forced_payload = _forced_function_template(getattr(function, "name", None), binary_path, api_style)
     if forced_payload is not None:
         status = "ok"
@@ -7982,7 +8021,7 @@ def _decompile_function_with_stats(
             flush=True,
         )
         sys.stdout.flush()
-    return status, payload, partial_payload, block_count, byte_count, elapsed
+    return status, payload, partial_payload, block_count, byte_count, elapsed, terminal_failure
 
 
 def _apply_validated_payload_replacement_8616(

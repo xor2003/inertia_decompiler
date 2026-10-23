@@ -420,6 +420,15 @@ check-all: ruff-all pyright-all type-ratchet-changed architecture-check agent-co
 	$(MAKE) type-ratchet-changed architecture-check agent-context-check test-ownership-check pytest-all
 
 QA_TYPED_FILES := \
+	tools/signatures/pickle_cache.py \
+	inertia/lowering/call_stack_inputs.py \
+	inertia/lowering/call_stack_input_replay.py \
+	inertia/pipeline/call_stack_input_outcome.py \
+	inertia/lowering/call_stack_input_contracts.py \
+	inertia/lowering/gp_register_read_order.py \
+	inertia/semantics/call_register_role_contracts.py \
+	inertia/semantics/call_register_roles.py \
+	inertia/alias/call_register_roles.py \
 	inertia/lowering/segmented_load_origins.py \
 	inertia/ir/instruction_origin.py \
 	inertia/ir/constant_flow.py \
@@ -1080,7 +1089,7 @@ QA_TYPED_FILES := \
 	inertia/cli/cli_fallback_decompilation.py \
 	inertia/cli/cli_function_discovery.py \
 	inertia/cli/function_graph_extent_repair.py \
-	inertia/cli/cli_access_profiles.py \
+	inertia/lowering/access_profiles.py \
 	inertia/cli/cli_access_traits.py \
 	inertia/cli/cli_access_trait_rewrite.py \
 	inertia/cli/cli_access_rewrite_artifact.py \
@@ -1107,7 +1116,7 @@ QA_TYPED_FILES := \
 	inertia/cli/cli_segmented_load_coalesce.py \
 	inertia/cli/cli_stack_byte_offsets.py \
 	inertia/cli/cli_stack_locals.py \
-	inertia/cli/cli_storage_objects.py \
+	inertia/lowering/storage_objects.py \
 	inertia/cli/cli_string_timeout_fallback.py \
 	inertia/cli/cli_timeout.py \
 	inertia/cli/cli_output.py \
@@ -1218,6 +1227,18 @@ QA_TYPED_FILES := \
 	decompile.py
 
 QA_RUFF_TARGETS := \
+	tests/alias/test_general_register_stack_coordinates.py \
+	tools/signatures/pickle_cache.py \
+	inertia/lowering/call_stack_inputs.py \
+	inertia/lowering/call_stack_input_replay.py \
+	inertia/pipeline/call_stack_input_outcome.py \
+	inertia/lowering/call_stack_input_contracts.py \
+	inertia/lowering/gp_register_read_order.py \
+	tests/lowering/test_gp_entry_read_order.py \
+	tests/cli/test_exact_region_recovery_completeness.py \
+	tests/pipeline/test_readiness_observation_scope.py \
+	tests/cli/test_rendered_call_preservation.py \
+	tests/postprocess/test_cleanup_retry_input_refusal.py \
 	inertia/lowering/segmented_load_origins.py \
 	tests/widening/test_x86_16_segmented_load_origins.py \
 	tests/cli/test_x86_16_envsize_behavior.py \
@@ -1878,7 +1899,7 @@ QA_RUFF_TARGETS := \
 	inertia/cli/cli_fallback_decompilation.py \
 	inertia/cli/cli_function_discovery.py \
 	inertia/cli/function_graph_extent_repair.py \
-	inertia/cli/cli_access_profiles.py \
+	inertia/lowering/access_profiles.py \
 	inertia/cli/cli_access_traits.py \
 	inertia/cli/cli_access_trait_rewrite.py \
 	inertia/cli/cli_access_rewrite_artifact.py \
@@ -1905,7 +1926,7 @@ QA_RUFF_TARGETS := \
 	inertia/cli/cli_segmented_load_coalesce.py \
 	inertia/cli/cli_stack_byte_offsets.py \
 	inertia/cli/cli_stack_locals.py \
-	inertia/cli/cli_storage_objects.py \
+	inertia/lowering/storage_objects.py \
 	inertia/cli/cli_string_timeout_fallback.py \
 	inertia/cli/cli_timeout.py \
 	inertia/cli/cli_output.py \
@@ -2837,6 +2858,11 @@ QA_PYTEST_TARGETS := \
 	tests/cli/test_x86_16_corpus_recovery_artifact.py \
 	tests/cli/test_x86_16_corpus_scan_timeout.py \
 	tests/integration/test_build_msc6_examples.py \
+	tests/integration/test_conditional_case_composition.py \
+	tests/integration/test_conditional_case_inventory.py \
+	tests/integration/test_conditional_case_request.py \
+	tests/cli/test_declared_function_discovery.py \
+	tests/cli/test_final_function_result_artifacts.py \
 	tests/integration/test_msc6_compat_headers.py \
 	tools/compiler_toolchain/tests/test_msc6_entrypoint.py \
 	tests/cli/test_decompile_entrypoint_determinism.py \
@@ -3564,8 +3590,8 @@ QA_RUFF_TARGETS += inertia/lowering/near_pointer_value_runtime.py
 LINTERS_DEV_MYPY_FILES += inertia/ir/direct_call_segment_entry.py
 LINTERS_DEV_MYPY_FILES += inertia/ir/ir_boundary_cfg.py
 QA_TYPED_FILES += inertia/ir/ir_boundary_cfg.py
-QA_RUFF_TARGETS += inertia/ir/ir_boundary_cfg.py tests/ir/test_x86_16_ir_boundary_cfg.py
-QA_PYTEST_TARGETS += tests/ir/test_x86_16_ir_boundary_cfg.py
+QA_RUFF_TARGETS += inertia/ir/ir_boundary_cfg.py tests/ir/test_x86_16_ir_boundary_cfg.py tests/ir/test_scoped_native_snapshot_rebind.py
+QA_PYTEST_TARGETS += tests/ir/test_x86_16_ir_boundary_cfg.py tests/ir/test_scoped_native_snapshot_rebind.py
 LINTERS_DEV_MYPY_FILES += inertia/ir/no_effect_instructions.py
 QA_TYPED_FILES += inertia/ir/no_effect_instructions.py
 QA_RUFF_TARGETS += inertia/ir/no_effect_instructions.py tests/ir/test_nop_census_8616.py tests/frontend/test_nop_native_binding.py tests/ir/test_nop_cache_cost.py
@@ -3588,6 +3614,8 @@ SCOPED_IR_OWNERS := \
 	inertia/ir/scoped_function_ir_view.py
 SCOPED_IR_CONTRACT_TESTS := \
 	tests/ir/test_x86_16_premise_collection_budget.py \
+	tests/ir/test_entry_collection_sibling_freshness.py \
+	tests/ir/test_native_feasibility_map_binding.py \
 	tests/integration/test_x86_16_invocation_pending_inventory.py \
 	tests/integration/test_x86_16_near_call_frame_width.py \
 	tests/integration/test_x86_16_invocation_inventory_budgets.py \
@@ -3632,6 +3660,7 @@ LINTERS_DEV_MYPY_FILES += inertia/ir/real16_invocation_domain.py
 # Follow-imports=skip needs the owned records visible for exact-type narrowing.
 LINTERS_DEV_MYPY_FILES += inertia/ir/core.py inertia/frontend/x86_16/frontend_function_boundary.py
 LINTERS_DEV_MYPY_FILES += inertia/ir/function_artifact.py inertia/ir/segment_state_transfer.py inertia/frontend/x86_16/frontend_function_boundary_index.py
+LINTERS_DEV_MYPY_FILES += inertia/ir/function_lifecycle.py inertia/ir/function_readiness_contracts.py inertia/pipeline/function_readiness.py inertia/pipeline/structured_ast_output.py
 LINTERS_DEV_MYPY_FILES += inertia/ir/vex_import.py
 # Keep the declared boot/image contracts visible under follow_imports=skip;
 # otherwise the adapter's runtime-authenticated ProgramBoot becomes Any.
@@ -3946,6 +3975,7 @@ QA_TYPED_FILES += \
 	tools/dosunit/reporting/proof_projection.py \
 	tools/dosunit/reporting/flat32_proof_report.py \
 	tools/dosunit/compare/flat32_proof_retry.py \
+	tools/dosunit/runtime/flat32_defined_flags.py \
 	tools/dosunit/runtime/flat32_replay.py \
 	tools/dosunit/reporting/flat32_replay_cli.py \
 	tools/dosunit/reporting/ssa_provenance.py \
@@ -3996,6 +4026,7 @@ QA_RUFF_TARGETS += \
 	tools/dosunit/reporting/proof_projection.py \
 	tools/dosunit/reporting/flat32_proof_report.py \
 	tools/dosunit/compare/flat32_proof_retry.py \
+	tools/dosunit/runtime/flat32_defined_flags.py \
 	tools/dosunit/runtime/flat32_replay.py \
 	tools/dosunit/reporting/flat32_replay_cli.py \
 	tools/dosunit/reporting/ssa_provenance.py \
@@ -4561,7 +4592,7 @@ KVIKDOS_WORKER_TESTS := tools/dosunit/tests/test_dosunit_kvikdos_worker.py \
 	tools/dosunit/tests/test_dosunit_kvikdos_memory_range.py \
 	tools/dosunit/tests/test_dosunit_kvikdos_protocol_errors.py \
 	tools/dosunit/tests/test_dosunit_kvikdos_snapshot_registry.py
-QA_TYPED_FILES += tools/dosunit/runtime/kvikdos_vm_worker.py tools/dosunit/runtime/kvikdos_backend.py
+QA_TYPED_FILES += tools/dosunit/contracts/model.py tools/dosunit/runtime/kvikdos_vm_worker.py tools/dosunit/runtime/kvikdos_backend.py
 QA_RUFF_TARGETS += tools/dosunit/runtime/kvikdos_vm_worker.py tools/dosunit/runtime/kvikdos_backend.py \
 	$(KVIKDOS_WORKER_TESTS) tools/dosunit/tests/dosunit_kvikdos_fake_worker.py \
 	tools/dosunit/tests/dosunit_kvikdos_test_support.py \
@@ -4958,7 +4989,7 @@ pyright-all:
 	$(Q)$(PYRIGHT_CMD_BASE)
 
 mypy:
-	$(Q)$(PYTHON) -m mypy $(MYPY_OUTPUT_FLAGS) --cache-dir .mypy_cache --config-file pyproject.toml $(QA_TYPED_FILES)
+	$(Q)$(PYTHON) -m mypy $(MYPY_OUTPUT_FLAGS) --cache-dir .mypy_cache --config-file pyproject.toml $(sort $(QA_TYPED_FILES))
 
 mypy-dev:
 	$(Q)$(PYTHON) -m mypy $(MYPY_OUTPUT_FLAGS) --cache-dir .mypy_cache --config-file pyproject.toml $(sort $(LINTERS_DEV_MYPY_FILES))
@@ -5205,3 +5236,6 @@ QA_PYTEST_TARGETS += tests/structuring/test_x86_16_scalar_return_arm_review.py
 QA_TYPED_FILES += inertia/ir/real16_census_fact_ownership.py
 QA_RUFF_TARGETS += inertia/ir/real16_census_fact_ownership.py tests/ir/test_real16_census_fact_ownership.py
 QA_PYTEST_TARGETS += tests/ir/test_real16_census_fact_ownership.py
+
+# Reviewed evidence owners in the development typing cohort.
+LINTERS_DEV_MYPY_FILES += inertia/alias/stack_pointer_alias_map.py inertia/postprocess/optimization/rule_runtime.py tools/dosunit/recursive_proofs/recursive_joint_identity.py

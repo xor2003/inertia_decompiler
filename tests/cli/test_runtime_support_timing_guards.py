@@ -215,3 +215,21 @@ def test_tail_validation_timing_guard_forwards_boundary_fingerprint(monkeypatch)
     assert result == "summary"
     assert recorded == [(project, codegen, "live_out", "boundary-1")]
     assert decompiler_structuring_stage.collect_x86_16_tail_validation_summary is original_stage_collect
+
+@pytest.mark.parametrize("initial", [0, 5, 10, 15, 19])
+@pytest.mark.parametrize("owner", ["cli", "cod"])
+def test_priority_lowering_does_not_accumulate(monkeypatch, initial, owner):
+    """Repeated startup and child startup must retain the requested niceness."""
+    from tools.dev import decompile_cod_dir
+    module = runtime_support if owner == "cli" else decompile_cod_dir
+    current = initial
+    def fake_nice(increment):
+        nonlocal current
+        current = min(19, current + increment)
+        return current
+    monkeypatch.setattr(module.os, "nice", fake_nice)
+    lower = (module.lower_process_priority if owner == "cli"
+             else module._lower_process_priority)
+    lower()
+    lower()
+    assert current == max(10, initial)

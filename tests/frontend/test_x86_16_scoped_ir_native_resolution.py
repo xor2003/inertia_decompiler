@@ -7,6 +7,7 @@ revocation; no patched proof verdicts, lift results or source authenticity.
 from __future__ import annotations
 
 from dataclasses import replace
+from types import ModuleType
 
 import pytest
 
@@ -20,6 +21,7 @@ from inertia.ir.entry_jump_domain import (
     EntryJumpDomainApplicationStatus8616,
     EntryJumpDomainRefusal8616,
 )
+from inertia.ir.native_import_surface_cache import native_import_request_8616
 from tools.dosunit.tests.test_x86_16_scoped_native_inputs import LEAF, _view, world  # noqa: F401
 
 
@@ -49,6 +51,177 @@ def test_native_census_stale_refusal_is_never_waived(
     assert ir_boundary_cfg._scoped_native_failure_8616(
         project, boundary, raw,
     ) is ir_boundary_cfg.IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
+
+
+def _warmed_record(project: object, boundary: object) -> None:
+    """Populate the request-local native record through the real surface route."""
+    vex_import._import_x86_16_function_surface_8616(project, boundary)
+
+
+def _count_import_requests(vex_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count full import entry points without touching pinned producers."""
+    calls: list[int] = []
+    real_request = vex_module.native_import_request_8616
+
+    def counting(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return real_request(*args, **kwargs)
+
+    monkeypatch.setattr(vex_module, "native_import_request_8616", counting)
+    return calls
+
+
+def _count_fact_rebinds(vex_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count warm-route attempts; the rebind entry is not a pinned producer."""
+    calls: list[int] = []
+    real_rebind = vex_module.request_native_fact_rebind_8616
+
+    def counting(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return real_rebind(*args, **kwargs)
+
+    monkeypatch.setattr(vex_module, "request_native_fact_rebind_8616", counting)
+    return calls
+
+
+def test_warm_native_fact_rebind_skips_full_census_import(
+    world: tuple, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    """A validated record authenticates native facts without a second import."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    with native_import_request_8616():
+        _warmed_record(project, boundary)
+        imports = _count_import_requests(vex_import, monkeypatch)
+        rebinds = _count_fact_rebinds(vex_import, monkeypatch)
+        assert ir_boundary_cfg._scoped_native_failure_8616(
+            project, boundary, raw,
+        ) is None
+        assert rebinds == [1]
+        assert not imports
+
+
+def test_cold_native_rebind_runs_single_census_import(
+    world: tuple, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    """No live request keeps the ordinary guarded import exactly once."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    imports = _count_import_requests(vex_import, monkeypatch)
+    rebinds = _count_fact_rebinds(vex_import, monkeypatch)
+    assert ir_boundary_cfg._scoped_native_failure_8616(
+        project, boundary, raw,
+    ) is None
+    assert rebinds == [1]
+    assert imports == [1]
+
+
+@pytest.mark.parametrize("offset", [0, 3])
+def test_warm_native_fact_rebind_changed_bytes_refuse(
+    world: tuple, monkeypatch: pytest.MonkeyPatch, offset: int,  # noqa: F811
+) -> None:
+    """Mutated native bytes make the retained record stale; refusal stands."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    with native_import_request_8616():
+        _warmed_record(project, boundary)
+        rebinds = _count_fact_rebinds(vex_import, monkeypatch)
+        # Change this function's bytes, including its no-effect NOP span.
+        # A callee outside the census is not part of this raw-body contract.
+        address = native.CALLER + offset
+        assert project.loader.memory.load(address, 1) != b'\xcc'
+        project.loader.memory.store(address, b'\xcc')
+        assert ir_boundary_cfg._scoped_native_failure_8616(
+            project, boundary, raw,
+        ) is not None
+        assert rebinds == [1]
+
+
+def test_warm_native_fact_rebind_honors_replaced_census_importer(
+    world: tuple, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    """A replaced census importer is invoked even inside a warm request."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    marker = IRRefusal(EntryJumpDomainRefusal8616.APPLICATION_INPUT_STALE.value,
+                       "injected independent native-census failure")
+    corrupt_census = replace(raw, refusals=(*raw.refusals, marker))
+    calls: list[int] = []
+
+    def replacement(*args: object) -> object:
+        calls.append(1)
+        return corrupt_census
+
+    with native_import_request_8616():
+        _warmed_record(project, boundary)
+        monkeypatch.setattr(real16_invocation_domain, "real16_native_census_import_8616",
+                            replacement)
+        assert ir_boundary_cfg._scoped_native_failure_8616(
+            project, boundary, raw,
+        ) is ir_boundary_cfg.IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
+        assert calls
+
+
+@pytest.mark.parametrize("forgery", ["function_refusal", "dropped_block"])
+def test_warm_native_fact_rebind_forged_caller_refuses(
+    world: tuple, monkeypatch: pytest.MonkeyPatch, forgery: str,  # noqa: F811
+) -> None:
+    """Caller facts foreign to the retained record must never bind."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    marker = IRRefusal(EntryJumpDomainRefusal8616.APPLICATION_INPUT_STALE.value,
+                       "injected caller-only refusal")
+    forged = (
+        replace(raw, refusals=(*raw.refusals, marker))
+        if forgery == "function_refusal"
+        else replace(raw, blocks=raw.blocks[1:])
+    )
+    with native_import_request_8616():
+        _warmed_record(project, boundary)
+        failure = ir_boundary_cfg._scoped_native_failure_8616(
+            project, boundary, forged,
+        )
+        expected = (
+            ir_boundary_cfg.IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
+            if forgery == "function_refusal"
+            else ir_boundary_cfg.IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
+        )
+        assert failure is expected
+
+
+def test_warm_native_fact_rebind_mid_callback_drift_refuses(
+    world: tuple, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    """A detached-evidence callback editing source bytes re-refuses after."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    real_evidence = vex_import._detached_terminal_evidence_8616
+
+    def drifting_evidence(surface: object) -> object:
+        project.loader.memory.store(native.CALLER, b'\xcc')
+        return real_evidence(surface)
+
+    with native_import_request_8616():
+        _warmed_record(project, boundary)
+        monkeypatch.setattr(
+            vex_import, "_detached_terminal_evidence_8616", drifting_evidence)
+        assert ir_boundary_cfg._scoped_native_failure_8616(
+            project, boundary, raw,
+        ) is not None
+
+
+def test_warm_native_fact_rebind_changed_boundary_refuses(
+    world: tuple, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    """A tampered boundary census refuses through either route."""
+    _boot, project, _sb, _sa, _index, boundary, _held = world
+    raw = vex_import._import_raw_x86_16_function_bundle_8616(project, boundary).artifact
+    narrowed = replace(boundary, reachable_instruction_addrs=frozenset())
+    with native_import_request_8616():
+        _warmed_record(project, narrowed)
+        assert ir_boundary_cfg._scoped_native_failure_8616(
+            project, narrowed, raw,
+        ) is not None
 
 
 def test_native_resolver_closes_scoped_body_and_revalidates_cache(world: tuple) -> None:  # noqa: F811

@@ -43,6 +43,7 @@
     "tests/frontend/test_x86_16_lifting_opcode_tables.py",
     "tests/frontend/test_x86_16_partial_register_lifting.py",
     "tests/frontend/test_x86_16_pyvex_compat.py",
+    "tests/frontend/test_x86_16_bootstrap_pyvex.py",
     "tests/frontend/test_x86_16_smoketest.py",
     "tests/frontend/test_x86_16_stack_probe_lifting.py",
     "tests/frontend/test_x86_16_status_flag_lift_context.py"

@@ -13,11 +13,12 @@ def _load_module():
     return report
 
 
-def test_script_entrypoint_prints_help():
+def test_package_entrypoint_prints_help() -> None:
+    """Exercise the maintained package command from the repository root."""
     repo_root = Path(__file__).resolve().parents[3]
-    mod_path = repo_root / "scripts" / "report_compiler_matches.py"
     result = subprocess.run(
-        [sys.executable, str(mod_path), "--help"],
+        [sys.executable, "-m", "tools.compiler_id", "--help"],
+        cwd=repo_root,
         capture_output=True,
         text=True,
         timeout=120,

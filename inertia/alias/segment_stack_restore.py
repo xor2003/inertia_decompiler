@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final, Protocol, cast
 
 from inertia.ir.constant_flow import IRConstantFlow8616
-from inertia.ir.core import IRAddress, IRFunctionArtifact, IRInstr, IRValue, MemSpace
+from inertia.ir.core import IRAddress, IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from inertia.ir.segment_state_transfer import SEGMENT_REGISTER_SET, SegmentRestoreSource
 
 from .segment_stack_fragments import (
@@ -283,16 +284,97 @@ def _call_effect_stack_state_8616(
         if effect is not None and effect.complete and effect.bp_preserved
         else None
     )
-    if (
-        effect is not None
-        and effect.complete
-        and effect.net_stack_delta is not None
-        and not effect.escaped_ranges
-    ):
+    if effect is None:
+        return None, {}, bp_delta
+    coordinates = effect.stack_coordinates
+    if coordinates is not None:
+        # A present coordinate record must authenticate its source CALL:
+        # callsite identity, the bound target, and a proven delta consistent
+        # with the owned net projection. No legacy fallback applies.
+        target = instruction.args[0] if instruction.args else None
+        target_bound = coordinates.source is not None and coordinates.source.matches_call(instruction)
+        if isinstance(target, IRValue) and target.space is MemSpace.CONST and type(target.const) is int:
+            target_bound = target_bound and coordinates.target_addr == target.const
+        coordinate_delta = (
+            coordinates.net_sp_delta
+            if coordinates.callsite_addr == instruction.addr
+            and coordinates.net_sp_delta is not None
+            and coordinates.net_sp_delta == effect.net_stack_delta
+            and target_bound
+            and coordinates.has_proven_sp_delta
+            else None
+        )
+        if coordinate_delta is None:
+            return None, {}, bp_delta
+    else:
+        coordinate_delta = None
+    if coordinate_delta is not None:
+        # A proven per-call SP coordinate survives uncertain memory effects:
+        # the machine delta applies even when the preservation census refused.
+        # Byte identities still require their own proof and are dropped when
+        # the preservation census is incomplete or reported escapes.
+        call_entry_sp = instruction_entry_state.sp_delta
+        sp_delta = None if call_entry_sp is None else call_entry_sp + coordinate_delta
+        stack_bytes = (
+            instruction_entry_state.byte_map()
+            if effect.complete and not effect.escaped_ranges
+            else {}
+        )
+        return sp_delta, stack_bytes, bp_delta
+    if effect.complete and effect.net_stack_delta is not None:
         call_entry_sp = instruction_entry_state.sp_delta
         sp_delta = None if call_entry_sp is None else call_entry_sp + effect.net_stack_delta
-        return sp_delta, instruction_entry_state.byte_map(), bp_delta
+        # A proven frame coordinate survives uncertain memory effects. Old
+        # byte identities do not; subsequent stores establish fresh identities.
+        stack_bytes = {} if effect.escaped_ranges else instruction_entry_state.byte_map()
+        return sp_delta, stack_bytes, bp_delta
     return None, {}, bp_delta
+
+
+def _ignore_call_positions(_instruction: IRInstr, _before: int | None, _entry: int | None) -> None:
+    """Leave optional CALL-position observation disabled during ordinary transfer."""
+
+
+_SNAPSHOT_WORD_REGISTERS: Final[tuple[str, ...]] = ("ax", "bx", "cx", "dx", "si", "di")
+
+
+def _block_constant_flow_8616(
+    entry_state: _SegmentStackAliasState8616,
+    tracked_registers: frozenset[str],
+    allow_constant_values: bool,
+    persistent_constants: bool,
+) -> IRConstantFlow8616 | None:
+    """Create the per-block constant flow and seed persistent entry facts."""
+    want = persistent_constants or (
+        allow_constant_values and tracked_registers != SEGMENT_REGISTER_SET
+    )
+    if not want:
+        return None
+    constants = IRConstantFlow8616()
+    if persistent_constants:
+        constants.seed_register_constants_8616(entry_state.register_constant_map())
+    return constants
+
+
+def _call_exit_state_8616(
+    instruction: IRInstr,
+    instruction_entry_state: _SegmentStackAliasState8616,
+    call_deltas: Mapping[int, int] | None,
+) -> tuple[int | None, dict[int, SegmentStackByteOrigin8616], int | None]:
+    """Apply one CALL's callee effect: scoped overlay or universal fields.
+
+    A scoped caller-visible delta applies only to SP: the callee body's byte
+    identities and BP coordinate stay unproven under scoped-only evidence.
+    """
+    overlay = (
+        call_deltas.get(instruction.addr)
+        if call_deltas is not None and isinstance(instruction.addr, int)
+        else None
+    )
+    if overlay is not None:
+        entry_sp = instruction_entry_state.sp_delta
+        return (None if entry_sp is None else entry_sp + overlay), {}, None
+    return _call_effect_stack_state_8616(instruction, instruction_entry_state)
 
 
 def _transfer_block(
@@ -302,11 +384,25 @@ def _transfer_block(
     tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
     *,
     allow_constant_values: bool = False,
+    persistent_constants: bool = False,
+    call_deltas: Mapping[int, int] | None = None,
+    value_observer: Callable[[IRInstr, StackPointerSnapshots8616, int | None, int | None], None] | None = None,
+    call_observer: Callable[[IRInstr, int | None, int | None], None] = _ignore_call_positions,
 ) -> tuple[list[SegmentStackRestoreFact8616], _SegmentStackAliasState8616]:
-    """Transfer exact stack identities and classify restorations in one block."""
+    """Transfer exact stack identities and classify restorations in one block.
+
+    A CALL observer receives the instruction-entry SP and the current SP after
+    physical frame preparation, before the authenticated callee transfer.
+    When ``persistent_constants`` is set, numeric register constants seeded
+    into the entry state and proven inside the block are threaded through the
+    same constant-flow owner and published on the exit state; SP-relative
+    coordinates remain a separate fact kind.
+    """
     values: dict[str | int, SegmentStackFragments8616] = {}
-    constants = IRConstantFlow8616() if allow_constant_values and tracked_registers != SEGMENT_REGISTER_SET else None
-    stack_pointers = StackPointerSnapshots8616()
+    constants = _block_constant_flow_8616(
+        entry_state, tracked_registers, allow_constant_values, persistent_constants,
+    )
+    stack_pointers = StackPointerSnapshots8616(register_offsets=entry_state.register_offset_map())
     stack_bytes = entry_state.byte_map()
     sp_delta = entry_state.sp_delta
     bp_delta = entry_state.bp_delta
@@ -327,8 +423,10 @@ def _transfer_block(
             constants.observe(instruction)
         if instruction.addr != machine_instruction_addr:
             machine_instruction_addr = instruction.addr
-            instruction_entry_state = _stack_state(sp_delta, stack_bytes, bp_delta)
-        stack_pointers.observe(instruction, sp_delta, bp_delta)
+            instruction_entry_state = _stack_state(sp_delta, stack_bytes, bp_delta, stack_pointers.register_offsets)
+        stack_pointers.observe(instruction, sp_delta, bp_delta, constants=constants)
+        if value_observer is not None:
+            value_observer(instruction, stack_pointers, sp_delta, bp_delta)
         _track_value_fragments_8616(
             instruction,
             values,
@@ -353,25 +451,78 @@ def _transfer_block(
         )
         if restore_fact is not None:
             facts.append(restore_fact)
-        next_sp = stack_pointers.updated_register("sp", instruction, sp_delta, bp_delta)
-        bp_delta = stack_pointers.updated_register("bp", instruction, sp_delta, bp_delta)
+        next_sp = stack_pointers.updated_register("sp", instruction, sp_delta, bp_delta, constants=constants)
+        bp_delta = stack_pointers.updated_register("bp", instruction, sp_delta, bp_delta, constants=constants)
         sp_delta = next_sp
         if instruction.op == "CALL":
-            sp_delta, stack_bytes, bp_delta = _call_effect_stack_state_8616(
-                instruction,
-                instruction_entry_state,
+            call_observer(instruction, instruction_entry_state.sp_delta, sp_delta)
+            sp_delta, stack_bytes, bp_delta = _call_exit_state_8616(
+                instruction, instruction_entry_state, call_deltas,
             )
-    return facts, _stack_state(sp_delta, stack_bytes, bp_delta)
+    return facts, _block_exit_state_8616(
+        sp_delta, stack_bytes, bp_delta, stack_pointers, constants, persistent_constants,
+    )
+
+
+def _block_exit_state_8616(
+    sp_delta: int | None,
+    stack_bytes: dict[int, SegmentStackByteOrigin8616],
+    bp_delta: int | None,
+    stack_pointers: StackPointerSnapshots8616,
+    constants: IRConstantFlow8616 | None,
+    persistent_constants: bool,
+) -> _SegmentStackAliasState8616:
+    """Freeze the block exit, publishing proven constants only when scoped."""
+    out_constants = (
+        constants.register_constants_8616(_SNAPSHOT_WORD_REGISTERS)
+        if persistent_constants and constants is not None
+        else None
+    )
+    return _stack_state(
+        sp_delta, stack_bytes, bp_delta, stack_pointers.register_offsets, out_constants,
+    )
+
+
+def _scoped_predecessors_8616(
+    block_addrs: frozenset[int], successors: Mapping[int, Sequence[int]],
+) -> dict[int, tuple[int, ...]]:
+    """Invert one scoped successor map restricted to the live block set."""
+    predecessors: dict[int, list[int]] = {addr: [] for addr in block_addrs}
+    for block_addr in block_addrs:
+        for successor in successors.get(block_addr, ()):
+            if successor in predecessors:
+                predecessors[successor].append(block_addr)
+    return {addr: tuple(sorted(values)) for addr, values in predecessors.items()}
 
 
 def _solve_stack_states(
     artifact: IRFunctionArtifact,
     tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
+    *,
+    entry_constants: Mapping[str, int] | None = None,
+    scoped_blocks: tuple[IRBlock, ...] | None = None,
+    scoped_successors: Mapping[int, Sequence[int]] | None = None,
+    call_deltas: Mapping[int, int] | None = None,
 ) -> dict[int, _SegmentStackAliasState8616]:
-    """Reach a deterministic must-state fixed point across typed IR edges."""
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
-    complete_ir = not any(block.refusals for block in artifact.blocks)
-    predecessors = _predecessor_map(artifact)
+    """Reach a deterministic must-state fixed point across typed IR edges.
+
+    The optional scoped graph parameters restrict the solved surface to one
+    authenticated projection without touching the shared artifact; the
+    universal path supplies neither and keeps its original behavior.
+    """
+    if scoped_blocks is None or scoped_successors is None:
+        blocks_by_addr = {block.addr: block for block in artifact.blocks}
+        predecessors = _predecessor_map(artifact)
+    else:
+        blocks_by_addr = {block.addr: block for block in scoped_blocks}
+        predecessors = _scoped_predecessors_8616(frozenset(blocks_by_addr), scoped_successors)
+    complete_ir = not any(block.refusals for block in blocks_by_addr.values())
+    persistent = entry_constants is not None
+    entry_seed = (
+        _SegmentStackAliasState8616(0)
+        if entry_constants is None
+        else _stack_state(0, {}, None, {}, dict(entry_constants))
+    )
     unknown = _SegmentStackAliasState8616(None)
     # An unvisited edge is not an analyzed unknown value. Seeding loop edges
     # with unknown would erase entry evidence before the first back-edge visit.
@@ -382,7 +533,7 @@ def _solve_stack_states(
         for block_addr in sorted(blocks_by_addr):
             incoming = tuple(exit_states[pred] for pred in predecessors[block_addr] if pred in exit_states)
             if block_addr == artifact.function_addr:
-                incoming = (_SegmentStackAliasState8616(0), *incoming)
+                incoming = (entry_seed, *incoming)
             if not incoming:
                 continue
             entry_state = _join_stack_states(incoming)
@@ -392,6 +543,8 @@ def _solve_stack_states(
                 entry_state,
                 tracked_registers,
                 allow_constant_values=complete_ir,
+                persistent_constants=persistent,
+                call_deltas=call_deltas,
             )[1]
             if new_exit != exit_states.get(block_addr):
                 exit_states[block_addr] = new_exit

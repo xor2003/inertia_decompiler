@@ -26,7 +26,6 @@ from inertia.cli.cli_c_text_postprocess import (
     _prune_non_lvalue_arithmetic_assignments,
     _prune_parameter_shadow_declarations_text,
     _prune_standalone_memory_helper_reads_text,
-    _prune_standalone_stack_probe_calls_text,
     _prune_trailing_generic_return_text,
     _prune_undefined_fragment_carrier_assignments_text,
     _prune_unused_local_declarations_text,
@@ -508,30 +507,6 @@ void f(void)
     assert rewritten == c_text
     assert "sub_10079();" in rewritten
     assert "aNchkstk();" not in rewritten
-
-
-def test_prune_standalone_stack_probe_calls_removes_prototype_and_call():
-    c_text = """\
-/* COD annotations:
- * calls = aNchkstk, DrawBar
- */
-void aNchkstk(void);
-void DrawBar(unsigned short row);
-
-int f(void)
-{
-    aNchkstk();
-    DrawBar(1);
-    return 0;
-}
-"""
-
-    rewritten = _prune_standalone_stack_probe_calls_text(c_text)
-
-    assert "void aNchkstk(void);" not in rewritten
-    assert "    aNchkstk();" not in rewritten
-    assert "calls = aNchkstk, DrawBar" in rewritten
-    assert "DrawBar(1);" in rewritten
 
 
 def test_source_header_args_unmaterialized_refuses_void_header_when_generated_arg_is_live():

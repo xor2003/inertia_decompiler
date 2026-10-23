@@ -561,9 +561,12 @@ def test_native_binding_depth_bound_fails_closed() -> None:
 
     premise, _, _ = _prove_stub(boot, STUB_CODE, 0x1032, mutate=inject)
     assert not premise.complete
-    assert premise.failure is Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
+    # The injected row has no bound native coverage, so it refuses at the
+    # coverage-binding layer before depth analysis runs and nothing is
+    # classified — the ledger is trivially closed (0 == 0 + 0).
+    assert premise.failure is Real16InvocationFailure8616.COVERAGE_UNBOUND
     assert premise.materialized_count == 0
-    assert premise.failure_count == premise.classified_fact_count > 0
+    assert premise.classified_fact_count == 0
     _assert_ledger_closed(premise)
 
 

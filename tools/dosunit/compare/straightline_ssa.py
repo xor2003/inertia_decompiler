@@ -96,6 +96,7 @@ from tools.dosunit.ssa.materialization import (
 from tools.dosunit.ssa.materialization import (
     materialize_term as _materialize_json_term,
 )
+from tools.dosunit.ssa.obligation_codec import decode_obligation
 from tools.dosunit.ssa.ssa_constant_terms import constant_bitvector
 from tools.dosunit.ssa.ssa_control_flow import ControlIndexRefusal, closed_block_index
 from tools.dosunit.ssa.translation import TranslationContext
@@ -3135,6 +3136,13 @@ def _repeat_string_family_versions(
     for direction in ("dflag", "d"):
         if direction in reg_versions:
             flag_args = (*flag_args, reg_versions[direction])
+    if family in {"movs", "stos", "scas", "cmps"} and names["architecture"] is RepeatArchitecture.FLAT32:
+        # Copies ignore incoming arithmetic flags; nonempty scans overwrite
+        # them before testing repetition. preserve_zero_count restores the
+        # original flags when no iteration executes. Keep direction carriers
+        # and the existing summary ABI while dropping only lazy-flag inputs.
+        flag_args = (*(SsaExpr("const", reg_widths[name], value=0) for name in names["flags"]),
+                     *flag_args[len(names["flags"]):])
     cx_width = reg_widths[names["cx"]]
     si_width = reg_widths[names["si"]]
     di_width = reg_widths[names["di"]]
@@ -3188,6 +3196,7 @@ def _lower_repeat_string_summary(
     mem_input = SsaExpr("mem_input", 0, name="mem")
     ax_value = _coerce_width(reg_versions[names["ax"]], width * 8)
 
+    before_repeat = dict(reg_versions)
     family_state = _repeat_string_family_versions(
         family,
         tag=tag,
@@ -3200,6 +3209,22 @@ def _lower_repeat_string_summary(
     if family_state is None:
         return None
     mem_version, memory_touched = family_state
+    if family in {"movs", "stos"} and names["architecture"] is RepeatArchitecture.FLAT32:
+        from tools.dosunit.ssa.repeat_counted import counted_repeat_outputs
+
+        counted_repeat_outputs(before_repeat, reg_versions, family=family, width=width)
+    if family in {"scas", "cmps"} and names["architecture"] is RepeatArchitecture.FLAT32:
+        # Every completed nonempty scan compares by subtraction. Zero count
+        # restores incoming state in preserve_zero_count below.
+        reg_versions["cc_op"] = SsaExpr("const", 32, value={1: 4, 2: 5, 4: 6}[width])
+        reg_versions["cc_ndep"] = SsaExpr("const", 32, value=0)
+        if family == "scas":
+            reg_versions["cc_dep1"] = _coerce_width(ax_value, 32)
+    from tools.dosunit.ssa.repeat_zero_count import preserve_zero_count
+
+    mem_version = preserve_zero_count(
+        before_repeat, reg_versions, before_repeat[names["cx"]], mem_input, mem_version,
+    )
 
     fallthrough = _call_fallthrough_linear_from_instructions(instructions)
     if fallthrough is not None:
@@ -9098,6 +9123,7 @@ def _compare_functions(
     timeout_ms: int,
     input_constraints: list[dict[str, Any]] | None = None,
     scalar_preprocessing: ScalarPreprocessing | None = None,
+    capture_memory_model: bool = False,
 ) -> dict[str, Any]:
     """Compare all declared SSA outputs over shared inputs with bounded Z3.
 
@@ -9153,6 +9179,16 @@ def _compare_functions(
     solver = z3.Solver()
     solver.set("timeout", timeout_ms)
     _add_z3_input_constraints(solver, inputs, input_constraints or [], z3)
+    # Typed per-site obligations (e.g. x87 pending-exception guards) are
+    # enforced as solver domain constraints: a countermodel that violates a
+    # declared site predicate can never be published as a failed verdict,
+    # and UNSAT inside the domain discharges the modeled transition only
+    # under its serialized premises.
+    domain_guards: list[Any] = []
+    domain_obligations, domain_refusal = _enforce_domain_obligations(
+        solver, oracle, candidate, inputs, z3, started=started, domain_guards=domain_guards)
+    if domain_refusal is not None:
+        return domain_refusal
     pairs, skipped_layout_outputs = _z3_output_pairs(
         output_regs,
         oracle=oracle,
@@ -9195,6 +9231,7 @@ def _compare_functions(
             "solver_time_ms": elapsed,
             "skipped_layout_outputs": skipped_layout_outputs,
             "output_lemmas": lemma_evidence,
+            "domain_obligations": domain_obligations,
         }
     model = checked.model
     assert model is not None
@@ -9203,44 +9240,52 @@ def _compare_functions(
         for name, (value, width) in inputs.items()
         if width > 0
     }
-    mismatches = _z3_mismatch_list(pairs, model=model, counterexample=counterexample, z3=z3)
-    if mismatches and all(
-        mismatch.get("kind") == "output_expr_changed"
-        and isinstance(mismatch.get("reg"), str)
-        for mismatch in mismatches
-    ):
-        scans = [
-            (
-                _output_uses_x86_lazy_flags(oracle, mismatch["reg"]),
-                _output_uses_x86_lazy_flags(candidate, mismatch["reg"]),
-            )
-            for mismatch in mismatches
-        ]
-        if all(FlagScanOutcome.UNINTERPRETED_HELPER in pair for pair in scans):
-            return {
-                "status": "refused",
-                "reason": "uninterpreted_x86_flags",
-                "mismatches": mismatches,
-                "solver_time_ms": elapsed,
-                "skipped_layout_outputs": skipped_layout_outputs,
-                "output_lemmas": lemma_evidence,
-            }
-        if not any(pair == (FlagScanOutcome.CLEAN, FlagScanOutcome.CLEAN) for pair in scans):
-            return {
-                "status": "refused",
-                "reason": "x86_flag_scan_incomplete",
-                "mismatches": mismatches,
-                "solver_time_ms": elapsed,
-                "skipped_layout_outputs": skipped_layout_outputs,
-                "output_lemmas": lemma_evidence,
-            }
+    from tools.dosunit.ssa.model_memory import serialize_byte_memory
+
+    memory_evidence = {"counterexample_memory": {
+        name: serialize_byte_memory(model.eval(value, model_completion=True))
+        for name, (value, width) in inputs.items() if width == 0
+    }} if capture_memory_model else {}
+    non_concrete_outputs: list[str] = []
+    mismatches = _z3_mismatch_list(
+        pairs, model=model, counterexample=counterexample, z3=z3,
+        non_concrete_outputs=non_concrete_outputs)
+    from tools.dosunit.ssa.x87_abstract_witness import counterexample_scope
+
+    x87_scope = counterexample_scope(pairs, domain_guards)
+    exact_mismatches = [item for item in mismatches if item.get("reg") in x87_scope.exact_outputs]
+    witness_refusal = _z3_witness_refusal_reason(
+        abstract_domain=x87_scope.abstract_domain, abstract_outputs=bool(x87_scope.abstract_outputs),
+        exact_mismatches=bool(exact_mismatches), non_concrete_outputs=bool(non_concrete_outputs))
+    if witness_refusal is not None:
+        return {
+            "status": "refused", "reason": witness_refusal,
+            "mismatches": mismatches, "solver_time_ms": elapsed,
+            "domain_obligations": domain_obligations, "output_lemmas": lemma_evidence,
+            "skipped_layout_outputs": skipped_layout_outputs,
+            "abstract_x87_outputs": list(x87_scope.abstract_outputs),
+            "abstract_x87_domain": x87_scope.abstract_domain,
+            "non_concrete_model_outputs": non_concrete_outputs,
+            **memory_evidence,
+        }
+    mismatches = exact_mismatches
+    flag_refusal = _z3_flag_scan_refusal(
+        mismatches, oracle, candidate,
+        memory_evidence=memory_evidence, elapsed=elapsed,
+        skipped_layout_outputs=skipped_layout_outputs, lemma_evidence=lemma_evidence,
+    )
+    if flag_refusal is not None:
+        return flag_refusal
     return {
         "status": "failed",
         "reason": "observable_mismatch",
         "mismatches": mismatches,
+        **memory_evidence,
         "solver_time_ms": elapsed,
         "skipped_layout_outputs": skipped_layout_outputs,
         "output_lemmas": lemma_evidence,
+        "domain_obligations": domain_obligations,
+        "non_concrete_model_outputs": non_concrete_outputs,
     }
 
 
@@ -9280,20 +9325,27 @@ def _x86_lazy_flag_summary_is_uninterpreted(
         return True
 
     def constant(value: Any) -> int | None:  # noqa: ANN401
-        """Resolve a direct constant or one materialized SSA reference."""
+        """Resolve literals and bounded constant shift guards through SSA references."""
         if not isinstance(value, dict):
             return None
-        ref = value.get("ref")
-        if isinstance(ref, str):
-            value = assignments.get(ref)
-        if not isinstance(value, dict) or value.get("op") != "const":
-            return None
-        return _optional_int(value.get("value"))
+        from tools.dosunit.ssa.ssa_constant_terms import constant_flag_selector
 
+        return constant_flag_selector(value, assignments)
+
+    from tools.dosunit.ssa.ssa_constant_terms import flag_selector_choices
+
+    index = 1 if term.get("op") == "summary_x86g_calculate_condition" else 0
+    choices = flag_selector_choices(args[index], assignments) if len(args) > index and isinstance(args[index], dict) else None
+    if choices is None:
+        return True
     if term.get("op") == "summary_x86g_calculate_condition" and len(args) == 5:
-        return _x86_exact_condition_kind(constant(args[0]), constant(args[1])) is None
+        return any(_x86_exact_condition_kind(constant(args[0]), choice) is None for choice in choices)
+    if term.get("op") == "summary_x86g_calculate_eflags_all" and len(args) == 4:
+        from tools.dosunit.ssa.x86_lazy_conditions import all_flags_contract
+
+        return any(all_flags_contract(choice) is None for choice in choices)
     if term.get("op") == "summary_x86g_calculate_eflags_c" and len(args) == 4:
-        return carry_contract(constant(args[0])) is None
+        return any(carry_contract(choice) is None for choice in choices)
     return True
 
 
@@ -9398,14 +9450,32 @@ def _z3_output_pairs(
 
 
 
+def _z3_witness_refusal_reason(
+    *, abstract_domain: bool, abstract_outputs: bool,
+    exact_mismatches: bool, non_concrete_outputs: bool,
+) -> str | None:
+    """Require an exact difference under a non-abstract counterexample domain."""
+    if abstract_domain or (abstract_outputs and not exact_mismatches):
+        return "x87_transcendental_counterexample_unvalidated"
+    if non_concrete_outputs and not exact_mismatches:
+        return "counterexample_outputs_not_concrete"
+    return None
+
+
 def _z3_mismatch_list(
     pairs: list[tuple[str, Any, Any]],
     *,
     model: Any,  # noqa: ANN401
     counterexample: dict[str, Any],
     z3: Any,  # noqa: ANN401
+    non_concrete_outputs: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Collect concrete output mismatches from a satisfying model."""
+    """Collect concrete differences and separately retain unavailable witnesses.
+
+    An incomplete model evaluation can remain symbolic even with model
+    completion. Such a value is not a numeric counterexample, but must not
+    discard an independently concrete register or memory difference.
+    """
     mismatches: list[dict[str, Any]] = []
     for reg, oracle_expr, candidate_expr in pairs:
         if _is_z3_array(oracle_expr, z3) or _is_z3_array(candidate_expr, z3):
@@ -9418,8 +9488,14 @@ def _z3_mismatch_list(
                     }
                 )
             continue
-        oracle_value = model.eval(oracle_expr, model_completion=True).as_long()
-        candidate_value = model.eval(candidate_expr, model_completion=True).as_long()
+        oracle_model = model.eval(oracle_expr, model_completion=True)
+        candidate_model = model.eval(candidate_expr, model_completion=True)
+        if not z3.is_bv_value(oracle_model) or not z3.is_bv_value(candidate_model):
+            if non_concrete_outputs is not None:
+                non_concrete_outputs.append(reg)
+            continue
+        oracle_value = oracle_model.as_long()
+        candidate_value = candidate_model.as_long()
         if oracle_value != candidate_value:
             mismatches.append(
                 {
@@ -14876,6 +14952,147 @@ def _z3_inputs(oracle: dict[str, Any], candidate: dict[str, Any], z3: Any) -> di
     return inputs
 
 
+def _z3_flag_scan_refusal(
+    mismatches: list[dict[str, Any]],
+    oracle: dict[str, Any], candidate: dict[str, Any],
+    *,
+    memory_evidence: dict[str, Any],
+    elapsed: int,
+    skipped_layout_outputs: list[Any],
+    lemma_evidence: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Downgrade flag-helper countermodels to typed refusals, else ``None``."""
+    if not mismatches or not all(
+        mismatch.get("kind") == "output_expr_changed"
+        and isinstance(mismatch.get("reg"), str)
+        for mismatch in mismatches
+    ):
+        return None
+    scans = [
+        (
+            _output_uses_x86_lazy_flags(oracle, mismatch["reg"]),
+            _output_uses_x86_lazy_flags(candidate, mismatch["reg"]),
+        )
+        for mismatch in mismatches
+    ]
+    reason: str | None = None
+    if all(FlagScanOutcome.UNINTERPRETED_HELPER in pair for pair in scans):
+        reason = "uninterpreted_x86_flags"
+    elif not any(pair == (FlagScanOutcome.CLEAN, FlagScanOutcome.CLEAN) for pair in scans):
+        reason = "x86_flag_scan_incomplete"
+    if reason is None:
+        return None
+    return {
+        "status": "refused",
+        "reason": reason,
+        "mismatches": mismatches,
+        **memory_evidence,
+        "solver_time_ms": elapsed,
+        "skipped_layout_outputs": skipped_layout_outputs,
+        "output_lemmas": lemma_evidence,
+    }
+
+
+def _decoded_domain_predicate(
+    obligation: dict[str, Any], *, side: str, started: float,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Decode self-contained evidence or return a bounded invalid-format refusal."""
+    try:
+        predicate = (decode_obligation(obligation) if "predicate_encoding" in obligation
+                     else obligation.get("predicate"))
+    except ValueError as error:
+        return None, {
+            "status": "refused", "reason": "domain_obligation_encoding_invalid",
+            "mismatches": [{"kind": "domain_obligation_encoding_invalid",
+                            "side": side, "detail": str(error)}],
+            "solver_time_ms": int((time.monotonic() - started) * 1000),
+        }
+    return predicate if isinstance(predicate, dict) else None, None
+
+
+def _enforce_domain_obligations(
+    solver: Any,  # noqa: ANN401
+    oracle: dict[str, Any], candidate: dict[str, Any],
+    inputs: dict[str, tuple[Any, int]],
+    z3: Any,  # noqa: ANN401
+    *,
+    started: float,
+    domain_guards: list[Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Assert every bound site predicate and prove the domain nonvacuous.
+
+    Returns the serialized obligation records plus ``None``, or an empty list
+    plus a ``refused`` comparison result when an obligation references inputs
+    outside the comparison domain or the declared domain is empty/unknown.
+    """
+    domain_guards = [] if domain_guards is None else domain_guards
+    domain_obligations: list[dict[str, Any]] = []
+    unenforceable: list[dict[str, Any]] = []
+    for side, document in (("oracle", oracle), ("candidate", candidate)):
+        for obligation in document.get("obligations", ()) or ():
+            if not isinstance(obligation, dict):
+                continue
+            predicate, encoding_refusal = _decoded_domain_predicate(obligation, side=side, started=started)
+            if encoding_refusal is not None:
+                return [], encoding_refusal
+            if not isinstance(predicate, dict):
+                continue
+            missing = {name for name in _term_named_inputs(predicate) if name not in inputs}
+            record = dict(obligation)
+            if missing:
+                unenforceable.append(record | {"side": side, "missing_inputs": sorted(missing)})
+                continue
+            obligation_document = ({**document, "_constant_normalization": {}}
+                                   if obligation.get("literal_constants") is True else document)
+            guard = _z3_obligation_term(predicate, document=obligation_document, inputs=inputs, z3=z3)
+            domain_guards.append(guard)
+            solver.add(guard != z3.BitVecVal(0, guard.size()) if z3.is_bv(guard) else guard)
+            domain_obligations.append(record | {"side": side})
+    if unenforceable:
+        return [], {
+            "status": "refused",
+            "reason": "domain_obligation_unenforceable",
+            "mismatches": [{"kind": "domain_obligation_unenforceable",
+                            "obligations": unenforceable}],
+            "solver_time_ms": int((time.monotonic() - started) * 1000),
+        }
+    if domain_obligations:
+        # A conjunction of declared site predicates that is unsatisfiable (or
+        # undecidable inside the budget) admits every output relation
+        # vacuously. Refuse rather than publish an empty-domain proof.
+        feasibility = solver.check()
+        if feasibility != z3.sat:
+            return domain_obligations, {
+                "status": "refused",
+                "reason": ("domain_obligation_unknown" if feasibility == z3.unknown
+                           else "domain_obligation_vacuous"),
+                "mismatches": [{"kind": "domain_obligation_vacuous",
+                                "feasibility": str(feasibility),
+                                "obligations": domain_obligations}],
+                "solver_time_ms": int((time.monotonic() - started) * 1000),
+                "domain_obligations": domain_obligations,
+            }
+    return domain_obligations, None
+
+
+def _term_named_inputs(term: dict[str, Any]) -> set[str]:
+    """Collect scalar and memory inputs, visiting shared SSA nodes only once."""
+    names: set[str] = set()
+    seen: set[int] = set()
+    pending = [term]
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, dict) or id(node) in seen:
+            continue
+        seen.add(id(node))
+        if node.get("op") in {"input", "mem_input"} and isinstance(node.get("name"), str):
+            names.add(node["name"])
+        args = node.get("args")
+        if isinstance(args, list):
+            pending.extend(arg for arg in args if isinstance(arg, dict))
+    return names
+
+
 def _add_z3_input_constraints(
     solver: Any, inputs: dict[str, tuple[Any, int]], constraints: list[dict[str, Any]], z3: Any  # noqa: ANN401
 ) -> None:
@@ -14919,6 +15136,47 @@ def _z3_term(
         }
     return TranslationContext(document, inputs, assignments, {} if cache is None else cache,
                               z3, _normalized_constant_value, output_name).term(term)
+
+
+def _z3_obligation_term(
+    term: dict[str, Any],
+    *,
+    document: dict[str, Any],
+    inputs: dict[str, tuple[Any, int]],
+    z3: Any,  # noqa: ANN401
+) -> Any:  # noqa: ANN401
+    """Translate an inline obligation predicate by flattening op nodes into assignments."""
+    assignments = {
+        item["id"]: item for item in document.get("assignments", []) or []
+        if isinstance(item, dict) and "id" in item
+    }
+    counter = [0]
+    flattened: dict[int, dict[str, Any]] = {}
+
+    def flatten(node: dict[str, Any]) -> dict[str, Any]:
+        cached = flattened.get(id(node))
+        if cached is not None:
+            return cached
+        if "ref" in node or node.get("op") in {"input", "mem_input", "const"}:
+            return node
+        ident = f"__x87_obligation_{counter[0]}"
+        while ident in assignments:
+            counter[0] += 1
+            ident = f"__x87_obligation_{counter[0]}"
+        counter[0] += 1
+        result = {"ref": ident}
+        flattened[id(node)] = result
+        assignments[ident] = {
+            "id": ident,
+            "op": node["op"],
+            "width": int(node.get("width", 16)),
+            "args": [flatten(arg) for arg in node.get("args", []) or []],
+        }
+        return result
+
+    root = flatten(term)
+    return TranslationContext(document, inputs, assignments, {},
+                              z3, _normalized_constant_value).term(root)
 
 
 def _z3_assignment(
@@ -15979,6 +16237,14 @@ def _is_incomplete_noncontrol_block(irsb: Any, instructions: list[dict[str, Any]
 
 
 def _boring_fallthrough_successor(irsb: Any, instructions: list[dict[str, Any]]) -> int | None:  # noqa: ANN401
+    """Admit byte-contiguous fallthrough using the active architecture's control.
+
+    Native i386 VEX may copy a constant EIP through registers and temporaries.
+    Resolving those copies preserves an exact prefix boundary without inventing
+    a branch or applying the segmented low-IP canonicalization to flat32.
+    """
+    import pyvex
+
     if str(getattr(irsb, "jumpkind", "")) != "Ijk_Boring" or not instructions:
         return None
     last = instructions[-1]
@@ -15988,6 +16254,10 @@ def _boring_fallthrough_successor(irsb: Any, instructions: list[dict[str, Any]])
     if linear is None or size is None or size <= 0:
         return None
     fallthrough = linear + size
+    if isinstance(irsb, pyvex.IRSB) and irsb.arch.name == "X86":
+        from tools.dosunit.compare.flat32_call_lowering import _static_next
+
+        return fallthrough if _static_next(irsb) == fallthrough else None
     next_target = _const_expr_value(getattr(irsb, "next", None))
     if next_target is None:
         return None

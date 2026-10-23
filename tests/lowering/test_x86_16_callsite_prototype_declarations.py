@@ -1227,7 +1227,7 @@ def test_rebinds_repeated_target_summaries_with_identical_typed_interface() -> N
     codegen.project.kb = SimpleNamespace(
         functions=SimpleNamespace(
             function=lambda *, addr, create: (
-                SimpleNamespace(addr=addr, name="render") if addr == 0x2000 and create is False else None
+                SimpleNamespace(addr=addr, name="render", prototype=None) if addr == 0x2000 and create is False else None
             )
         )
     )
@@ -1256,7 +1256,7 @@ def test_refuses_repeated_target_summaries_with_conflicting_typed_interfaces() -
     codegen.project.kb = SimpleNamespace(
         functions=SimpleNamespace(
             function=lambda *, addr, create: (
-                SimpleNamespace(addr=addr, name="combine") if addr == 0x2000 and create is False else None
+                SimpleNamespace(addr=addr, name="combine", prototype=None) if addr == 0x2000 and create is False else None
             )
         )
     )

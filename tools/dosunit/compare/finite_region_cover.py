@@ -54,13 +54,18 @@ def _region(nodes: dict[int, RegionNode], head: int, cutpoints: set[int]) -> Col
     return CollapsedRegion(tuple(members), node.successors, node.kind)
 
 
-def cover_regions(nodes: dict[int, RegionNode], entry: int) -> FiniteRegionCover:
+def cover_regions(
+    nodes: dict[int, RegionNode], entry: int, *, include_terminal_suffixes: bool = False,
+) -> FiniteRegionCover:
     """Propose finite transitions allowing shared unconditional guard suffixes.
 
     Entry and successors of branches/calls are retained cutpoints. Unconditional
     prefixes may reach one shared guard from several cutpoints, so each path
     includes that guard's real effects independently. Every edge remains closed,
     every source block is covered, and no branch or cycle is silently skipped.
+    Optional terminal suffix sharing includes the entire return block in each
+    unconditional predecessor while retaining its standalone cutpoint. Consumers
+    must still compose its effects and prove every transition independently.
     """
     _check_nodes(nodes, entry)
     boundaries: set[int] = set()
@@ -71,7 +76,10 @@ def cover_regions(nodes: dict[int, RegionNode], entry: int) -> FiniteRegionCover
     # its real guard effects in the predecessor transition. Conditional reentry
     # retains entry as a boundary through the successor rule above.
     heads = boundaries | {entry}
-    regions = tuple(_region(nodes, head, boundaries) for head in sorted(heads))
+    barriers = (boundaries - {address for address in boundaries
+                             if nodes[address].kind is RegionExitKind.RETURN}
+                if include_terminal_suffixes else boundaries)
+    regions = tuple(_region(nodes, head, barriers) for head in sorted(heads))
     covered = frozenset(member for region in regions for member in region.members)
     if covered != frozenset(nodes):
         raise RegionGraphRefusal(RegionGraphReason.CLOSURE)

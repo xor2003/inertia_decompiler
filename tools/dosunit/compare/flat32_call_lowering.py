@@ -28,17 +28,22 @@ target set from the composed ``ip`` term; otherwise it keeps the
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from tools.dosunit.architectures.flat32 import flat32_register_architecture
 from tools.dosunit.compare import straightline_ssa as S
 from tools.dosunit.compare.flat32_call_contracts import (
     BlockLiftRetry,
     CallCompositionRefusal,
+    CallRefusalLocation,
+    NativeExceptionEdge,
     _check_compose_deadline,
     _ComposeSession,
     _LiftedBlock,
 )
+from tools.dosunit.compare.flat32_call_control_word import control_word_boundary_count, lower_control_word_block
+from tools.dosunit.compare.flat32_call_repeat import lower_repeat_block, repeat_boundary_count
+from tools.dosunit.compare.flat32_external_binding import imported_transfer_slot
 
 if TYPE_CHECKING:
     import pyvex
@@ -74,17 +79,26 @@ def _static_next(irsb: pyvex.IRSB) -> int | None:
     return value(irsb.next)
 
 
-def _check_exits(irsb: pyvex.IRSB, ip_offset: int) -> list[int]:
+def _check_exits(irsb: pyvex.IRSB, ip_offset: int, function_entry: int | None = None) -> list[int]:
     """Validate exit targets and forbid observable effects after the first exit."""
     import pyvex
 
     targets: list[int] = []
     seen_exit = False
+    instruction = int(irsb.addr)
     for statement in irsb.statements:
+        if isinstance(statement, pyvex.stmt.IMark):
+            instruction = int(statement.addr)
         if isinstance(statement, pyvex.stmt.Exit):
             seen_exit = True
             if str(statement.jumpkind) != "Ijk_Boring":
-                raise CallCompositionRefusal("exception_edge")
+                raise NativeExceptionEdge(
+                    str(statement.jumpkind),
+                    CallRefusalLocation(
+                        int(irsb.addr) if function_entry is None else function_entry,
+                        int(irsb.addr), instruction,
+                    ),
+                )
             # Dynamic third-party PyVEX IRConst variants expose value at this boundary.
             target = getattr(statement.dst, "value", None)
             if not isinstance(target, int):
@@ -261,7 +275,19 @@ def _lift_control_block(session: _ComposeSession, address: int, size: int) -> py
         irsb = lifted.vex
         if not isinstance(irsb, pyvex.IRSB):
             raise CallCompositionRefusal("non_vex_lifter")
+        from tools.dosunit.compare.flat32_exception_guards import prune_unreachable_exceptions
+
+        # Prove faults before splitting: later divisions may depend on a
+        # divisor established before an earlier, unreachable exception exit.
+        irsb, exception_proofs = prune_unreachable_exceptions(session, irsb)
+        session.unreachable_exception_proofs.extend(exception_proofs)
         instruction_count = _first_exit_instruction_count(irsb)
+        control_word_count = control_word_boundary_count(session, irsb)
+        if control_word_count is not None:
+            instruction_count = min(instruction_count, control_word_count) if instruction_count is not None else control_word_count
+        repeat_count = repeat_boundary_count(session.project, irsb)
+        if repeat_count is not None:
+            instruction_count = min(instruction_count, repeat_count) if instruction_count is not None else repeat_count
         if instruction_count is not None:
             irsb = session.project.factory.block(
                 address, size=size, opt_level=0, num_inst=instruction_count,
@@ -273,23 +299,82 @@ def _lift_control_block(session: _ComposeSession, address: int, size: int) -> py
     return irsb
 
 
-def _lift_block(session: _ComposeSession, function_entry: int, address: int, end: int) -> _LiftedBlock:
+def _external_block_slot(session: _ComposeSession, irsb: pyvex.IRSB, address: int) -> int | None:
+    """Recognize a declared real IAT route at the native block terminator."""
+    external_slot = None
+    if session.external_bindings and irsb.instruction_addresses:
+        last = irsb.instruction_addresses[-1]
+        if address + int(irsb.size) - last == 6:
+            slot = imported_transfer_slot(session.project, last)
+            if slot in session.external_bindings:
+                external_slot = slot
+    return external_slot
+
+
+def _boring_targets(
+    session: _ComposeSession, irsb: pyvex.IRSB, function_entry: int,
+    address: int, end: int, exit_targets: list[int], external_slot: int | None,
+) -> tuple[tuple[int, ...], frozenset[int]]:
+    """Close ordinary jump edges, keeping external routes outside the local CFG."""
+    tail_targets: frozenset[int] = frozenset()
+    resolved = _static_next(irsb)
+    if resolved is None and external_slot is None:
+        raise CallCompositionRefusal(
+            "indirect_jump", location=CallRefusalLocation(
+                function_entry, address, irsb.instruction_addresses[-1] if irsb.instruction_addresses else None,
+            ),
+        )
+    terminal = (resolved or 0) & 0xFFFFFFFF
+    successors = (*exit_targets, terminal)
+    if external_slot is not None:
+        if exit_targets:
+            raise CallCompositionRefusal("conditional_external_transfer")
+        successors = ()
+    elif not function_entry <= terminal < end:
+        tail = _tail_transfer_target(
+            session,
+            terminal,
+            exit_targets=exit_targets,
+            fallthrough=address + int(irsb.size),
+        )
+        if tail is not None:
+            # The tail target leaves the owning closure: it is recorded
+            # on the block, never enqueued into this function's range.
+            tail_targets = frozenset({tail})
+            successors = ()
+    return successors, tail_targets
+
+
+def _lift_block(session: _ComposeSession, function_entry: int, address: int, end: int,
+                *, stop: int | None = None) -> _LiftedBlock:
     """Lift one block, admitting only boring, call or return ends.
 
     A call with a folded-constant ``irsb.next`` is a direct call; with
     ``session.admit_indirect_calls`` a non-constant one is deferred with
     ``call_target=None`` and proves its finite targets during composition.
     """
-    size = min(end - address, session.limits.max_lift_bytes)
+    size = min((end if stop is None else min(end, stop)) - address, session.limits.max_lift_bytes)
     irsb = _lift_control_block(session, address, size)
+    control_word = lower_control_word_block(session, function_entry, address, irsb)
+    if control_word is not None:
+        # A fully admitted native x87 instruction owns its complete effects;
+        # its erased or dirty VEX helpers are never consulted.
+        return cast(_LiftedBlock, control_word)
     jumpkind = _accepted_jumpkind(irsb)
+    repeated: _LiftedBlock | None = lower_repeat_block(session, function_entry, address, irsb)
+    if repeated is not None:
+        return repeated
     ip_offset = session.project.arch.ip_offset
     if ip_offset is None:
         raise CallCompositionRefusal("missing_arch_ip_offset")
-    exit_targets = _check_exits(irsb, int(ip_offset))
+    from tools.dosunit.compare.flat32_exception_guards import prune_unreachable_exceptions
+
+    irsb, exception_proofs = prune_unreachable_exceptions(session, irsb)
+    exit_targets = _check_exits(irsb, int(ip_offset), function_entry)
     call_target: int | None = None
     fallthrough: int | None = None
     tail_targets: frozenset[int] = frozenset()
+    external_slot = _external_block_slot(session, irsb, address)
     if jumpkind == "Ijk_Ret":
         if exit_targets:
             raise CallCompositionRefusal("conditional_return_block")
@@ -301,23 +386,9 @@ def _lift_block(session: _ComposeSession, function_entry: int, address: int, end
         fallthrough = address + int(irsb.size)
         successors = (fallthrough,)
     else:
-        resolved = _static_next(irsb)
-        if resolved is None:
-            raise CallCompositionRefusal("indirect_jump")
-        terminal = resolved & 0xFFFFFFFF
-        successors = (*exit_targets, terminal)
-        if not function_entry <= terminal < end:
-            tail = _tail_transfer_target(
-                session,
-                terminal,
-                exit_targets=exit_targets,
-                fallthrough=address + int(irsb.size),
-            )
-            if tail is not None:
-                # The tail target leaves the owning closure: it is recorded
-                # on the block, never enqueued into this function's range.
-                tail_targets = frozenset({tail})
-                successors = ()
+        successors, tail_targets = _boring_targets(
+            session, irsb, function_entry, address, end, exit_targets, external_slot,
+        )
     part = _lower_block(
         session,
         function_entry,
@@ -328,6 +399,9 @@ def _lift_block(session: _ComposeSession, function_entry: int, address: int, end
         fallthrough=fallthrough,
         tail_targets=tail_targets,
     )
+    if exception_proofs:
+        part["unreachable_exception_proofs"] = exception_proofs
+        session.unreachable_exception_proofs.extend(exception_proofs)
     return _LiftedBlock(
         address=address,
         irsb=irsb,
@@ -337,7 +411,26 @@ def _lift_block(session: _ComposeSession, function_entry: int, address: int, end
         call_target=call_target,
         fallthrough=fallthrough,
         tail_targets=tail_targets,
+        external_slot=external_slot,
     )
+
+
+def _partition_block_entries(
+    session: _ComposeSession, entry: int, end: int, blocks: dict[int, _LiftedBlock],
+) -> None:
+    """End a block before any other discovered entry at an instruction boundary.
+
+    Discovery can lift overlapping suffixes when a branch enters the middle of
+    an already decoded block. Partitioning retains those exact entry points and
+    instruction bytes; only the prefix is relifted, with the true function end
+    still governing nonlocal-transfer checks. No new node or work cap is added.
+    """
+    entries = set(blocks)
+    for address, block in list(blocks.items()):
+        _check_compose_deadline(session.compose_stats)
+        cuts = entries.intersection(block.irsb.instruction_addresses[1:])
+        if cuts:
+            blocks[address] = _lift_block(session, entry, address, end, stop=min(cuts))
 
 
 def _lift_function(session: _ComposeSession, entry: int) -> dict[int, _LiftedBlock]:
@@ -359,7 +452,7 @@ def _lift_function(session: _ComposeSession, entry: int) -> dict[int, _LiftedBlo
     cache entry and the ``blocks_lifted`` counter are published only for
     a completed closure.
     """
-    cached = session.blocks.get(entry)
+    cached: dict[int, _LiftedBlock] | None = session.blocks.get(entry)
     if cached is not None:
         return cached
     size = session.functions.get(entry)

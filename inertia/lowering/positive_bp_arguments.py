@@ -681,6 +681,22 @@ def _canonical_body_candidate_8616(
     return max(body_bucket, key=_candidate_width_8616)
 
 
+def _preserved_byte_value_width_8616(
+    candidate: structured_c.CVariable,
+    argument_type: SimType,
+    slot_width: int,
+) -> int | None:
+    """Keep a body-owned typed byte distinct from its ABI word padding."""
+    if slot_width != 2 or not isinstance(argument_type, SimTypeChar):
+        return None
+    variable = candidate.variable
+    if not isinstance(variable, SimStackVariable):
+        return None
+    if variable.size == 1 and isinstance(candidate.variable_type, SimTypeChar):
+        return 1
+    return None
+
+
 def _body_plan_entries_8616(
     run: _PositiveBpRun8616,
     layout_by_offset: dict[int, StackPrototypeArgument8616],
@@ -758,6 +774,9 @@ def _body_plan_entries_8616(
                 name=name,
                 argument_type=argument_type,
                 cvar=canonical,
+                value_width=_preserved_byte_value_width_8616(
+                    canonical, argument_type, width,
+                ),
             )
         )
         cursor += width
@@ -873,7 +892,12 @@ def _desired_candidates_8616(
         if candidate is None:
             candidate = _fresh_argument_candidate_8616(run, entry, entry_sp_offset)
         variable = cast(SimStackVariable, candidate.variable)
-        variable.size = entry.width
+        run.changed |= (
+            variable.size != entry.materialized_width
+            or variable.name != entry.name
+            or candidate.variable_type != entry.argument_type
+        )
+        variable.size = entry.materialized_width
         variable.name = entry.name
         candidate.variable_type = entry.argument_type
         interface.desired.append(candidate)

@@ -11,6 +11,7 @@ postprocess, or CLI/reporting work here. Never infer stack identity here.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast
@@ -217,7 +218,7 @@ def _current_image_digest_matches_8616(
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
-    return hashlib.sha256(loaded).hexdigest() == admission.image_sha256
+    return bool(hashlib.sha256(loaded).hexdigest() == admission.image_sha256)
 
 
 def _declared_call_target_bound_8616(
@@ -460,6 +461,7 @@ def transfer_block_with_instruction_states(
     source_artifact: IRFunctionArtifact | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
+    near_call_effects: Mapping[int, frozenset[str]] | None = None,
 ) -> tuple[
     dict[str, SegmentRegisterState],
     dict[InstructionStateKey, dict[str, SegmentRegisterState]],
@@ -509,6 +511,10 @@ def transfer_block_with_instruction_states(
             )
             if declared is not None:
                 preserved |= frozenset(declared.retained_registers)
+            # This operation-local map is prepared by the authenticated solver.
+            # Apply the conditional step only under the inductive CS identity.
+            if near_call_effects is not None and state.get("cs") == architectural_live_in_state("cs"):
+                preserved |= near_call_effects.get(id(instr), frozenset())
             _drop_unproved_call_boundary_identities(state, preserved)
             # CALL args describe the target, not an assigned output value.
             instruction_exits[instruction_key] = _visible_segment_states(state)

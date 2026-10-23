@@ -127,6 +127,10 @@ def _unwrap_statements_8616(node: object) -> tuple[object, ...]:
 
 def _structured_codegen_node_8616(value: object) -> bool:
     """Return whether a value participates in the structured C AST boundary."""
+    # Empty fields and numeric literals dominate non-node children. Only exact
+    # builtins bypass the boundary; foreign subclasses retain their metadata.
+    if value is None or type(value) is int:
+        return False
     return isinstance(value, CConstruct) or type(value).__module__.startswith(
         "angr.analyses.decompiler.structured_codegen"
     )
@@ -492,6 +496,23 @@ def _iter_c_nodes_deep_8616(node: object, seen: set[int] | None = None) -> Itera
                 node_stack.append(value)
             elif isinstance(value, (dict, list, tuple, set)):
                 node_stack.extend(_iter_c_node_children_8616(value, seen_values))
+
+
+def iter_c_direct_children_8616(node: CConstruct) -> Iterator[CConstruct]:
+    """Read direct syntax children and preserve native field-read failures.
+
+    Dynamic boundary: the canonical native-node slot metadata determines field
+    names. Missing fields violate that contract; they are not empty children.
+    """
+    for attribute in _structured_slot_names_8616(node):
+        try:
+            value = getattr(node, attribute)
+        except AttributeError as error:
+            raise CTraversalContractError8616(type(node).__name__, attribute,
+                                              CTraversalFailure8616.CHILD_READ) from error
+        for _path, child in _labeled_c_children_8616(value, attribute):
+            if isinstance(child, CConstruct):
+                yield child
 
 
 def _iter_c_node_occurrences_8616(

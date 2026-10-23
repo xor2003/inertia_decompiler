@@ -1,8 +1,8 @@
-"""Closed matched-loop induction over flat32 CFGs containing direct calls.
+"""Closed matched-loop induction over flat32 CFGs containing resolved calls.
 
 Layer: dosunit relational loop proofs.
 Responsibility: prove paired flat32 CFGs whose superblock transitions may end
-in admitted direct calls. A call member is never an assumed boundary: the
+in admitted direct or finite-target indirect calls. A call member is never an assumed boundary: the
 caller's call-block continuation is composed with the callee's checked
 complete body from ``flat32_call_execution`` and the callee return is proved
 by the shared ``_prove_return_target`` back to the recorded fallthrough, so a
@@ -12,70 +12,55 @@ composed transitions are then discharged by the common matched-CFG induction
 which gives initiation, preservation over every reachable transition,
 branch/successor agreement, every normal and early exit, full
 register/flags/memory state, and divergence equivalence for the synchronized
-paired graph. Cyclic/recursive or incomplete callees, indirect calls,
+paired graph. Cyclic/recursive or incomplete callees, unconstrained indirect calls,
 unproved return targets, unmapped edges and exhausted budgets keep the
 existing typed refusals; no premise is ever invented.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import asdict
-from enum import StrEnum
 from typing import Any
 
 from tools.comparator.services import proof_owners
-from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.architectures.flat32 import X87_REGISTER_NAMES
+from tools.dosunit.compare.flat32_call_composition import _normalization_assumptions
 from tools.dosunit.compare.flat32_call_contracts import (
-    PRESERVED_OUTPUTS,
     CallCompositionLimits,
     CallCompositionRefusal,
-    _check_compose_deadline,
     _ComposeSession,
-    _const_term_int,
-    _initial_state,
     _LiftedBlock,
     _normalize_function_map,
     _register_widths,
-    _ret_proof_timeout_ms,
-    _term_nodes,
-)
-from tools.dosunit.compare.flat32_call_execution import (
-    _callee_term,
-    _compose_function,
-    _prove_return_target,
 )
 from tools.dosunit.compare.flat32_call_lowering import _lift_function
+from tools.dosunit.compare.flat32_callee_frames import expand_frame_safe_callees
 from tools.dosunit.compare.flat32_environment_coverage import environment_parts
-from tools.dosunit.compare.flat32_region_attempts import (
-    compare_attempt as _compare_attempt,
+from tools.dosunit.compare.flat32_identity_edges import contract_identity_edges
+from tools.dosunit.compare.flat32_loop_graph_search import (
+    search_loop_graphs,
 )
+from tools.dosunit.compare.flat32_loop_relations import compare_loop_relations
+from tools.dosunit.compare.flat32_loop_transitions import Flat32LoopCallReason, _cutpoint_tokens, _lower_transitions
+from tools.dosunit.compare.flat32_native_constants import (
+    NativeConstantProof,
+    native_constant_checker,
+    prove_native_constants,
+)
+from tools.dosunit.compare.flat32_predecessor_edges import prune_predecessor_edges
 from tools.dosunit.compare.flat32_region_attempts import (
     comparison_deadline,
 )
-from tools.dosunit.compare.flat32_relation_evidence import attempt_record as _attempt_record
 from tools.dosunit.compare.paired_region_graph import (
-    CollapsedRegion,
     RegionExitKind,
+    RegionGraphReason,
     RegionGraphRefusal,
     RegionNode,
 )
-from tools.dosunit.compare.region_pairing import propose_paired_regions
+from tools.dosunit.compare.region_pairing import PairedRegions, paired_control_tokens
 from tools.dosunit.contracts.proof_scope import ProofScope
-from tools.dosunit.contracts.register_state_relations import IDENTITY_RELATION
-from tools.dosunit.ssa.ssa_constant_terms import constant_bitvector
-
-CONTROL_WIDTH: int = 32
-
-
-class Flat32LoopCallReason(StrEnum):
-    """Named verdict/refusal reasons owned by the flat32 call-loop lane."""
-
-    INDUCTION = "call_loop_induction"
-    TRANSITIONS_UNPROVED = "call_loop_transitions_unproved"
-    CONTROL_LEAF_UNMAPPED = "call_loop_unmapped_successor"
-    CONTROL_SHAPE = "call_loop_control_shape_unexpected"
-    IP_UNOBSERVED = "call_loop_ip_unobserved"
 
 
 def _nodes(blocks: Mapping[int, _LiftedBlock]) -> dict[int, RegionNode]:
@@ -90,285 +75,6 @@ def _nodes(blocks: Mapping[int, _LiftedBlock]) -> dict[int, RegionNode]:
     }
 
 
-def _cutpoint_tokens(
-    regions: list[CollapsedRegion],
-    ordered_indices: list[int],
-    blocks: Mapping[int, _LiftedBlock],
-) -> dict[int, int]:
-    """Assign transition tokens: pair position for region heads, extra ids for interiors."""
-    pair_index = {region_index: index for index, region_index in enumerate(ordered_indices)}
-    tokens = {
-        regions[region_index].members[0]: pair_index[region_index]
-        for region_index in ordered_indices
-    }
-    for address in sorted(set(blocks) - set(tokens)):
-        tokens[address] = len(tokens)
-    return tokens
-
-
-def _map_exit_tokens(term: dict[str, Any], tokens: Mapping[int, int]) -> dict[str, Any]:
-    """Lower a transition's exit ``ip`` term from binary addresses to cutpoint tokens."""
-    const = constant_bitvector(term)
-    if const is not None:
-        value, width = const
-        if width != CONTROL_WIDTH or value not in tokens:
-            raise CallCompositionRefusal(Flat32LoopCallReason.CONTROL_LEAF_UNMAPPED.value)
-        return {"op": "const", "value": hex(tokens[value]), "width": CONTROL_WIDTH}
-    if term.get("op") == "ite":
-        args = term.get("args")
-        if (
-            isinstance(args, list)
-            and len(args) == 3
-            and all(isinstance(arg, dict) for arg in args)
-        ):
-            return {
-                "op": "ite",
-                "width": term.get("width", CONTROL_WIDTH),
-                "args": [
-                    args[0],
-                    _map_exit_tokens(args[1], tokens),
-                    _map_exit_tokens(args[2], tokens),
-                ],
-            }
-    raise CallCompositionRefusal(Flat32LoopCallReason.CONTROL_SHAPE.value)
-
-
-def _compose_call_transition(
-    session: _ComposeSession,
-    call_block: _LiftedBlock,
-    state: dict[str, dict[str, Any]],
-    active: frozenset[int],
-) -> dict[str, dict[str, Any]]:
-    """Inline one proved callee and continue at the recorded fallthrough.
-
-    Reuses the M2 machinery verbatim: the callee body is composed by
-    ``_compose_function`` (which itself refuses recursion, cycles, unmapped or
-    unsupported transfers) and its symbolic return target is proved to equal
-    the recorded fallthrough by ``_prove_return_target`` under the shared
-    deadline.  The post-state carries the proved concrete fallthrough so the
-    continuation is an ordinary member/cutpoint edge, never an assumption.
-    """
-    target = call_block.call_target
-    fallthrough = call_block.fallthrough
-    if target is None or fallthrough is None:
-        raise CallCompositionRefusal("call_target_unmapped")
-    if _const_term_int(state.get("ip")) != target:
-        raise CallCompositionRefusal("call_target_mismatch")
-    if target in active:
-        raise CallCompositionRefusal(f"recursive_call:{hex(target)}")
-    if session.limits.max_inline_depth < 1:
-        raise CallCompositionRefusal("call_inline_depth_limit")
-    if session.inlined_calls >= session.limits.max_inlined_calls:
-        raise CallCompositionRefusal("call_inline_budget")
-    session.inlined_calls += 1
-    callee_state = _compose_function(session, target, active | {target}, 1)
-    callee_return = callee_state.get("eip")
-    if not isinstance(callee_return, dict):
-        raise CallCompositionRefusal("callee_terminal_missing")
-    instruction_addresses = call_block.irsb.instruction_addresses
-    if not instruction_addresses:
-        raise CallCompositionRefusal("call_instruction_address_missing")
-    _prove_return_target(
-        _callee_term(callee_return, state, session),
-        fallthrough,
-        timeout_ms=_ret_proof_timeout_ms(session),
-        callsite=instruction_addresses[-1],
-        call_block=call_block.address,
-        target=target,
-        callee=session.labels.get(target, ""),
-    )
-    post = dict(state)
-    for name, term in callee_state.items():
-        if name not in {"eip", "ip"}:
-            _check_compose_deadline(session.compose_stats)
-            post[name] = _callee_term(term, state, session)
-    proved = {"op": "const", "value": hex(fallthrough), "width": CONTROL_WIDTH}
-    post["ip"] = dict(proved)
-    post["eip"] = proved
-    session.return_targets_proved += 1
-    session.call_sites.append(
-        {
-            "callsite": hex(instruction_addresses[-1]),
-            "call_block": hex(call_block.address),
-            "target": hex(target),
-            "fallthrough": hex(fallthrough),
-            "depth": 1,
-            "callee": session.labels.get(target, ""),
-            "proved_under_entry_domain": False,
-        }
-    )
-    return post
-
-
-def _compose_region_state(
-    region: CollapsedRegion,
-    lifted: Mapping[int, _LiftedBlock],
-    session: _ComposeSession,
-    *,
-    function_entry: int,
-    is_entry: bool,
-) -> dict[str, dict[str, Any]]:
-    """Compose one region's members into the post-state before exit mapping.
-
-    Members compose sequentially with a const-progress check so an
-    unconditional chain can never silently drop a member; an ``Ijk_Call``
-    member additionally composes the proved callee and leaves ``ip`` at the
-    recorded fallthrough, so the residual boundary is only the region kind.
-    """
-    state: dict[str, dict[str, Any]] = _initial_state(session.reg_widths)
-    if not is_entry:
-        state = IDENTITY_RELATION.candidate_inputs(state)
-    members = region.members
-    for index, address in enumerate(members):
-        _check_compose_deadline(session.compose_stats)
-        block = lifted[address]
-        member_outputs = block.part.get("outputs", {})
-        if block.part.get("trap_exits") or "io" in member_outputs:
-            raise CallCompositionRefusal("unsupported_effect_in_superblock")
-        session.compositions += 1
-        if session.compositions > session.limits.max_compositions:
-            raise CallCompositionRefusal("region_composition_limit")
-        state = S._compose_block_outputs(
-            block.part,
-            member_outputs,
-            state,
-            compose_stats=session.compose_stats,
-        )
-        if block.jumpkind == "Ijk_Call":
-            state = _compose_call_transition(
-                session, block, state, frozenset({function_entry})
-            )
-        if (
-            _term_nodes(state, session.limits.max_term_nodes)
-            > session.limits.max_term_nodes
-        ):
-            raise CallCompositionRefusal("region_expression_limit")
-        if index < len(members) - 1:
-            control = constant_bitvector(state.get("ip", {}))
-            if control != (members[index + 1], CONTROL_WIDTH):
-                raise CallCompositionRefusal(
-                    Flat32LoopCallReason.CONTROL_SHAPE.value
-                )
-    return state
-
-
-def _compose_transition(
-    region: CollapsedRegion,
-    lifted: Mapping[int, _LiftedBlock],
-    session: _ComposeSession,
-    tokens: Mapping[int, int],
-    *,
-    function_entry: int,
-    is_entry: bool,
-    module: str,
-    name: str,
-    outputs: tuple[str, ...],
-    full_state: tuple[str, ...],
-) -> dict[str, Any]:
-    """Compose one paired region's members into a full-state transition document.
-
-    ``Ijk_Ret`` exposes the return value; every other tail maps branch leaves
-    onto cutpoint tokens, mirroring
-    ``flat32_cfg_regions._compose_superblock``.
-    """
-    state = _compose_region_state(
-        region, lifted, session, function_entry=function_entry, is_entry=is_entry
-    )
-    ip_term = state.get("ip")
-    if not isinstance(ip_term, dict):
-        raise CallCompositionRefusal(Flat32LoopCallReason.IP_UNOBSERVED.value)
-    reenters_entry = any(tokens[target] == 0 for target in region.exits)
-    if region.kind is RegionExitKind.RETURN:
-        state["eip"] = ip_term
-    else:
-        state["eip"] = _map_exit_tokens(ip_term, tokens)
-    if region.kind is not RegionExitKind.RETURN:
-        state = IDENTITY_RELATION.continuing_outputs(
-            state, control_field="eip", reenters_entry=reenters_entry
-        )
-    observed = (
-        tuple(dict.fromkeys((*outputs, *PRESERVED_OUTPUTS, "eip", "memory", "io")))
-        if region.kind is RegionExitKind.RETURN
-        else (*full_state, "memory")
-    )
-    terms: dict[str, Any] = {}
-    for reg in observed:
-        if reg not in state:
-            raise CallCompositionRefusal(f"missing_state:{reg}")
-        terms[reg] = state[reg]
-    if _term_nodes(terms, session.limits.max_term_nodes) > session.limits.max_term_nodes:
-        raise CallCompositionRefusal("region_expression_limit")
-    assignments: list[dict[str, Any]] = []
-    memo: dict[str, str] = {}
-    term_cache: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
-    materialized = {
-        reg: S._materialize_json_term(
-            term, assignments=assignments, memo=memo, term_cache=term_cache
-        )
-        for reg, term in terms.items()
-    }
-    entry = {"linear": hex(region.members[0])}
-    # A CALL tail is already composed into the transition terms and discharged
-    # by ``_prove_return_target``; the document's residual boundary is a
-    # resolved cutpoint edge, not an unresolved call.  Emitting the machine
-    # ``Ijk_Call`` would ask the document comparator to re-resolve a callee
-    # that legitimately has no standalone doc entry, so the composed marker
-    # carries the truth and the machine jumpkind stays as inert provenance.
-    source = {
-        "jumpkind": (
-            "call_composed" if region.kind is RegionExitKind.CALL else region.kind.value
-        ),
-        "reblocked_members": len(region.members),
-    }
-    if region.kind is RegionExitKind.CALL:
-        source["machine_jumpkind"] = region.kind.value
-    return {
-        "id": f"{module}:{name}",
-        "function": {"id": f"{module}:{name}", "name": name},
-        "part": {"kind": "superblock", "index": 0, "entry_delta": "0x0"},
-        "entry": entry,
-        "function_entry": entry,
-        "source": source,
-        "inputs": S._term_input_items(materialized.values(), assignments),
-        "outputs": materialized,
-        "assignments": assignments,
-    }
-
-
-def _lower_transitions(
-    regions: list[CollapsedRegion],
-    pairs: list[tuple[int, int]],
-    lifted: Mapping[int, _LiftedBlock],
-    session: _ComposeSession,
-    tokens: Mapping[int, int],
-    *,
-    function_entry: int,
-    module: str,
-    outputs: tuple[str, ...],
-    full_state: tuple[str, ...],
-    left: bool,
-) -> dict[str, Any]:
-    """Compose every paired region for one side into transition documents."""
-    functions = []
-    for index, (oracle_region, candidate_region) in enumerate(pairs):
-        region = regions[oracle_region if left else candidate_region]
-        functions.append(
-            _compose_transition(
-                region,
-                lifted,
-                session,
-                tokens,
-                function_entry=function_entry,
-                is_entry=index == 0,
-                module=module,
-                name=f"sb_{index}",
-                outputs=outputs,
-                full_state=full_state,
-            )
-        )
-    return {"functions": functions}
-
-
 def _lifted_map(session: _ComposeSession) -> dict[int, _LiftedBlock]:
     """Flatten a session's per-function lifted blocks for coverage evidence."""
     return {
@@ -376,6 +82,297 @@ def _lifted_map(session: _ComposeSession) -> dict[int, _LiftedBlock]:
         for blocks in session.blocks.values()
         for address, block in blocks.items()
     }
+
+
+def _record_x87_premises(
+    result: dict[str, Any], verdict: Any,  # noqa: ANN401
+    olifted: Mapping[int, _LiftedBlock], clifted: Mapping[int, _LiftedBlock],
+) -> None:
+    """Publish declared x87 premises and downgrade assumed loop proofs.
+
+    Checking x87 instructions only execute their modeled continuation when
+    no unmasked exception is pending, and CPU-specific policies are declared
+    contracts. A passed induction is published CONDITIONAL with the premise
+    records; failed/refused verdicts are left untouched.
+    """
+    records: dict[str, dict[str, Any]] = {}
+    for lifted in (olifted, clifted):
+        for block in lifted.values():
+            for premise in block.part.get("summary", {}).get("premises", ()):
+                records.setdefault(json.dumps(premise, sort_keys=True), premise)
+    obligations = [
+        {"side": side, **obligation}
+        for side, summary in (("oracle", result.get("oracle_ssa")), ("candidate", result.get("candidate_ssa")))
+        for function in (summary or {}).get("functions", ())
+        for obligation in function.get("obligations", ())
+    ]
+    if not records and not obligations:
+        return
+    assumption = {
+        "kind": "declared_x87_premises",
+        "premises": list(records.values()),
+        "obligations": obligations,
+    }
+    result["x87_assumptions"] = assumption
+    if result["status"] is verdict.Status.PASSED:
+        result.update(status=verdict.Status.CONDITIONAL,
+                      reason="declared_x87_premises", assumptions=assumption)
+
+
+def _native_comparison_normalization(
+    candidate_facts: NativeConstantProof | None,
+    requested: Mapping[int, int] | None,
+) -> Mapping[int, int] | None:
+    """Admit relocated facts only in their independently certified exact domain."""
+    if candidate_facts is None:
+        return requested
+    evidence = candidate_facts.evidence
+    if evidence.get("scalar_domain") != "candidate_normalization":
+        return None
+    expected = {hex(key): hex(value) for key, value in sorted((requested or {}).items())}
+    if not expected or evidence.get("candidate_normalization") != expected:
+        raise CallCompositionRefusal(Flat32LoopCallReason.NATIVE_CONSTANT_DOMAIN_MISMATCH.value)
+    return requested
+
+
+def _compare_loop_graph(
+    osession: _ComposeSession, csession: _ComposeSession,
+    olifted: Mapping[int, _LiftedBlock], clifted: Mapping[int, _LiftedBlock],
+    graph: PairedRegions, oracle_entry: int, candidate_entry: int,
+    outputs: tuple[str, ...], deadline: float, name: str,
+    candidate_normalization: Mapping[int, int] | None,
+    native_constants: tuple[NativeConstantProof | None, NativeConstantProof | None] = (None, None),
+) -> dict[str, Any]:
+    """Discharge every transition of one untrusted complete graph proposal."""
+    owners = proof_owners()
+    adapter, verdict = owners.model, owners.verdict
+    comparison_normalization = _native_comparison_normalization(
+        native_constants[1], candidate_normalization)
+    oregions = list(graph.oracle.regions)
+    cregions = list(graph.candidate.regions)
+    pairs = list(graph.pairs)
+    pair_tokens = paired_control_tokens(pairs, oregions, cregions, allow_state_merges=graph.evidence.state_merges)
+    o_tokens = _cutpoint_tokens(oregions, [left for left, _ in pairs], olifted, pair_tokens)
+    c_tokens = _cutpoint_tokens(cregions, [right for _, right in pairs], clifted, pair_tokens)
+    if candidate_normalization and set(candidate_normalization).intersection(c_tokens.values()):
+        raise CallCompositionRefusal(Flat32LoopCallReason.NORMALIZATION_TOKEN_OVERLAP.value)
+    full_state = (*tuple(name for name, _ in adapter.REG32.values()), *X87_REGISTER_NAMES)
+    ossa = _lower_transitions(
+        oregions, pairs, olifted, osession, o_tokens,
+        function_entry=oracle_entry, module="oracle", outputs=outputs,
+        full_state=full_state, left=True, native_constants=native_constants[0],
+    )
+    cssa = _lower_transitions(
+        cregions, pairs, clifted, csession, c_tokens,
+        function_entry=candidate_entry, module="candidate", outputs=outputs,
+        full_state=full_state, left=False, native_constants=native_constants[1],
+    )
+    checked = compare_loop_relations(
+        ossa, cssa,
+        lambda relation: _lower_transitions(
+            cregions, pairs, clifted, csession, c_tokens, function_entry=candidate_entry,
+            module="candidate", outputs=outputs, full_state=full_state, left=False, relation=relation,
+            native_constants=native_constants[1],
+        ), deadline=deadline,
+        candidate_normalization=comparison_normalization,
+    )
+    status, compared, verdicts = checked.status, checked.compared, checked.verdicts
+    cssa, attempts = checked.candidate_ssa, checked.attempts
+    if checked.projected_oracle is not None:
+        ossa = checked.projected_oracle
+    result = {
+        "function": {"name": name},
+        "graph_evidence": asdict(graph.evidence),
+        "status": status,
+        "reason": (
+            Flat32LoopCallReason.INDUCTION.value
+            if status in {verdict.Status.PASSED, verdict.Status.CONDITIONAL}
+            else Flat32LoopCallReason.TRANSITIONS_UNPROVED.value
+        ),
+        "proof_scope": ProofScope.CUTPOINT_SIMULATION,
+        "register_relation": [asdict(binding) for binding in checked.relation.bindings],
+        "proposal_reason": checked.proposal_reason,
+        "memory_relation": None,
+        "native_constant_invariants": {side: facts.evidence for side, facts
+                                       in zip(("oracle", "candidate"), native_constants, strict=True)
+                                       if facts is not None},
+        "constant_register_invariants": checked.constant_invariants,
+        "frame_invariants": checked.frame_invariants,
+        "dead_flag_projection": checked.dead_flags,
+        "dead_register_projection": checked.dead_registers,
+        "narrow_register_projection": checked.narrow_registers,
+        "relation_attempts": attempts,
+        "counters": attempts[-1]["counters"],
+        "superblock_pairs": [
+            {
+                "pair": index,
+                "oracle_head": hex(oregions[left].members[0]),
+                "oracle_members": [hex(member) for member in oregions[left].members],
+                "oracle_exits": [hex(target) for target in oregions[left].exits],
+                "oracle_kind": oregions[left].kind.value,
+                "candidate_head": hex(cregions[right].members[0]),
+                "candidate_members": [hex(member) for member in cregions[right].members],
+                "candidate_exits": [hex(target) for target in cregions[right].exits],
+                "candidate_kind": cregions[right].kind.value,
+            }
+            for index, (left, right) in enumerate(pairs)
+        ],
+        "call_sites": {"oracle": osession.call_sites, "candidate": csession.call_sites},
+        "oracle_inlined_calls": osession.inlined_calls,
+        "candidate_inlined_calls": csession.inlined_calls,
+        "oracle_blocks_lifted": osession.blocks_lifted,
+        "candidate_blocks_lifted": csession.blocks_lifted,
+        "block_lift_retries": {
+            "oracle": [retry.to_document() for retry in osession.block_lift_retries],
+            "candidate": [retry.to_document() for retry in csession.block_lift_retries],
+        },
+        "return_targets_proved": osession.return_targets_proved + csession.return_targets_proved,
+        "oracle_tail_transfers": osession.tail_transfers,
+        "candidate_tail_transfers": csession.tail_transfers,
+        "tail_sites": {"oracle": osession.tail_sites, "candidate": csession.tail_sites},
+        "environment_coverage": {
+            "oracle": environment_parts(_lifted_map(osession)),
+            "candidate": environment_parts(_lifted_map(csession)),
+        },
+        "block_compare": compared,
+        "block_verdicts": verdicts,
+        "oracle_ssa": ossa,
+        "candidate_ssa": cssa,
+    }
+    _record_x87_premises(result, verdict, olifted, clifted)
+    if any(native_constants):
+        result["native_constant_comparison_coordinates"] = (
+            "candidate_normalization" if comparison_normalization else "literal")
+        result["requested_normalization_used"] = bool(comparison_normalization)
+    if candidate_normalization:
+        # Preserve the caller's declared premise in the public domain even
+        # when a stronger literal attempt discharged the actual transitions.
+        if status == verdict.Status.PASSED:
+            result["status"] = verdict.Status.CONDITIONAL
+        premise = _normalization_assumptions(candidate_normalization)
+        result["normalization_assumptions"] = premise
+        result["assumptions"] = premise
+    return result
+
+
+def _retry_callee_frames(
+    sessions: tuple[_ComposeSession, _ComposeSession],
+    lifted: tuple[Mapping[int, _LiftedBlock], Mapping[int, _LiftedBlock]],
+    entries: tuple[int, int], outputs: tuple[str, ...], deadline: float,
+    name: str, candidate_normalization: Mapping[int, int] | None,
+    searched: dict[str, Any],
+) -> dict[str, Any]:
+    """Retry a nested cycle using independently proved native return frames."""
+    osession, csession = sessions
+    olifted, clifted = lifted
+    oracle_entry, candidate_entry = entries
+    if searched.get("reason") != "loop_requires_inductive_proof":
+        return searched
+    try:
+        expanded_o, evidence_o = expand_frame_safe_callees(osession, dict(olifted))
+        expanded_c, evidence_c = expand_frame_safe_callees(csession, dict(clifted))
+        if not evidence_o and not evidence_c:
+            return searched
+        expanded = search_loop_graphs(
+            _nodes(expanded_o), _nodes(expanded_c), oracle_entry, candidate_entry,
+            lambda graph: _compare_loop_graph(
+                osession, csession, expanded_o, expanded_c, graph, oracle_entry, candidate_entry,
+                outputs, deadline, name, candidate_normalization,
+            ), deadline=deadline, name=name,
+        )
+        expanded["callee_frame_expansion"] = {"oracle": evidence_o, "candidate": evidence_c}
+        if "graph_evidence" not in expanded:
+            # A failed structural proposal must not hide the native blocker
+            # already reached by the original complete graph.
+            searched["callee_frame_expansion_attempt"] = expanded
+            return searched
+        expanded["before_callee_expansion"] = searched
+        return expanded
+    except (CallCompositionRefusal, RegionGraphRefusal) as error:
+        searched["callee_frame_expansion_refusal"] = str(error)
+    return searched
+
+
+def _search_native_graphs(
+    sessions: tuple[_ComposeSession, _ComposeSession],
+    lifted: tuple[Mapping[int, _LiftedBlock], Mapping[int, _LiftedBlock]],
+    entries: tuple[int, int], outputs: tuple[str, ...], deadline: float,
+    name: str, candidate_normalization: Mapping[int, int] | None,
+) -> dict[str, Any]:
+    """Give each complete native block map its own invariant-inference cache."""
+    osession, csession = sessions
+    olifted, clifted = lifted
+    oracle_entry, candidate_entry = entries
+    check = native_constant_checker(
+        lambda graph, facts: _compare_loop_graph(
+            osession, csession, olifted, clifted, graph, oracle_entry, candidate_entry,
+            outputs, deadline, name, candidate_normalization, facts,
+        ),
+        lambda: (
+            prove_native_constants(olifted, oracle_entry, osession, deadline=deadline),
+            prove_native_constants(clifted, candidate_entry, csession, deadline=deadline,
+                                   candidate_normalization=candidate_normalization),
+        ), enabled=True, prefer_facts_first=bool(candidate_normalization),
+    )
+    return search_loop_graphs(_nodes(olifted), _nodes(clifted), oracle_entry, candidate_entry,
+                             check, deadline=deadline, name=name)
+
+
+def _retry_predecessor_edges(
+    sessions: tuple[_ComposeSession, _ComposeSession],
+    lifted: tuple[Mapping[int, _LiftedBlock], Mapping[int, _LiftedBlock]],
+    entries: tuple[int, int], outputs: tuple[str, ...], deadline: float,
+    name: str, candidate_normalization: Mapping[int, int] | None,
+    searched: dict[str, Any],
+) -> dict[str, Any]:
+    """Retry structural refusal after independently certified oracle simplification.
+
+    Literal oracle semantics do not undergo candidate relocation. Candidate
+    pruning is intentionally absent until its implication can be certified in
+    exactly the normalized domain consumed by the paired transition checker.
+    """
+    if searched.get("reason") not in {RegionGraphReason.SHAPE.value, RegionGraphReason.BIJECTION.value}:
+        return searched
+    result = prune_predecessor_edges(lifted[0], entries[0], sessions[0], deadline=deadline)
+    if not result.proofs:
+        return searched
+    retried = _search_native_graphs(sessions, (result.blocks, lifted[1]), entries, outputs,
+                                    deadline, name, candidate_normalization)
+    retried["predecessor_edge_pruning"] = {
+        "oracle": [proof.to_document() for proof in result.proofs], "candidate": [],
+        "domain": "literal_oracle", "raw_fact_count": result.attempted,
+        "normalized_fact_count": result.attempted, "classified_fact_count": len(result.proofs),
+        "materialized_count": len(result.proofs), "failure_count": result.attempted - len(result.proofs),
+    }
+    retried["before_predecessor_edge_pruning"] = searched
+    return retried
+
+
+def _retry_identity_edges(
+    sessions: tuple[_ComposeSession, _ComposeSession],
+    lifted: tuple[Mapping[int, _LiftedBlock], Mapping[int, _LiftedBlock]],
+    entries: tuple[int, int], outputs: tuple[str, ...], deadline: float,
+    name: str, candidate_normalization: Mapping[int, int] | None,
+    searched: dict[str, Any],
+) -> dict[str, Any]:
+    """Retry mismatched graph shape after certified literal identity removal."""
+    if searched.get("reason") not in {RegionGraphReason.SHAPE.value, RegionGraphReason.BIJECTION.value}:
+        return searched
+    oracle = contract_identity_edges(lifted[0], entries[0], sessions[0], deadline=deadline)
+    candidate = contract_identity_edges(lifted[1], entries[1], sessions[1], deadline=deadline)
+    if not oracle.proofs and not candidate.proofs:
+        return searched
+    retried = _search_native_graphs(sessions, (oracle.blocks, candidate.blocks), entries,
+                                    outputs, deadline, name, candidate_normalization)
+    retried["identity_edge_contraction"] = {
+        "oracle": [proof.to_document() for proof in oracle.proofs],
+        "candidate": [proof.to_document() for proof in candidate.proofs],
+        "domain": "literal_native_state_identity",
+        "oracle_retained_cycles": [hex(a) for a in oracle.retained_cycles],
+        "candidate_retained_cycles": [hex(a) for a in candidate.retained_cycles],
+    }
+    retried["before_identity_edge_contraction"] = searched
+    return retried
 
 
 def compare_flat32_loop_calls(
@@ -392,174 +389,72 @@ def compare_flat32_loop_calls(
     oracle_labels: Mapping[int, str] | None = None,
     candidate_labels: Mapping[int, str] | None = None,
     total_deadline: float | None = None,
+    candidate_normalization: Mapping[int, int] | None = None,
 ) -> dict[str, Any]:
-    """Prove a paired flat32 CFG whose transitions may contain direct calls.
+    """Prove a paired flat32 CFG with complete callees and full-state induction.
 
-    The theorem is the common matched-CFG induction: cutpoint-pair the two
-    closed graphs, compose each paired region into a transition over the
-    complete machine state (with admitted ``Ijk_Call`` tails replaced by the
-    proved callee continuation), then require every paired transition to
-    agree on the shared post-state domain including the tokenised
-    continuation ``eip`` and full memory. Initiation at pair 0 plus
-    transition preservation implies the simulation at every cutpoint;
-    tokenised-exit equality is branch agreement over the closed paired
-    cover, so both sides diverge on the same input domain and share every
-    exit. Returns a ``flat32_verdict``-shaped report; any missing premise
-    refuses with the machinery's existing named reasons.
+    Root inputs are arbitrary. Every paired transition, successor, normal and
+    early return, preserved register and complete memory array must agree.
+    Finite positive region progress preserves divergence. Unsupported calls,
+    effects and exhausted budgets remain explicit refusals.
+
+    Unrestricted graph comparisons run before optional physical-entry constant
+    specialization. Its side invariants require independent initiation and all
+    incoming-edge proofs; they never replace full relational obligations.
+    Constant relocation is applied only after native routing/return checks and
+    remains an explicit conditional premise, without native constant refinement.
     """
     deadline = comparison_deadline(timeout_ms, total_deadline)
     owners = proof_owners()
-    adapter, catalog, verdict = owners.model, owners.catalog, owners.verdict
+    adapter, verdict = owners.model, owners.verdict
     outputs = tuple(dict.fromkeys((*outputs, *adapter.OUTPUT_REGS[2:])))
     limits = limits or CallCompositionLimits()
     oracle_project, candidate_project = projects
     try:
         oracle_map = _normalize_function_map(
-            oracle_functions
-            if oracle_functions is not None
-            else {oracle_range[0]: oracle_range[1]}
+            oracle_functions if oracle_functions is not None else {oracle_range[0]: oracle_range[1]}
         )
         candidate_map = _normalize_function_map(
-            candidate_functions
-            if candidate_functions is not None
-            else {candidate_range[0]: candidate_range[1]}
+            candidate_functions if candidate_functions is not None else {candidate_range[0]: candidate_range[1]}
         )
         osession = _ComposeSession(
-            project=oracle_project,
-            functions=oracle_map,
-            labels={
-                address: str(label)
-                for address, label in (oracle_labels or {}).items()
-            },
-            limits=limits,
-            reg_widths=_register_widths(),
-            compose_stats={"deadline": deadline},
+            project=oracle_project, functions=oracle_map,
+            labels={address: str(label) for address, label in (oracle_labels or {}).items()},
+            limits=limits, reg_widths=_register_widths(), compose_stats={"deadline": deadline},
+            admit_indirect_calls=True,
         )
         csession = _ComposeSession(
-            project=candidate_project,
-            functions=candidate_map,
-            labels={
-                address: str(label)
-                for address, label in (candidate_labels or {}).items()
-            },
-            limits=limits,
-            reg_widths=_register_widths(),
-            compose_stats={"deadline": deadline},
+            project=candidate_project, functions=candidate_map,
+            labels={address: str(label) for address, label in (candidate_labels or {}).items()},
+            limits=limits, reg_widths=_register_widths(), compose_stats={"deadline": deadline},
+            admit_indirect_calls=True,
         )
         oracle_entry, _oracle_size = oracle_range
         candidate_entry, _candidate_size = candidate_range
-        for entry, session in (
-            (oracle_entry, osession),
-            (candidate_entry, csession),
-        ):
+        for entry, session in ((oracle_entry, osession), (candidate_entry, csession)):
             if entry not in session.functions:
                 raise CallCompositionRefusal("entry_not_in_functions")
         olifted = _lift_function(osession, oracle_entry)
         clifted = _lift_function(csession, candidate_entry)
-        graph = propose_paired_regions(
-            _nodes(olifted),
-            _nodes(clifted),
-            oracle_entry,
-            candidate_entry,
-        )
-        oregions = list(graph.oracle.regions)
-        cregions = list(graph.candidate.regions)
-        pairs = list(graph.pairs)
-        o_tokens = _cutpoint_tokens(
-            oregions, [left for left, _ in pairs], olifted
-        )
-        c_tokens = _cutpoint_tokens(
-            cregions, [right for _, right in pairs], clifted
-        )
-        full_state = tuple(name for name, _ in adapter.REG32.values())
-        ossa = _lower_transitions(
-            oregions, pairs, olifted, osession, o_tokens,
-            function_entry=oracle_entry,
-            module="oracle", outputs=outputs,
-            full_state=full_state, left=True,
-        )
-        cssa = _lower_transitions(
-            cregions, pairs, clifted, csession, c_tokens,
-            function_entry=candidate_entry,
-            module="candidate", outputs=outputs,
-            full_state=full_state, left=False,
-        )
     except CallCompositionRefusal as error:
-        report = {
-            "function": {"name": name},
-            "status": verdict.Status.REFUSED,
-            "reason": str(error),
-        }
+        report = {"function": {"name": name}, "status": verdict.Status.REFUSED, "reason": str(error)}
         if error.evidence is not None:
             report["return_proof_failure"] = error.evidence.to_document()
+        if error.location is not None:
+            report["refusal_location"] = error.location.to_document()
         return report
     except RegionGraphRefusal as error:
-        return {
-            "function": {"name": name},
-            "status": verdict.Status.REFUSED,
-            "reason": error.reason.value,
-        }
-    status, compared, verdicts = _compare_attempt(
-        ossa, cssa, deadline, adapter, catalog, verdict
+        return {"function": {"name": name}, "status": verdict.Status.REFUSED, "reason": error.reason.value}
+    searched = _search_native_graphs((osession, csession), (olifted, clifted),
+                                    (oracle_entry, candidate_entry), outputs, deadline,
+                                    name, candidate_normalization)
+    searched = _retry_identity_edges((osession, csession), (olifted, clifted),
+                                    (oracle_entry, candidate_entry), outputs, deadline,
+                                    name, candidate_normalization, searched)
+    searched = _retry_predecessor_edges((osession, csession), (olifted, clifted),
+                                       (oracle_entry, candidate_entry), outputs, deadline,
+                                       name, candidate_normalization, searched)
+    return _retry_callee_frames(
+        (osession, csession), (olifted, clifted), (oracle_entry, candidate_entry),
+        outputs, deadline, name, candidate_normalization, searched,
     )
-    attempts = [
-        _attempt_record(IDENTITY_RELATION, status, compared, verdicts, len(pairs))
-    ]
-    return {
-        "function": {"name": name},
-        "graph_evidence": asdict(graph.evidence),
-        "status": status,
-        "reason": (
-            Flat32LoopCallReason.INDUCTION.value
-            if status is verdict.Status.PASSED
-            else Flat32LoopCallReason.TRANSITIONS_UNPROVED.value
-        ),
-        "proof_scope": ProofScope.CUTPOINT_SIMULATION,
-        "register_relation": [],
-        "memory_relation": None,
-        "relation_attempts": attempts,
-        "counters": attempts[0]["counters"],
-        "superblock_pairs": [
-            {
-                "pair": index,
-                "oracle_head": hex(oregions[left].members[0]),
-                "oracle_members": [hex(member) for member in oregions[left].members],
-                "oracle_exits": [hex(target) for target in oregions[left].exits],
-                "oracle_kind": oregions[left].kind.value,
-                "candidate_head": hex(cregions[right].members[0]),
-                "candidate_members": [
-                    hex(member) for member in cregions[right].members
-                ],
-                "candidate_exits": [
-                    hex(target) for target in cregions[right].exits
-                ],
-                "candidate_kind": cregions[right].kind.value,
-            }
-            for index, (left, right) in enumerate(pairs)
-        ],
-        "call_sites": {
-            "oracle": osession.call_sites,
-            "candidate": csession.call_sites,
-        },
-        "oracle_inlined_calls": osession.inlined_calls,
-        "candidate_inlined_calls": csession.inlined_calls,
-        "oracle_blocks_lifted": osession.blocks_lifted,
-        "candidate_blocks_lifted": csession.blocks_lifted,
-        "return_targets_proved": (
-            osession.return_targets_proved + csession.return_targets_proved
-        ),
-        "oracle_tail_transfers": osession.tail_transfers,
-        "candidate_tail_transfers": csession.tail_transfers,
-        "tail_sites": {
-            "oracle": osession.tail_sites,
-            "candidate": csession.tail_sites,
-        },
-        "environment_coverage": {
-            "oracle": environment_parts(_lifted_map(osession)),
-            "candidate": environment_parts(_lifted_map(csession)),
-        },
-        "block_compare": compared,
-        "block_verdicts": verdicts,
-        "oracle_ssa": ossa,
-        "candidate_ssa": cssa,
-    }

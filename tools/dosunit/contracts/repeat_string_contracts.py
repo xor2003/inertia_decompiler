@@ -89,10 +89,10 @@ def decode_repeat_summary(
     instructions: list[dict[str, Any]], *,
     architecture: RepeatArchitecture = RepeatArchitecture.REAL16,
 ) -> RepeatStringSpec | None:
-    """Admit one isolated default-form REP; preserve all other blocks as IR.
+    """Admit one isolated REP with a modeled operand/address form.
 
-    Prefix instructions before REP, address/operand overrides and source-segment
-    overrides must not be silently replaced by a default-form summary. This
+    Flat32 additionally admits one operand override in either prefix order.
+    Address/segment overrides and unmodeled prefix combinations retain IR. This
     admission rule makes no assertion that their native semantics are unsupported.
     """
     if len(instructions) != 1:
@@ -104,6 +104,11 @@ def decode_repeat_summary(
     else:
         return None
     code = _instruction_bytes(instructions[0])
+    if architecture is RepeatArchitecture.FLAT32 and len(code) == 3:
+        if code[:2] not in {b"\x66\xf2", b"\x66\xf3", b"\xf2\x66", b"\xf3\x66"}:
+            return None
+        default_width = 2
+        code = bytes((code[1] if code[0] == 0x66 else code[0], code[2]))
     if len(code) != 2 or code[0] not in {0xF2, 0xF3}:
         return None
     family = _FAMILIES.get(code[1])

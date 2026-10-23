@@ -283,3 +283,49 @@ def test_parent_expired_deadline_emits_no_ordered_proposal() -> None:
     assert report.ordered is None
     assert report.counters.expanded == 0
     assert report.limit is rbp.BranchSearchLimit.DEADLINE
+
+
+@pytest.mark.parametrize("kind", [_RETURN, _BORING])
+def test_opt_in_merges_only_terminal_returns(kind: RegionExitKind) -> None:
+    """A shared return is permitted, a shared continuing cutpoint is not."""
+    left, lt = _layout([(_BORING, (1, 2)), (kind, ()), (kind, ())])
+    right, rt = _layout([(_BORING, (1, 1)), (kind, ())])
+    strict = rbp.propose_branch_bijections(left, right, lt, rt, 0, 0)
+    relaxed = rbp.propose_branch_bijections(
+        left, right, lt, rt, 0, 0, allow_terminal_merges=True,
+    )
+    assert not strict.candidates
+    assert bool(relaxed.candidates) is (kind is _RETURN)
+    for pairs in relaxed.candidates:
+        assert set(pairs) == {(0, 0), (1, 1), (2, 1)}
+
+
+def test_return_tokens_keep_unrelated_components_distinct() -> None:
+    """Shared-tail equality is transitive only along checked return pairs."""
+    from tools.dosunit.compare.region_pairing import paired_control_tokens
+    regions, _ = _layout([(_BORING, (1, 2)), (_RETURN, ()), (_RETURN, ()), (_RETURN, ())])
+    pairs = [(0, 0), (1, 1), (2, 1), (2, 2), (3, 3)]
+    tokens = paired_control_tokens(pairs, list(regions), list(regions))
+    assert tokens[1] == tokens[2] == tokens[3]
+    assert len({tokens[0], tokens[1], tokens[4]}) == 3
+    with pytest.raises(RegionGraphRefusal, match="cfg_not_bijective"):
+        paired_control_tokens([(0, 0), (0, 1)], list(regions), list(regions))
+
+
+
+def test_state_merge_covers_every_pair_and_preserves_entry() -> None:
+    """An extra initial loop body is a separate obligation; root aliases forbid."""
+    from tools.dosunit.compare.region_pairing import paired_control_tokens
+    left, lt = _layout([(_BORING, (2, 1)), (_BORING, (2, 1)), (_RETURN, ())])
+    right, rt = _layout([(_BORING, (3, 1)), (_BORING, (3, 2)), (_BORING, (3, 2)), (_RETURN, ())])
+    assert not rbp.propose_branch_bijections(left, right, lt, rt, 0, 0).candidates
+    report = rbp.propose_branch_bijections(left, right, lt, rt, 0, 0, allow_state_merges=True)
+    assert report.candidates
+    for pairs in report.candidates:
+        assert set(pairs) == {(0, 0), (1, 1), (1, 2), (2, 3)}
+        tokens = paired_control_tokens(list(pairs), list(left), list(right), allow_state_merges=True)
+        by_pair = dict(zip(pairs, tokens, strict=True))
+        assert by_pair[(1, 1)] == by_pair[(1, 2)]
+        assert len({by_pair[(0, 0)], by_pair[(1, 1)], by_pair[(2, 3)]}) == 3
+    with pytest.raises(RegionGraphRefusal, match="cfg_not_bijective"):
+        paired_control_tokens([(0, 0), (0, 1)], list(left), list(right), allow_state_merges=True)

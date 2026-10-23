@@ -1421,7 +1421,7 @@ def test_decompile_function_with_stats_skips_same_family_retry_without_new_proof
         _inertia_decompiler_stage="structuring",
     )
     function = SimpleNamespace(addr=0x102E0, name="RunMenu", info={}, project=project, normalized=True)
-    cfg = SimpleNamespace()
+    cfg = SimpleNamespace(kb=SimpleNamespace())
 
     monkeypatch.setattr(cli_decompilation, "_analysis_timeout", lambda *_args, **_kwargs: contextlib.nullcontext())
     monkeypatch.setattr(
@@ -1441,7 +1441,7 @@ def test_decompile_function_with_stats_skips_same_family_retry_without_new_proof
         cli_decompilation, "_guard_angr_clinic_stage_markers", lambda *_args, **_kwargs: contextlib.nullcontext()
     )
 
-    status, _payload, partial_payload, block_count, byte_count, elapsed = (
+    status, _payload, partial_payload, block_count, byte_count, elapsed, _terminal = (
         cli_decompilation._decompile_function_with_stats(
             project,
             cfg,
@@ -5566,7 +5566,7 @@ def test_decompile_function_empty_reports_angr_error_detail(monkeypatch):
         loader=SimpleNamespace(main_object=SimpleNamespace(linked_base=0x10000, max_addr=0x200)),
     )
     function = SimpleNamespace(addr=0x10010, name="sub_10010", normalized=True, blocks=(SimpleNamespace(size=0x10),))
-    cfg = SimpleNamespace()
+    cfg = SimpleNamespace(kb=SimpleNamespace())
 
     monkeypatch.setattr(decompile, "_apply_binary_specific_annotations", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(decompile, "seed_calling_conventions", lambda *_args, **_kwargs: None)
@@ -5613,7 +5613,7 @@ def test_decompile_function_timeout_returns_partial_codegen_text(monkeypatch):
         analyses=SimpleNamespace(Decompiler=FakeDecompiler),
     )
     function = SimpleNamespace(addr=0x10010, name="sub_10010", normalized=True, blocks=(SimpleNamespace(size=0x10),))
-    cfg = SimpleNamespace()
+    cfg = SimpleNamespace(kb=SimpleNamespace())
 
     monkeypatch.setattr(decompile, "_apply_binary_specific_annotations", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(decompile, "_prepare_function_for_decompilation", lambda *_args, **_kwargs: None)
@@ -7250,7 +7250,7 @@ def test_repro_decompiler_boundary_reports_blocked_narrow_stack_object(monkeypat
 
 def test_decompile_function_disables_structuring_for_tiny_single_call_helpers(monkeypatch):
     class FakeDecompiler:
-        def __init__(self, function, cfg=None, options=None, expr_collapse_depth=None):
+        def __init__(self, function, cfg=None, options=None, expr_collapse_depth=None, kb=None):
             assert options == [("structurer_cls", "Phoenix")]
             assert expr_collapse_depth is not None
             codegen = SimpleNamespace(
@@ -7286,6 +7286,7 @@ def test_decompile_function_disables_structuring_for_tiny_single_call_helpers(mo
         arch=architecture,
         analyses=SimpleNamespace(Decompiler=FakeDecompiler),
         factory=SimpleNamespace(block=lambda block_addr, opt_level=0: blocks[block_addr]),
+        kb=SimpleNamespace(functions=SimpleNamespace(function=lambda *_args, **_kwargs: None)),
     )
     function = SimpleNamespace(
         addr=0x1196F,
@@ -7295,7 +7296,7 @@ def test_decompile_function_disables_structuring_for_tiny_single_call_helpers(mo
         block_addrs_set=set(blocks),
         get_call_sites=lambda: [0x1196F],
     )
-    cfg = SimpleNamespace()
+    cfg = SimpleNamespace(kb=SimpleNamespace())
 
     monkeypatch.setattr(decompile, "_apply_binary_specific_annotations", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(decompile, "seed_calling_conventions", lambda *_args, **_kwargs: None)

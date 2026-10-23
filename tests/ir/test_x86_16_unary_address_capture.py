@@ -95,6 +95,6 @@ def test_explicit_cs_never_defaults_to_data_or_stack(register, hinted):
         segment_hints=hints if hinted else None)
     assert address.base == (register,)
     assert address.expr == ("segmented_linear", "cs", register)
-    assert address.space is MemSpace.UNKNOWN
-    assert address.status is AddressStatus.UNKNOWN
-    assert address.segment_origin is SegmentOrigin.UNKNOWN
+    assert address.space is MemSpace.CS
+    assert address.status is AddressStatus.STABLE
+    assert address.segment_origin is SegmentOrigin.PROVEN

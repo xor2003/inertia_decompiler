@@ -41,3 +41,51 @@ def test_malformed_memory_cannot_disappear() -> None:
         # Deliberately corrupt a nominally typed boundary to test rejection.
         terms.masked_state(cast(dict[str, terms.Term], {"memory": None}), terms.guard_true())
     assert refused.value.reason is MacroStepReason.MACRO_ADMISSION
+
+
+def test_multiple_cuts_never_pair_paths_from_different_inputs() -> None:
+    """Equal exit kinds do not allow paths to borrow another cut's coverage."""
+    nodes = {
+        0: RegionNode(0, (1, 2), RegionExitKind.BORING),
+        1: RegionNode(1, (1, 2), RegionExitKind.BORING),
+        2: RegionNode(2, (), RegionExitKind.RETURN),
+    }
+    search = pairing.propose_macro_steps(
+        nodes, nodes, 0, 0, cut_pairs=((0, 0), (1, 1)), deadline_seconds=5,
+    )
+    for proposal in search.proposals:
+        for candidate in proposal.pairings:
+            assert candidate.slow_concats
+            assert all(paths[0].start_cut == candidate.fast_path.start_cut
+                       for paths in candidate.slow_concats)
+
+
+@pytest.mark.parametrize("cuts", [(), ((1, 1),), ((0, 0), (1, 0)), ((0, 0), (9, 9))])
+def test_invalid_cut_correspondence_is_rejected(cuts: tuple[tuple[int, int], ...]) -> None:
+    """Missing entry, duplicate endpoints and nonexistent cuts supply no proof."""
+    nodes = {0: RegionNode(0, (1,), RegionExitKind.BORING),
+             1: RegionNode(1, (), RegionExitKind.RETURN)}
+    with pytest.raises(MacroStepRefusal) as refused:
+        pairing.propose_macro_steps(nodes, nodes, 0, 0, cut_pairs=cuts, deadline_seconds=5)
+    assert refused.value.reason is MacroStepReason.MACRO_ENDPOINT
+
+
+@pytest.mark.parametrize("condition,changed,expected", [
+    (4, False, "proved"), (4, True, "counterexample"), (2, False, "unknown"),
+])
+def test_macro_guard_uses_only_demanded_dec_flags(condition: int, changed: bool, expected: str) -> None:
+    """DEC zero testing ignores preserved carry; carry testing must retain it."""
+    from tools.dosunit.compare.flat32_macro_terms import prove_guard_equal32
+
+    def const(value: int) -> dict:
+        return {"op": "const", "width": 32, "value": hex(value)}
+
+    value = {"op": "input", "name": "eax", "width": 32}
+    carry = {"op": "summary_x86g_calculate_eflags_c", "width": 32,
+             "args": [{"op": "input", "name": name, "width": 32}
+                      for name in ("cc_op", "cc_dep1", "cc_dep2", "cc_ndep")]}
+    condition_term = {"op": "summary_x86g_calculate_condition", "width": 32,
+                      "args": [const(condition), const(21), value, const(0), carry]}
+    guard = {"op": "trunc", "width": 1, "args": [condition_term]}
+    expected_guard = {"op": "eq", "width": 1, "args": [value, const(1 if changed else 0)]}
+    assert prove_guard_equal32(guard, expected_guard, time.monotonic() + 5).value == expected

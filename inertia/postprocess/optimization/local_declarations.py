@@ -7,6 +7,8 @@ Consumes already-proven stack identity and type surfaces. This module may remove
 declaration duplicates with identical BP-relative storage, name, size, and type.
 It may also retire declaration-only entries whose authoritative DCE keys have
 no remaining body or argument references. Names alone never prove dead storage.
+Unreferenced fixed scalar declarators may be retired after a complete body and
+parameter inventory; opaque code, unknown types and uncertain aliases are kept.
 It must not merge expressions, infer alias/type facts, or repair rendered C text.
 """
 
@@ -18,7 +20,8 @@ from collections.abc import Callable
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_variable import SimStackVariable
+from angr.sim_type import SimTypeBool, SimTypeChar, SimTypeFloat, SimTypeInt, SimTypeNum
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 _DeclarationKey8616 = tuple[str, int | str]
 _UNIFIED_ENTRY_ARITY_8616: int = 2
@@ -87,12 +90,112 @@ class _CFunctionLike(Protocol):
 
     variables_in_use: object
     unified_local_vars: object
+    statements: object
+    arg_list: object
 
 
 class _CodegenLike(Protocol):
     """Third-party structured-codegen surface used by declaration cleanup."""
 
     cfunc: _CFunctionLike | None
+
+
+def _scalar_declaration_nodes_8616(entry: object) -> tuple[structured_c.CVariable, ...] | None:
+    """Accept only complete, fixed scalar declarators without initializer code."""
+    if isinstance(entry, structured_c.CVariable):
+        nodes = (entry,)
+    elif isinstance(entry, (set, list, tuple)) and entry:
+        collected: list[structured_c.CVariable] = []
+        for item in entry:
+            if not isinstance(item, tuple) or len(item) != 2 or not isinstance(item[0], structured_c.CVariable):
+                return None
+            if item[1] != item[0].variable_type:
+                return None
+            collected.append(item[0])
+        nodes = tuple(collected)
+    else:
+        return None
+    for node in nodes:
+        value_type = node.variable_type
+        if not isinstance(value_type, (SimTypeBool, SimTypeChar, SimTypeFloat, SimTypeInt, SimTypeNum)):
+            return None
+        try:
+            size = value_type.size
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(size, int) or size <= 0:
+            return None
+    return nodes
+
+
+def _declaration_references_8616(
+    cfunc: _CFunctionLike,
+) -> tuple[set[int], set[tuple[object, ...]], bool, bool] | None:
+    """Collect complete body/parameter references, keeping opaque code unknown."""
+    from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616
+    from inertia.semantics.alias_query import describe_alias_storage
+
+    try:
+        arguments = cfunc.arg_list
+        body = cfunc.statements
+    except AttributeError:
+        return None
+    if not isinstance(arguments, (list, tuple)) or not isinstance(body, structured_c.CConstruct):
+        return None
+    if any(not isinstance(argument, structured_c.CConstruct) for argument in arguments):
+        return None
+    variables: set[int] = set()
+    storage: set[tuple[object, ...]] = set()
+    any_reference = False
+    unknown_storage = False
+    for root in (body, *arguments):
+        for node in _iter_c_nodes_deep_8616(root):
+            if isinstance(node, (structured_c.CDirtyExpression, structured_c.CDirtyStatement)):
+                return None
+            if isinstance(node, structured_c.CVariable):
+                any_reference = True
+                variables.add(id(node.variable))
+                variables.add(id(node.unified_variable))
+                identity = describe_alias_storage(node).identity
+                if identity is None:
+                    unknown_storage = True
+                else:
+                    storage.add(identity)
+    return variables, storage, any_reference, unknown_storage
+
+
+def prune_unreferenced_scalar_declarations_8616(codegen: _CodegenLike) -> bool:
+    """Retire pure scalar declaration metadata after complete use exclusion.
+
+    Parameters, body references and alias-equivalent storage remain declared.
+    Arrays, pointer declarators, unknown types and opaque code remain unchanged.
+    This changes no statements and derives no machine storage identity.
+    """
+    from inertia.semantics.alias_query import describe_alias_storage
+
+    cfunc = codegen.cfunc
+    if cfunc is None:
+        return False
+    references = _declaration_references_8616(cfunc)
+    if references is None:
+        return False
+    variables, storage, any_reference, unknown_storage = references
+    changed = False
+    for mapping in _declaration_maps_8616(codegen):
+        if not isinstance(mapping, dict):
+            continue
+        for variable, entry in tuple(mapping.items()):
+            if not isinstance(variable, (SimRegisterVariable, SimStackVariable)) or id(variable) in variables:
+                continue
+            nodes = _scalar_declaration_nodes_8616(entry)
+            if nodes is None or unknown_storage:
+                continue
+            identities = tuple(describe_alias_storage(node).identity for node in nodes)
+            if any(identity in storage or (identity is None and any_reference) for identity in identities):
+                continue
+            del mapping[variable]
+            changed = True
+    return changed
 
 
 def _stack_declaration_identity(
@@ -207,4 +310,4 @@ def dedupe_equivalent_stack_local_declarations_8616(codegen: _CodegenLike) -> bo
     return _dedupe_unified_local_vars_8616(cfunc, debug) or changed
 
 
-__all__ = ["dedupe_equivalent_stack_local_declarations_8616", "prune_dce_proven_declarations_8616"]
+__all__ = ["dedupe_equivalent_stack_local_declarations_8616", "prune_dce_proven_declarations_8616", "prune_unreferenced_scalar_declarations_8616"]

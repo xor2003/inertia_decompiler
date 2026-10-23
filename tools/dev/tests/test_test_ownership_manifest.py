@@ -253,17 +253,19 @@ def test_specific_rule_takes_precedence_over_layer_fallback():
 
 
 def test_selects_tail_validation_family_tests_for_related_modules() -> None:
-    """Pin both exact-generation controls alongside all validation families."""
+    """Pin shared alias refusals alongside exact-generation validation controls."""
     selected = test_ownership_manifest.select_tests_for_files(
         ("inertia/validation/tail_validation_fingerprint.py",)
     )
 
     assert selected == (
+        "tests/alias/test_stack_pointer_alias_map.py",
+        "tests/lowering/test_x86_16_stack_lowering.py",
+        "tests/validation/test_x86_16_tail_validation_fingerprint.py",
         "tests/validation/test_x86_16_tail_validation.py",
         "tests/validation/test_x86_16_validation_goto_target_identity.py",
         "tests/validation/test_x86_16_tail_validation_alias_cycles.py",
         "tests/validation/test_x86_16_validation_owned_condition_precision.py",
-        "tests/validation/test_x86_16_tail_validation_fingerprint.py",
         "tests/validation/test_x86_16_tail_validation_generation_atoms.py",
         "tests/validation/test_x86_16_tail_validation_generation_equality.py",
         "tests/validation/test_x86_16_tail_validation_routing.py",
@@ -313,12 +315,15 @@ def test_selects_type_structure_merging_tests_for_implementation_file():
     assert selected == ("tests/lowering/test_x86_16_struct_merging.py",)
 
 
-def test_selects_postprocess_stage_direct_stack_validation_tests_for_implementation_file():
+def test_selects_postprocess_stage_direct_stack_validation_tests_for_implementation_file() -> None:
+    """Keep named-rule execution controls beside guarded stack validation."""
     selected = test_ownership_manifest.select_tests_for_files(
         ("inertia/postprocess/decompiler_postprocess_stage.py",)
     )
 
     assert selected == (
+        "tests/postprocess/test_optimization_rule_runtime.py",
+        "tests/postprocess/test_x86_16_postprocess_snapshot.py::test_optimization_runner_applies_validation_step_per_subpass",
         "tools/dev/tests/test_decompiler_architecture_check.py",
         "tests/integration/test_x86_16_jcc_instruction_reuse.py",
         "tests/semantics/test_x86_16_jcc_typed_condition_order.py",
@@ -333,7 +338,8 @@ def test_selects_postprocess_stage_direct_stack_validation_tests_for_implementat
     )
 
 
-def test_selects_postprocess_callsite_argument_tests_for_implementation_file():
+def test_selects_postprocess_callsite_argument_tests_for_implementation_file() -> None:
+    """Keep current unknown-memory refusal controls in callsite ownership."""
     selected = test_ownership_manifest.select_tests_for_files(
         ("inertia/postprocess/decompiler_postprocess_calls.py",)
     )
@@ -355,7 +361,7 @@ def test_selects_postprocess_callsite_argument_tests_for_implementation_file():
         "tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::"
         "test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores",
         "tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::"
-        "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
+        "test_materialize_callsite_stack_arguments_keeps_unknown_memory_even_with_exact_push_evidence",
     )
 
 
@@ -378,6 +384,8 @@ def test_selects_cli_direct_fallback_focused_tests_for_legacy_cli_file() -> None
     )
 
     assert selected == (
+        "tests/cli/test_declared_function_discovery.py",
+        "tests/cli/test_final_function_result_artifacts.py",
         "tools/dev/tests/test_architecture_import_attestation.py",
         "tools/dev/tests/test_decompiler_architecture_check.py",
         "tests/cli/test_serial_clean_worker_cache.py",
@@ -423,6 +431,7 @@ def test_selects_tail_validation_focused_tests_for_implementation_file():
 
     assert selected == (
         "tests/validation/test_x86_16_escaped_stack_validation.py",
+        "tests/validation/test_cite_observed_locations.py",
         "tests/validation/test_x86_16_validation_dataflow.py::"
         "test_tail_validation_refuses_def_use_failure_even_when_baseline_already_lost_definition",
         "tests/validation/test_x86_16_validation_control_flow.py::"
@@ -696,7 +705,7 @@ def test_tool_private_tests_are_valid_focused_targets():
         test_ownership_manifest.TestOwnershipRule(
             owner="compiler-tool",
             paths=("tools/compiler_id/report.py",),
-            tests=("tools/compiler_id/tests/test_flags.py::test_script_entrypoint_prints_help",),
+            tests=("tools/compiler_id/tests/test_flags.py::test_package_entrypoint_prints_help",),
         ),
     )
     assert not test_ownership_manifest.validate_manifest_targets(rules)

@@ -62,8 +62,8 @@ def control_view_model_hash() -> str:
     the owner sources keeps stale projections a typed refusal.
     """
     parent = Path(__file__).resolve().parent.parent
-    paths = (parent / "real16_control_boundary.py", parent / "real16_control_targets.py",
-             parent / "straightline_ssa.py", parent / "contracts/ssa.py",
+    paths = (parent / "compare/real16_control_boundary.py", parent / "compare/real16_control_targets.py",
+             parent / "compare/straightline_ssa.py", parent / "contracts/ssa.py",
              parent / "contracts/registers.py", parent / "contracts/comparison.py",
              parent / "contracts/scanning.py",
              parent / "ssa/identity.py", parent / "ssa/z3_ops.py",

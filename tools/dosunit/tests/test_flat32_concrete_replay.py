@@ -22,6 +22,22 @@ def _vector() -> ReplayVector:
                                         MappingOrigin.VECTOR),))
 
 
+def test_replay_instruction_admission_and_terminal_bytes() -> None:
+    """An explicit instruction contract rejects before executing a disallowed op."""
+    from capstone import x86_const as ins
+
+    allowed = frozenset({ins.X86_INS_MOV, ins.X86_INS_RET})
+    good = replay(_image(bytes.fromhex('b807000000c3')), 0x10000, _vector(),
+                  instruction_limit=10, allowed_instruction_ids=allowed)
+    assert good.status is ReplayStatus.RETURNED
+    assert good.last_instruction == (0x10005, b'\xc3')
+    bad = replay(_image(bytes.fromhex('40c3')), 0x10000, _vector(),
+                 instruction_limit=10, allowed_instruction_ids=allowed)
+    assert bad.status is ReplayStatus.UNSUPPORTED
+    assert bad.detail == 'instruction_outside_declared_subset'
+    assert dict(bad.registers)['eax'] == 0
+
+
 def test_call_loop_memory_replay_and_corruption():
     # call leaf; dec ecx; jne dec; store eax; ret; leaf: mov eax,7; ret
     good = bytes.fromhex('e809000000 49 75fd a300000300 c3 b807000000 c3')

@@ -14,9 +14,16 @@ from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
 from typing import Protocol, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CAssignment, CStatements, CVariable
-from angr.sim_type import SimType
+from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
+    CDirtyExpression,
+    CExpression,
+    CStatements,
+    CVariable,
+)
+from angr.sim_type import SimType, SimTypeChar, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimTemporaryVariable, SimVariable
+from archinfo import Arch
 
 from inertia.lowering.c_ast_utils import (
     _iter_c_node_occurrences_8616,
@@ -28,11 +35,11 @@ from inertia.pipeline.errors import PipelineHardError
 from .stack_value_projection import project_pointer_storage_value_8616
 from .terminal_return_expressions import contains_effectful_call_8616
 
-type RegisterIdentity8616 = tuple[int, int, str | None, int | None]
+type RegisterIdentity8616 = tuple[int, int, int | str | None, int | None]
 type RegisterClassifier8616 = Callable[[object], tuple[RegisterIdentity8616, str] | None]
 _CAPTURE_TAG: str = "inertia_gp_version_capture_8616"
 _POINTER_WORD_BYTES: int = 2
-_STATEMENT_CENSUS_IDENTITY_MULTIPLIER: int = 2
+_STATEMENT_CENSUS_OCCURRENCE_MULTIPLIER: int = 2
 
 
 class _VariableManager8616(Protocol):
@@ -54,10 +61,17 @@ class _Function8616(Protocol):
         """Rebuild declarations from the published storage inventory."""
 
 
+class _Project8616(Protocol):
+    """Architecture used to bind machine-width capture types."""
+
+    arch: Arch
+
+
 class _Codegen8616(Protocol):
     """Owned capture counters attached at the codegen boundary."""
 
     cfunc: _Function8616
+    project: _Project8616
     _inertia_gp_register_version_capture_stats_8616: GPVersionCaptureStats8616
 
 
@@ -79,7 +93,7 @@ class _CapturePlan8616:
     identity: RegisterIdentity8616
     assignment: CAssignment
     group: CStatements
-    source: CVariable
+    source: CVariable | CDirtyExpression
 
 
 def _occurrence_histogram(
@@ -102,8 +116,10 @@ class _CaptureScan8616:
     candidate identity. Per-statement histograms, owner groups, and effect
     checks are memoized by node identity for this single planning pass only;
     the tree is not mutated until every plan is selected, so each memoized
-    answer stays exact. Retained subtree histograms have a linear identity
-    budget; overlapping nested scopes cannot accumulate quadratic storage.
+    answer stays exact. Retained histogram entries are bounded by the root's
+    register occurrences, including repeated uses of an identity. This admits
+    disjoint statement censuses without thrashing while overlapping nested
+    scopes cannot accumulate quadratic storage.
     Nothing persists across capture invocations. The classifier must be a
     read-only projection of the unchanged tree during planning.
     """
@@ -117,6 +133,7 @@ class _CaptureScan8616:
         default_factory=dict,
     )
     _statement_identity_entries: int = 0
+    _statement_identity_limit: int = 0
     _effectful: dict[int, tuple[object, bool]] = field(default_factory=dict)
     _overwrites: dict[tuple[int, str], tuple[object, bool]] = field(default_factory=dict)
 
@@ -124,6 +141,9 @@ class _CaptureScan8616:
         """Return the whole-root occurrence count, building the census once."""
         if self._occurrences is None:
             self._occurrences = _occurrence_histogram(self.root, self.classify)
+            self._statement_identity_limit = (
+                _STATEMENT_CENSUS_OCCURRENCE_MULTIPLIER * sum(self._occurrences.values())
+            )
         return self._occurrences.get(identity, 0)
 
     def owner_groups(self, assignment: CAssignment) -> tuple[CStatements, ...]:
@@ -149,7 +169,7 @@ class _CaptureScan8616:
             cached = (statement, _occurrence_histogram(statement, self.classify))
             self.total(identity)
             assert self._occurrences is not None
-            limit = _STATEMENT_CENSUS_IDENTITY_MULTIPLIER * len(self._occurrences)
+            limit = self._statement_identity_limit
             entries = len(cached[1])
             if self._statement_identity_entries + entries > limit:
                 self._statement_occurrences.clear()
@@ -197,9 +217,11 @@ def _capture_plan(
     )
     if dominating is None:
         raise PipelineHardError(f"GP version capture: identity={identity!r}: definition does not dominate every read")
-    if not _outlives_register_value(scan, dominating, assignment, identity):
+    if not isinstance(assignment.lhs, CDirtyExpression) and not _outlives_register_value(
+        scan, dominating, assignment, identity,
+    ):
         return None
-    return _CapturePlan8616(identity, assignment, group, cast(CVariable, assignment.lhs))
+    return _CapturePlan8616(identity, assignment, group, cast(CVariable | CDirtyExpression, assignment.lhs))
 
 
 def _may_overwrite_lane(statement: object, parent: str, classify: RegisterClassifier8616) -> bool:
@@ -277,12 +299,28 @@ def _plans(
     selected: list[_CapturePlan8616] = []
     for identity, assignments in definitions.items():
         shares_lane = any(key != identity and parent == parents[identity] for key, parent in parents.items())
-        if len(assignments) != 1 or not shares_lane:
+        if len(assignments) != 1:
+            continue
+        if not shares_lane and not isinstance(assignments[0].lhs, CDirtyExpression):
             continue
         plan = _capture_plan(scan, assignments[0], identity)
         if plan is not None:
             selected.append(plan)
     return tuple(selected)
+
+
+
+def _capture_storage_type_8616(plan: _CapturePlan8616, codegen: _Codegen8616) -> SimType:
+    """Consume a typed C variable or the exact machine width of a dirty SSA value."""
+    if isinstance(plan.source, CVariable):
+        return plan.source.variable_type
+    types: dict[int, SimType] = {
+        1: SimTypeChar(False), 2: SimTypeShort(False), 4: SimTypeLong(False),
+    }
+    size = plan.identity[1]
+    if size not in types:
+        raise PipelineHardError(f"GP version capture: unsupported register width {size}")
+    return types[size].with_arch(codegen.project.arch)
 
 
 def capture_gp_register_versions_8616(
@@ -312,31 +350,43 @@ def capture_gp_register_versions_8616(
     }
     used_ids.update(variable.tmp_id for variable in function.variables_in_use if isinstance(variable, SimTemporaryVariable))
     next_id = max(used_ids, default=-1) + 1
+    replacements: dict[RegisterIdentity8616, CVariable] = {}
+    publications: list[tuple[_CapturePlan8616, CAssignment]] = []
+
+    def replace_version(node: object) -> object:
+        """Project selected full identities without merging architectural lanes."""
+        fact = classify(node)
+        return replacements.get(fact[0], node) if fact is not None else node
+
     for plan in plans:
-        temporary = SimTemporaryVariable(next_id, plan.source.variable.size)
+        capture_type = _capture_storage_type_8616(plan, boundary)
+        temporary = SimTemporaryVariable(next_id, plan.identity[1])
         next_id += 1
-        value = CVariable(temporary, variable_type=plan.source.variable_type, codegen=codegen)
+        value = CVariable(temporary, variable_type=capture_type, codegen=codegen)
         # A scalar register snapshot stores guest offset bits, not a host C
         # pointer. Reuse the architectural-write owner's exact projection.
+        # Earlier captures must already be visible to this RHS's type query.
+        # Visit only this expression now; replace the complete function once
+        # after every plan is prepared, before adding architectural publications.
+        rhs = cast(CExpression, replace_version(plan.assignment.rhs))
+        _replace_c_children_8616(rhs, replace_version)
         projected = project_pointer_storage_value_8616(
-            codegen, plan.assignment.rhs, max(plan.source.variable.size, _POINTER_WORD_BYTES),
+            codegen, rhs, max(plan.identity[1], _POINTER_WORD_BYTES),
         )
         assert projected is not None
         plan.assignment.rhs = projected
 
-        def replace_version(node: object, plan: _CapturePlan8616 = plan, value: CVariable = value) -> object:
-            """Replace only the selected full identity, including its definition."""
-            fact = classify(node)
-            return value if fact is not None and fact[0] == plan.identity else node
-
-        _replace_c_children_8616(root, replace_version)
+        replacements[plan.identity] = value
         # Evaluate the RHS once into the local, then publish that exact value.
         publication = CAssignment(plan.source, value, codegen=codegen, tags=dict(plan.assignment.tags))
         plan.assignment.tags[_CAPTURE_TAG] = True
+        publications.append((plan, publication))
+        function.variables_in_use[temporary] = value
+        function.variable_manager.set_variable_type(temporary, capture_type)
+    _replace_c_children_8616(root, replace_version)
+    for plan, publication in publications:
         position = next(index for index, statement in enumerate(plan.group.statements) if statement is plan.assignment)
         plan.group.statements = [*plan.group.statements[:position + 1], publication, *plan.group.statements[position + 1:]]
-        function.variables_in_use[temporary] = value
-        function.variable_manager.set_variable_type(temporary, plan.source.variable_type)
     function.refresh()
     count = existing + len(plans)
     boundary._inertia_gp_register_version_capture_stats_8616 = GPVersionCaptureStats8616(count, count, count, count, 0)

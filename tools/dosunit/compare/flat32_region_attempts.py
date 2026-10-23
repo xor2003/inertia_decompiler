@@ -8,6 +8,7 @@ failed invariant obligations from becoming complete-function equivalence.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from tools.dosunit.compare.memory_invariant_obligations import MemoryInvariantProof
@@ -25,13 +26,27 @@ def compare_attempt(
     ossa: dict[str, Any], cssa: dict[str, Any], deadline: float,
     adapter: Any, catalog: Any, verdict: Any,  # noqa: ANN401
     invariant_proofs: tuple[MemoryInvariantProof, ...] = (),
+    *, candidate_normalization: Mapping[int, int] | None = None,
 ) -> tuple[Any, dict[str, Any], list[dict[str, Any]]]:
-    """Check every transition without promoting internal SAT to binary mismatch."""
+    """Check every transition without promoting internal SAT to binary mismatch.
+
+    An explicit constant map labels every checked row and aggregate success
+    conditional. Callers must retain the exact premise in the final report
+    and protect control tokens before requesting normalized induction.
+    """
     timeout_ms = int((deadline - time.monotonic()) * 1000)
     if timeout_ms <= 0:
         rows = [verdict.refusal(f"sb_{index}", f"oracle:sb_{index}", verdict.Reason.ABORTED)
                 for index in range(len(ossa["functions"]))]
         return verdict.Status.REFUSED, {"status": "refused", "reason": "compose_deadline_exceeded"}, rows
+    if candidate_normalization:
+        # Premises belong to this attempt, not to the reusable native SSA.
+        # A later literal invariant check must see the original coordinates.
+        cssa = {**cssa, "functions": [
+            {**function, "_constant_normalization": dict(candidate_normalization),
+             "_constant_normalization_reasons": dict.fromkeys(candidate_normalization, "global_reloc")}
+            for function in cssa["functions"]
+        ]}
     compared = adapter.S.compare_ssa_documents(
         oracle=ossa,
         candidate=cssa,
@@ -47,12 +62,15 @@ def compare_attempt(
         enable_connectivity=False,
     )
     expected = {f"sb_{index}": f"oracle:sb_{index}" for index in range(len(ossa["functions"]))}
-    verdicts = verdict.checked_results(expected, compared)
+    verdicts = verdict.checked_results(expected, compared, relocation=candidate_normalization)
     # SAT at an arbitrary internal cutpoint refutes this simulation relation;
     # it does not establish a reachable whole-function counterexample.
-    status = verdict.Status.PASSED if verdicts and all(
+    accepted = {ProofStatus.PROVED}
+    if candidate_normalization:
+        accepted.add(ProofStatus.CONDITIONAL)
+    status = (verdict.Status.CONDITIONAL if candidate_normalization else verdict.Status.PASSED) if verdicts and all(
         admit_scope_status(proof_status_from_legacy(row.get("status")) or ProofStatus.UNKNOWN,
-                           ProofScope.CUTPOINT_SIMULATION) is ProofStatus.PROVED for row in verdicts
+                           ProofScope.CUTPOINT_SIMULATION) in accepted for row in verdicts
     ) else verdict.Status.REFUSED
     if any(proof.status is not ProofStatus.PROVED for proof in invariant_proofs):
         status = verdict.Status.REFUSED

@@ -5,13 +5,13 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
 
-from inertia.cli.cli_access_profiles import build_access_trait_evidence_profiles
 from inertia.cli.cli_access_rewrite_artifact import (
     AccessRewriteArtifact,
     has_access_rewrite_artifact,
     load_access_rewrite_artifact,
 )
 from inertia.cli.cli_access_trait_rewrite import _attach_access_trait_field_names
+from inertia.lowering.access_profiles import build_access_trait_evidence_profiles
 from inertia.lowering.object_lowering import AccessTraitObjectHint, _build_stable_access_object_hints
 
 

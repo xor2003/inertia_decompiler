@@ -9,17 +9,17 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable
 from functools import partial
-from typing import Protocol, cast
+from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
 from inertia.lowering.object_lowering import BaseKey
-
-from .cli_storage_objects import (
+from inertia.lowering.storage_objects import (
     EvidenceProfiles,
     StableHints,
+    StorageObjectArtifact,
     build_storage_object_artifact,
     storage_object_record_for_key,
 )
@@ -529,7 +529,7 @@ def _member_offset_for_variable(
     variable: object,
     *,
     access_trait_variable_key: Callable[[object], BaseKey | None],
-    storage_object_artifact: object,
+    storage_object_artifact: StorageObjectArtifact,
 ) -> int | None:
     """Return the recorded member offset for a stack variable, or ``None``."""
     base_key = access_trait_variable_key(variable)
@@ -538,7 +538,7 @@ def _member_offset_for_variable(
     record = storage_object_record_for_key(storage_object_artifact, base_key)
     if record is None:
         return None
-    return cast(int | None, record.primary_member_offset())
+    return record.primary_member_offset()
 
 
 def _resolve_alias_expr(

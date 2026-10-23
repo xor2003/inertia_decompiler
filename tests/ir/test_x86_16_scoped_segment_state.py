@@ -25,6 +25,7 @@ import inertia.ir.segment_call_preservation as scp
 import inertia.ir.segment_effect_closure as sce
 import inertia.ir.segment_state as state_mod
 import inertia.ir.segment_state_solver as solver_mod
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
@@ -76,10 +77,36 @@ def _jmp_pending(head: int, encoding: bytes, block_addr: int = FUNC) -> object:
     return ejd.PendingTerminalJump8616(block_addr=block_addr, decoded=decoded)
 
 
+_CALLER_CODE = bytes.fromhex("e8fd6fc3")  # call FUNC; ret
+
+
+def _load_native_bytes_8616(addr: int, size: int) -> bytes:
+    """Serve retained native bytes for the mock caller extent."""
+    base = CALLER_ADDR
+    if base <= addr and addr + size <= base + len(_CALLER_CODE):
+        return _CALLER_CODE[addr - base: addr - base + size]
+    return b""
+
+
+def _decoded_block_8616(addr: int, code: bytes,
+                        extents: tuple[tuple[int, int], ...]) -> object:
+    """Mint the decoded-block surface bound-block authentication reads."""
+    return SimpleNamespace(
+        addr=addr, size=len(code), bytes=code,
+        capstone=SimpleNamespace(insns=tuple(
+            SimpleNamespace(address=head, size=size) for head, size in extents)),
+    )
+
+
 def _caller_surface(
     project: object,
 ) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616, object]:
     """Build one registered refusal-free caller surface for the parent."""
+    # Bound-block authentication requires a real arch, live loader bytes and
+    # retained decoded blocks; the mock supplies that exact surface.
+    project.arch = Arch86_16()
+    project.loader = SimpleNamespace(
+        memory=SimpleNamespace(load=_load_native_bytes_8616))
     caller = IRFunctionArtifact(
         CALLER_ADDR,
         (
@@ -105,6 +132,9 @@ def _caller_surface(
         frozenset({CALLER_ADDR}),
         frozenset({CALLER_ADDR, CALLER_ADDR + 3}),
         (),
+        blocks=(_decoded_block_8616(
+            CALLER_ADDR, _CALLER_CODE,
+            ((CALLER_ADDR, 3), (CALLER_ADDR + 3, 1))),),
     )
     coverage = prove_ir_boundary_coverage_8616(project, boundary, caller)
     assert coverage.complete

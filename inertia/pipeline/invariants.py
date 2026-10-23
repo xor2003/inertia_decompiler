@@ -14,6 +14,7 @@ Forbidden: semantic recovery, type inference, condition reconstruction.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, cast
@@ -320,7 +321,7 @@ def _collect_unmaterialized_stack_slots_8616(
 
     failures: list[str] = []
     provisional_count = 0
-    for fact in semantic_alias_facts:
+    for fact in cast(Iterable[object], semantic_alias_facts):
         if isinstance(fact, AliasFailure):
             # PROVISIONAL SS addresses (push/pop/call/ret traffic) are stack
             # activity, not stack variables.  Per AGENTS rule: stack activity

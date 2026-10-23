@@ -33,6 +33,11 @@ def quick_compare(
     require literal terms so raw identity cannot hide differing normalization.
     No backend, engine state or architecture setup is needed here.
     """
+    # Identity of the modeled continuations says nothing about whether their
+    # declared domain is inhabited. The solver owns feasibility and binding of
+    # per-site predicates, including ones present on only one side.
+    if oracle.get("obligations") or candidate.get("obligations"):
+        return None
     if comparison_policy.require_literal_identity and (
         oracle.get("_constant_normalization") or candidate.get("_constant_normalization")
     ):

@@ -1,0 +1,1 @@
+"""Shared native test fixtures."""

@@ -113,3 +113,24 @@ def test_nonconstant_and_invalid_conditions_stay_abstract():
         args = [z3.BitVecVal(value, 32) for value in (4, 3, 1, 2, 0)]
         args[unknown] = z3.BitVec("unknown_condition_or_operation", 32)
         assert not z3.is_bv_value(z3.simplify(S._z3_apply("summary_x86g_calculate_condition", 32, args, z3)))
+
+
+@pytest.mark.parametrize("cc_op", range(22))
+def test_dependency_bounds_preserve_every_admitted_condition(cc_op: int) -> None:
+    """Universally change all excluded bits and prove every Jcc unchanged."""
+    from tools.dosunit.ssa.x86_lazy_conditions import condition_contract, condition_dependency_bits, exact_condition
+
+    original = [z3.BitVec("dependency_" + str(i), 32) for i in range(3)]
+    other = [z3.BitVec("other_" + str(i), 32) for i in range(3)]
+    for condition in range(16):
+        kind = condition_contract(condition, cc_op)
+        assert kind is not None
+        demands = condition_dependency_bits(kind)
+        masks = [z3.BitVecVal((1 << bits) - 1, 32) for bits in demands]
+        changed = [(old & mask) | (new & ~mask)
+                   for old, new, mask in zip(original, other, masks, strict=True)]
+        solver = z3.Solver()
+        solver.set(timeout=1000)
+        solver.add(exact_condition(kind, *original, output_width=32)
+                   != exact_condition(kind, *changed, output_width=32))
+        assert solver.check() == z3.unsat, (cc_op, condition, demands)

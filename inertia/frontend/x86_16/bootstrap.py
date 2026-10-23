@@ -10,6 +10,7 @@ from inertia.lowering.native_integer_constants import apply_native_integer_const
 from inertia.postprocess.decompiler_postprocess_stage import apply_x86_16_decompiler_postprocess
 from inertia.structuring.clinic_option_policy import apply_x86_16_clinic_option_policy_8616
 from inertia.structuring.decompiler_structuring_stage import apply_x86_16_decompiler_structuring
+from pyvex_compat import apply_pyvex_runtime_compatibility
 
 from .ail_remainder_compat import apply_remainder_compatibility_8616
 from .calling_convention_compat import apply_x86_16_calling_convention_compatibility
@@ -26,6 +27,7 @@ __all__ = ["apply_x86_16_bootstrap"]
 def describe_x86_16_bootstrap() -> tuple[str, ...]:
     """Return the startup hooks installed by the x86-16 frontend bootstrap."""
     return (
+        "apply_pyvex_runtime_compatibility",
         "apply_x86_16_calling_convention_compatibility",
         "apply_x86_16_compatibility",
         "register_native_direct_jump_resolver_8616",
@@ -43,6 +45,7 @@ def describe_x86_16_bootstrap() -> tuple[str, ...]:
 
 def apply_x86_16_bootstrap() -> None:
     """Install x86-16 frontend compatibility, structuring, return, and cleanup hooks."""
+    apply_pyvex_runtime_compatibility()
     apply_x86_16_calling_convention_compatibility()
     apply_x86_16_compatibility()
     register_native_direct_jump_resolver_8616()

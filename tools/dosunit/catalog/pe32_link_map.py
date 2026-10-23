@@ -116,6 +116,7 @@ class Pe32LinkMap:
     segments: tuple[MapSegment, ...]
     publics: tuple[MapPublic, ...]
     _segment_index: dict[int, tuple[MapSegment, ...]]
+    statics: tuple[MapPublic, ...] = ()
 
     def segment(self, index: int, offset: int) -> MapSegment | None:
         """Return the declared segment record containing ``index:offset``.
@@ -139,6 +140,7 @@ class Pe32LinkMap:
             "preferred_base": f"{self.preferred_base:08x}",
             "segment_count": len(self.segments),
             "public_count": len(self.publics),
+            "static_count": len(self.statics),
         }
 
 
@@ -268,11 +270,12 @@ def _scan_publics(lines: list[str], start: int, path: Path) -> list[MapPublic]:
     return publics
 
 
-def parse_link_map(path: Path) -> Pe32LinkMap:
+def parse_link_map(path: Path, *, include_statics: bool = False) -> Pe32LinkMap:
     """Parse one MSVC LINK /MAP file under explicit bounds, refusing ambiguity.
 
-    Only the ``Publics by Value`` table supplies relocation evidence; static
-    symbols, fixups and later sections are ignored once the publics table ends.
+    Only the ``Publics by Value`` table supplies relocation evidence. Optional
+    static symbols use the same bounded row parser and remain separate from
+    relocation publics; code dependency consumers opt in explicitly.
     Any unrecognized nonblank line inside a recognized section refuses rather
     than guessing a continuation.
     """
@@ -287,11 +290,18 @@ def parse_link_map(path: Path) -> Pe32LinkMap:
     module, timestamp, preferred_base, cursor = _scan_header(lines, path)
     segments, cursor = _scan_segments(lines, cursor, path)
     publics = _scan_publics(lines, cursor, path)
+    statics: list[MapPublic] = []
+    if include_statics:
+        headers = [index for index in range(cursor + 1, len(lines)) if lines[index].strip() == "Static symbols"]
+        if len(headers) > 1:
+            raise LinkMapError(LinkMapRejection.MALFORMED_LINE, f"{path}: duplicate static symbol table")
+        if headers:
+            statics = _scan_publics(lines, headers[0], path)
     grouped: dict[int, list[MapSegment]] = {}
     for record in segments:
         grouped.setdefault(record.index, []).append(record)
     segment_index = {index: tuple(records) for index, records in grouped.items()}
-    for public in publics:
+    for public in (*publics, *statics):
         if public.segment not in segment_index:
             raise LinkMapError(
                 LinkMapRejection.UNDECLARED_SEGMENT,
@@ -306,17 +316,20 @@ def parse_link_map(path: Path) -> Pe32LinkMap:
         segments=tuple(segments),
         publics=tuple(publics),
         _segment_index=segment_index,
+        statics=tuple(statics),
     )
 
 
-def load_candidate_link_map(map_path: Path, candidate_exe: Path) -> Pe32LinkMap:
+def load_candidate_link_map(
+    map_path: Path, candidate_exe: Path, *, include_statics: bool = False,
+) -> Pe32LinkMap:
     """Bind a LINK map to its exact PE32 image before trusting any record.
 
     The map's own ``Timestamp`` and ``Preferred load address`` must equal the
     candidate's ``TimeDateStamp`` and ``ImageBase``; a map produced for any
     other link refuses instead of silently applying another image's layout.
     """
-    link_map = parse_link_map(map_path)
+    link_map = parse_link_map(map_path, include_statics=include_statics)
     identity = read_pe32_identity(candidate_exe)
     if link_map.timestamp != identity.timestamp:
         raise LinkMapError(

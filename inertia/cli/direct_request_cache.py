@@ -148,7 +148,7 @@ def _tail_validation_record_passed_8616(snapshot: object) -> bool:
 
 def _validated_scalar_fields_8616(
     record: dict[str, object],
-) -> tuple[int, str, str, int, str, list[object], str, str, str, object] | None:
+) -> tuple[int, str, str, int, str, list[str], str, str, str, object] | None:
     """Validate the record's scalar/header fields and return them in order."""
     function_addr = record.get("function_addr")
     function_name = record.get("function_name")
@@ -233,6 +233,10 @@ def _artifact_from_record_8616(record: dict[str, object]) -> DirectRequestCacheA
         raw_tail_validation,
     ) = fields
     if not _payload_proof_ok_8616(payload, validated_hash, gcc_hash, raw_tail_validation):
+        return None
+    # The acceptance proof above already verified the tail-validation record is a
+    # dict; narrow it locally for the immutable artifact contract.
+    if not isinstance(raw_tail_validation, dict):
         return None
     failure_snapshot = FailureFamilySnapshot.from_record(record.get("failure_family_snapshot"))
     if failure_snapshot is None:

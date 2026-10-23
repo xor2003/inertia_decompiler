@@ -21,6 +21,9 @@ from inertia.frontend.x86_16.frontend_instruction_reachability import (
     collect_instruction_reachability_8616,
     decoded_block_instructions_8616,
 )
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
+    is_synthetic_call_stub_8616,
+)
 from inertia.semantics.terminal_return_contract import (
     TerminalReturnFrameKind8616,
     TerminalStackCleanupEvidence8616,
@@ -140,8 +143,11 @@ def _direct_target_8616(insn: object) -> int | None:
     return operand.imm if operand.type == 2 and isinstance(operand.imm, int) else None
 
 
+_RETURN_CLEANUP_IMM16_LIMIT_8616: int = 0x10000
+
+
 def _return_cleanup_8616(insn: object) -> int | None:
-    """Return a valid even near/far return immediate, including plain zero."""
+    """Return the decoded near/far return imm16 byte count, including plain zero."""
     inner = cast(Any, _inner_instruction_8616(insn))
     try:
         operands = tuple(inner.operands or ())
@@ -153,7 +159,7 @@ def _return_cleanup_8616(insn: object) -> int | None:
         return None
     operand = cast(Any, operands[0])
     cleanup = operand.imm if operand.type == 2 else None
-    return cleanup if isinstance(cleanup, int) and 0 <= cleanup <= 128 and cleanup % 2 == 0 else None
+    return cleanup if isinstance(cleanup, int) and 0 <= cleanup < _RETURN_CLEANUP_IMM16_LIMIT_8616 else None
 
 
 def _return_frame_kind_8616(insn: object) -> TerminalReturnFrameKind8616 | None:
@@ -179,6 +185,9 @@ def collect_terminal_stack_cleanup_evidence_8616(
 ) -> TerminalStackCleanupEvidence8616:
     """Collect cleanup amounts along all bounded entry-reachable returns."""
     function_surface = cast(_FunctionSurface8616, function)
+    entry = function_surface.addr
+    if is_synthetic_call_stub_8616(project, entry):
+        return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
     try:
         block_addrs = frozenset(int(addr) for addr in function_surface.block_addrs_set)
         entry_addr = function_surface.addr
@@ -290,7 +299,15 @@ def terminal_stack_cleanup_at_address_8616(
     project: object,
     address: int,
 ) -> TerminalStackCleanupEvidence8616:
-    """Collect cleanup from a known or bounded binary-reachable callee body."""
+    """Collect cleanup from a known or bounded binary-reachable callee body.
+
+    A registered synthetic call stub is analysis-only: its mapped placeholder
+    bytes must not certify a physical RET/purge contract. The check runs
+    before the cache so a proof collected before registration cannot survive
+    the registry change.
+    """
+    if is_synthetic_call_stub_8616(project, address):
+        return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
     cache = _terminal_cleanup_cache_8616(project)
     cached = cache.get(address)
     if cached is not None:

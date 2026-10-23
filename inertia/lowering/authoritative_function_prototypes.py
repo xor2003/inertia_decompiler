@@ -121,6 +121,25 @@ def capture_authoritative_function_prototype_8616(
     return captured
 
 
+def authoritative_function_prototype_for_address_8616(
+    project: object,
+    function_addr: int,
+    *,
+    argument_count: int,
+    minimum_source: PrototypeSource = PrototypeSource.CCA_DECOMPILER,
+) -> SimTypeFunction | None:
+    """Read an owned snapshot without requiring a caller CFG's callee Function.
+
+    This accessor never creates an angr function or infers a prototype. The
+    registry must already contain the independently published typed interface.
+    """
+    captured = _registry_8616(project).get(function_addr)
+    if not isinstance(captured, AuthoritativeFunctionPrototype8616) or captured.source < minimum_source:
+        return None
+    prototype = captured.prototype
+    return prototype if len(tuple(prototype.args or ())) == argument_count else None
+
+
 def authoritative_function_prototype_8616(
     project: object,
     function: object | None,
@@ -191,6 +210,7 @@ def publish_codegen_function_prototype_8616(
 __all__ = [
     "AuthoritativeFunctionPrototype8616",
     "authoritative_function_prototype_8616",
+    "authoritative_function_prototype_for_address_8616",
     "capture_authoritative_function_prototype_8616",
     "publish_authoritative_function_prototype_8616",
     "publish_codegen_function_prototype_8616",

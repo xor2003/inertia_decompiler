@@ -320,6 +320,55 @@ def test_retry_field_appended_preserves_positional_construction() -> None:
     assert extended.max_indirect_call_targets == 8
 
 
+@pytest.mark.parametrize("retry_cap, changed, expected", [
+    (None, False, "refused"), (65, False, "refused"),
+    (128, False, "passed"), (128, True, "refused"),
+])
+def test_loop_retry_retains_selected_block_budget(
+    monkeypatch: pytest.MonkeyPatch, retry_cap: int | None, changed: bool, expected: str,
+) -> None:
+    """A real 66-block loop retains the call lane's budget in induction."""
+    from tools.dosunit.compare.flat32_proof_retry import retry_function_proof
+
+    # 64 no-op jump blocks, a decrement/backedge block and the exit RET.
+    prefix = bytes.fromhex("eb00") * 64
+    branch_end = len(prefix) + 7
+    raw = prefix + bytes.fromhex("490f85") + (-branch_end).to_bytes(4, "little", signed=True) + b"\xc3"
+    project = _project(raw.hex())
+    candidate_raw = raw[:-1] + bytes.fromhex("b807000000c3") if changed else raw
+    candidate = _project(candidate_raw.hex())
+    ranges = {"loop": (BASE, len(raw))}
+    candidate_ranges = {"loop": (BASE, len(candidate_raw))}
+    # Force the earlier CFG lane to yield so this exercises the real loop
+    # retry selected after real call composition detects the cycle.
+    monkeypatch.setattr(
+        "tools.dosunit.compare.flat32_cfg_regions.compare_reblocked_cfg",
+        lambda *_args, **_kwargs: {"status": "refused", "reason": "test_lane_selection"},
+    )
+    monkeypatch.setattr(
+        "tools.dosunit.compare.flat32_macro_proof.compare_macro_cfg",
+        lambda *_args, **_kwargs: {"status": "refused", "reason": "test_lane_selection"},
+    )
+    result = retry_function_proof(
+        "loop", {"status": "refused", "reason": "loop_requires_inductive_proof"},
+        (project, candidate, ranges, candidate_ranges), OUTPUTS, 15000,
+        call_block_retry_cap=retry_cap,
+    )
+    assert result["status"] == expected, result
+    if expected == "passed":
+        assert result["proof_method"] == "closed_call_loop_induction"
+        assert not result.get("assumptions")
+        for side in ("oracle", "candidate"):
+            assert result["block_lift_retries"][side] == [{
+                "entry": hex(BASE), "initial_cap": 64, "retry_cap": 128,
+                "blocks_lifted": 66,
+            }]
+    elif not changed:
+        assert result["additional_proof_attempts"]["calls"]["reason"] == "block_limit"
+    else:
+        assert result["additional_proof_attempts"]["call_loop"]["status"] != "passed"
+
+
 @pytest.mark.parametrize("driver", ["msc8", "bc5"])
 def test_public_adapter_retry_proves_a_complete_large_callee(tmp_path: Path, driver: str) -> None:
     """Both public drivers consume the bounded continuation without assumptions."""

@@ -17,8 +17,7 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
-from angr.errors import SimEngineError
-
+from inertia.alias.call_register_roles import call_role_preserves_register_8616
 from inertia.alias.register_reaching_source import (
     RegisterBlockTransfer8616,
     RegisterBlockTransferKind8616,
@@ -27,12 +26,9 @@ from inertia.alias.register_reaching_source import (
     resolve_register_reaching_source_8616,
 )
 from inertia.frontend.x86_16.frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
-from inertia.frontend.x86_16.frontend_instruction_reachability import decoded_block_instructions_8616
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import is_synthetic_call_stub_8616
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
-from inertia.semantics.call_register_effects import (
-    SyntheticCallRegisterEffectVerdict8616,
-    classify_synthetic_call_register_effect_8616,
+from inertia.semantics.call_register_roles import (
+    build_callsite_register_role_fact_8616,
 )
 from inertia.semantics.register_value_preservation import (
     decoded_instruction_preserves_register_value_8616,
@@ -46,6 +42,7 @@ from .callsite_register_instruction_facts import (
     register_storage_snapshot_source_8616,
 )
 from .register_source_block_inventory import (
+    RegisterSourceBlockInventory8616,
     collect_register_source_block_inventory_8616,
 )
 
@@ -55,140 +52,43 @@ __all__ = (
 )
 
 
-class _FunctionManager8616(Protocol):
-    """Exact function lookup used for direct-callee proofs."""
-
-    def function(self, *, addr: int, create: bool = False) -> object | None:
-        """Return an existing function at ``addr``."""
-
-
-class _KnowledgeBase8616(Protocol):
-    """angr knowledge-base fields used by direct-callee proofs."""
-
-    functions: _FunctionManager8616
-
-
-class _Project8616(Protocol):
-    """angr project fields consumed by register transfer collection."""
-
-    kb: _KnowledgeBase8616
-
-
 class _Function8616(Protocol):
     """angr function fields consumed by exact register-source recovery."""
 
     addr: int
-    project: _Project8616
-
-
-class _CalleeFunction8616(Protocol):
-    """Direct-callee function block ownership used by leaf proofs."""
-
-    block_addrs_set: set[int]
-
-
-def _leaf_block_addrs_8616(
-    project: _Project8616,
-    target: int,
-) -> tuple[int, ...] | None:
-    """Resolve the callee's owned block set or the single direct target."""
-    try:
-        callee = project.kb.functions.function(addr=target, create=False)
-    except (AttributeError, TypeError):
-        callee = None
-    if callee is None:
-        return (target,)
-    try:
-        block_addrs = tuple(sorted(cast(_CalleeFunction8616, callee).block_addrs_set))
-    except (AttributeError, TypeError):
-        return None
-    return block_addrs or (target,)
-
-
-def _leaf_block_body_preserves_register_8616(
-    instructions: tuple[DecodedInstructionFactSurface8616, ...],
-    register: str,
-) -> bool:
-    """Require every pre-return instruction to leave ``register`` untouched."""
-    for candidate in instructions[:-1]:
-        mnemonic = candidate.mnemonic.lower()
-        if is_x86_16_call_mnemonic_8616(mnemonic) or mnemonic.startswith(("j", "loop")):
-            return False
-        if instruction_writes_register_8616(candidate, register):
-            return False
-    return True
-
-
-def _direct_leaf_call_preserves_register_8616(
-    project: _Project8616,
-    target: int | None,
-    register: str,
-) -> bool:
-    """Prove a direct one-block leaf callee does not write ``register``.
-
-    A direct target remains machine evidence when CFG function discovery omits
-    its leaf stub. In that case decode the exact target as one basic block and
-    retain the same terminal-return and no-write requirements.
-    """
-    if not isinstance(target, int):
-        return False
-    if is_synthetic_call_stub_8616(project, target):
-        return False
-    block_addrs = _leaf_block_addrs_8616(project, target)
-    if block_addrs is None or len(block_addrs) != 1:
-        return False
-    try:
-        instructions = decoded_block_instructions_8616(
-            project,
-            block_addrs[0],
-            opt_level=0,
-        )
-    except (AttributeError, SimEngineError, TypeError, ValueError):
-        return False
-    if not instructions or instructions[-1].mnemonic.lower() not in {"ret", "retf", "retw"}:
-        return False
-    return _leaf_block_body_preserves_register_8616(instructions, register)
-
-
-def _synthetic_call_preserves_register_8616(
-    project: _Project8616,
-    callsite_addr: int,
-    target: int | None,
-    register: str,
-) -> bool:
-    """Consume the registered MS C ABI only for an exact synthetic target."""
-    effect = classify_synthetic_call_register_effect_8616(
-        project,
-        callsite_addr=callsite_addr,
-        target_addr=target,
-        register=register,
-    )
-    return (
-        effect.closes_evidence
-        and effect.verdict is SyntheticCallRegisterEffectVerdict8616.PRESERVED
-    )
+    project: object
 
 
 def _call_instruction_preserves_register_8616(
-    project: _Project8616,
+    project: object,
     instruction: DecodedInstructionFactSurface8616,
     register: str,
+    caller_inventory: RegisterSourceBlockInventory8616 | None,
 ) -> bool:
-    """Prove one call instruction leaves ``register`` intact."""
+    """Prove one call instruction leaves ``register`` intact.
+
+    The decision delegates to the canonical Alias consumer over the exact
+    call register-role fact: complete may-clobber evidence may preserve a
+    register; unknown, refused or spoiled bits always kill. Caller-dead,
+    input and result roles never stand in for preservation.
+    """
+    try:
+        callsite_addr = instruction.address
+    except AttributeError:
+        callsite_addr = None
+    if not isinstance(callsite_addr, int) or isinstance(callsite_addr, bool):
+        callsite_addr = None
     target = resolve_direct_call_target_from_instruction_8616(
         project,
         instruction,
     )
-    return _direct_leaf_call_preserves_register_8616(
+    fact = build_callsite_register_role_fact_8616(
         project,
-        target,
-        register,
-    ) or _synthetic_call_preserves_register_8616(
-        project,
-        instruction.address,
-        target,
-        register,
+        callsite_addr=callsite_addr,
+        target_addr=target,
+        caller_inventory=caller_inventory,
     )
+    return call_role_preserves_register_8616(fact, register)
 
 
 def _register_write_transfer_8616(
@@ -207,9 +107,10 @@ def _register_write_transfer_8616(
 
 
 def _block_transfer_8616(
-    project: _Project8616,
+    project: object,
     instructions: tuple[DecodedInstructionFactSurface8616, ...],
     register: str,
+    caller_inventory: RegisterSourceBlockInventory8616 | None = None,
 ) -> tuple[RegisterBlockTransferKind8616, tuple[object, ...] | None, bool]:
     """Collect one ordered block-prefix transfer from decoded instructions."""
     kind = RegisterBlockTransferKind8616.PRESERVE
@@ -231,7 +132,9 @@ def _block_transfer_8616(
             clobbers_memory_sources = False
             continue
         if is_x86_16_call_mnemonic_8616(mnemonic):
-            if not _call_instruction_preserves_register_8616(project, instruction, register):
+            if not _call_instruction_preserves_register_8616(
+                project, instruction, register, caller_inventory
+            ):
                 kind = RegisterBlockTransferKind8616.KILL
                 source = None
                 clobbers_memory_sources = False
@@ -283,6 +186,7 @@ def recover_register_source_before_instruction_8616(
             project,
             tuple(prefix),
             register,
+            caller_inventory=inventory,
         )
         transfers.append(
             RegisterBlockTransfer8616(

@@ -58,9 +58,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
-from inertia.cli.cli_storage_objects import StorageObjectRefusal
 from inertia.ir.core import MemSpace, SegmentOrigin
 from inertia.lowering.segmented_memory_reasoning import SegmentAssociation, SegmentAssociationAnalyzer, SegmentRegister
+from inertia.lowering.storage_objects import StorageObjectRefusal
 from inertia.lowering.type_array_matching import ArrayExpressionMatcher, ArrayRecoveryInfo
 from inertia.lowering.type_storage_object_bridge import SegmentedStorageFact, StorageObjectBridgeFact
 from inertia.lowering.type_structure_merging import StructField, StructRecoveryInfo, StructType, StructureFieldMerger

@@ -141,3 +141,33 @@ def test_known_call_delta_does_not_invent_an_unknown_entry_sp():
     fact = build_x86_16_segment_stack_restore_artifact(artifact).facts[0]
 
     assert fact.verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+
+
+@pytest.mark.parametrize("saved_before_call", [False, True])
+def test_call_memory_uncertainty_keeps_proven_sp_but_discards_old_bytes(saved_before_call):
+    """Known SP permits fresh saves, never restores from possibly changed bytes."""
+    delta = -18
+    save = _push_ds_ir(0x4000 if saved_before_call else 0x4006)
+    call = IRInstr(
+        "CALL", None, (), addr=0x4003,
+        call_stack_effect=IRCallStackEffect8616(
+            net_stack_delta=delta, complete=True,
+            escaped_ranges=(IRAddress(MemSpace.SS, (), 0, 0),),
+        ),
+    )
+    undo = IRInstr(
+        "MOV", IRValue(MemSpace.REG, name="sp", size=2),
+        (IRValue(MemSpace.REG, name="sp", offset=-delta, size=2),), addr=0x4006,
+    )
+    instructions = (*save, call, undo) if saved_before_call else (call, *save)
+    artifact = IRFunctionArtifact(0x4000, blocks=(
+        IRBlock(0x4000, instrs=(*instructions, *_pop_ds_ir(0x4007))),
+    ))
+    fact = build_x86_16_segment_stack_restore_artifact(artifact).facts[0]
+    expected = (
+        SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+        if saved_before_call else SegmentStackRestoreVerdict8616.PROVEN
+    )
+    assert fact.verdict is expected
+    if not saved_before_call:
+        assert fact.stack_offsets == (delta - 2, delta - 1)

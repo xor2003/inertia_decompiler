@@ -1,8 +1,9 @@
 """Normalize exact Boolean ITE encodings used as structured conditions.
 
 Layer: Structuring.
-Responsibility: replace control-condition ``CITE`` nodes only when their two
-outcomes prove an exact Boolean encoding, while preserving origin tags.
+Responsibility: replace control-condition ``CITE`` nodes and bounded logical
+negations only when their outcomes prove an exact Boolean encoding, preserving
+the outer control origin and the original predicate's evaluation count.
 Owns CFG shape, loops, switches, and structured condition lowering from proven
 IR/semantic evidence.
 Do not perform alias-state ownership, widening, type/materialization recovery,
@@ -26,6 +27,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CExpression,
     CForLoop,
     CIfElse,
+    CUnaryOp,
     CWhileLoop,
 )
 
@@ -76,11 +78,47 @@ def _constant_integer_8616(expression: CExpression) -> int | None:
     return int(expression.value)
 
 
-def _merge_condition_origin_tags_8616(replacement: CExpression, encoded: CITE) -> None:
-    """Preserve inner comparison and outer ITE instruction-origin tags."""
+_LOGICAL_NOT_WRAPPER_LIMIT_8616 = 4
+
+
+def _unwrap_logical_not_chain_8616(
+    condition: CExpression,
+) -> tuple[CExpression, int]:
+    """Unwrap a bounded chain of logical Not operators around one expression.
+
+    Only the ``CUnaryOp`` ``"Not"`` operator is a logical negation; bitwise
+    complement and every other node stop the chain. The bound keeps the pass
+    honest instead of descending arbitrary wrapper depth.
+    """
+    operand = condition
+    not_count = 0
+    while (
+        not_count < _LOGICAL_NOT_WRAPPER_LIMIT_8616
+        and isinstance(operand, CUnaryOp)
+        and operand.op == "Not"
+    ):
+        operand = operand.operand
+        not_count += 1
+    return operand, not_count
+
+
+def _merge_condition_origin_tags_8616(replacement: CExpression, condition: CExpression) -> None:
+    """Preserve inner comparison and outer wrapper instruction-origin tags."""
+    encoded, _not_count = _unwrap_logical_not_chain_8616(condition)
+    if not isinstance(encoded, CITE):
+        return
     tags = copy_structured_tags_8616(encoded.cond.tags) or {}
     tags.update(copy_structured_tags_8616(replacement.tags) or {})
     tags.update(copy_structured_tags_8616(encoded.tags) or {})
+    wrappers: list[CUnaryOp] = []
+    wrapper = condition
+    while wrapper is not encoded:
+        wrappers.append(cast(CUnaryOp, wrapper))
+        wrapper = cast(CUnaryOp, wrapper).operand
+    # This is a control-expression replacement: its outermost source origin
+    # must win over locations belonging only to inner Boolean encodings.
+    for wrapper in reversed(wrappers):
+        tags.update(copy_structured_tags_8616(wrapper.tags) or {})
     replacement.tags = tags
 
 
@@ -88,25 +126,32 @@ def _normalize_boolean_ite_8616(
     condition: CExpression,
     codegen: object,
 ) -> tuple[CExpression, BooleanConditionIteDisposition8616]:
-    """Normalize one direct control condition when both outcomes prove Booleanity."""
-    if not isinstance(condition, CITE):
+    """Normalize one control condition when its ITE outcomes prove Booleanity.
+
+    A bounded logical Not chain may wrap the literal ``(0, 1)``/``(1, 0)`` ITE;
+    each wrapper only flips truth parity, so the folded expression still
+    evaluates ``cond`` exactly once and preserves the original guard truth.
+    """
+    encoded, not_count = _unwrap_logical_not_chain_8616(condition)
+    if not isinstance(encoded, CITE):
         return condition, BooleanConditionIteDisposition8616.NOT_ITE
-    true_value = _constant_integer_8616(condition.iftrue)
-    false_value = _constant_integer_8616(condition.iffalse)
+    true_value = _constant_integer_8616(encoded.iftrue)
+    false_value = _constant_integer_8616(encoded.iffalse)
     if true_value is None or false_value is None:
         return condition, BooleanConditionIteDisposition8616.REFUSED_NON_CONSTANT
     if (true_value, false_value) not in {(0, 1), (1, 0)}:
         return condition, BooleanConditionIteDisposition8616.REFUSED_NON_BOOLEAN
 
+    negations = not_count + (0 if (true_value, false_value) == (1, 0) else 1)
     replacement = (
-        condition.cond
-        if (true_value, false_value) == (1, 0)
-        else invert_structured_condition_8616(condition.cond, codegen)
+        encoded.cond
+        if negations % 2 == 0
+        else invert_structured_condition_8616(encoded.cond, codegen)
     )
     _merge_condition_origin_tags_8616(replacement, condition)
     disposition = (
         BooleanConditionIteDisposition8616.MATERIALIZED_IDENTITY
-        if (true_value, false_value) == (1, 0)
+        if negations % 2 == 0
         else BooleanConditionIteDisposition8616.MATERIALIZED_INVERTED
     )
     return replacement, disposition

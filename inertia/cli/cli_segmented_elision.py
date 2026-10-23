@@ -158,7 +158,7 @@ class _SegmentedDerefElider:
                 return None
             if not self.same_c_storage(base_expr, classified.cvar):
                 return None
-            return base_expr
+            return cast(object, base_expr)
         _classified, base_expr = match
         # Dynamic codegen boundary: match results may be CVariable-like codegen nodes.
         base_var = getattr(getattr(base_expr, "variable", None), "reg", None)

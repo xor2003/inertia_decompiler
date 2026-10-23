@@ -170,6 +170,8 @@ class ReplayResult:
     pages: tuple[PageGrant, ...] = ()
     requested_observations: tuple[MemoryRange, ...] = ()
     """Required denominator copied from the vector, independently of results."""
+    last_instruction: tuple[int, bytes] | None = None
+    """Last admitted instruction fetch; only RETURNED establishes its completion."""
 
 
 @dataclass(frozen=True, slots=True)

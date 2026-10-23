@@ -158,3 +158,65 @@ def test_completed_transaction_uses_direct_final_summary(monkeypatch) -> None:
     )
 
     assert collected == [codegen]
+
+
+@pytest.mark.parametrize("previous_cost", [None, 100.0])
+def test_measured_baseline_cost_survives_metadata_restore(monkeypatch, previous_cost) -> None:
+    """Use the actual metadata restore before selecting expensive-validation policy."""
+    from contextlib import nullcontext
+
+    from inertia.postprocess.pass_transaction import (
+        PostprocessPassPreflightAction8616,
+        PostprocessPassPreflightInput8616,
+        decide_postprocess_pass_preflight_8616,
+    )
+
+    summary = X86_16TailValidationSummary(("callee",), (), (), (), (), (), (), ())
+    project = SimpleNamespace(_inertia_tail_validation_enabled=True)
+    codegen = SimpleNamespace(project=project)
+    if previous_cost is not None:
+        codegen._inertia_postprocess_pre_validation_cost_ms_8616 = previous_cost
+    owner = SimpleNamespace(project=project, codegen=codegen)
+    clock = iter((0.0, 0.5, 1.0, 4.0))
+    monkeypatch.setattr(postprocess_stage, "time", SimpleNamespace(perf_counter=lambda: next(clock)))
+    monkeypatch.setattr(postprocess_stage, "span", lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(postprocess_stage, "annotate_current_span", lambda **kwargs: None)
+    monkeypatch.setattr(postprocess_stage, "_measure_pre_validation_value_8616", lambda name, fn: fn())
+    monkeypatch.setattr(postprocess_stage, "_snapshot_codegen_cfunc", lambda c: object())
+    monkeypatch.setattr(postprocess_stage, "_restore_codegen_cfunc", lambda *args: None)
+    monkeypatch.setattr(postprocess_stage, "_snapshot_project_function_metadata_8616", lambda *args: None)
+    monkeypatch.setattr(postprocess_stage, "fingerprint_x86_16_tail_validation_boundary", lambda *args, **kwargs: ("fp",))
+    monkeypatch.setattr(postprocess_stage, "_structuring_tail_validation_baseline_summary_8616", lambda *args, **kwargs: summary)
+    monkeypatch.setattr(postprocess_stage, "_debug_prevalidation_pointer_surface_8616", lambda *args: None)
+    monkeypatch.setattr(postprocess_stage, "capture_materialized_condition_storage_surface_8616", lambda c: ())
+    monkeypatch.delenv("INERTIA_FORCE_PER_PASS_TV", raising=False)
+
+    result = postprocess_stage._collect_validation_baseline_8616(owner, 0x1000, "live_out")
+    assert result[1] is summary
+    assert codegen._inertia_postprocess_pre_validation_cost_ms_8616 == 3500.0
+    config = configure_postprocess_runtime_8616(
+        project, codegen, (),
+        complexity_resolver=lambda *_args: PostprocessFunctionComplexity8616(),
+        baseline_summary_collector=lambda *args: pytest.fail("baseline must remain available"),
+        fact_backed_stack_normalize_enabled=True,
+    )
+    assert config.validation_enabled is True
+    assert config.baseline_summary is summary
+    assert config.per_pass_validation_enabled is False
+    assert codegen._inertia_postprocess_function_complexity_8616["expensive_validation_baseline"] is True
+
+    def decision(name, evidence):
+        return decide_postprocess_pass_preflight_8616(PostprocessPassPreflightInput8616(
+            pass_name=name, validation_enabled=config.validation_enabled,
+            per_pass_validation_enabled=config.per_pass_validation_enabled,
+            large_function_skip=codegen._inertia_skip_per_pass_validation_large_function,
+            force_per_pass_requested=False, optional_reject_budget=6,
+            optional_reject_count=0, local_evidence_present=evidence,
+        ))
+
+    optimization = decision("optimization:dce", None)
+    assert optimization.enforce_pass_validation is True
+    assert optimization.requires_snapshot is True
+    assert decision("_apply_word_global_types_8616", False).action is (
+        PostprocessPassPreflightAction8616.REFUSE_LOCAL_PROOF
+    )

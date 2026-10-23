@@ -12,7 +12,7 @@ import contextlib
 import logging
 import os
 import typing
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Any, Protocol, cast, overload
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -397,7 +397,7 @@ def _record_stack_cvar_8616(
     codegen: object,
     cvar: object,
     *,
-    binding_name: object,
+    binding_name: str | None,
     offset: int,
     bp_offset: int,
     size: int,
@@ -434,7 +434,7 @@ def _materialize_existing_views_8616(
     bp_offset: int,
     size: int,
     target_type: object,
-    binding_name: object,
+    binding_name: str | None,
     publish_machine_bp: bool,
 ) -> object | None:
     """Promote and record matching regenerated views at this storage start."""
@@ -488,7 +488,7 @@ def _materialize_new_stack_cvar_8616(
     offset: int,
     size: int,
     target_type: object,
-    binding_name: object,
+    binding_name: str | None,
 ) -> tuple[object, object]:
     """Create and register a fresh SimStackVariable + CVariable pair."""
     variable = SimStackVariable(
@@ -642,9 +642,9 @@ def _stable_bp_fact_count_8616(alias_facts: list[object]) -> int:
 def _stack_lowering_debug_stats_8616(
     stable_stack_fact_count: int,
     stable_bp_fact_count: int,
-    bindings: object,
-    typed_frame_slots: object,
-    unbound_typed_frame_slots: object,
+    bindings: Collection[StackVariableBinding],
+    typed_frame_slots: Collection[StackFrameSlot],
+    unbound_typed_frame_slots: Collection[StackFrameSlot],
 ) -> dict[str, int]:
     """Build the stack-lowering debug counter block."""
     return {
@@ -696,7 +696,7 @@ def _materialization_offset_for_binding_8616(
 
 def _materialize_stack_bindings_8616(
     codegen: object,
-    bindings: object,
+    bindings: Iterable[StackVariableBinding],
     entry_sp_offsets_by_bp_range: Mapping[tuple[int, int], int] | None,
 ) -> tuple[int, list[StackSlotFailure], list[tuple[int, str]]]:
     """Materialize each alias-proven binding; failures are typed, not fatal."""

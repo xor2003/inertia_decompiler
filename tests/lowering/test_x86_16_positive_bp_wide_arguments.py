@@ -3,9 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
+from angr.analyses.decompiler.structured_codegen.c import CReturn, CStatements, CVariable
 from angr.knowledge_plugins.functions.function import PrototypeSource
-from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
+from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
 
 import inertia.lowering.positive_bp_arguments as positive_bp_arguments
@@ -13,6 +13,10 @@ from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     CalleeArgumentCountVerdict8616,
+)
+from inertia.lowering.callee_argument_width_evidence import (
+    CalleeArgumentWidthEvidence8616,
+    CalleeArgumentWidthVerdict8616,
 )
 from inertia.lowering.positive_bp_arguments import (
     materialize_positive_bp_arguments_8616,
@@ -115,3 +119,55 @@ def test_unmaterialized_prototype_refuses_mismatched_storage(offset, width):
     candidate = CVariable(SimStackVariable(offset, width, base="bp"), variable_type=word, codegen=codegen)
     cfunc = SimpleNamespace(functy=prototype, prototype=prototype, arg_list=[])
     assert not positive_bp_arguments._existing_interface_matches_8616(codegen, cfunc, [candidate])
+
+
+@pytest.mark.parametrize("signed", [False, True])
+@pytest.mark.parametrize("value_width", [1, 2])
+def test_word_slot_replay_preserves_typed_value_view(
+    monkeypatch: pytest.MonkeyPatch, signed: bool, value_width: int,
+) -> None:
+    """ABI word padding must not widen a body-owned byte argument on replay."""
+    arch = Arch86_16()
+    value_type = (SimTypeChar(signed) if value_width == 1 else SimTypeShort(signed)).with_arch(arch)
+    prototype = SimTypeFunction([value_type], value_type, arg_names=("arg_4",)).with_arch(arch)
+    summary = CallsiteSummary8616(
+        callsite_addr=0x1200, return_addr=0x1203, target_addr=0x1300, kind="near", arg_count=1,
+        arg_widths=(2,), logical_arg_widths=(2,), stack_cleanup=2,
+        return_register="ax", return_used=False, push_arg_sources=(None,),
+    )
+    count = CalleeArgumentCountEvidence8616(
+        target_addr=0x1300, verdict=CalleeArgumentCountVerdict8616.CONSISTENT,
+        argument_count=1, raw_fact_count=1, normalized_fact_count=1,
+        classified_fact_count=1, materialized_count=1,
+        callsite_addrs=(summary.callsite_addr,), callsite_summaries=(summary,),
+    )
+    function = SimpleNamespace(
+        addr=0x1300, prototype=prototype, prototype_source=PrototypeSource.CCA_DECOMPILER,
+        is_prototype_guessed=False, info={},
+    )
+    project = SimpleNamespace(
+        arch=arch,
+        factory=SimpleNamespace(block=lambda *_args, **_kwargs: SimpleNamespace(capstone=SimpleNamespace(insns=()))),
+        kb=SimpleNamespace(functions=SimpleNamespace(function=lambda addr, create=False: function)),
+        _inertia_callee_argument_count_evidence_8616={function.addr: count},
+    )
+    codegen = SimpleNamespace(project=project, next_idx=lambda _name: 1,
+                              next_ident=lambda name: f"{name}_0", next_node_idx=lambda: 1)
+    variable = SimStackVariable(4, value_width, base="bp", name="arg_4", region=function.addr)
+    candidate = CVariable(variable, variable_type=value_type, codegen=codegen)
+    codegen.cfunc = SimpleNamespace(
+        addr=function.addr, arg_list=[candidate, candidate], functy=prototype, prototype=prototype,
+        statements=CStatements([CReturn(candidate, codegen=codegen)], codegen=codegen),
+        variables_in_use={variable: candidate}, unified_local_vars={},
+    )
+    # Reconcile a stale duplicate interface against one body-owned value. The
+    # caller census describes ABI storage, independently of the typed value.
+    monkeypatch.setattr(positive_bp_arguments, "collect_bp_word_stack_access_offsets_8616",
+                        lambda _project, _function: frozenset({4}) if value_width == 2 else frozenset())
+    monkeypatch.setattr(positive_bp_arguments, "collect_callee_argument_width_evidence_8616",
+                        lambda _project, addr: CalleeArgumentWidthEvidence8616(addr, CalleeArgumentWidthVerdict8616.UNKNOWN))
+    assert materialize_positive_bp_arguments_8616(project, codegen)
+    assert candidate.variable.size == value_width
+    assert candidate.variable_type.size == value_width * 8
+    assert materialize_positive_bp_arguments_8616(project, codegen) is False
+    assert candidate.variable.size == value_width

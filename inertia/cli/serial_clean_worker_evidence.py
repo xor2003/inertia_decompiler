@@ -40,6 +40,12 @@ from inertia.lowering.global_object_source_codec import (
     global_object_source_evidence_from_record_8616,
     global_object_source_evidence_record_8616,
 )
+from inertia.lowering.scalar_interface_transport import (
+    ScalarInterface8616,
+    attach_scalar_interface_8616,
+    scalar_interface_from_record_8616,
+    scalar_interface_records_8616,
+)
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
     caller_return_use_evidence_by_addr_8616,
@@ -69,6 +75,7 @@ from inertia.widening.indexed_global_object_program_ranges import (
     ProjectBoundedGlobalObjectRangeEvidence8616,
 )
 
+from .cache import DECOMPILATION_CACHE_SOURCE_FILES, _cache_source_digest
 from .discovery_cache_contract import (
     caller_return_use_evidence_from_record_8616,
     caller_return_use_evidence_record_8616,
@@ -81,7 +88,7 @@ from .project_evidence_transport import (
 )
 
 _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616 = "INERTIA_SERIAL_CLEAN_WORKER_EVIDENCE"
-_SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616 = 8
+_SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616 = 9
 _SERIAL_CLEAN_WORKER_DECODE_OWNER_8616 = SimpleNamespace()
 
 
@@ -96,6 +103,7 @@ class _SerialCleanWorkerEvidence8616:
     global_object_sources: GlobalObjectSourceEvidence8616 | None
     callee_callsites_by_addr: dict[int, CalleeCallsiteCensus8616]
     program_callsite_summaries: ProgramCallsiteSummaryEvidence8616 | None
+    scalar_interfaces: tuple[ScalarInterface8616, ...]
 
 
 def _widening_payload_8616(source_project: object) -> tuple[object, object]:
@@ -140,6 +148,8 @@ def _write_serial_clean_worker_evidence_8616(
             raise ValueError("clean-worker global sources have a mismatched pointer census")
     payload = {
         "schema": _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616,
+        "scalar_interfaces": scalar_interface_records_8616(source_project),
+        "scalar_interface_generation": _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES),
         "caller_return_use": [
             {
                 "function_addr": function_addr,
@@ -187,7 +197,9 @@ def _caller_return_evidence_map_8616(records: list[object]) -> dict[int, CallerR
     return evidence_by_addr
 
 
-def _decode_layout_ranges_8616(payload: dict[object, object]) -> tuple[object, object]:
+def _decode_layout_ranges_8616(
+    payload: dict[object, object],
+) -> tuple[GlobalObjectLayoutEvidence8616 | None, ProjectBoundedGlobalObjectRangeEvidence8616 | None]:
     """Decode bounded-range/layout artifacts and enforce their coherence."""
     raw_layout = payload.get("global_object_layout")
     raw_ranges = payload.get("bounded_global_ranges")
@@ -204,7 +216,7 @@ def _decode_source_evidence_8616(
     payload: dict[object, object],
     layouts: object,
     pointer_evidence: dict[int, CalleePointerArgumentEvidence8616],
-) -> object:
+) -> GlobalObjectSourceEvidence8616 | None:
     """Decode global object sources and check them against pointer evidence."""
     raw_sources = payload.get("global_object_sources")
     source_evidence = (
@@ -227,6 +239,23 @@ def _decode_source_evidence_8616(
     return source_evidence
 
 
+def _decode_scalar_interfaces_8616(payload: dict[str, object]) -> tuple[ScalarInterface8616, ...]:
+    """Legacy discovery carries no scalar authority; current records bind producers."""
+    if payload.get("schema") == 8:
+        if "scalar_interfaces" in payload or "scalar_interface_generation" in payload:
+            raise ValueError("legacy evidence cannot assert scalar interfaces")
+        return ()
+    if payload.get("scalar_interface_generation") != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES):
+        raise ValueError("stale scalar interface producer generation")
+    raw_interfaces = payload.get("scalar_interfaces")
+    if not isinstance(raw_interfaces, list):
+        raise ValueError("invalid scalar interface inventory")
+    interfaces = tuple(scalar_interface_from_record_8616(item) for item in raw_interfaces)
+    if len({item.target for item in interfaces}) != len(interfaces):
+        raise ValueError("duplicate scalar interface target")
+    return interfaces
+
+
 def _read_serial_clean_worker_evidence_8616(
     evidence_path: Path,
     *,
@@ -237,7 +266,7 @@ def _read_serial_clean_worker_evidence_8616(
         payload = json.loads(evidence_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"invalid serial clean-worker evidence: {exc}") from exc
-    if not isinstance(payload, dict) or payload.get("schema") != _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616:
+    if not isinstance(payload, dict) or payload.get("schema") not in (8, _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616):
         raise ValueError("serial clean-worker evidence has an unsupported schema")
     records = payload.get("caller_return_use")
     if not isinstance(records, list):
@@ -264,6 +293,7 @@ def _read_serial_clean_worker_evidence_8616(
             raw_program_summaries
         )
     )
+    interfaces = _decode_scalar_interfaces_8616(payload)
     return _SerialCleanWorkerEvidence8616(
         evidence_by_addr,
         layouts,
@@ -272,6 +302,7 @@ def _read_serial_clean_worker_evidence_8616(
         source_evidence,
         callsite_censuses,
         program_summaries,
+        interfaces,
     )
 
 
@@ -284,6 +315,8 @@ def _hydrate_serial_clean_worker_evidence_8616(project: object) -> int:
         Path(evidence_path_text),
         project=project,
     )
+    for interface in transported.scalar_interfaces:
+        attach_scalar_interface_8616(project, interface)
     for function_addr, evidence in transported.caller_return_use_by_addr.items():
         record_caller_return_use_evidence_8616(project, function_addr, evidence)
     if transported.global_object_layout is not None:
@@ -296,8 +329,8 @@ def _hydrate_serial_clean_worker_evidence_8616(project: object) -> int:
             project,
             transported.bounded_global_ranges,
         )
-    for evidence in transported.callee_pointer_by_addr.values():
-        record_callee_pointer_argument_evidence_8616(project, evidence)
+    for pointer_evidence in transported.callee_pointer_by_addr.values():
+        record_callee_pointer_argument_evidence_8616(project, pointer_evidence)
     if transported.global_object_sources is not None:
         attach_project_global_object_source_evidence_8616(
             project,

@@ -373,15 +373,18 @@ def _anchor_save_following_statements_8616(
     fact: SegmentStackRestoreFact8616,
 ) -> None:
     """Tag later statements whose addresses fall inside the save window."""
+    saved_instruction_addr = fact.saved_instruction_addr
+    if saved_instruction_addr is None:
+        return
     anchor_identity = (
-        fact.saved_instruction_addr,
+        saved_instruction_addr,
         fact.restore_instruction_addr,
         fact.restore_register,
     )
     for statement in target.statements[index:]:
         addresses = instruction_addrs_from_node_8616(statement)
         if not any(
-            fact.saved_instruction_addr < address < fact.restore_instruction_addr
+            saved_instruction_addr < address < fact.restore_instruction_addr
             for address in addresses
         ):
             continue

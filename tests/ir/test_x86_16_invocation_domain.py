@@ -30,7 +30,13 @@ from inertia.ir.core import (
     IRValue,
     MemSpace,
 )
+from inertia.ir.function_artifact import IRFunctionArtifact
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
+from inertia.ir.function_readiness_contracts import (
+    function_artifact_body_digest_8616,
+    observed_function_source_revision_8616,
+    record_function_build_attestation_8616,
+)
 from inertia.ir.ir_boundary_cfg import (
     IRBoundaryCoverageResult8616,
     prove_ir_boundary_coverage_8616,
@@ -224,6 +230,29 @@ def test_callsite_frame_store_into_fetched_call_tail_refuses() -> None:
     assert premise.failure is Real16InvocationFailure8616.CODE_WRITE_VIOLATION
 
 
+def _attest_derived_body_8616(
+    project: angr.Project,
+    boundary: object,
+    parent: IRFunctionArtifact,
+    derived: IRFunctionArtifact,
+) -> None:
+    """Attest one test-mutated body as derived from the imported parent.
+
+    Publication requires an owned build attestation binding each body digest
+    to the source generation it consumed. A test mutation is a derived
+    artifact; the authentic imported body is its parent.
+    """
+    parent_digest = function_artifact_body_digest_8616(parent)
+    body_digest = function_artifact_body_digest_8616(derived)
+    observed = observed_function_source_revision_8616(
+        project, derived.function_addr, boundary=boundary)
+    if body_digest is not None and observed is not None:
+        record_function_build_attestation_8616(
+            project, derived.function_addr, body_digest, observed,
+            "x86_16_vex_ir",
+            inputs=() if parent_digest is None else (parent_digest,))
+
+
 def _stub_with_injected_row(boot: ProgramBoot, injected: IRInstr) -> tuple:
     """Build a fresh stub world with one opaque row prepended to its head."""
     project = angr.Project(
@@ -235,13 +264,14 @@ def _stub_with_injected_row(boot: ProgramBoot, injected: IRInstr) -> tuple:
     boundary = exact_function_range_boundary_8616(project, 0x1030, 0x1036)
     assert boundary is not None
     raw = build_x86_16_ir_function_artifact(project, boundary)
-    raw = replace(raw, blocks=tuple(
+    derived = replace(raw, blocks=tuple(
         replace(block, instrs=(injected, *block.instrs))
         if block.addr == 0x1030 else block
         for block in raw.blocks
     ))
-    publish_function_ir_artifact_8616(project, raw)
-    coverage = prove_ir_boundary_coverage_8616(project, boundary, raw)
+    _attest_derived_body_8616(project, boundary, raw, derived)
+    publish_function_ir_artifact_8616(project, derived)
+    coverage = prove_ir_boundary_coverage_8616(project, boundary, derived)
     return project, coverage
 
 
@@ -349,9 +379,10 @@ def _stub_with_mutated_artifact(
     boundary = exact_function_range_boundary_8616(project, 0x1030, 0x1036)
     assert boundary is not None
     raw = build_x86_16_ir_function_artifact(project, boundary)
-    raw = replace(raw, blocks=tuple(mutate(block) for block in raw.blocks))
-    publish_function_ir_artifact_8616(project, raw)
-    coverage = prove_ir_boundary_coverage_8616(project, boundary, raw)
+    derived = replace(raw, blocks=tuple(mutate(block) for block in raw.blocks))
+    _attest_derived_body_8616(project, boundary, raw, derived)
+    publish_function_ir_artifact_8616(project, derived)
+    coverage = prove_ir_boundary_coverage_8616(project, boundary, derived)
     return project, coverage
 
 
@@ -578,9 +609,10 @@ def test_loop_capture_mutation_refuses_native_effect_unproven() -> None:
                 return mutated
         raise AssertionError("no TMP capture row in loop head")
 
-    raw = replace(raw, blocks=tuple(mutate(block) for block in raw.blocks))
-    publish_function_ir_artifact_8616(project, raw)
-    coverage = prove_ir_boundary_coverage_8616(project, boundary, raw)
+    derived = replace(raw, blocks=tuple(mutate(block) for block in raw.blocks))
+    _attest_derived_body_8616(project, boundary, raw, derived)
+    publish_function_ir_artifact_8616(project, derived)
+    coverage = prove_ir_boundary_coverage_8616(project, boundary, derived)
     assert coverage.complete
     premise = prove_real16_invocation_domain_8616(
         project, coverage, 0x1033, boot=boot, boot_recompute=_recompute,

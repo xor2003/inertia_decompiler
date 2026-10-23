@@ -3,7 +3,7 @@ from __future__ import annotations
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_variable import SimRegisterVariable
 
-from inertia.cli.cli_access_profiles import InductionSummary
+from inertia.lowering.access_profiles import InductionSummary
 from inertia.lowering.type_array_matching import (
     _has_induction_evidence_for_key_8616,
     _profile_induction_match_8616,

@@ -107,6 +107,8 @@ _LOGICAL_WRITER_MNEMONICS_8616 = frozenset({"and", "or", "test", "xor"})
 _COUNTED_SHIFT_MNEMONICS_8616 = frozenset({"sal", "sar", "shl", "shld", "shr", "shrd"})
 _COUNTED_ROTATE_MNEMONICS_8616 = frozenset({"rcl", "rcr", "rol", "ror"})
 _MNEMONIC_PREFIXES_8616 = frozenset({"bnd", "lock", "rep", "repe", "repne", "repnz", "repz"})
+_REPEAT_PREFIXES_8616 = frozenset({"rep", "repe", "repne", "repnz", "repz"})
+_REPEAT_COMPARE_MNEMONICS_8616 = frozenset({"cmps", "cmpsb", "cmpsw", "scas", "scasb", "scasw"})
 _LAHF_FLAGS_8616 = (
     StatusFlag8616.CARRY
     | StatusFlag8616.PARITY
@@ -123,8 +125,10 @@ def decoded_status_flag_instruction_8616(instruction: object) -> DecodedStatusFl
         mnemonic_parts = str(decoded.mnemonic).lower().split()
     except (AttributeError, TypeError, ValueError):
         return None
+    repeat_prefix = False
     while mnemonic_parts and mnemonic_parts[0] in _MNEMONIC_PREFIXES_8616:
-        mnemonic_parts.pop(0)
+        prefix = mnemonic_parts.pop(0)
+        repeat_prefix = prefix in _REPEAT_PREFIXES_8616 or repeat_prefix
     if not mnemonic_parts:
         return None
     mnemonic = mnemonic_parts[0]
@@ -141,7 +145,7 @@ def decoded_status_flag_instruction_8616(instruction: object) -> DecodedStatusFl
                     immediate_count = int(count_operand.imm)
             except (AttributeError, TypeError, ValueError):
                 immediate_count = None
-    return DecodedStatusFlagInstruction8616(mnemonic, immediate_count)
+    return DecodedStatusFlagInstruction8616(mnemonic, immediate_count, repeat_prefix)
 
 
 def binop_status_flag_writes_8616(op_name: str) -> StatusFlag8616 | None:
@@ -190,6 +194,9 @@ def status_flag_effect_8616(instruction: DecodedStatusFlagInstruction8616) -> St
     if condition_reads is not None:
         return StatusFlagEffect8616(reads=condition_reads)
     if mnemonic in _TRANSPARENT_MNEMONICS_8616 or mnemonic in {"jcxz", "jecxz", "jmp", "loop"}:
+        return StatusFlagEffect8616()
+    if instruction.repeat_prefix and mnemonic in _REPEAT_COMPARE_MNEMONICS_8616:
+        # Zero iterations preserve incoming flags; a may-write is not a kill.
         return StatusFlagEffect8616()
     if mnemonic in _FULL_WRITER_MNEMONICS_8616:
         return StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616)

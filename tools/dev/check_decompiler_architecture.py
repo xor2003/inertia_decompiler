@@ -525,6 +525,9 @@ _CLI_ALLOWED_X86_16_IMPORTS = frozenset(
         # CLI may report syntax-only C AST cycles; semantic repair remains forbidden here.
         "inertia.lowering.c_ast_utils",
         "inertia.semantics.callee_name_normalization",
+        # CLI scopes the third-party resilience boundary so owned terminal
+        # failures propagate once; ordinary angr recovery remains unchanged.
+        "inertia.frontend.x86_16.analysis_failures",
         "inertia.frontend.x86_16.cod_extract",
         "inertia.frontend.x86_16.cod_known_objects",
         # CLI may consume lowering-owned render metadata; it must not derive or mutate that evidence.
@@ -2550,7 +2553,7 @@ _PROMOTED_TYPED_FILES = (
     "inertia/cli/cli_function_discovery.py",
     "inertia/cli/function_graph_extent_repair.py",
     "inertia/lowering/object_lowering.py",
-    "inertia/cli/cli_access_profiles.py",
+    "inertia/lowering/access_profiles.py",
     "inertia/cli/cli_access_traits.py",
     "inertia/cli/cli_access_trait_rewrite.py",
     "inertia/cli/cli_access_rewrite_artifact.py",
@@ -2581,7 +2584,7 @@ _PROMOTED_TYPED_FILES = (
     "inertia/lowering/stack_lowering.py",
     "inertia/cli/cli_stack_byte_offsets.py",
     "inertia/cli/cli_stack_locals.py",
-    "inertia/cli/cli_storage_objects.py",
+    "inertia/lowering/storage_objects.py",
     "inertia/cli/cli_string_timeout_fallback.py",
     "inertia/cli/cli_terminal_status.py",
     "inertia/cli/cli_timeout.py",

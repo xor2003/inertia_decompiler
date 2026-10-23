@@ -24,6 +24,11 @@ from inertia.ir import (
     build_x86_16_segment_state_artifact,
 )
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
+from inertia.ir.function_readiness_contracts import (
+    function_artifact_body_digest_8616,
+    observed_function_source_revision_8616,
+    record_function_build_attestation_8616,
+)
 from inertia.ir.ir_boundary_cfg import (
     IRBoundaryCoverageResult8616,
     prove_ir_boundary_coverage_8616,
@@ -205,6 +210,30 @@ def test_full_width_symbolic_target_binds_above_64k() -> None:
     assert proof.complete
 
 
+def _attest_derived_artifact(project: object, boundary: object,
+                             parent: object, derived: object) -> None:
+    """Attest a test-substituted body as a derived artifact.
+
+    A mutated body has no build attestation of its own, so publication cannot
+    bind it. Record that it consumed the attested parent body, matching the
+    derived-artifact flow used by production registries.
+    """
+    parent_digest = function_artifact_body_digest_8616(parent)
+    body_digest = function_artifact_body_digest_8616(derived)
+    observed = observed_function_source_revision_8616(
+        project, derived.function_addr, boundary=boundary
+    )
+    if body_digest is not None and observed is not None:
+        record_function_build_attestation_8616(
+            project,
+            derived.function_addr,
+            body_digest,
+            observed,
+            "x86_16_vex_ir",
+            inputs=() if parent_digest is None else (parent_digest,),
+        )
+
+
 def _prove_const_target(target: int) -> SegmentCallPreservationResult8616:
     """Replace only a decoded CALL's operand to test exact CONST binding.
 
@@ -234,6 +263,7 @@ def _prove_const_target(target: int) -> SegmentCallPreservationResult8616:
         blocks=tuple(changed_block if original is block else original
                      for original in original_artifact.blocks),
     )
+    _attest_derived_artifact(project, boundary, original_artifact, artifact)
     publish_function_ir_artifact_8616(project, artifact)
     caller = prove_ir_boundary_coverage_8616(project, boundary, artifact)
     assert caller.complete
@@ -325,6 +355,7 @@ def test_provenance_and_native_mutations_refuse(mutation: str) -> None:
     )
     index = _program_index(project, 0x1000, 0x1004)
     if mutation in ("origin_missing", "origin_tmp"):
+        original_artifact = artifact
         block = next(block for block in artifact.blocks
                      if any(instruction.op == "CALL" for instruction in block.instrs))
         call = next(instruction for instruction in block.instrs if instruction.op == "CALL")
@@ -340,6 +371,7 @@ def test_provenance_and_native_mutations_refuse(mutation: str) -> None:
         artifact = replace(artifact, blocks=tuple(
             new_block if item is block else item for item in artifact.blocks
         ))
+        _attest_derived_artifact(project, boundary, original_artifact, artifact)
     publish_function_ir_artifact_8616(project, artifact)
     caller = prove_ir_boundary_coverage_8616(project, boundary, artifact)
     assert caller.complete
@@ -350,7 +382,15 @@ def test_provenance_and_native_mutations_refuse(mutation: str) -> None:
         project.loader.memory.store(0x1001, b"\xff")
     proof = prove_segment_call_preservation_8616(caller, closure, index, 0x1000)
     assert not proof.complete
-    assert proof.failure is SegmentCallPreservationFailure8616.TARGET_MISMATCH
+    # Arch/domain and native-byte tampering is caught at the source-integrity
+    # layer (stale observation) before target reasoning; origin tampering on an
+    # attested derived body still reaches the target check.
+    expected = (
+        SegmentCallPreservationFailure8616.COVERAGE_INCOMPLETE
+        if mutation in ("domain", "native_bytes")
+        else SegmentCallPreservationFailure8616.TARGET_MISMATCH
+    )
+    assert proof.failure is expected
 
 
 def test_shared_owner_accepts_typed_coordinates() -> None:

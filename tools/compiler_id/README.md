@@ -17,8 +17,7 @@ Signature parsing remains owned by the shared `omf_pat`/signature catalog code.
 This tool must not recover argument types, repair generated C, or influence
 proof verdicts. It must not depend on CLI/decompiler implementations.
 
-`scripts/report_compiler_matches.py` retains the old command and import identity.
-Remove that shim only after external consumers migrate. Tool-specific tests
+The package command above is the maintained entry point. Tool-specific tests
 live here; large compiler/signature datasets remain external or ignored.
 
 Ownership and test labels: [compiler_detector.json](../../reference/components/compiler_detector.json).

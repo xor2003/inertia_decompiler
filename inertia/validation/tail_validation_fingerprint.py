@@ -34,23 +34,24 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
     CConstant,
     CDirtyExpression,
-    CDoWhileLoop,
     CExpression,
-    CExpressionStatement,
-    CForLoop,
     CFunctionCall,
-    CIfElse,
     CIndexedVariable,
     CStatements,
     CTypeCast,
     CUnaryOp,
     CVariable,
     CVariableField,
-    CWhileLoop,
 )
 from angr.sim_type import SimType, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
+from inertia.alias.stack_pointer_alias_map import (
+    StackPointerAliasResult8616,
+    compute_stack_pointer_aliases_8616,
+    read_stack_pointer_alias_map_8616,
+    write_stack_pointer_alias_map_8616,
+)
 from inertia.lowering.gp_register_state import runtime_gp_name_for_variable_8616
 from inertia.lowering.segment_register_state import runtime_segment_name_for_variable_8616
 from inertia.lowering.segmented_global_loads import IndexedSegmentedGlobalStoreEvidence8616
@@ -76,6 +77,8 @@ from inertia.semantics.callsite_summary import (
 from inertia.semantics.callsite_summary import (
     summarize_x86_16_callsite as _summarize_x86_16_callsite_fallback,
 )
+from inertia.validation.gp_capture_values import resolve_gp_capture_constant_8616
+from inertia.validation.typed_constant_values import fold_typed_constant_binary_8616
 
 from .validation_additive_terms import flatten_additive_terms_8616 as _flatten_additive_terms_8616
 from .validation_aggregate_storage import aggregate_field_storage_8616
@@ -702,7 +705,8 @@ def _validation_alias_node_context_8616(node: Any, project: Any) -> tuple[Any, A
     if not isinstance(node, CVariable):
         return None
     variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
-    if variable is None:
+    if variable is None or isinstance(variable, SimTemporaryVariable):
+        # Temporary values require the dedicated current-definition proof.
         return None
     codegen = _dynamic_tail_validation_getattr_8616(node, "codegen", None)
     if codegen is None:
@@ -943,221 +947,52 @@ def _debug_tail_stack_alias_indexed_8616(
     return _impl()
 
 
-def _stack_alias_map_8616(codegen: object) -> dict[int, tuple[object, int]]:
-    def _impl() -> dict[int, tuple[object, int]]:
-        cached = _dynamic_tail_validation_getattr_8616(codegen, "_inertia_stack_pointer_aliases_for_cvars", None)
+def _refresh_stack_alias_diagnostics_8616(
+    codegen: object, result: StackPointerAliasResult8616
+) -> None:
+    """Publish validation diagnostics from the consumed alias result.
+
+    The owner performs one ordered propagation pass, so ``iterations`` is
+    honestly 1 for any result it produced; refusal flags mirror the current
+    result rather than latching a stale True from an earlier failure.
+    """
+    dynamic = typing.cast(typing.Any, codegen)
+    dynamic._inertia_tail_validation_stack_alias_iterations = 1
+    dynamic._inertia_tail_validation_stack_alias_nodes = result.visited_nodes
+    dynamic._inertia_tail_validation_stack_pointer_aliases = (
+        result.aliases if result.complete else {}
+    )
+    dynamic._inertia_tail_validation_stack_alias_incomplete = not result.complete
+    dynamic._inertia_tail_validation_stack_alias_candidate_budget_exceeded = (
+        not result.complete
+    )
+
+
+def _stack_alias_map_8616(codegen: object) -> Mapping[int, tuple[object, int]]:
+    def _impl() -> Mapping[int, tuple[object, int]]:
+        cached = read_stack_pointer_alias_map_8616(codegen)
+        if cached is not None:
+            _refresh_stack_alias_diagnostics_8616(codegen, cached)
+            if cached.complete:
+                return cached.aliases
+            return {}
         cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None)
         root = _dynamic_tail_validation_getattr_8616(cfunc, "statements", None)
-        if isinstance(cached, tuple) and len(cached) == 2 and cached[0] is root and isinstance(cached[1], dict):
-            return cached[1]
         if root is None:
+            dynamic = typing.cast(typing.Any, codegen)
+            dynamic._inertia_tail_validation_stack_alias_iterations = 0
+            dynamic._inertia_tail_validation_stack_alias_nodes = 0
+            dynamic._inertia_tail_validation_stack_pointer_aliases = {}
             return {}
 
-        aliases, iteration_count, visited_nodes, budget_exceeded, changed = (
-            _compute_stack_aliases_8616(codegen, root)
-        )
-        if changed or budget_exceeded:
-            aliases = {}
-            typing.cast(typing.Any, codegen)._inertia_tail_validation_stack_alias_incomplete = True
-        typing.cast(typing.Any, codegen)._inertia_tail_validation_stack_alias_iterations = iteration_count
-        typing.cast(typing.Any, codegen)._inertia_tail_validation_stack_alias_nodes = visited_nodes
-        typing.cast(typing.Any, codegen)._inertia_stack_pointer_aliases_for_cvars = (root, aliases)
-        typing.cast(typing.Any, codegen)._inertia_tail_validation_stack_pointer_aliases = aliases
-        return aliases
+        result = compute_stack_pointer_aliases_8616(codegen, root)
+        write_stack_pointer_alias_map_8616(codegen, result)
+        _refresh_stack_alias_diagnostics_8616(codegen, result)
+        return result.aliases if result.complete else {}
 
     return _impl()
 
 
-def _stack_var_is_pointer_capable_8616(var: object, cvar: object | None = None) -> bool:
-    """Check a stack variable can carry pointer-shaped values."""
-    if not isinstance(var, SimStackVariable):
-        return False
-    if _dynamic_tail_validation_getattr_8616(var, "base", None) != "bp":
-        return False
-    size = _dynamic_tail_validation_getattr_8616(var, "size", None)
-    if isinstance(size, int) and size >= 2:
-        return True
-    var_type = _dynamic_tail_validation_getattr_8616(cvar, "variable_type", None)
-    return isinstance(var_type, SimTypePointer)
-
-
-def _expr_is_bp_stack_var_8616(expr: Any) -> bool:
-    """Check an expression resolves to a bp-based stack variable."""
-    expr = _strip_validation_casts(expr)
-    if isinstance(expr, CUnaryOp) and expr.op == "Reference":
-        expr = _strip_validation_casts(expr.operand)
-    if not isinstance(expr, CVariable):
-        return False
-    var = _dynamic_tail_validation_getattr_8616(expr, "variable", None)
-    return isinstance(var, SimStackVariable) and _dynamic_tail_validation_getattr_8616(var, "base", None) == "bp"
-
-
-def _resolve_stack_alias_expr_8616(expr: Any, aliases: Any) -> Any:
-    """Resolve one rhs expression against the current stack alias map."""
-    expr = _strip_validation_casts(expr)
-    if isinstance(expr, CVariable):
-        var = _dynamic_tail_validation_getattr_8616(expr, "variable", None)
-        if not isinstance(var, SimStackVariable) or _dynamic_tail_validation_getattr_8616(var, "base", None) != "bp":
-            return None
-        alias = aliases.get(id(var))
-        if alias is not None:
-            return alias
-        if _stack_var_is_pointer_capable_8616(var, expr):
-            return expr, 0
-        return None
-    if isinstance(expr, CUnaryOp) and expr.op == "Reference":
-        operand = _strip_validation_casts(expr.operand)
-        if _expr_is_bp_stack_var_8616(operand):
-            return operand, 0
-        return None
-    if isinstance(expr, CBinaryOp) and expr.op in {"Add", "Sub"}:
-        lhs = _resolve_stack_alias_expr_8616(expr.lhs, aliases)
-        rhs = _resolve_stack_alias_expr_8616(expr.rhs, aliases)
-        lhs_value = _c_constant_int_value(_strip_validation_casts(expr.lhs))
-        rhs_value = _c_constant_int_value(_strip_validation_casts(expr.rhs))
-        if lhs is not None and isinstance(rhs_value, int):
-            base, offset = lhs
-            return base, offset + (rhs_value if expr.op == "Add" else -rhs_value)
-        if rhs is not None and isinstance(lhs_value, int) and expr.op == "Add":
-            base, offset = rhs
-            return base, offset + lhs_value
-    return None
-
-
-def _stack_alias_stable_key_8616(resolved: tuple[object, int]) -> tuple[int, int]:
-    """Derive a stable identity key for a resolved alias base+offset."""
-    base, offset = resolved
-    variable = _dynamic_tail_validation_getattr_8616(base, "variable", None)
-    return (id(variable) if variable is not None else id(base), offset)
-
-
-def _iter_stack_alias_assignments_8616(
-    start: object, max_nodes: int, codegen: object
-) -> Iterator[CAssignment]:
-    """Yield reachable assignment nodes under a statement root with a budget."""
-    seen: set[int] = set()
-    stack = [start]
-    visited = 0
-    while stack:
-        current = stack.pop()
-        current_id = id(current)
-        if current_id in seen:
-            continue
-        seen.add(current_id)
-        visited += 1
-        if visited > max_nodes:
-            typing.cast(typing.Any, codegen)._inertia_tail_validation_stack_alias_candidate_budget_exceeded = True
-            break
-        if isinstance(current, CAssignment):
-            yield current
-            continue
-        _push_walk_children_8616(current, stack)
-
-
-def _push_loop_children_8616(current: object, stack: list[object]) -> None:
-    """Push body/iterator/initializer children of a loop node."""
-    for attr in ("body", "iterator", "initializer"):
-        child = _dynamic_tail_validation_getattr_8616(current, attr, None)
-        if child is not None:
-            stack.append(child)
-
-
-def _push_walk_children_8616(current: object, stack: list[object]) -> None:
-    """Push a non-assignment node's children onto the walk stack."""
-    if isinstance(current, CStatements):
-        stack.extend(reversed(tuple(_dynamic_tail_validation_getattr_8616(current, "statements", ()) or ())))
-        return
-    if isinstance(current, CExpressionStatement):
-        expr = _dynamic_tail_validation_getattr_8616(current, "expr", None)
-        if expr is not None:
-            stack.append(expr)
-        return
-    if isinstance(current, CIfElse):
-        _push_if_else_children_8616(current, stack)
-        return
-    if isinstance(current, (CForLoop, CWhileLoop, CDoWhileLoop)):
-        _push_loop_children_8616(current, stack)
-        return
-    if isinstance(current, (list, tuple)):
-        stack.extend(reversed(tuple(current)))
-
-
-def _push_if_else_children_8616(current: CIfElse, stack: list[object]) -> None:
-    """Push else/branch children of an if-else node onto the walk stack."""
-    else_node = _dynamic_tail_validation_getattr_8616(current, "else_node", None)
-    if else_node is not None:
-        stack.append(else_node)
-    condition_pairs = _dynamic_tail_validation_getattr_8616(current, "condition_and_nodes", None)
-    if isinstance(condition_pairs, (list, tuple)):
-        for pair in reversed(tuple(condition_pairs)):
-            if isinstance(pair, tuple) and len(pair) >= 2:
-                stack.append(pair[1])
-
-
-def _stack_alias_lhs_var_8616(node: CAssignment) -> tuple[Any, Any] | None:
-    """Resolve the lhs bp-stack variable for one assignment node."""
-    lhs = _strip_validation_casts(_dynamic_tail_validation_getattr_8616(node, "lhs", None))
-    if not isinstance(lhs, CVariable):
-        return None
-    lhs_var = _dynamic_tail_validation_getattr_8616(lhs, "variable", None)
-    if not isinstance(lhs_var, SimStackVariable) or _dynamic_tail_validation_getattr_8616(lhs_var, "base", None) != "bp":
-        return None
-    return lhs, lhs_var
-
-
-def _alias_assignment_proceeds_8616(
-    node: CAssignment, lhs: Any, lhs_var: Any, resolved: Any
-) -> bool:
-    """Check a non-pointer lhs may accept the resolved alias shape."""
-    if _stack_var_is_pointer_capable_8616(lhs_var, lhs):
-        return True
-    rhs_expr = _strip_validation_casts(_dynamic_tail_validation_getattr_8616(node, "rhs", None))
-    return (
-        (isinstance(rhs_expr, CUnaryOp) and rhs_expr.op == "Reference") or isinstance(rhs_expr, CBinaryOp)
-    )
-
-
-def _compute_stack_aliases_8616(
-    codegen: object, root: object
-) -> tuple[dict[int, tuple[object, int]], int, int, bool, bool]:
-    """Run the stack-alias fixpoint over assignment candidates."""
-    aliases: dict[int, tuple[object, int]] = {}
-    alias_keys: dict[int, tuple[int, int]] = {}
-    changed = True
-    iteration_count = 0
-    max_iterations = 32
-    visited_nodes = 0
-    max_nodes = 4096
-    budget_exceeded = False
-    while changed and iteration_count < max_iterations:
-        iteration_count += 1
-        changed = False
-        for node in _iter_stack_alias_assignments_8616(root, max_nodes, codegen):
-            visited_nodes += 1
-            if visited_nodes > max_nodes:
-                budget_exceeded = True
-                changed = False
-                break
-            if not isinstance(node, CAssignment):
-                continue
-            lhs_pair = _stack_alias_lhs_var_8616(node)
-            if lhs_pair is None:
-                continue
-            lhs, lhs_var = lhs_pair
-            resolved = _resolve_stack_alias_expr_8616(_dynamic_tail_validation_getattr_8616(node, "rhs", None), aliases)
-            if resolved is None:
-                continue
-            if not _alias_assignment_proceeds_8616(node, lhs, lhs_var, resolved):
-                continue
-            lhs_key = id(lhs_var)
-            resolved_key = _stack_alias_stable_key_8616(resolved)
-            if alias_keys.get(lhs_key) != resolved_key:
-                aliases[lhs_key] = resolved
-                alias_keys[lhs_key] = resolved_key
-                changed = True
-        if budget_exceeded:
-            break
-    return aliases, iteration_count, visited_nodes, budget_exceeded, changed
 
 
 def _materialized_local_map_8616(codegen: object) -> dict[int, tuple[int | None, str | None]]:
@@ -1443,10 +1278,19 @@ def _resolve_stack_alias_base_offset_8616(base_expr: Any, codegen: Any, *, seen:
         alias_entry = _stack_alias_map_8616(codegen).get(variable_id)
         if alias_entry is not None:
             return _resolve_alias_entry_base_offset_8616(codegen, alias_entry, seen)
-        offset = _dynamic_tail_validation_getattr_8616(variable, "offset", None)
-        return offset if isinstance(offset, int) else None
+        return _unproven_carrier_offset_8616(variable, variable_id, codegen)
 
     return _impl()
+
+
+def _unproven_carrier_offset_8616(variable: Any, variable_id: int, codegen: Any) -> int | None:
+    """Resolve a non-carrier variable to its own slot; refused carriers refuse."""
+    entry = read_stack_pointer_alias_map_8616(codegen)
+    if entry is not None and variable_id in entry.refused:
+        _record_stack_alias_refusal_8616(codegen, "stack_alias_refused_carrier")
+        return None
+    offset = _dynamic_tail_validation_getattr_8616(variable, "offset", None)
+    return offset if isinstance(offset, int) else None
 
 
 def _resolve_alias_entry_base_offset_8616(
@@ -2252,6 +2096,9 @@ def _simplify_expr_for_fingerprint_8616(node: Any) -> Any:
     def _impl() -> Any:
         nonlocal node
         node = _strip_cosmetic_validation_casts_8616(node)
+        if isinstance(node, CVariable) and isinstance(node.variable, SimTemporaryVariable):
+            captured = resolve_gp_capture_constant_8616(node)
+            return captured if captured is not None else node
         if isinstance(node, CUnaryOp):
             operand = _simplify_expr_for_fingerprint_8616(_dynamic_tail_validation_getattr_8616(node, "operand", None))
             if operand is not _dynamic_tail_validation_getattr_8616(node, "operand", None):
@@ -2272,7 +2119,10 @@ def _simplify_expr_for_fingerprint_8616(node: Any) -> Any:
 
 
 def _fold_const_binary_8616(node: CBinaryOp, lhs: Any, rhs: Any) -> Any:
-    """Fold a binary op with a zero constant operand."""
+    """Fold proven typed constants, then existing zero-operand identities."""
+    constant = fold_typed_constant_binary_8616(node, lhs, rhs)
+    if constant is not None:
+        return constant
     lhs_zero = _c_constant_int_value(lhs) == 0
     rhs_zero = _c_constant_int_value(rhs) == 0
     if node.op == "Mul" and (lhs_zero or rhs_zero):
@@ -2499,7 +2349,7 @@ def _expr_fingerprint_impl_8616(node: object, project: object, seen: set[int] | 
 
     projection = proven_stack_projection_fingerprint_8616(node)
     if projection is not None:
-        return cast(str, projection)
+        return projection
 
     node = _simplify_expr_for_fingerprint_8616(node)
     cache_ctx = _fingerprint_cache_ctx_8616(node, project)

@@ -176,6 +176,11 @@ from inertia.lowering.stack_variable_display_names import (
     reapply_stack_variable_projection_names_8616,
     rebind_restored_stack_coordinate_registry_8616,
 )
+from inertia.pipeline.call_stack_input_outcome import (
+    CallStackInputFailure8616,
+    CallStackInputStatus8616,
+    call_stack_input_lowering_result_8616,
+)
 from inertia.pipeline.contracts import assert_pipeline_contracts_8616
 from inertia.pipeline.errors import PipelineHardError
 from inertia.pipeline.invariants import format_invariant_report_8616, validate_before_rewrite_8616
@@ -207,10 +212,17 @@ from inertia.postprocess.decompiler_postprocess_utils import (
 from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 from inertia.postprocess.optimization.dead_condition_carriers import prune_unread_pure_condition_carriers_8616
 from inertia.postprocess.optimization.dead_setup import _count_dead_setup_escaped_8616
-from inertia.postprocess.optimization.local_declarations import dedupe_equivalent_stack_local_declarations_8616
+from inertia.postprocess.optimization.local_declarations import (
+    dedupe_equivalent_stack_local_declarations_8616,
+    prune_unreferenced_scalar_declarations_8616,
+)
 from inertia.postprocess.optimization.pass_driver import (
     OPTIMIZATION_PASSES,
     _normalize_cfunc_root_for_optimization_8616,
+)
+from inertia.postprocess.optimization.rule_runtime import (
+    OPTIMIZATION_RULE_PASS_PREFIX_8616,
+    run_optimization_rules_8616,
 )
 from inertia.postprocess.optimization.structured_braces import normalize_multi_statement_braces_8616
 from inertia.postprocess.optimization.trivial_copy import prune_adjacent_temporary_copy_assignments_8616
@@ -8497,6 +8509,11 @@ def _build_decompiler_postprocess_passes() -> tuple[DecompilerPostprocessPassSpe
             False,
         ),
         DecompilerPostprocessPassSpec(
+            "_prune_unreferenced_scalar_declarations_final_8616",
+            prune_unreferenced_scalar_declarations_8616,
+            False,
+        ),
+        DecompilerPostprocessPassSpec(
             "_normalize_multi_statement_braces_final_8616",
             normalize_multi_statement_braces_8616,
             False,
@@ -8705,13 +8722,25 @@ def describe_x86_16_decompiler_postprocess_stage() -> tuple[tuple[str, bool], ..
 
 
 def _snapshot_codegen_cfunc(codegen: StructuredAstValue) -> StructuredAstValue:
+    """Clone rollback syntax while retaining exact call occurrence provenance."""
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return None
     try:
         with contextlib.suppress(Exception):
             delattr(codegen, "_inertia_postprocess_snapshot_error")
-        return _deepcopy_cfunc_for_validation_8616(cfunc)
+        from inertia.postprocess.call_summary_rollback import retain_call_clone_binding_8616
+
+        memo: dict[int, StructuredAstValue] = {}
+        cloned = _deepcopy_cfunc_for_validation_8616(cfunc, call_clone_memo=memo)
+        if cloned.statements is not cfunc.statements:
+            retain_call_clone_binding_8616(
+                cloned.statements,
+                tuple(node for node in _iter_c_nodes_deep_8616(cfunc.statements) if isinstance(node, CFunctionCall)),
+                memo,
+                tuple(node for node in _iter_c_nodes_deep_8616(cloned.statements) if isinstance(node, CFunctionCall)),
+            )
+        return cloned
     except Exception as ex:
         with contextlib.suppress(Exception):
             codegen._inertia_postprocess_snapshot_error = f"{type(ex).__name__}: {ex}"
@@ -8762,8 +8791,12 @@ def _set_cfunc_statements_root_8616(codegen: StructuredAstValue, root: CStatemen
 
 
 def _restore_codegen_cfunc(codegen: StructuredAstValue, snapshot: StructuredAstValue) -> bool:
+    """Restore syntax and detach rollback-only call clone provenance."""
+    from inertia.postprocess.call_summary_rollback import take_call_clone_binding_8616
+
     if snapshot is None:
         return False
+    take_call_clone_binding_8616(codegen, snapshot.statements)
     codegen.cfunc = snapshot
     with contextlib.suppress(Exception):
         codegen.cfunc.codegen = codegen
@@ -8988,6 +9021,12 @@ def _snapshot_inertia_metadata_value_8616(
 def _restore_codegen_inertia_metadata_8616(
     codegen: StructuredAstValue, snapshot: dict[str, StructuredAstValue] | None
 ) -> None:
+    """Restore owned metadata and rebind calls through exact clone provenance."""
+    from inertia.postprocess.call_summary_rollback import (
+        is_call_clone_snapshot_key_8616,
+        restore_call_clone_binding_8616,
+    )
+
     if codegen is None or snapshot is None:
         return
     attrs = getattr(codegen, "__dict__", {})
@@ -9003,11 +9042,17 @@ def _restore_codegen_inertia_metadata_8616(
             with contextlib.suppress(Exception):
                 delattr(codegen, name)
     for name, value in snapshot.items():
+        if is_call_clone_snapshot_key_8616(name):
+            continue
         with contextlib.suppress(Exception):
             setattr(codegen, name, value)
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is not None:
         rebind_restored_stack_coordinate_registry_8616(codegen, cfunc)
+        restore_call_clone_binding_8616(
+            codegen, snapshot, cfunc.statements,
+            tuple(node for node in _iter_c_nodes_deep_8616(cfunc.statements) if isinstance(node, CFunctionCall)),
+        )
     _invalidate_tail_validation_derived_caches_8616(codegen)
 
 
@@ -9027,7 +9072,9 @@ def _deepcopy_itertools_count_8616(value: StructuredAstValue, memo: StructuredAs
     return cloned
 
 
-def _manual_validation_fallback_clone_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
+def _manual_validation_fallback_clone_8616(
+    cfunc: StructuredAstValue, *, call_clone_memo: dict[int, StructuredAstValue] | None = None,
+) -> StructuredAstValue:
     """Best-effort manual clone used when the primary snapshot path fails."""
     with contextlib.suppress(Exception):
         fallback = copy.copy(cfunc)
@@ -9039,6 +9086,8 @@ def _manual_validation_fallback_clone_8616(cfunc: StructuredAstValue) -> Structu
         if isinstance(next_counter, _IT_COUNT_TYPE):
             fallback._next_counter = _snapshot_c_ast_value_for_validation_8616(next_counter, memo)
         _clone_cfunc_validation_fields_8616(cfunc, fallback, memo)
+        if call_clone_memo is not None:
+            call_clone_memo.update(memo)
         with contextlib.suppress(Exception):
             fallback._inertia_validation_snapshot_fallback = "manual"
         return fallback
@@ -9055,7 +9104,10 @@ def _restore_deepcopy_dispatch_8616(dispatch: StructuredAstValue, previous: Stru
         dispatch[_IT_COUNT_TYPE] = previous
 
 
-def _deepcopy_cfunc_for_validation_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
+def _deepcopy_cfunc_for_validation_8616(
+    cfunc: StructuredAstValue, *, call_clone_memo: dict[int, StructuredAstValue] | None = None,
+) -> StructuredAstValue:
+    """Clone validation syntax, optionally exporting its exact occurrence memo."""
     dispatch = getattr(copy, "_deepcopy_dispatch", None)
     sentinel = object()
     previous = sentinel
@@ -9092,9 +9144,11 @@ def _deepcopy_cfunc_for_validation_8616(cfunc: StructuredAstValue) -> Structured
         if isinstance(next_counter, _IT_COUNT_TYPE):
             cloned._next_counter = _snapshot_c_ast_value_for_validation_8616(next_counter, memo)
         _clone_cfunc_validation_fields_8616(cfunc, cloned, memo)
+        if call_clone_memo is not None:
+            call_clone_memo.update(memo)
         return cloned
     except Exception:
-        fallback = _manual_validation_fallback_clone_8616(cfunc)
+        fallback = _manual_validation_fallback_clone_8616(cfunc, call_clone_memo=call_clone_memo)
         if fallback is not None:
             return fallback
         raise
@@ -10591,9 +10645,22 @@ def _postprocess_local_validation_refusal_reason_8616(
 def _postprocess_set_completion_state_8616(
     project: StructuredAstValue, codegen: StructuredAstValue, state: PostprocessPassTransactionState8616
 ) -> bool:
+    """Request final producer publication after the inner cleanup completes."""
     codegen._inertia_postprocess_mutation_generation_8616 = state.mutation_generation()
     codegen._inertia_postprocess_changed = state.accepted_changed
     project._inertia_decompiler_stage = "postprocess"
+    cfunc = getattr(codegen, "cfunc", None)
+    function_addr = getattr(cfunc, "addr", None)
+    if isinstance(function_addr, int):
+        from inertia.pipeline.function_readiness import record_function_rewrite_completion_8616
+
+        record_function_rewrite_completion_8616(
+            project,
+            function_addr,
+            codegen,
+            producer="x86_16_postprocess_cleanup",
+            outputs=(state,),
+        )
     return bool(state.accepted_changed)
 
 
@@ -10682,55 +10749,32 @@ def _postprocess_run_optimization_step_8616(
     if getattr(codegen, "cfunc", None) is None:
         return True
 
-    _normalize_cfunc_root_for_optimization_8616(codegen)
-    debug_enabled = os.environ.get("INERTIA_DEBUG_OPTIMIZATION", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    for spec in OPTIMIZATION_PASSES:
-        pass_name = f"optimization:{spec.name}"
+    timing_enabled = (
+        timing_output_enabled()
+        and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1"
+    )
+
+    def _apply_rule_step_8616(pass_name: str, step: Callable[[], bool]) -> bool:
         pass_started = time.perf_counter()
-
-        def _run_spec(spec: StructuredAstValue = spec) -> StructuredAstValue:
-            changed = bool(spec.func(codegen))
-            if debug_enabled:
-                state = "pass_changed" if changed else "pass_stable"
-                print(f"[optimization] {state}={spec.name}", file=sys.stderr, flush=True)
-            return changed
-
-        keep_running = apply_step(pass_name, _run_spec)
-        if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
+        keep_running = bool(apply_step(pass_name, step))
+        if timing_enabled:
             print(
-                f"[{time.strftime('%H:%M:%S')}] optimization pass: {spec.name} "
+                f"[{time.strftime('%H:%M:%S')}] optimization pass: "
+                f"{pass_name.removeprefix(OPTIMIZATION_RULE_PASS_PREFIX_8616)} "
                 f"({time.perf_counter() - pass_started:.3f}s)",
                 file=sys.stderr,
                 flush=True,
             )
-        if not keep_running:
-            return False
-        if codegen._inertia_postprocess_validation_failed:
-            return False
-    if debug_enabled:
-        print(
-            "[optimization] counters "
-            f"dce_candidates={int(getattr(codegen, 'dce_candidates', 0) or 0)} "
-            f"dce_deleted={int(getattr(codegen, 'dce_deleted', 0) or 0)} "
-            f"dce_keep_live_use={int(getattr(codegen, 'dce_keep_live_use', 0) or 0)} "
-            f"dce_keep_side_effect={int(getattr(codegen, 'dce_keep_side_effect', 0) or 0)} "
-            f"dce_keep_protected={int(getattr(codegen, 'dce_keep_protected', 0) or 0)} "
-            f"dce_keep_observable={int(getattr(codegen, 'dce_keep_observable', 0) or 0)} "
-            f"dce_keep_unknown={int(getattr(codegen, 'dce_keep_unknown', 0) or 0)} "
-            f"dce_duplicate_assignment_candidates="
-            f"{int(getattr(codegen, 'dce_duplicate_assignment_candidates', 0) or 0)} "
-            f"dce_duplicate_assignment_deleted="
-            f"{int(getattr(codegen, 'dce_duplicate_assignment_deleted', 0) or 0)} "
-            f"dce_duplicate_assignment_refused="
-            f"{int(getattr(codegen, 'dce_duplicate_assignment_refused', 0) or 0)}",
-            file=sys.stderr,
-            flush=True,
-        )
+        return keep_running and not codegen._inertia_postprocess_validation_failed
+
+    report = run_optimization_rules_8616(
+        codegen,
+        OPTIMIZATION_PASSES,
+        _apply_rule_step_8616,
+        prepare=_normalize_cfunc_root_for_optimization_8616,
+    )
+    if report.halted:
+        return False
     return not codegen._inertia_postprocess_validation_failed
 
 
@@ -11986,9 +12030,9 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
 
     def _impl() -> bool:
         setup_started = time.perf_counter()
-        if getattr(codegen, "cfunc", None) is None:
+        cfunc = getattr(codegen, "cfunc", None)
+        if cfunc is None:
             return False
-
         _debug_pointer_surface_8616(codegen, "entry")
 
         _reset_postprocess_run_flags_8616(codegen)
@@ -16752,9 +16796,10 @@ def _enforce_dead_setup_gate_8616(codegen: StructuredAstValue, function: Structu
 
 
 def _run_pipeline_contract_gate_8616(codegen: StructuredAstValue, function: StructuredAstValue) -> None:
-    """Run the pipeline contract assertions with lane diagnostics."""
+    """Require completed Structuring and closed lanes before Rewrite begins."""
+    from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
     try:
-        assert_pipeline_contracts_8616(codegen)
+        assert_pipeline_contracts_8616(codegen, required_stage=FunctionLifecycleStage8616.STRUCTURING)
     except Exception as ex:
         stack_lane = getattr(codegen, "_inertia_stack_lane", None)
         cond_lane = getattr(codegen, "_inertia_condition_lane", None)
@@ -17052,7 +17097,7 @@ def _collect_validation_baseline_8616(
     func_addr: StructuredAstValue,
     validation_mode: str,
 ) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue, float]:
-    """Collect the pre-postprocess baseline summaries and restore the snapshot."""
+    """Collect the actual transaction baseline and restore collection side effects."""
     baseline_cfunc_snapshot = _measure_pre_validation_value_8616(
         "baseline_cfunc_snapshot",
         lambda: _snapshot_codegen_cfunc(self.codegen),
@@ -17098,7 +17143,9 @@ def _collect_validation_baseline_8616(
         if before_summary is None:
             before_summary = _measure_pre_validation_value_8616(
                 "before_summary",
-                lambda: _collect_tail_validation_summary_with_baseline_canonicalization_8616(
+                # Compare actual ASTs: a clone can erase pre-existing obligations
+                # and falsely classify them as introduced by postprocess.
+                lambda: _collect_direct_tail_summary_8616(
                     self.project,
                     self.codegen,
                     mode=validation_mode,
@@ -17106,10 +17153,6 @@ def _collect_validation_baseline_8616(
                 ),
             )
     before_collect_elapsed = time.perf_counter() - before_collect_started
-    self.codegen._inertia_postprocess_pre_validation_cost_ms_8616 = round(
-        (before_fingerprint_elapsed + before_collect_elapsed) * 1000.0,
-        3,
-    )
     if baseline_cfunc_snapshot is not None:
         _measure_pre_validation_value_8616(
             "baseline_project_function_restore",
@@ -17127,6 +17170,11 @@ def _collect_validation_baseline_8616(
             "baseline_text_restore",
             lambda: _restore_codegen_text_state_8616(self.codegen, baseline_text_snapshot),
         )
+    # This run measurement belongs to the restored owner, not the temporary baseline AST.
+    self.codegen._inertia_postprocess_pre_validation_cost_ms_8616 = round(
+        (before_fingerprint_elapsed + before_collect_elapsed) * 1000.0,
+        3,
+    )
     _debug_prevalidation_pointer_surface_8616(self, "after-baseline-restore")
     self.codegen._inertia_postprocess_pre_validation_summary = before_summary
     materialized_condition_storage_before = capture_materialized_condition_storage_surface_8616(self.codegen)
@@ -17293,7 +17341,7 @@ def _collect_after_validation_summary_8616(
             )
         after_collect_started = time.perf_counter()
         with span("x86_16.decompile.validation.after_summary", function=func_addr):
-            after_summary = _collect_tail_validation_summary_with_baseline_canonicalization_8616(
+            after_summary = _collect_direct_tail_summary_8616(
                 self.project,
                 self.codegen,
                 mode=validation_mode,
@@ -17533,7 +17581,8 @@ def _finalize_failed_postprocess_validation_8616(
 def _decompile_8616(self: StructuredAstValue) -> None:
     """Run the x86-16 core, structuring, postprocess, and validation pipeline."""
 
-    def _impl() -> None:
+    def _impl(production_scopes: contextlib.ExitStack) -> None:
+        """Run the core, then own Rewrite until cleanup and validation finish."""
         core_elapsed = _run_decompile_core_8616(self)
         cfunc = getattr(self.codegen, "cfunc", None)
         func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
@@ -17542,6 +17591,14 @@ def _decompile_8616(self: StructuredAstValue) -> None:
         _debug_decompile_entry_8616(self, func_addr, func_name, tv_enabled)
         if self.project.arch.name != "86_16" or self.codegen is None:
             return
+        if isinstance(func_addr, int):
+            from inertia.pipeline.function_readiness import function_rewrite_production_scope_8616
+
+            # Baseline priming mutates call nodes too, so Rewrite must own the
+            # validated Structuring version before either postprocess path starts.
+            production_scopes.enter_context(
+                function_rewrite_production_scope_8616(self.project, func_addr, self.codegen),
+            )
         stage_function = getattr(self, "function", None) or getattr(self, "func", None)
         if stage_function is not None:
             self.codegen._inertia_current_function_8616 = stage_function
@@ -17670,8 +17727,8 @@ def _decompile_8616(self: StructuredAstValue) -> None:
         _debug_decompile_done_8616(self, func_addr)
 
     function = getattr(self, "function", None) or getattr(self, "func", None)
-    with active_status_flag_lift_context_8616(self.project, function):
-        return _impl()
+    with active_status_flag_lift_context_8616(self.project, function), contextlib.ExitStack() as production_scopes:
+        return _impl(production_scopes)
 
 
 def _handle_failed_postprocess_validation_8616(
@@ -18821,6 +18878,16 @@ def _collect_discard_salvages_8616(
             "Skipped postprocess rollback salvage because Structuring validation already failed"
         )
         return salvages
+    call_inputs = call_stack_input_lowering_result_8616(self.codegen)
+    if (
+        call_inputs is not None
+        and call_inputs.status is CallStackInputStatus8616.REFUSED
+        and call_inputs.failure is CallStackInputFailure8616.POSITION_UNPROVEN
+    ):
+        log.warning(
+            "Skipped postprocess rollback salvage because architectural call positions remain unproven"
+        )
+        return salvages
     if not destructive_discard_delta:
         salvages.direct_stack_updates = _salvage_direct_stack_update_after_discard_8616(
             self,
@@ -19019,11 +19086,10 @@ def _discard_failed_postprocess_result_8616(
     )
     self.codegen._inertia_postprocess_discarded = True
     self.codegen._inertia_postprocess_discard_verdict = validation_verdict_text
-    restored_after_summary = _collect_tail_validation_summary_with_baseline_canonicalization_8616(
+    restored_after_summary = _collect_direct_tail_summary_8616(
         self.project,
         self.codegen,
         mode=validation_mode,
-        force_baseline_canonicalization=True,
     )
     # Rollback validation must use the freshly collected summaries. The
     # comparison cache is keyed by boundary fingerprints, and this path exists

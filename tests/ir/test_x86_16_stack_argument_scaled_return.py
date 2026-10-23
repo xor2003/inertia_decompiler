@@ -15,7 +15,15 @@ from inertia.frontend.x86_16.frontend_function_boundary import (
 )
 from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
-from inertia.ir import AddressStatus, IRAddress, IRValue, MemSpace, SegmentOrigin
+from inertia.ir import (
+    AddressStatus,
+    IRAddress,
+    IRFunctionArtifact,
+    IRInstr,
+    IRValue,
+    MemSpace,
+    SegmentOrigin,
+)
 from inertia.ir.scalar_affine_contracts import (
     ScalarAffineExpression8616,
     ScalarAffineTrace8616,
@@ -36,6 +44,7 @@ from inertia.ir.stack_argument_scaled_return import (
     prove_stack_argument_far_scaled_return_8616,
     prove_stack_argument_scaled_return_8616,
 )
+from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.semantics.call_stack_effect_pipeline import (
     build_semantic_function_ssa_8616,
 )
@@ -99,8 +108,10 @@ def _rebased_semantic_ssa(
         function_bytes = function_bytes.replace(bytes.fromhex("d1 e0"), b"\x90" * 2)
     image = bytearray(0x5BE)
     image[0xF1 : 0xF1 + len(function_bytes)] = function_bytes
-    image[0x5BC] = 0xC3 if ret_only_helper else 0x90
-    image[0x5BD] = 0xC3
+    # A bare RET proves nothing extra, but a body whose control cannot be
+    # bounded (``jmp ax``) must keep the caller's effect unproven.
+    image[0x5BC] = 0xC3 if ret_only_helper else 0xFF
+    image[0x5BD] = 0xC3 if ret_only_helper else 0xE0
     project = angr.Project(
         io.BytesIO(image),
         main_opts={
@@ -115,6 +126,62 @@ def _rebased_semantic_ssa(
     _, outputs, ssa = build_semantic_function_ssa_8616(project, boundary)
     assert not outputs.function.refusals
     return boundary, ssa
+
+
+def _probe_linkage_effect_rows_8616() -> tuple[IRInstr, ...]:
+    """Model the linked far probe's returning-path local effects at its site.
+
+    The guarded ``aFCHKSTK`` failure exits keep Semantics-owned effect refusal,
+    so the test supplies the linked-helper premise directly: the returning path
+    pops the stored far return frame into CX/DX and reads SP through BX while
+    leaving the caller's SP coordinate unchanged across the site.
+    """
+    def return_frame(offset: int) -> IRAddress:
+        return IRAddress(
+            space=MemSpace.SS, base=("sp",), offset=offset, size=2,
+            status=AddressStatus.STABLE, segment_origin=SegmentOrigin.PROVEN,
+        )
+    return (
+        IRInstr(
+            op="LOAD",
+            dst=IRValue(space=MemSpace.REG, name="cx", offset=0, size=2),
+            args=(return_frame(0),),
+            size=2,
+            addr=0x10F7,
+        ),
+        IRInstr(
+            op="LOAD",
+            dst=IRValue(space=MemSpace.REG, name="dx", offset=0, size=2),
+            args=(return_frame(2),),
+            size=2,
+            addr=0x10F7,
+        ),
+        IRInstr(
+            op="MOV",
+            dst=IRValue(space=MemSpace.REG, name="bx", offset=0, size=2),
+            args=(IRValue(space=MemSpace.REG, name="sp", offset=0, size=2),),
+            size=2,
+            addr=0x10F7,
+        ),
+    )
+
+
+def _linked_probe_callsite_artifact_8616(artifact: IRFunctionArtifact) -> IRFunctionArtifact:
+    """Substitute the recognized probe's proven local effects for the lcall.
+
+    The lifter retains the architectural ``lcall``; Semantics refuses to grant
+    the guarded helper's effects from its name. This fixture replaces the
+    callsite rows with the probe's observed returning-path effects so the
+    downstream scaled-return proofs consume the intended linked callsite.
+    """
+    blocks = []
+    for block in artifact.blocks:
+        kept = tuple(row for row in block.instrs if row.addr != 0x10F7)
+        if len(kept) == len(block.instrs):
+            blocks.append(block)
+            continue
+        blocks.append(replace(block, instrs=(*kept, *_probe_linkage_effect_rows_8616())))
+    return replace(artifact, blocks=tuple(blocks))
 
 
 def _far_probe_semantic_ssa(
@@ -144,7 +211,10 @@ def _far_probe_semantic_ssa(
     assert len(evidence) == int(recognizable_helper)
     boundary = exact_function_range_boundary_8616(project, 0x10F1, 0x1112)
     assert boundary is not None
-    _, outputs, ssa = build_semantic_function_ssa_8616(project, boundary)
+    artifact = build_x86_16_ir_function_artifact(project, boundary)
+    if recognizable_helper:
+        artifact = _linked_probe_callsite_artifact_8616(artifact)
+    _, outputs, ssa = build_semantic_function_ssa_8616(project, boundary, ir_artifact=artifact)
     assert not outputs.function.refusals
     return boundary, ssa
 
@@ -384,7 +454,7 @@ def test_rebased_real_ret_only_call_preserves_bp_and_scaled_return() -> None:
 
 
 def test_rebased_nontrivial_call_refuses_without_body_proof() -> None:
-    """A NOP/RET helper must not inherit the one-instruction-body proof."""
+    """A helper whose body cannot be bounded keeps the call effect unproven."""
     boundary, ssa = _rebased_semantic_ssa(ret_only_helper=False)
 
     result = _prove(boundary, ssa)

@@ -149,6 +149,27 @@ def _stored_surface() -> tuple[SimpleNamespace, SimpleNamespace, CAssignment, CI
     return project, codegen, assignment, branch, returned
 
 
+def _assert_owned_call_condition(codegen: SimpleNamespace, branch: CIfElse) -> None:
+    """Check exact provenance, orientation, and final validator acceptance."""
+    from inertia.validation.validation_branch_conditions import validate_materialized_branch_conditions_8616
+
+    condition = branch.condition_and_nodes[0][0]
+    fact = codegen._inertia_typed_conditions[0]
+    assert isinstance(condition, CBinaryOp)
+    assert condition.op == "CmpNE"
+    assert condition.tags["ins_addr"] == fact.src_insn
+    assert condition.tags["vex_block_addr"] == fact.block_addr
+    assert condition.tags["condition_producer_insn"] == fact.producer_insn
+    assert condition.tags["inertia_structuring_condition_cfg_materialized_8616"] is True
+    report = validate_materialized_branch_conditions_8616(
+        codegen, codegen.cfunc.statements,
+        condition_fingerprint=lambda expression: expression.op,
+        condition_ir_fingerprint=lambda typed: typed.op,
+    )
+    assert report.passed
+    assert report.materialized_count == 1
+
+
 def test_materializes_exact_call_return_condition() -> None:
     project, codegen, branch = _surface()
 
@@ -161,6 +182,8 @@ def test_materializes_exact_call_return_condition() -> None:
     assert structured_callsite_addr_8616(expression.lhs) == 0x100A3
     assert codegen._inertia_callsite_summaries[id(expression.lhs)].target_addr == 0x10010
     assert codegen._inertia_call_return_condition_stats_8616.materialized_count == 1
+
+    _assert_owned_call_condition(codegen, branch)
 
 
 def test_rebinds_stale_condition_tags_from_structured_callsite_identity() -> None:
@@ -201,6 +224,8 @@ def test_reuses_adjacent_call_assignment_for_return_condition() -> None:
     assert stats.materialized_count == 1
     assert stats.failure_count == 0
 
+    _assert_owned_call_condition(codegen, branch)
+
 
 def test_consumes_adjacent_assignment_when_condition_reuses_same_call() -> None:
     """Count one shared AST call occurrence at each rendered evaluation site."""
@@ -226,6 +251,8 @@ def test_consumes_adjacent_assignment_when_condition_reuses_same_call() -> None:
     assert stats.classified_fact_count == 1
     assert stats.materialized_count == 1
     assert stats.failure_count == 0
+
+    _assert_owned_call_condition(codegen, branch)
 
 
 def test_consumes_adjacent_assignment_before_unbound_same_target_call() -> None:
@@ -559,6 +586,8 @@ def test_refuses_condition_without_exact_return_register() -> None:
     assert not materialize_call_return_conditions_8616(project, codegen)
     assert codegen._inertia_call_return_condition_stats_8616.failure_count == 1
     assert not codegen._inertia_callsite_summaries
+
+    assert not branch.condition_and_nodes[0][0].tags.get("inertia_structuring_condition_cfg_materialized_8616")
 
 
 def test_rebinds_unique_regenerated_target_call() -> None:

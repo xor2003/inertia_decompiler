@@ -26,6 +26,13 @@ from angr.sim_type import SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
 
 from inertia.alias.alias_model_impl import AliasStorageFacts, _StackSlotIdentity
+from inertia.alias.stack_pointer_alias_map import (
+    StackPointerAliasResult8616,
+    StackPointerAliasStatus8616,
+    compute_stack_pointer_aliases_8616,
+    read_stack_pointer_alias_map_8616,
+    write_stack_pointer_alias_map_8616,
+)
 from inertia.lowering.structured_tags import copy_structured_tags_8616
 
 from .call_return_stack_bindings import bind_call_return_stack_assignment_8616
@@ -46,6 +53,8 @@ log: logging.Logger = logging.getLogger(__name__)
 
 
 _LINEAR_TEMP_NAME_RE_8616 = re.compile(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)")
+
+_STACK_POINTER_ALIAS_MAX_SWEEPS_8616 = 3
 
 
 def _strip_typed_suffix_8616(name: object) -> str | None:
@@ -1092,28 +1101,6 @@ class _StackCvarCanonicalize8616:
         except (AttributeError, TypeError, ValueError):
             return None
 
-    def _alias_keys_for_cvar(self, node: object, *, lookup: bool) -> tuple[object, ...]:
-        if not isinstance(node, structured_c.CVariable):
-            return ()
-        variable = node.variable
-        keys: list[object] = []
-        linear_temp = self._is_linear_temp_cvar(node)
-        if variable is not None:
-            keys.append(("var", id(variable)))
-            reg = getattr(variable, "reg", None)
-            size = getattr(variable, "size", None)
-            if lookup and not linear_temp and isinstance(reg, int) and isinstance(size, int):
-                keys.append(("reg", reg, size))
-        for candidate in (
-            node.name,
-            getattr(variable, "name", None),
-        ):
-            if isinstance(candidate, str) and candidate:
-                normalized = _strip_typed_suffix_8616(candidate)
-                if isinstance(normalized, str) and normalized:
-                    keys.append(("name", normalized))
-        return tuple(dict.fromkeys(keys))
-
     def _single_assignment_expr_for_cvar(self, node_cvar: object) -> object | None:
         cache_key = id(node_cvar)
         if cache_key in self.cvar_single_assignment_cache:
@@ -1401,187 +1388,42 @@ class _StackCvarCanonicalize8616:
         name = node.name or var.name
         return base in {"sp", "bp"} and offset == 0 and name in {"sp_0", "bp_0"}
 
-    def _stack_pointer_aliases(self) -> dict[object, tuple[object, int]]:
-        # dynamic-boundary: alias caches live on angr codegen/cfunc objects
-        # during this lowering pass; owned Inertia contracts use dot access.
-        cached = getattr(self.codegen_dynamic, "_inertia_stack_pointer_aliases_for_cvars", None)
-        cache_key = getattr(self.codegen_dynamic.cfunc, "statements", None)
-        if isinstance(cached, tuple) and len(cached) == 2 and cached[0] is cache_key and isinstance(cached[1], dict):
-            return cast(dict[object, tuple[object, int]], cached[1])
+    def _stack_pointer_aliases(self) -> typing.Mapping[int, tuple[object, int]]:
+        # dynamic-boundary: the shared alias result lives on angr codegen
+        # objects; owned Inertia contracts use dot access.
+        result = self._stack_alias_result_8616()
+        if not result.complete:
+            return {}
+        return result.aliases
 
-        aliases: dict[object, tuple[object, int]] = {}
+    def _stack_alias_result_8616(self) -> StackPointerAliasResult8616:
+        """Return the authoritative shared stack-alias result for this function.
+
+        The Alias layer owns the propagation: this pass only reads or fills the
+        shared typed result. An incomplete result never drives lowering.
+        """
+        cached = read_stack_pointer_alias_map_8616(self.codegen)
+        if cached is not None:
+            return cached
         root = getattr(getattr(self.codegen, "cfunc", None), "statements", None)
-        if root is not None:
-            self._fixpoint_stack_pointer_aliases_8616(aliases, root)
-
-        typing.cast(typing.Any, self.codegen)._inertia_stack_pointer_aliases_for_cvars = (cache_key, aliases)
-        return aliases
-
-    def _fixpoint_stack_pointer_aliases_8616(
-        self, aliases: dict[object, tuple[object, int]], root: object
-    ) -> None:
-        """Propagate stack-pointer aliases through assignments until a fixpoint."""
-        for _ in range(3):
-            changed_local = False
-            for node in self._iter_statement_nodes(root):
-                if self._apply_assignment_alias_8616(aliases, node):
-                    changed_local = True
-            if not changed_local:
-                break
-
-    def _apply_assignment_alias_8616(
-        self, aliases: dict[object, tuple[object, int]], node: object
-    ) -> bool:
-        """Apply one assignment statement to the alias map; return whether it changed."""
-        if not isinstance(node, structured_c.CAssignment):
-            return False
-        lhs = self.unwrap_c_casts(node.lhs)
-        if not isinstance(lhs, structured_c.CVariable):
-            return False
-        lhs_var = lhs.variable
-        if lhs_var is None:
-            return False
-        keys = self._alias_keys_for_cvar(lhs, lookup=False)
-        if not keys:
-            return False
-        resolved = self._resolve_stack_pointer_alias_8616(node.rhs, aliases)
-        if resolved is None:
-            return False
-        if isinstance(lhs_var, SimStackVariable) and lhs_var.base != "bp":
-            return False
-        if not self._stack_carrier_lhs_allowed_8616(lhs_var, lhs, node):
-            return False
-        needs_update = False
-        for key in keys:
-            if aliases.get(key) != resolved:
-                aliases[key] = resolved
-                needs_update = True
-        return needs_update
-
-    def _stack_carrier_lhs_allowed_8616(self, lhs_var: Any, lhs: Any, node: Any) -> bool:
-        """Return whether a non-pointer-capable stack lhs may still carry a pointer."""
-        if not isinstance(lhs_var, SimStackVariable) or self._is_pointer_capable_stack_variable(
-            lhs_var, lhs
-        ):
-            return True
-        # Accept tiny stack temporaries that are proved to carry a stack pointer.
-        # These appear in helper prologue/epilogue carrier patterns.
-        rhs_expr = self.unwrap_c_casts(node.rhs)
-        return (
-            isinstance(rhs_expr, structured_c.CUnaryOp)
-            and rhs_expr.op == "Reference"
-        ) or isinstance(rhs_expr, structured_c.CBinaryOp)
-
-    def _resolve_stack_pointer_alias_8616(
-        self,
-        node: Any,
-        aliases: dict[object, tuple[object, int]],
-        *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
-        """Resolve a node to a (base, offset) stack-pointer alias pair, if provable."""
-        node = self.unwrap_c_casts(node)
-        if node is None:
-            return None
-        if seen_expr_ids is None:
-            seen_expr_ids = set()
-        node_id = id(node)
-        if node_id in seen_expr_ids:
-            return None
-        seen_expr_ids.add(node_id)
-
-        if isinstance(node, structured_c.CVariable):
-            return self._cvar_stack_pointer_alias_8616(
-                node, aliases, seen_expr_ids=seen_expr_ids, seen_varids=seen_varids
+        if root is None:
+            return StackPointerAliasResult8616(
+                root=None,
+                status=StackPointerAliasStatus8616.NODE_BUDGET_EXHAUSTED,
+                aliases={},
+                definition_index={},
+                refused=frozenset(),
             )
-        if isinstance(node, structured_c.CUnaryOp) and node.op == "Reference":
-            return self._reference_stack_pointer_alias_8616(node, aliases)
-        if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
-            return self._binop_stack_pointer_alias_8616(
-                node, aliases, seen_expr_ids=seen_expr_ids, seen_varids=seen_varids
+        result = compute_stack_pointer_aliases_8616(self.codegen, root)
+        write_stack_pointer_alias_map_8616(self.codegen, result)
+        if not result.complete:
+            self.codegen_dynamic._inertia_stack_lowering_alias_result_incomplete_8616 = (
+                _dynamic_int_counter_8616(
+                    self.codegen_dynamic, "_inertia_stack_lowering_alias_result_incomplete_8616"
+                )
+                + 1
             )
-        return None
-
-    def _cvar_stack_pointer_alias_8616(
-        self,
-        node: Any,
-        aliases: dict[object, tuple[object, int]],
-        *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
-        """Resolve a CVariable through aliases, sp-register evidence, or assignments."""
-        variable = node.variable
-        for key in self._alias_keys_for_cvar(node, lookup=True):
-            alias = aliases.get(key)
-            if alias is not None:
-                return alias
-        if self._is_sp_virtual_register(variable):
-            return self._synthetic_sp_anchor_cvar(), 0
-        single_assignment_rhs = self._single_assignment_expr_for_cvar(node)
-        if single_assignment_rhs is not None:
-            return self._resolve_stack_pointer_alias_8616(
-                single_assignment_rhs,
-                aliases,
-                seen_expr_ids=seen_expr_ids,
-                seen_varids=seen_varids,
-            )
-        nearest_assignment_rhs = self._nearest_preceding_assignment_expr_for_cvar(node)
-        if nearest_assignment_rhs is not None:
-            return self._resolve_stack_pointer_alias_8616(
-                nearest_assignment_rhs,
-                aliases,
-                seen_expr_ids=seen_expr_ids,
-                seen_varids=seen_varids,
-            )
-        return None
-
-    def _reference_stack_pointer_alias_8616(
-        self, node: Any, aliases: dict[object, tuple[object, int]]
-    ) -> tuple[object, int] | None:
-        """Resolve a `&var` reference through bp evidence or alias keys."""
-        operand = self.unwrap_c_casts(node.operand)
-        if isinstance(operand, structured_c.CVariable):
-            variable = operand.variable
-            if isinstance(variable, SimStackVariable) and variable.base == "bp":
-                return operand, 0
-            for key in self._alias_keys_for_cvar(operand, lookup=True):
-                alias = aliases.get(key)
-                if alias is not None:
-                    return alias
-        return None
-
-    def _binop_stack_pointer_alias_8616(
-        self,
-        node: Any,
-        aliases: dict[object, tuple[object, int]],
-        *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
-        """Resolve an Add/Sub expression through per-side aliases and constants."""
-        lhs = self._resolve_stack_pointer_alias_8616(
-            node.lhs,
-            aliases,
-            seen_expr_ids=seen_expr_ids,
-            seen_varids=seen_varids,
-        )
-        rhs = self._resolve_stack_pointer_alias_8616(
-            node.rhs,
-            aliases,
-            seen_expr_ids=seen_expr_ids,
-            seen_varids=seen_varids,
-        )
-        lhs_value = getattr(self.unwrap_c_casts(node.lhs), "value", None)
-        rhs_value = getattr(self.unwrap_c_casts(node.rhs), "value", None)
-        if lhs is not None and isinstance(rhs_value, int):
-            base, offset = lhs
-            return base, offset + (rhs_value if node.op == "Add" else -rhs_value)
-        if rhs is not None and isinstance(lhs_value, int) and node.op == "Add":
-            base, offset = rhs
-            return base, offset + lhs_value
-        return None
+        return result
 
 
     def _resolve_stack_pointer_alias_expr(self, 
@@ -1626,23 +1468,36 @@ class _StackCvarCanonicalize8616:
         return None
 
     def _lookup_alias_keys_8616(self, node: Any) -> tuple[object, int] | None:
-        """Return the cached stack-pointer alias for a node's alias keys, if any."""
-        for key in self._alias_keys_for_cvar(node, lookup=True):
-            alias_state = self._stack_pointer_aliases().get(key)
-            if alias_state is not None:
-                return alias_state
-        return None
+        """Return the proven stack-pointer alias for a cvar's exact identity.
+
+        Only the shared exact-identity map resolves here; names and registers
+        never prove storage. The owner publishes a variable only when every
+        collected read is ordered after its definition, so no per-use position
+        check is needed here.
+        """
+        if not isinstance(node, structured_c.CVariable):
+            return None
+        variable = node.variable
+        if variable is None:
+            return None
+        result = self._stack_alias_result_8616()
+        if not result.complete:
+            return None
+        return result.aliases.get(id(variable))
 
     def _reference_alias_expr_8616(self, base_ref: Any) -> tuple[object, int] | None:
-        """Resolve a `&var` reference through alias keys or direct bp stack evidence."""
+        """Resolve a ``&var`` reference to the operand's own bp slot only.
+
+        Address-of never projects through the operand's value alias: after
+        ``p = &local``, ``&p`` is p's slot, not local's.
+        """
         operand = self.unwrap_c_casts(base_ref.operand)
         if isinstance(operand, structured_c.CVariable):
             base_var = operand.variable
-            alias_state = self._lookup_alias_keys_8616(operand)
-            if alias_state is not None:
-                return alias_state
             if isinstance(base_var, SimStackVariable) and getattr(base_var, "base", None) == "bp":
                 return operand, 0
+            # `&v` names v's own slot; a value alias of v must never be
+            # projected through address-of, and non-bp operands have none.
         return None
 
     def _stack_base_alias_expr_8616(self) -> tuple[object, int] | None:
@@ -1667,17 +1522,12 @@ class _StackCvarCanonicalize8616:
         alias_state = self._lookup_alias_keys_8616(base_ref)
         if alias_state is not None:
             return alias_state
+        if base_var is not None and id(base_var) in self._stack_alias_result_8616().refused:
+            return None
         if isinstance(base_var, SimStackVariable) and getattr(base_var, "base", None) == "bp":
             return base_ref, 0
         if self._is_sp_virtual_register(base_var):
             return self._synthetic_sp_anchor_cvar(), 0
-        single_assignment_rhs = self._single_assignment_expr_for_cvar(base_ref)
-        if single_assignment_rhs is not None:
-            return self._resolve_stack_pointer_alias_expr(
-                single_assignment_rhs,
-                seen_expr_ids=seen_expr_ids,
-                seen_varids=seen_varids,
-            )
         nearest_assignment_rhs = self._nearest_preceding_assignment_expr_for_cvar(base_ref)
         if nearest_assignment_rhs is not None:
             return self._resolve_stack_pointer_alias_expr(
@@ -2146,7 +1996,7 @@ class _StackCvarCanonicalize8616:
                 and isinstance(self.base_var, SimStackVariable)
                 and isinstance(self.index_value, int)
             ):
-                self.alias_state = self._stack_pointer_aliases().get(id(self.base_var))
+                self.alias_state = self._lookup_alias_keys_8616(self.base_var_expr)
                 if self.alias_state is not None:
                     self.alias_base_expr, self.alias_offset = self.alias_state
                     self.alias_base_var = getattr(self.alias_base_expr, "variable", None)

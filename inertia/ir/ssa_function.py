@@ -11,8 +11,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .core import IRFunctionArtifact, IRRefusal, IRValue, MemSpace
+from .core import IRRefusal, IRValue, MemSpace
+from .function_artifact import IRFunctionArtifact
 from .function_condition_artifact import IRFunctionConditionArtifact8616
+from .function_lifecycle import FunctionLifecycle8616
+from .function_readiness_contracts import (
+    FunctionLifecycleStage8616,
+    FunctionSourceRevision8616,
+    function_artifact_body_digest_8616,
+)
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
 from .ssa import SSABlock, _version_key, build_x86_16_block_local_ssa
 from .ssa_memory import build_x86_16_function_memory_ssa
@@ -78,7 +85,7 @@ class SSAPhiNode:
 
 @dataclass(frozen=True, slots=True)
 class SSAFunctionArtifact:
-    """Function-level SSA artifact over typed IR blocks and phi nodes."""
+    """Function SSA projection sharing the raw IR owner's lifecycle and refusal state."""
 
     function_addr: int
     blocks: tuple[SSABlock, ...]
@@ -94,12 +101,51 @@ class SSAFunctionArtifact:
     summary: dict[str, object] = field(default_factory=dict)
     logical_memory: IRLogicalMemoryArtifact8616 | None = None
     condition_evidence: IRFunctionConditionArtifact8616 | None = None
+    source_revision: FunctionSourceRevision8616 | None = None
+    parent_digest: str | None = None
+    lifecycle_stage: FunctionLifecycleStage8616 = FunctionLifecycleStage8616.IR
+
+    lifecycle: FunctionLifecycle8616 = field(default_factory=FunctionLifecycle8616, compare=False, repr=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
         return {
             "function_addr": self.function_addr,
             "blocks": [block.to_dict() for block in self.blocks],
+            **self.non_block_payload_8616(),
+        }
+
+    def canonical_blocks_payload_8616(self) -> dict[str, object]:
+        """Bind raw instructions and SSA definitions without expanding expression DAGs."""
+        from .source_graph_binding import canonical_ir_instruction_graph_8616
+
+        targets: list[IRValue] = []
+        blocks: list[dict[str, object]] = []
+        for block in self.blocks:
+            bindings: list[dict[str, object]] = []
+            for binding in block.bindings:
+                bindings.append({
+                    "target_index": len(targets),
+                    "version": binding.version,
+                    "instr_index": binding.instr_index,
+                })
+                targets.append(binding.target)
+            blocks.append({
+                "addr": block.addr,
+                "bindings": bindings,
+                "refusals": list(block.refusals),
+            })
+        return {
+            "instruction_graph": canonical_ir_instruction_graph_8616(
+                tuple(block.instrs for block in self.blocks), tuple(targets),
+            ),
+            "blocks": blocks,
+        }
+
+    def non_block_payload_8616(self) -> dict[str, object]:
+        """Share non-block fields between diagnostics and finite body attestation."""
+        return {
+            "function_addr": self.function_addr,
             "phi_nodes": [phi.to_dict() for phi in self.phi_nodes],
             "memory_bindings": [binding.to_dict() for binding in self.memory_bindings],
             "memory_accesses": [access.to_dict() for access in self.memory_accesses],
@@ -126,6 +172,12 @@ class SSAFunctionArtifact:
                 if self.condition_evidence is None
                 else self.condition_evidence.to_dict()
             ),
+            "source_revision": (
+                None if self.source_revision is None else self.source_revision.to_dict()
+            ),
+            "parent_digest": self.parent_digest,
+            "lifecycle_stage": self.lifecycle_stage.value,
+            "lifecycle": self.lifecycle.to_dict(),
         }
 
 
@@ -250,6 +302,9 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
             summary=summary,
             logical_memory=memory_ssa.logical_memory,
             condition_evidence=artifact.condition_evidence,
+            source_revision=artifact.source_revision,
+            lifecycle=artifact.lifecycle,
+            parent_digest=function_artifact_body_digest_8616(artifact),
         )
 
     return _impl()

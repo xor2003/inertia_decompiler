@@ -145,7 +145,14 @@ def test_records_only_for_parent_retry(
     boot = SimpleNamespace(failure=None if boot_complete else object(), complete=boot_complete)
     row, record, chained = object(), object(), object()
     session = resolver._PremiseResolution8616()
-    source = SimpleNamespace(boot=object(), boot_recompute=object(), declared_services=(), callsite_index=SimpleNamespace(for_target=lambda addr: (row,) if has_parent else ()))
+    source = SimpleNamespace(
+        boot=object(),
+        boot_recompute=object(),
+        declared_services=(),
+        callsite_index=SimpleNamespace(for_target=lambda addr: (row,) if has_parent else ()),
+        pending_targets=(),
+        function_entries=(),
+    )
     monkeypatch.setattr(resolver, "registered_function_ir_artifact_8616", lambda *a: SimpleNamespace(verdict=resolver.FunctionIRArtifactVerdict8616.PROVEN, artifact=artifact))
     monkeypatch.setattr(resolver, "_exact_boundary_for_8616", lambda *a: boundary)
     monkeypatch.setattr(resolver, "prove_ir_boundary_coverage_8616", lambda *a: coverage)
@@ -167,7 +174,7 @@ def test_records_only_for_parent_retry(
         return chained
 
     monkeypatch.setattr(domain, "prove_real16_invocation_domain_8616", prove)
-    monkeypatch.setattr(resolver, "_surface_call_preservations_8616", records)
+    monkeypatch.setattr(resolver, "_prefix_records_8616", records)
     monkeypatch.setattr(resolver, "_edge_invocation_premise_8616", edge)
     result = resolver._registered_invocation_premise_8616(
         project,

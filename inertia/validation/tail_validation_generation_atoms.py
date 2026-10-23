@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence, Set
 from dataclasses import dataclass, field, fields, is_dataclass
-from enum import Enum
+from enum import Enum, EnumType
+from itertools import pairwise
+from types import GetSetDescriptorType
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -59,6 +61,7 @@ _THIRD_PARTY_SEMANTIC_FIELDS_8616 = (
 
 
 _SCALAR_LEAF_TYPES_8616 = (bool, int, str)
+_CONTEXT_REFERENCE_LIMIT_8616: int = 4096
 
 
 def _qualified_type_name_8616(value_type: type[object]) -> str:
@@ -80,9 +83,80 @@ def _ordered_item_atoms_8616(
     return tuple(sorted(items, key=repr))
 
 
+def _standard_enum_repr_8616(value: object) -> bool:
+    """Recognize native scalar enum repr without executing an attribute hook.
+
+    Enum's standard repr reads its class, name, and value. Require plain
+    instance fields, ordinary class lookup, and the exact builtin value repr;
+    descriptors or user formatting keep the original repr-sort path.
+    """
+    value_type = type(value)
+    if type(value_type) is not EnumType:
+        return False
+    methods: dict[str, object] = {}
+    for base in value_type.__mro__:
+        namespace = vars(base)
+        if any(name in namespace for name in ("_name_", "_value_", "__class__")) and base is not object:
+            return False
+        if "__dict__" in namespace and type(namespace["__dict__"]) is not GetSetDescriptorType:
+            return False
+        for key in ("__repr__", "__getattribute__", "_value_repr_"):
+            if key not in methods and key in namespace:
+                methods[key] = namespace[key]
+    if methods.get("__repr__") is not Enum.__repr__ or methods.get("__getattribute__") is not object.__getattribute__:
+        return False
+    fields = object.__getattribute__(value, "__dict__")
+    name, scalar = fields.get("_name_"), fields.get("_value_")
+    scalar_type = type(scalar)
+    if type(name) is not str or (scalar_type is not str and scalar_type is not int):
+        return False
+    return methods.get("_value_repr_") is scalar_type.__repr__
+
+
+def _pure_mapping_atoms_8616(items: list[ValidationGenerationAtom8616]) -> bool:
+    """Require pure builtin repr without expanding repeated tuple descendants."""
+    pending = list(items)
+    seen: set[int] = set()
+    while pending:
+        item = pending.pop()
+        item_type = type(item)
+        if item is None or item_type is bool or item_type is int or item_type is str:
+            continue
+        if _standard_enum_repr_8616(item):
+            continue
+        if item_type is not tuple:
+            return False
+        if id(item) not in seen:
+            seen.add(id(item))
+            pending.extend(cast("tuple[ValidationGenerationAtom8616, ...]", item))
+    return True
+
+
+def _ordered_mapping_atoms_8616(
+    items: list[ValidationGenerationAtom8616],
+) -> tuple[ValidationGenerationAtom8616, ...]:
+    """Sort by exact disjoint repr prefixes, retaining native fallback otherwise.
+
+    A mapping pair begins with its key repr and a comma delimiter. Distinct,
+    non-overlapping prefixes decide order without rendering potentially huge
+    shared value DAGs. Custom scalar repr keeps its original call order/count.
+    """
+    if len(items) <= 1 or not _pure_mapping_atoms_8616(items):
+        return _ordered_item_atoms_8616(items)
+    prefixes: list[tuple[str, ValidationGenerationAtom8616]] = []
+    for item in items:
+        if type(item) is not tuple or len(item) != 2:
+            return _ordered_item_atoms_8616(items)
+        prefixes.append(("(" + repr(item[0]) + ", ", item))
+    prefixes.sort(key=lambda pair: pair[0])
+    if any(right[0].startswith(left[0]) for left, right in pairwise(prefixes)):
+        return _ordered_item_atoms_8616(items)
+    return tuple(item for _prefix, item in prefixes)
+
+
 @dataclass(slots=True)
 class ValidationGenerationAtomBuilder8616:
-    """Build exact atoms while reusing only proven cycle-free subgraphs.
+    """Build exact atoms with bounded reuse of ancestry-dependent subgraphs.
 
     Exact builtin containers dispatch by identity so arbitrary metaclass
     ``__hash__``/``__eq__`` is never invoked, and bound-method locals only
@@ -90,7 +164,12 @@ class ValidationGenerationAtomBuilder8616:
     so mutations between builds are still observed exactly as before.
     """
 
-    _active: set[int] = field(default_factory=set, init=False)
+    _active: dict[int, object] = field(default_factory=dict, init=False)
+    _context_memo: dict[
+        int,
+        dict[frozenset[int], tuple[object, ValidationGenerationAtom8616, tuple[object, ...]]],
+    ] = field(default_factory=dict, init=False)
+    _context_references: int = field(default=0, init=False)
     _memo: dict[int, tuple[object, ValidationGenerationAtom8616]] = field(
         default_factory=dict,
         init=False,
@@ -98,6 +177,7 @@ class ValidationGenerationAtomBuilder8616:
 
     def atom(self, value: object) -> ValidationGenerationAtom8616:
         """Normalize one value within this request-local shared-object graph."""
+        self._begin_root()
         atom, _ = self._atom_with_cacheability(value)
         return atom
 
@@ -107,8 +187,15 @@ class ValidationGenerationAtomBuilder8616:
         field_name: str,
     ) -> ValidationGenerationAtom8616:
         """Read one dynamic angr/codegen field and normalize its value."""
+        self._begin_root()
         atom, _ = self._dynamic_field_atom_with_cacheability(owner, field_name)
         return atom
+
+    def _begin_root(self) -> None:
+        """Discard cyclic snapshots between roots, where inputs can mutate."""
+        if not self._active:
+            self._context_memo.clear()
+            self._context_references = 0
 
     def _dynamic_field_atom_with_cacheability(
         self,
@@ -151,14 +238,45 @@ class ValidationGenerationAtomBuilder8616:
         if identity in self._active:
             return ("cycle", _qualified_type_name_8616(value_type), identity), False
 
-        self._active.add(identity)
+        contexts = self._context_memo.get(identity)
+        if contexts is not None:
+            context_atom = contexts.get(frozenset(self._active))
+            if context_atom is not None and context_atom[0] is value:
+                return context_atom[1], False
+
+        self._active[identity] = value
         try:
             atom, cacheable = self._uncached_atom(value)
         finally:
-            self._active.remove(identity)
+            del self._active[identity]
         if cacheable:
             self._memo[identity] = (value, atom)
+        else:
+            self._remember_context_atom(value, atom)
         return atom, cacheable
+
+    def _remember_context_atom(
+        self, value: object, atom: ValidationGenerationAtom8616,
+    ) -> None:
+        """Reuse cycles only under identical ancestors within a fixed memory cap.
+
+        Existing path-sensitive cycle markers depend on the active identity set.
+        Retain those ancestors to prevent identity reuse within a root walk.
+        Charge both the root and every ancestor against the cap. Discard a
+        saturated batch before admitting newer contexts, so early cold graphs
+        cannot disable all sharing for the remainder of the current root.
+        Eviction only causes recomputation; it never broadens a reuse key.
+        """
+        references = len(self._active) + 1
+        if references > _CONTEXT_REFERENCE_LIMIT_8616:
+            return
+        if self._context_references + references > _CONTEXT_REFERENCE_LIMIT_8616:
+            self._context_memo.clear()
+            self._context_references = 0
+        self._context_memo.setdefault(id(value), {})[frozenset(self._active)] = (
+            value, atom, tuple(self._active.values()),
+        )
+        self._context_references += references
 
     def _dataclass_atom(
         self,
@@ -201,7 +319,7 @@ class ValidationGenerationAtomBuilder8616:
         return (
             "mapping",
             _qualified_type_name_8616(type(value)),
-            _ordered_item_atoms_8616(mapping_items),
+            _ordered_mapping_atoms_8616(mapping_items),
         ), cacheable
 
     def _set_atom(
@@ -319,85 +437,81 @@ def build_validation_generation_atom_8616(
     return ValidationGenerationAtomBuilder8616().atom(value)
 
 
-def _atoms_have_builtin_value_semantics_8616(
-    left: ValidationGenerationAtom8616,
-    right: ValidationGenerationAtom8616,
-) -> bool:
-    """Prove plain immutable values before suppressing repeated comparisons.
+class _PureAtomComparison8616(Enum):
+    """Known pure result, or a request to preserve native user-method dispatch."""
 
-    The builder can retain int/str subclasses. Their custom equality may have
-    observable effects, so isinstance is insufficient proof of pure native
-    equality. Inspect each exact tuple once without invoking user methods.
+    EQUAL = "equal"
+    DIFFERENT = "different"
+    NATIVE_REQUIRED = "native_required"
+
+
+def _queue_tuple_comparisons_8616(
+    pending: list[tuple[ValidationGenerationAtom8616, ValidationGenerationAtom8616] | None],
+    left: tuple[ValidationGenerationAtom8616, ...],
+    right: tuple[ValidationGenerationAtom8616, ...],
+) -> None:
+    """Schedule common-prefix comparisons before checking unequal lengths.
+
+    None is a work-item marker for unequal lengths, never an atom pair.
+    A custom equality method in the common prefix must precede this mismatch.
     """
-    pending: list[ValidationGenerationAtom8616] = [left, right]
-    seen: set[int] = set()
+    if len(left) != len(right):
+        pending.append(None)
+    count = min(len(left), len(right))
+    for index in range(count - 1, -1, -1):
+        pending.append((left[index], right[index]))
+
+
+def _compare_pure_generation_atoms_8616(left: ValidationGenerationAtom8616, right: ValidationGenerationAtom8616) -> _PureAtomComparison8616:
+    """Compare native-pure prefixes without ever invoking a custom method.
+
+    Exact builtin scalars have side-effect-free equality. Identical contained
+    objects need no method call, including enum singletons. Unknown comparison
+    requests native fallback before any custom method has executed, preserving
+    its order and side effects. Positional work follows native left-to-right
+    order; a known mismatch can stop before later custom comparisons.
+
+    Each tuple pair is visited once. Immutable bottom-up atom DAGs cannot
+    contain themselves, and both roots pin every descendant throughout this
+    call, preventing identity reuse. No comparison state survives the call.
+    """
+    pending: list[tuple[ValidationGenerationAtom8616, ValidationGenerationAtom8616] | None] = [(left, right)]
+    seen: set[tuple[int, int]] = set()
     while pending:
-        node = pending.pop()
-        node_type = type(node)
-        if node_type is tuple:
-            identity = id(node)
+        pair = pending.pop()
+        # A length mismatch follows the common prefix in native tuple order.
+        if pair is None:
+            return _PureAtomComparison8616.DIFFERENT
+        left_node, right_node = pair
+        if left_node is right_node:
+            continue
+        left_type, right_type = type(left_node), type(right_node)
+        if left_type is tuple and right_type is tuple:
+            identity = (id(left_node), id(right_node))
             if identity in seen:
                 continue
             seen.add(identity)
-            pending.extend(cast(tuple[ValidationGenerationAtom8616, ...], node))
-        else:
-            native_scalar = (
-                node is None or node_type is bool or node_type is int or node_type is str
+            _queue_tuple_comparisons_8616(
+                pending,
+                cast("tuple[ValidationGenerationAtom8616, ...]", left_node),
+                cast("tuple[ValidationGenerationAtom8616, ...]", right_node),
             )
-            if not native_scalar:
-                return False
-    return True
-
-
-def validation_generation_atoms_equal_8616(
-    left: ValidationGenerationAtom8616,
-    right: ValidationGenerationAtom8616,
-) -> bool:
-    """Return ``left == right`` while walking each shared tuple pair once.
-
-    Atoms are immutable scalar/tuple DAGs built bottom-up, so a tuple node
-    can never contain itself. The worklist and seen identity pairs live only
-    for this call: the call frame pins both immutable
-    roots for the comparison's whole lifetime, which transitively keeps every
-    descendant tuple alive, so a memoized identity pair can never be reused
-    by a different node while it is recorded. Each unique shared subtree
-    pair is therefore compared once instead of once per root path.
-
-    Value semantics are exactly ``tuple.__eq__``: every scalar and tuple
-    position is compared, ``True`` still equals ``1``, and literal cycle
-    markers — including their recorded object ids — must match position for
-    position. Positional work is scheduled once per unique tuple pair and
-    must all pass; a seen pair never substitutes proof of an unexamined
-    child. An explicit worklist preserves builder-supported depth without
-    adding recursive Python frames. Scalar/tuple subclasses without proven
-    native value semantics retain native comparison, including their custom
-    methods and exceptions. Nothing persists across calls.
-    """
-    if not isinstance(left, tuple) or not isinstance(right, tuple):
-        return left == right
-    if not _atoms_have_builtin_value_semantics_8616(left, right):
-        return left == right
-    pending: list[tuple[ValidationGenerationAtom8616, ValidationGenerationAtom8616]] = [
-        (left, right)
-    ]
-    seen_pairs: set[tuple[int, int]] = set()
-    while pending:
-        left_node, right_node = pending.pop()
-        # Like tuple equality, identical contained values need no value call.
-        if left_node is right_node:
             continue
-        if isinstance(left_node, tuple) and isinstance(right_node, tuple):
-            if len(left_node) != len(right_node):
-                return False
-            pair = (id(left_node), id(right_node))
-            if pair in seen_pairs:
-                continue
-            seen_pairs.add(pair)
-            # Reverse scheduling keeps value comparisons in positional order.
-            pending.extend(zip(reversed(left_node), reversed(right_node), strict=True))
-        else:
-            # Tuple comparison uses equality, not independently overloaded !=.
-            values_equal = left_node == right_node
-            if not values_equal:
-                return False
-    return True
+        left_native = left_node is None or left_type is bool or left_type is int or left_type is str
+        right_native = right_node is None or right_type is bool or right_type is int or right_type is str
+        if not left_native or not right_native:
+            return _PureAtomComparison8616.NATIVE_REQUIRED
+        values_equal = left_node == right_node
+        if not values_equal:
+            return _PureAtomComparison8616.DIFFERENT
+    return _PureAtomComparison8616.EQUAL
+
+
+def validation_generation_atoms_equal_8616(left: ValidationGenerationAtom8616, right: ValidationGenerationAtom8616) -> bool:
+    """Keep root protocols and fall back before custom equality has executed."""
+    if type(left) is not tuple or type(right) is not tuple:
+        return left == right
+    result = _compare_pure_generation_atoms_8616(left, right)
+    if result is _PureAtomComparison8616.NATIVE_REQUIRED:
+        return left == right
+    return result is _PureAtomComparison8616.EQUAL

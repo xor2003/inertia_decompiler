@@ -34,12 +34,14 @@ from typing import TYPE_CHECKING, Any
 import angr
 
 from tools.comparator.catalog import catalog, mapping
+from tools.comparator.global_layout_checks import check_global_layout
 from tools.comparator.msc8_catalog import (
     ListingEndKind,
     Symbol,
     global_map,
     link_map_global_map,
     listing_size,
+    lst_data_rows,
     lst_data_symbols,
     lst_functions,
     nm_symbols,
@@ -222,6 +224,32 @@ def _normalization_premise(
         "relocation_count": len(normalization),
         "relocations": {hex(mapped): hex(original) for mapped, original in sorted(normalization.items())},
     }
+
+
+def _relocation_map(
+    args: argparse.Namespace, symbols: dict[str, Symbol],
+    candidate: angr.Project, oracle: angr.Project, link_map: Pe32LinkMap | None,
+) -> dict[int, int]:
+    """Build the explicit constant premise from verified data-symbol evidence."""
+    if not args.normalize_globals:
+        return {}
+    oracle_data = lst_data_symbols(args.oracle_lst)
+    oracle_rows = lst_data_rows(args.oracle_lst)
+    # Dynamic third-party argparse boundary: older callers omit alias-source intake.
+    alias_source = getattr(args, "global_alias_source", None)
+    if alias_source is not None:
+        from tools.comparator.global_source_aliases import declared_global_aliases
+
+        oracle_data.update(declared_global_aliases(Path(alias_source), oracle_data))
+    normalization = global_map(symbols, candidate, oracle, oracle_data)
+    if link_map is not None:
+        for mapped, original in link_map_global_map(
+            link_map, candidate, oracle, oracle_data, oracle_rows
+        ).items():
+            if normalization.get(mapped, original) != original:
+                raise ValueError(f"conflicting data relocations at {mapped:#x}")
+            normalization[mapped] = original
+    return normalization
 
 
 def _component_functions(
@@ -465,13 +493,52 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
     if candidate_link_map is not None:
         if not args.normalize_globals:
             raise ValueError("--candidate-link-map supplies a relocation premise and requires --normalize-globals")
-        if args.mode != "leaf":
-            raise ValueError("--candidate-link-map is supported only in leaf mode")
+        if args.mode not in {"leaf", "matched-cfg"}:
+            raise ValueError("--candidate-link-map is supported only in leaf and matched-cfg modes")
         from tools.dosunit.catalog.pe32_link_map import load_candidate_link_map
 
         link_map = load_candidate_link_map(candidate_link_map, args.candidate_exe)
     else:
         link_map = None
+    # Dynamic third-party argparse boundary: renamed-data evidence is opt-in.
+    alias_source = getattr(args, "global_alias_source", None)
+    if alias_source is not None and link_map is None:
+        raise ValueError("--global-alias-source requires --candidate-link-map and --normalize-globals")
+    # Dynamic third-party argparse boundary: older callers omit code-map intake.
+    candidate_code_map = getattr(args, "candidate_code_map", None)
+    # Dynamic third-party argparse boundary: historical callers omit this opt-in.
+    match_import_thunks = getattr(args, "match_import_thunks", False)
+    if match_import_thunks and (candidate_code_map is None or args.mode != "matched-cfg"):
+        raise ValueError("--match-import-thunks requires --candidate-code-map and matched-cfg mode")
+    # Dynamic third-party argparse boundary: historical callers omit this opt-in.
+    match_code_symbols = getattr(args, "match_code_symbols", False)
+    if match_code_symbols and (candidate_code_map is None or args.mode != "matched-cfg"):
+        raise ValueError("--match-code-symbols requires --candidate-code-map and matched-cfg mode")
+    code_map = None
+    if candidate_code_map is not None:
+        from tools.dosunit.catalog.pe32_link_map import load_candidate_link_map
+
+        code_map = load_candidate_link_map(candidate_code_map, args.candidate_exe, include_statics=True)
+    from tools.comparator.abi_catalog import load_abi_catalog
+    from tools.comparator.external_catalog import load_external_catalog
+
+    # Dynamic third-party argparse boundary: existing callers omit the optional ABI catalog.
+    abi_contracts, abi_binding = load_abi_catalog(getattr(args, "abi_observation_catalog", None), args.mode)
+    auxiliary_maps: dict[str, object] = {"abi_observation_catalog": abi_binding} if abi_binding else {}
+    # Dynamic third-party argparse boundary: older callers omit external contracts.
+    external_contracts, external_binding = load_external_catalog(getattr(args, "external_call_catalog", None), args.mode)
+    if external_binding:
+        auxiliary_maps["external_call_catalog"] = external_binding
+    if link_map is not None:
+        auxiliary_maps["candidate_link_map"] = link_map.provenance()
+    if alias_source is not None:
+        source_path = Path(alias_source).resolve()
+        auxiliary_maps["global_alias_source"] = {
+            "path": str(source_path), "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "scope": "declared_global_name_correspondence", "proved": False,
+        }
+    if code_map is not None:
+        auxiliary_maps["candidate_code_map"] = code_map.provenance()
     oracle, candidate = load32(args.oracle_exe), load32(args.candidate_exe)
     from tools.dosunit.reporting.flat32_proof_report import loaded_image_identity
 
@@ -485,6 +552,8 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
             if magic[:2] != b"MZ" and magic != b"\x7fELF":
                 raise ValueError("region mode requires a PE32 or ELF32 candidate")
     boundaries = lst_functions(args.oracle_lst)
+    if set(abi_contracts) - set(boundaries):
+        raise ValueError("ABI catalog names must belong to the original function manifest")
     if args.candidate_lst:
         candidate_end_kind = ListingEndKind(args.candidate_lst_end_kind)
         symbols = {
@@ -503,18 +572,51 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
             pass
     else:
         symbols = nm_symbols(args.candidate_exe)
+    if code_map is not None and args.candidate_lst and candidate_end_kind is ListingEndKind.BYTE:
+        from tools.comparator.msc8_dependencies import refine_scan_symbols
+
+        symbols = refine_scan_symbols(candidate, symbols, code_map)
+    # Dynamic third-party argparse boundary: older API callers omit all_original.
+    all_original = getattr(args, "all_original", False)
     names = (
         sorted({name.strip() for name in args.functions.split(",") if name.strip()})
         if args.functions
+        else sorted(boundaries) if all_original
         else sorted(name for name in boundaries if name.startswith("sub_"))
     )
+    import_root_matches: list[dict[str, object]] = []
+    if match_import_thunks and code_map is not None:
+        from tools.comparator.import_thunk_roots import match_import_thunk_roots
+
+        symbols, import_root_matches = match_import_thunk_roots(oracle, candidate, boundaries, symbols, names, code_map)
+    code_root_matches: list[dict[str, object]] = []
+    if match_code_symbols and code_map is not None:
+        from tools.comparator.code_symbol_roots import match_code_symbol_roots
+
+        symbols, code_root_matches = match_code_symbol_roots(
+            candidate, symbols, sorted(set(names) & boundaries.keys()), code_map,
+        )
     ofuncs, cfuncs, results = select_functions(args, oracle, candidate, boundaries, symbols, names)
     recursive_joint = _recursive_joint_document(args, oracle, candidate, boundaries, symbols, names)
+    from tools.comparator.msc8_dependencies import candidate_dependencies, original_dependencies, with_code_map
     from tools.dosunit.compare.flat32_proof_retry import build_proof_context
 
-    proof_context = build_proof_context(args.mode, oracle, candidate, lambda: select_functions(
-        args, oracle, candidate, boundaries, symbols, sorted(boundaries.keys() | symbols.keys()),
+    proof_context = build_proof_context(args.mode, oracle, candidate, lambda: (
+        original_dependencies(oracle, boundaries), candidate_dependencies(candidate, symbols, args.scan_limit), [],
     ))
+    if proof_context is not None:
+        from tools.comparator.msc8_chunks import with_listing_chunks
+
+        _, _, oracle_dependencies, rebuilt_dependencies = proof_context
+        oracle_dependencies = with_listing_chunks(oracle, oracle_dependencies, args.oracle_lst)
+        if args.candidate_lst is not None:
+            rebuilt_dependencies = with_listing_chunks(candidate, rebuilt_dependencies, args.candidate_lst)
+        if code_map is not None:
+            rebuilt_dependencies = with_code_map(
+                candidate, rebuilt_dependencies, code_map,
+                partition_scan_envelopes=bool(args.candidate_lst) and candidate_end_kind is ListingEndKind.BYTE,
+            )
+        proof_context = oracle, candidate, oracle_dependencies, rebuilt_dependencies
     omod, cmod = "oracle", "candidate"
     ocat = catalog(omod, ofuncs, oracle.loader.main_object.linked_base)
     ccat = catalog(cmod, cfuncs, candidate.loader.main_object.linked_base)
@@ -523,6 +625,8 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
     if args.mode == "matched-cfg":
         from tools.comparator.msc8_cfg import compare_cfg
 
+        normalization = _relocation_map(args, symbols, candidate, oracle, link_map)
+        write_json(args.out_dir, "globals.json", {hex(k): hex(v) for k, v in normalization.items()})
         for name in ofuncs:
             result = compare_cfg(
                 oracle,
@@ -532,13 +636,26 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
                 candidate_range=cfuncs[name],
                 outputs=output_regs,
                 timeout_ms=args.timeout_ms,
+                normalization=normalization,
             )
             from tools.dosunit.compare.flat32_proof_retry import checked_cfg_environment_verdict, retry_function_proof
 
-            retried = retry_function_proof(name, result, proof_context, output_regs, args.timeout_ms,
-                                           entry_domain=entry_domain, io_model=io_model,
-                                           call_block_retry_cap=call_block_retry_cap(args))
+            # Normalized retries use exactly the CFG's constant premise.
+            # The shared owner keeps unrelated strict lanes out of that path.
+            retried = retry_function_proof(
+                name, result, proof_context, output_regs, args.timeout_ms,
+                entry_domain=entry_domain, io_model=io_model,
+                call_block_retry_cap=call_block_retry_cap(args),
+                candidate_normalization=normalization,
+                abi_observation=abi_contracts.get(name),
+                external_contracts=external_contracts.get(name, ()),
+            )
             retried = checked_cfg_environment_verdict(retried, result, proof_context, io_model=io_model)
+            if name in abi_contracts or name in external_contracts:
+                retried["strict_cfg_result"] = {
+                    key: value for key, value in result.items()
+                    if key not in {"oracle_ssa", "candidate_ssa", "block_compare"}
+                }
             result = {**retried, "function": {"id": f"oracle:{name}", "name": name}}
             write_json(args.out_dir, f"{name}.cfg.json", result)
             results.append(
@@ -549,28 +666,38 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
                 }
             )
         summary = summarize(results)
-        report = {
+        report: dict[str, Any] = {
             "schema": REPORT_SCHEMA,
             "requested_functions": names,
             "summary": summary,
             "results": results,
             "proof_contract": {
-                "control_flow": "closed bijective CFG induction over full internal state",
+                "control_flow": "closed CFG induction or complete entry-to-return composition over full internal state",
                 "outputs": output_regs,
                 "memory": "entire byte array",
                 "calls": (
+                    "call boundaries retry checked complete call composition under the same "
+                    "constant relocation premise; unrelated strict retries are not applied"
+                    if normalization else
                     "call boundaries refuse the CFG compare, then retry through checked "
                     "bounded composition over declared ranges: direct targets and finite "
                     "selector-enumerated indirect targets, each with a proved return; "
                     "undeclared, unconstrained, recursive or over-budget targets refuse"
                 ),
-                "global_normalization": None,
+                "global_normalization": _normalization_premise(normalization, link_map),
+                "global_layout_check": check_global_layout(normalization),
             },
         }
         write_json(args.out_dir, "compare.json", report)
         report["loaded_images"] = images
         report["function_ranges"] = {"oracle": ofuncs, "candidate": cfuncs}
         report["recursive_joint"] = recursive_joint
+        if match_import_thunks:
+            report["import_thunk_correspondence"] = import_root_matches
+        if match_code_symbols:
+            report["code_symbol_correspondence"] = code_root_matches
+        if auxiliary_maps:
+            report["auxiliary_inputs"] = auxiliary_maps
         return report
     kwargs = {
         "output_regs": (*REG_NAMES, "ip")
@@ -599,16 +726,10 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
         report["loaded_images"] = images
         report["function_ranges"] = {"oracle": ofuncs, "candidate": cfuncs}
         report["recursive_joint"] = recursive_joint
+        if auxiliary_maps:
+            report["auxiliary_inputs"] = auxiliary_maps
         return report
-    normalization = (
-        global_map(symbols, candidate, oracle, lst_data_symbols(args.oracle_lst)) if args.normalize_globals else {}
-    )
-    if link_map is not None:
-        oracle_data = lst_data_symbols(args.oracle_lst)
-        for mapped, original in link_map_global_map(link_map, candidate, oracle, oracle_data).items():
-            if normalization.get(mapped, original) != original:
-                raise ValueError(f"conflicting data relocations at {mapped:#x}")
-            normalization[mapped] = original
+    normalization = _relocation_map(args, symbols, candidate, oracle, link_map)
     for function in cssa["functions"]:
         function["_constant_normalization"] = normalization
         function["_constant_normalization_reasons"] = dict.fromkeys(normalization, "global_reloc")
@@ -678,6 +799,7 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
             "control_flow": "complete single-block near return; 32-bit return target observed",
             "flags": "lazy-flag summaries: supported thunks evaluated exactly; unsupported flag-dependent counterexamples refuse",
             "global_normalization": _normalization_premise(normalization, link_map),
+            "global_layout_check": check_global_layout(normalization),
         },
         "inputs": {
             side: {"path": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -685,8 +807,8 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
         },
         "lowering_refusals": {"oracle": ossa["refusals"], "candidate": cssa["refusals"]},
     }
-    if link_map is not None:
-        report["auxiliary_inputs"] = {"candidate_link_map": link_map.provenance()}
+    if auxiliary_maps:
+        report["auxiliary_inputs"] = auxiliary_maps
     for filename, document in [
         ("oracle.functions.json", ocat),
         ("candidate.functions.json", ccat),
@@ -704,11 +826,134 @@ def _compare(args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901
     return report
 
 
+def _counterexample_memory_addresses(args: argparse.Namespace, enabled: bool) -> tuple[int, ...]:
+    """Validate explicit byte observations before starting a bound comparison."""
+    # Dynamic third-party argparse boundary: older callers omit memory-byte observations.
+    addresses = tuple(getattr(args, "counterexample_memory_byte", ()) or ())
+    if addresses and not enabled:
+        raise ValueError("counterexample memory bytes require --find-return-counterexamples")
+    if (len(set(addresses)) != len(addresses)
+            or any(type(address) is not int or not 0 <= address < 2**32 for address in addresses)):
+        raise ValueError("counterexample memory addresses must be distinct uint32 integers")
+    return addresses
+
+
+def _compare_with_tables(args: argparse.Namespace) -> dict[str, Any]:
+    """Run opt-in table lemmas inside the same source and input seal as other proofs."""
+    from tools.comparator.abi_catalog import load_abi_catalog
+    from tools.comparator.concrete_witness_catalog import prepare_concrete_catalog
+    from tools.comparator.table_catalog import attach_table_catalog, prepare_table_catalog
+    from tools.comparator.verdict import summarize
+    from tools.dosunit.reporting.flat32_proof_domain_cli import entry_domain_from_args
+
+    # Dynamic third-party argparse boundary: earlier callers omit this optional catalog.
+    discover_tables = getattr(args, "discover_target_tables", False)
+    # Dynamic third-party argparse boundary: earlier callers omit the manual catalog.
+    catalog_path = getattr(args, "table_check_catalog", None)
+    if discover_tables and (args.mode != "matched-cfg" or catalog_path is not None):
+        raise ValueError("table discovery requires matched-cfg without a manual table catalog")
+    # Dynamic third-party argparse boundary: older callers omit bounded refutation.
+    find_counterexamples = getattr(args, "find_return_counterexamples", False)
+    memory_addresses = _counterexample_memory_addresses(args, find_counterexamples)
+    if find_counterexamples:
+        # Dynamic third-party argparse boundary: older callers omit these catalogs.
+        has_catalog = any(getattr(args, name, None) is not None
+                          for name in ("abi_observation_catalog", "external_call_catalog"))
+        if (args.mode != "matched-cfg" or args.normalize_globals or has_catalog
+                or "eax" not in {name.strip() for name in args.output_regs.split(",")}):
+            raise ValueError("return counterexamples require literal matched-cfg with full EAX and no ABI/external catalog")
+    # Dynamic third-party argparse boundary: legacy callers omit this optional catalog.
+    table_abis, table_abi_binding = load_abi_catalog(getattr(args, "abi_observation_catalog", None), args.mode)
+    concrete_catalog = prepare_concrete_catalog(args)
+    table_evidence = prepare_table_catalog(catalog_path,
+                                           args.oracle_exe, args.candidate_exe, sorted(lst_functions(args.oracle_lst)),
+                                           entry_domain=entry_domain_from_args(args), abi_contracts=table_abis)
+    report = _compare(args)
+    _check_table_abi_binding(report, table_abi_binding)
+    if discover_tables:
+        from tools.comparator.table_discovery import discover_entry_tables
+
+        ranges = report["function_ranges"]
+        discovered, evidence = discover_entry_tables(args.oracle_exe.read_bytes(), args.candidate_exe.read_bytes(),
+                                                      ranges["oracle"], ranges["candidate"])
+        report["table_discovery"] = evidence
+        if discovered["functions"]:
+            write_json(args.out_dir, "discovered-tables.json", discovered)
+            table_evidence = prepare_table_catalog(args.out_dir / "discovered-tables.json", args.oracle_exe,
+                                                   args.candidate_exe, sorted(lst_functions(args.oracle_lst)),
+                                                   entry_domain=entry_domain_from_args(args), abi_contracts=table_abis)
+    if table_evidence is not None:
+        # run_bound_comparison independently verifies these binary digests and
+        # replaces this temporary input view with its authoritative snapshot.
+        report["inputs"] = {side: {"sha256": digest} for side, digest in table_evidence.image_sha256.items()}
+        report.setdefault("auxiliary_inputs", {})["table_check_catalog"] = {
+            "path": str(table_evidence.path), "sha256": table_evidence.catalog_sha256,
+        }
+        attach_table_catalog(report, table_evidence)
+        from tools.comparator.table_normalized_checks import attach_normalized_table_checks
+
+        attach_normalized_table_checks(report, args.oracle_exe.read_bytes(), args.candidate_exe.read_bytes())
+        if discover_tables:
+            from tools.comparator.table_accessor_proof import promote_accessor_switch
+
+            images = (args.oracle_exe.read_bytes(), args.candidate_exe.read_bytes())
+            for row in report["results"]:
+                promote_accessor_switch(row, *images)
+        report["summary"] = summarize(report["results"])
+    if find_counterexamples:
+        from tools.comparator.return_counterexample import attach_return_counterexamples
+
+        names = [row["function"]["name"] for row in report["results"]]
+        masks = _return_width_masks(args, names)
+        eligible = {name for name in names if masks.get(name, 0xFFFFFFFF) == 0xFFFFFFFF}
+        attach_return_counterexamples(report, args.oracle_exe.read_bytes(), args.candidate_exe.read_bytes(), eligible,
+                                      entry_domain=entry_domain_from_args(args),
+                                      output_registers=tuple(name for name in ("eax", "edx")
+                                                             if name in args.output_regs.split(",")),
+                                      memory_addresses=memory_addresses)
+        report["summary"] = summarize(report["results"])
+    _attach_concrete_witnesses(args, report, concrete_catalog)
+    return report
+
+
+def _attach_concrete_witnesses(args: argparse.Namespace, report: dict[str, Any], catalog: object) -> None:
+    """Bind full-EAX explicit refutations inside the same source and input seal."""
+    from tools.comparator.concrete_witness_catalog import ConcreteWitnessCatalog, attach_concrete_catalog
+    from tools.comparator.verdict import summarize
+
+    if catalog is None:
+        return
+    assert isinstance(catalog, ConcreteWitnessCatalog)
+    names = [row['function']['name'] for row in report['results']]
+    masks = _return_width_masks(args, names)
+    eligible = {name for name in names if masks.get(name, 0xFFFFFFFF) == 0xFFFFFFFF}
+    attach_concrete_catalog(report, catalog, args.oracle_exe.read_bytes(), args.candidate_exe.read_bytes(), eligible)
+    report['summary'] = summarize(report['results'])
+
+
+
+def _check_table_abi_binding(report: dict[str, Any], binding: dict[str, str]) -> None:
+    """Require both proof stages to consume the identical hashed ABI premise."""
+    if binding and report.get("auxiliary_inputs", {}).get("abi_observation_catalog") != binding:
+        raise RuntimeError("ABI catalog changed between table and function proofs")
+
+
 def compare(args: argparse.Namespace) -> dict[str, Any]:
     """Bind complete backend evidence to current binaries and proof contracts."""
+    from tools.comparator.function_coverage import original_function_coverage
     from tools.dosunit.reporting.flat32_proof_report import run_bound_comparison
 
-    return run_bound_comparison(_compare, args, Path(__file__))
+    listing_digest = hashlib.sha256(args.oracle_lst.read_bytes()).hexdigest()
+    original_names = sorted(lst_functions(args.oracle_lst))
+    report: dict[str, Any] = run_bound_comparison(_compare_with_tables, args, Path(__file__))
+    if hashlib.sha256(args.oracle_lst.read_bytes()).hexdigest() != listing_digest:
+        raise RuntimeError("original listing changed during the proof; coverage cannot be established")
+    report["original_function_coverage"] = original_function_coverage(original_names, report["results"])
+    report["original_function_manifest"] = {
+        "path": str(args.oracle_lst.resolve()), "sha256": listing_digest, "names": original_names,
+    }
+    write_json(args.out_dir, "compare.json", report)
+    return report
 
 
 def main() -> int:
@@ -725,17 +970,47 @@ def main() -> int:
     )
     parser.add_argument("--candidate-src", type=Path, default=None,
                         help="candidate generated C for return-width masks (default: derive from --candidate-lst)")
+    parser.add_argument("--abi-observation-catalog", type=Path,
+                        help="explicit per-function scalar return and private-stack lifetime premises; matched-cfg only")
+    parser.add_argument("--counterexample-memory-byte", action="append", type=lambda value: int(value, 0),
+                        help="observe this literal byte address in bounded root-return refutation; repeatable")
+    parser.add_argument("--find-return-counterexamples", action="store_true",
+                        help="bounded root-to-return declared EAX/EDX refutation; literal matched-cfg, never proves equality")
+    parser.add_argument("--concrete-counterexample-vectors", type=Path,
+                        help="explicit shared integer inputs for bounded native EAX refutation; literal matched-cfg only")
+    parser.add_argument("--discover-target-tables", action="store_true",
+                        help="prove entry-switch lemmas with published initial-table and, for read accessors, live-global premises")
+    parser.add_argument("--external-call-catalog", type=Path,
+                        help="explicit per-function imported-call ABI/effect premises; matched-cfg only")
+    parser.add_argument("--table-check-catalog", type=Path,
+                        help="partial serialized table/dispatch checks, reported separately from function proofs")
     parser.add_argument("--candidate-map", type=Path, default=None,
                         help="funcnames.map for sub_<VA> to semantic-name resolution")
     parser.add_argument(
         "--candidate-link-map", type=Path, default=None,
         help="MSVC LINK /MAP for a symbol-stripped PE32 candidate; its timestamp/base are "
              "verified against --candidate-exe and its publics supply data-alias relocation "
-             "evidence (leaf mode only, requires --normalize-globals)",
+             "evidence (leaf or matched-cfg mode, requires --normalize-globals)",
     )
+    parser.add_argument("--global-alias-source", type=Path, default=None,
+                        help="explicit decompiler C name/address annotations for renamed globals; "
+                             "requires --candidate-link-map and --normalize-globals; remains a premise")
+    parser.add_argument(
+        "--candidate-code-map", type=Path, default=None,
+        help="image-verified MSVC LINK /MAP code dependencies, including static helpers; "
+             "does not normalize data or establish root correspondences",
+    )
+    parser.add_argument("--match-import-thunks", action="store_true",
+                        help="match missing roots by unique native JMP-IAT DLL/import identity; "
+                             "requires --candidate-code-map and matched-cfg; establishes no ABI or equivalence")
+    parser.add_argument("--match-code-symbols", action="store_true",
+                        help="propose missing roots from unique verified LINK public names; "
+                             "requires --candidate-code-map and matched-cfg; native proof remains mandatory")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--functions")
     group.add_argument("--all-mapped", action="store_true")
+    group.add_argument("--all-original", action="store_true",
+                       help="compare every original listing function, including named and unmapped entries")
     parser.add_argument("--mode", choices=["leaf", "matched-cfg", "region", "auto"], default="leaf")
     parser.add_argument("--retry-block-limit", type=int, choices=[128], default=None,
                         help="continue a call-lifting worklist only after its 64-block cap; "
@@ -748,13 +1023,13 @@ def main() -> int:
     )
     parser.add_argument("--scan-limit", type=lambda value: int(value, 0), default=0x2000)
     parser.add_argument("--timeout-ms", type=int, default=30000)
+    from tools.dosunit.compare.pe32_recursive_compare import add_recursive_arguments, check_recursive_request
     from tools.dosunit.reporting.flat32_proof_domain_cli import (
         add_entry_esp_range_argument,
         add_ordered_io_argument,
         check_entry_domain_mode,
         check_ordered_io_mode,
     )
-    from tools.dosunit.compare.pe32_recursive_compare import add_recursive_arguments, check_recursive_request
 
     add_entry_esp_range_argument(parser)
     add_ordered_io_argument(parser)
@@ -766,7 +1041,7 @@ def main() -> int:
     check_recursive_request(parser, args)
     if args.scan_limit <= 0 or args.timeout_ms <= 0:
         parser.error("scan-limit and timeout-ms must be positive")
-    if args.mode in {"matched-cfg", "region", "auto"} and args.normalize_globals:
+    if args.mode in {"region", "auto"} and args.normalize_globals:
         parser.error(f"{args.mode} currently requires literal data addresses")
     if args.candidate_link_map is not None and not args.normalize_globals:
         parser.error("--candidate-link-map supplies a relocation premise and requires --normalize-globals")

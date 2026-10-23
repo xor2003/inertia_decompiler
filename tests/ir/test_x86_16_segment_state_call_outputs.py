@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 
+from inertia.ir import segment_state_solver
 from inertia.ir.core import (
     IRBlock,
     IRFunctionArtifact,
@@ -129,3 +133,32 @@ def test_real_constant_move_still_has_proven_provenance() -> None:
     state, _entries, _exits = transfer_block_with_instruction_states(block, {})
     assert state["ds"].origin is SegmentOrigin.PROVEN
     assert state["ds"].constant_value() == 0x2345
+
+
+@pytest.mark.parametrize("preservation,declared,transfers", [
+    (False, False, 2), (True, False, 6), (False, True, 6),
+])
+def test_segment_fixed_point_preserves_evidence_replay_budget(
+    preservation: bool, declared: bool, transfers: int,
+) -> None:
+    """Skip redundant pure work, retaining replay counts for supplied evidence."""
+    artifact = IRFunctionArtifact(0x1000, (IRBlock(0x1000, (
+        IRInstr("MOV", _reg("ds"), (_reg("ss"),), addr=0x1000),
+        IRInstr("CALL", None,
+                (IRValue(MemSpace.CONST, const=0x2000, size=2),), addr=0x1002),
+    )),))
+    # Deliberately unbound evidence must never preserve DS. Its presence still
+    # requires the original evaluation schedule, including final snapshots.
+    proofs = ((SimpleNamespace(caller=SimpleNamespace(artifact=None), callsite_addr=0),)
+              if preservation else ())
+    admissions = (SimpleNamespace(),) if declared else ()
+    with patch.object(
+        segment_state_solver, "transfer_block_with_instruction_states",
+        wraps=segment_state_solver.transfer_block_with_instruction_states,
+    ) as transfer:
+        result = segment_state_solver.solve_segment_state_8616(
+            artifact, None, (), proofs, declared_call_effects=admissions,
+        )
+    assert result.instruction_entry_states[0x1002]["ds"].source == "ss"
+    assert result.instruction_exit_states[0x1002]["ds"].origin is SegmentOrigin.UNKNOWN
+    assert transfer.call_count == transfers

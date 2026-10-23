@@ -250,7 +250,7 @@ def test_main_structuring_path_builds_local_contract_before_segment_consumers() 
     names = tuple(spec.name for spec in _build_decompiler_structuring_passes())
 
     assert names.index("_segment_function_contract_8616") < names.index(
-        "_segmented_memory_reasoning_8616"
+        "_segmented_memory_analysis_8616"
     )
 
 

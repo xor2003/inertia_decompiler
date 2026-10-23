@@ -435,3 +435,98 @@ def test_explicit_flat32_function_scan_retains_complete_branch_state(tmp_path):
     assert {"eax", "ecx", "esp", "eip", "cc_op", "cc_dep1"} <= branch["outputs"].keys()
     assert all(int(part["entry"]["linear"], 16) >= 0x400000 for part in parts)
     assert engine.REG_BY_OFFSET is original_map
+
+
+def test_flat32_pushfd_preserves_id_and_ac_bits():
+    import archinfo
+    import pyvex
+    import z3
+
+    from tools.dosunit.architectures.flat32_cfg_summary import lower_cfg_block
+    from tools.dosunit.compare import straightline_ssa as engine
+
+    # Arithmetic flags remain an explicit abstract helper in this adapter.
+    # PUSHFD; POP EAX; AND EAX, ID|AC; RET.
+    block = pyvex.IRSB(bytes.fromhex("9c582500002400c3"), 0x1000, archinfo.ArchX86())
+    lowered = lower_cfg_block(block, output_regs=("eax", "esp", "eip", "id", "ac"), control_targets={})
+    assert isinstance(lowered, dict), lowered
+    inputs = engine._z3_inputs(lowered, lowered, z3)
+    value = engine._z3_term(lowered["outputs"]["eax"], document=lowered, inputs=inputs, z3=z3)
+    expected = ((inputs["id"][0] & 1) << 21) | ((inputs["ac"][0] & 1) << 18)
+    solver = z3.Solver()
+    solver.add(value != expected)
+    assert solver.check() == z3.unsat
+    for missing in (1 << 21, 1 << 18):
+        solver = z3.Solver()
+        solver.add(value != (expected & ~missing))
+        assert solver.check() == z3.sat
+    for name in ("id", "ac"):
+        output = engine._z3_term(lowered["outputs"][name], document=lowered, inputs=inputs, z3=z3)
+        solver = z3.Solver()
+        solver.add(output != inputs[name][0])
+        assert solver.check() == z3.unsat
+
+
+def test_flat32_popfd_retains_unmodeled_warning_refusal():
+    import archinfo
+    import pyvex
+
+    from tools.dosunit.architectures.flat32_cfg_summary import lower_cfg_block
+    from tools.dosunit.compare import straightline_ssa as engine
+
+    block = pyvex.IRSB(bytes.fromhex("509dc3"), 0x1000, archinfo.ArchX86())
+    lowered = lower_cfg_block(block, output_regs=("eax", "esp", "eip", "id", "ac"), control_targets={})
+    assert isinstance(lowered, engine.LowerFailure)
+    assert lowered.reason == "unsupported_ir"
+
+
+@pytest.mark.parametrize("operation", ["storele", "storebe"])
+def test_composition_factors_equal_destination_stores(operation):
+    """A branch chooses stored bytes without duplicating its common memory/address."""
+    import z3
+
+    from tools.dosunit.compare import straightline_ssa as S
+    from tools.dosunit.ssa.composition import merge_states
+    from tools.dosunit.ssa.materialization import input_items, materialize_term
+
+    memory = {"op": "mem_input", "name": "mem", "addr_width": 32, "value_width": 8}
+    address = {"op": "input", "name": "address", "width": 32}
+    condition = {"op": "input", "name": "condition", "width": 1}
+    left = {"op": operation, "width": 0, "args": [memory, address,
+            {"op": "input", "name": "left", "width": 32}]}
+    right = {"op": operation, "width": 0, "args": [memory, address,
+             {"op": "input", "name": "right", "width": 32}]}
+    merged = merge_states(condition, {"memory": left}, {"memory": right})["memory"]
+    assert merged["op"] == operation
+    assert merged["args"][0] is memory
+    original = {"op": "ite", "width": 0, "args": [condition, left, right]}
+    expressions = []
+    for term in (original, merged):
+        assignments = []
+        value = materialize_term(term, assignments=assignments, memo={})
+        document = {"outputs": {"memory": value}, "assignments": assignments,
+                    "inputs": input_items([value], assignments)}
+        expressions.append(S._z3_term(value, document=document,
+            inputs=S._z3_inputs(document, document, z3), z3=z3))
+    solver = z3.Solver()
+    solver.add(expressions[0] != expressions[1])
+    assert solver.check() == z3.unsat
+
+
+@pytest.mark.parametrize("difference", ["array", "address", "width", "endian"])
+def test_store_factoring_retains_distinct_destinations(difference):
+    """Unknown aliasing or different storage must retain the complete branch arrays."""
+    from tools.dosunit.ssa.composition import merge_states
+
+    memory = {"op": "mem_input", "name": "mem", "addr_width": 32, "value_width": 8}
+    address = {"op": "input", "name": "a", "width": 32}
+    left = {"op": "storele", "width": 0, "args": [memory, address,
+            {"op": "input", "name": "x", "width": 32}]}
+    right = {"op": "storebe" if difference == "endian" else "storele", "width": 0,
+             "args": [{**memory, "name": "other"} if difference == "array" else memory,
+                      {**address, "name": "b"} if difference == "address" else address,
+                      {"op": "input", "name": "y", "width": 16 if difference == "width" else 32}]}
+    condition = {"op": "input", "name": "condition", "width": 1}
+    result = merge_states(condition, {"memory": left}, {"memory": right})["memory"]
+    assert result["op"] == "ite"
+    assert result["args"][1] is left and result["args"][2] is right

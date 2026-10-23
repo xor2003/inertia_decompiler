@@ -60,7 +60,7 @@ def _memory_storage(expression: c.CExpression, width: int, project: object) -> s
             isinstance(type_, _INTEGER_TYPES)
             and type_.with_arch(expression.codegen.project.arch).size == width * _BITS_PER_BYTE
         ):
-            return cast("str | None", _global_indexed_field_ds_deref_fingerprint_8616(expression, project, set()))
+            return _global_indexed_field_ds_deref_fingerprint_8616(expression, project, set())
     return None
 
 

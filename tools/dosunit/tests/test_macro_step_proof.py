@@ -345,13 +345,7 @@ def test_compose_budget_cannot_be_assumed(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("driver", ["msc8"])
 def test_flat32_identity_neighbor_unchanged(driver: str) -> None:
-    """Neighbor: production identity and chain-split proofs stay unchanged.
-
-    The staged macro-step layer is entry-cut identity only: these loops have
-    an interior back-edge that never revisits the entry cut, so the staged
-    slice must fail closed with a typed refusal rather than prove or drop
-    the cycle. The production reblocked proofs remain the green neighbors.
-    """
+    """Interior feedback cuts preserve identity and split-loop neighbor proofs."""
     from tools.dosunit.compare.flat32_cfg_regions import compare_reblocked_cfg
 
     with _driver_lane(driver) as lane:
@@ -363,8 +357,9 @@ def test_flat32_identity_neighbor_unchanged(driver: str) -> None:
             )
             assert baseline["status"] is lane.verdict.Status.PASSED
             staged = _macro32(lane, *code_pair)
-            assert staged["status"] is not lane.verdict.Status.PASSED
-            assert staged["reason"] != "macro_step_cfg_induction"
+            assert staged["status"] is lane.verdict.Status.PASSED
+            assert staged["reason"] == "macro_step_cfg_induction"
+            assert len(staged["macro"]["cut_pairs"]) == 2
 
 
 def test_real16_reblocking_neighbor_unchanged(tmp_path: Path) -> None:
@@ -382,3 +377,22 @@ def test_flat32_macro_identity_and_permutation_paths(driver: str) -> None:
         result = _macro32(lane, ORACLE32, ORACLE32)
         assert result["status"] is lane.verdict.Status.PASSED, result
         assert result["counters"]["failure_count"] == 0
+
+
+def test_missing_internal_cut_coverage_cannot_prove(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Entry coverage cannot conceal a missing internal-loop transition."""
+    import tools.dosunit.compare.flat32_macro_proof as proof
+
+    original = proof._resolve_pairs
+
+    def omit_internal(*args, **kwargs):
+        rows, facts, failures = original(*args, **kwargs)
+        entry = min(row[0].start_cut for row in rows)
+        return [row for row in rows if row[0].start_cut == entry], facts, failures
+
+    monkeypatch.setattr(proof, "_resolve_pairs", omit_internal)
+    with _driver_lane("msc8") as lane:
+        result = _macro32(lane, LOOP32, LOOP32)
+    assert result["status"] is not lane.verdict.Status.PASSED
+    assert any(coverage["completeness"] != "proved"
+               for attempt in result["macro"]["attempts"] for coverage in attempt["coverage"])

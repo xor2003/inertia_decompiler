@@ -21,12 +21,14 @@ from inertia.ir.logical_memory_rebase import rebase_logical_memory_prefix_insert
 from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_machine_frame_kind_8616
 
 from .call_output_contracts import (
+    CALL_OUTPUT_SHAPE_REGISTERS_8616,
     CallOutputFact8616,
     CallOutputFailure8616,
     CallOutputShape8616,
     CallOutputStats8616,
     CallOutputVerdict8616,
 )
+from .call_register_role_contracts import CallRegisterRolesArtifact8616
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,10 +38,23 @@ class CallOutputArtifact8616:
     function: IRFunctionArtifact
     facts: tuple[CallOutputFact8616, ...]
     stats: CallOutputStats8616
+    register_roles: CallRegisterRolesArtifact8616 | None = None
+    source_function: IRFunctionArtifact | None = None
 
     @property
     def complete(self) -> bool:
-        """Return whether every CALL output decision is positively proven."""
+        """Return whether every CALL output decision is positively proven.
+
+        Attached register-role evidence must authenticate the exact output
+        snapshot it consumed: the canonical fact census and, when retained,
+        the source/output IR snapshots themselves. A foreign artifact — even
+        one built for the same function address — is not coherent.
+        """
+        if self.register_roles is not None and not _roles_bind_outputs_8616(
+            self.register_roles,
+            self,
+        ):
+            return False
         return bool(self.stats.complete)
 
     def to_dict(self) -> dict[str, object]:
@@ -60,8 +75,31 @@ class CallOutputArtifact8616:
                 }
                 for fact in self.facts
             ],
+            "register_roles": (
+                None
+                if self.register_roles is None
+                else self.register_roles.to_dict()
+            ),
             "stats": self.stats.to_dict(),
         }
+
+
+def _roles_bind_outputs_8616(
+    roles: CallRegisterRolesArtifact8616,
+    outputs: CallOutputArtifact8616,
+) -> bool:
+    """Return whether role evidence authenticates this exact output snapshot."""
+    if roles.function_addr != outputs.function.function_addr:
+        return False
+    if not roles.authenticates_output_facts(outputs.facts):
+        return False
+    if roles.output_function is not None and roles.output_function != outputs.function:
+        return False
+    return not (
+        roles.source_function is not None
+        and outputs.source_function is not None
+        and roles.source_function != outputs.source_function
+    )
 
 
 def _shape_8616(summary: CallsiteSummary8616) -> CallOutputShape8616 | None:
@@ -79,12 +117,12 @@ def _output_values_8616(
     target_addr: int,
 ) -> tuple[IRValue, ...]:
     """Return exact register slices defined by one used call result."""
-    names = ("ax",) if shape is CallOutputShape8616.AX else ("ax", "dx")
+    layout = CALL_OUTPUT_SHAPE_REGISTERS_8616[shape]
     return tuple(
         IRValue(
             MemSpace.REG,
             name=name,
-            size=2,
+            size=width,
             expr=("call_output", shape.value, f"{callsite_addr:#x}"),
             call_output=IRCallOutputProvenance8616(
                 callsite_addr=callsite_addr,
@@ -92,7 +130,7 @@ def _output_values_8616(
                 shape=shape,
             ),
         )
-        for name in names
+        for name, width in layout
     )
 
 
@@ -354,6 +392,7 @@ def materialize_call_outputs_8616(
         ),
         tuple(facts),
         stats,
+        source_function=artifact,
     )
 
 

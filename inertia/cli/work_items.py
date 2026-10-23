@@ -6,6 +6,7 @@ Responsibility: carry decompiler work-item status and reporting snapshots withou
 
 from __future__ import annotations
 
+import builtins
 import os
 import sys
 import time
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from inertia.cli.direct_addr_failure_family import FailureFamilySnapshot
+    from inertia.lowering.scalar_interface_transport import ScalarInterface8616
     from inertia.semantics.segment_program_layout_contract import SegmentProgramFunctionEvidence8616
 
 from inertia.cli.metadata_evidence import has_only_binary_signatures
@@ -48,6 +50,25 @@ class FunctionWorkExecutionOrigin8616(StrEnum):
 
     IN_PROCESS = "in_process"
     CLEAN_PROCESS = "clean_process"
+
+
+@dataclass(frozen=True)
+class TerminalDecompileFailure8616:
+    """Typed terminal pipeline failure carried across the stats/work boundary.
+
+    Produced by ``_decompile_function_with_stats`` when the run raised
+    ``PipelineHardError``. Consumers set terminal provenance
+    (``FunctionWorkResult.skip_heavy_fallbacks``) from its presence instead
+    of re-running the identical failed invariant under alternative
+    structurer, direct-address or non-optimized recovery lanes.
+    """
+
+    message: str
+    layer: str
+    function_addr: int | None
+    # mypyc resolves unqualified object annotations through module globals.
+    # Qualifying the builtin keeps native and Python dataclass contracts equal.
+    details: builtins.object
 
 
 class TailValidationDisplayOutcome(StrEnum):
@@ -229,6 +250,8 @@ class FunctionWorkResult:
     fallback_family_labels: tuple[str, ...] = ()
     validated_payload_hash: str | None = None
     gcc_checked_payload_hash: str | None = None
+    scalar_interface: ScalarInterface8616 | None = None
+    scalar_interface_generation: str | None = None
     segment_program_function_evidence: SegmentProgramFunctionEvidence8616 | None = None
     failure_family_snapshot: FailureFamilySnapshot | None = None
     execution_origin: FunctionWorkExecutionOrigin8616 = (

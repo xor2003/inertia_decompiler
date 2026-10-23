@@ -39,8 +39,9 @@ def test_legacy_pickle_class_lookup():
     import pickle
 
     from tools.signatures.omf_pat import PatPublicName
+    from tools.signatures.pickle_cache import loads_signature_pickle
 
     # Protocol-zero global lookup represents pickles produced before relocation.
-    assert pickle.loads(b"comf_pat\nPatPublicName\n.") is PatPublicName
+    assert loads_signature_pickle(b"comf_pat\nPatPublicName\n.") is PatPublicName
     symbol = PatPublicName(3, "example")
     assert pickle.loads(pickle.dumps(symbol)) == symbol

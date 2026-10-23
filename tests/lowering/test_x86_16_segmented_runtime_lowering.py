@@ -27,8 +27,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariableField,
     CWhileLoop,
 )
+from angr.block import CapstoneInsn
+from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimStruct, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+from capstone import CS_ARCH_X86, CS_MODE_16, Cs
 from capstone.x86_const import (
     X86_GRP_JUMP,
     X86_GRP_RET,
@@ -146,6 +149,82 @@ from inertia.validation.validation_dataflow import validate_structured_def_use_8
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 
 
+class _EmptyFixtureFunctions:
+    """Expose a real empty lookup boundary without inventing function evidence."""
+
+    def function(self, addr: int, create: bool = False) -> None:
+        """Report that no function exists; this fixture never creates one."""
+        assert create is False
+        return None
+
+    def get(self, addr: int, default: object = None) -> object:
+        """Preserve normal mapping lookup behavior for an empty registry."""
+        return default
+
+
+class _FunctionFixtureManager:
+    """Retain exact function lookup and the same project knowledge base."""
+
+    def __init__(self, kb: SimpleNamespace, function: SimpleNamespace) -> None:
+        """Bind the fixture to the exact manager used by production consumers."""
+        self._kb, self._function = kb, function
+    def function(self, addr: int, create: bool = False) -> SimpleNamespace | None:
+        """Return only the retained function at its exact address."""
+        assert create is False
+        return self._function if addr == self._function.addr else None
+    def get(self, addr: int, default: object = None) -> object:
+        """Expose matching map lookup without creating function evidence."""
+        value = self.function(addr, create=False)
+        return default if value is None else value
+
+
+def _bind_function_fixture(
+    project: SimpleNamespace,
+    function: SimpleNamespace,
+    address: int,
+    encodings: dict[int, bytes],
+) -> None:
+    """Bind an owned function and validate fixture facts against decoded bytes.
+
+    Use the real decoder wrapper rather than partial instruction objects.
+    Prototype provenance starts at NONE; no readiness or semantic evidence is
+    invented to satisfy consumers of the function-manager boundary.
+    """
+    decoder = Cs(CS_ARCH_X86, CS_MODE_16)
+    decoder.detail = True
+    function.addr = address
+    function.info = {}
+    function.prototype_source = PrototypeSource.NONE
+    blocks = {block.addr: block for block in function.blocks}
+    for block in blocks.values():
+        instructions = []
+        for wrapper in block.capstone.insns:
+            original = wrapper.insn
+            raw = encodings[original.address]
+            decoded, = decoder.disasm(raw, original.address)
+            assert decoded.size == len(raw)
+            assert decoded.id == original.id
+            for wanted, actual in zip(original.operands, decoded.operands, strict=True):
+                assert wanted.type == actual.type and wanted.size == actual.size
+                if wanted.type == X86_OP_REG:
+                    assert wanted.reg == actual.reg
+                elif wanted.type == X86_OP_MEM:
+                    assert (wanted.mem.base,wanted.mem.index,wanted.mem.disp) == (actual.mem.base,actual.mem.index,actual.mem.disp)
+            instructions.append(CapstoneInsn(decoded))
+        block.capstone.insns = tuple(instructions)
+    function.block_addrs_set = set(blocks)
+    kb = SimpleNamespace(_project=project, labels={})
+    manager = _FunctionFixtureManager(kb, function)
+    kb.functions = manager
+    function._function_manager = manager
+    project.kb = kb
+    def block_for_address(addr: int, **_options: object) -> SimpleNamespace:
+        """Return the exact declared block, retaining its decoded instruction facts."""
+        return blocks[addr]
+
+    project.factory = SimpleNamespace(block=block_for_address)
+
+
 class _DummyCodegen:
     def __init__(self, project):
         self._idx = 0
@@ -163,6 +242,7 @@ class _DummyCodegen:
 
 def _project():
     project = SimpleNamespace(arch=Arch86_16(), _inertia_c_target="portable-flat")
+    project.kb = SimpleNamespace(_project=project, functions=_EmptyFixtureFunctions(), labels={})
     codegen = _DummyCodegen(project)
     root = CStatements([], addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(
@@ -8373,7 +8453,7 @@ def test_prune_consumed_call_push_reaches_switch_case_bodies():
     ) == (1, 1, 1, 1, 0)
 
 
-def test_prune_consumed_call_push_removes_nested_condition_mse_carrier():
+def test_prune_consumed_call_push_keeps_nested_condition_mse_live_carrier():
     project, codegen = _project()
     index_var = SimStackVariable(-2, 2, base="bp", name="index", region=0x4010)
     index_cvar = CVariable(index_var, variable_type=SimTypeShort(False), codegen=codegen)
@@ -8419,8 +8499,8 @@ def test_prune_consumed_call_push_removes_nested_condition_mse_carrier():
         function=function,
     )
 
-    assert changed is True
-    assert condition.stmts.statements == []
+    assert changed is False
+    assert condition.stmts.statements == [push_carrier]
     assert condition.expr.lhs.args[0] is index_cvar
     stats = codegen._inertia_consumed_call_push_carrier_prune_8616
     assert (
@@ -8429,7 +8509,7 @@ def test_prune_consumed_call_push_removes_nested_condition_mse_carrier():
         stats.classified_fact_count,
         stats.materialized_count,
         stats.failure_count,
-    ) == (1, 1, 1, 1, 0)
+    ) == (1, 1, 0, 0, 1)
 
 
 def test_prune_consumed_call_push_keeps_nested_condition_mse_near_match():
@@ -10639,7 +10719,7 @@ def test_apply_runtime_segment_lowering_joins_register_carrier_by_instruction_fa
             ),
         )
     )
-    project.kb = SimpleNamespace(functions=SimpleNamespace(get=lambda _addr: function))
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x4014: bytes.fromhex("8b5e06"), 0x4018: bytes.fromhex("ff37")})
 
     changed = apply_runtime_segment_lowering_8616(codegen)
     lowered = codegen.cfunc.statements.statements[0].expr
@@ -10709,7 +10789,7 @@ def test_apply_runtime_segment_lowering_consumes_typed_pointer_register_store_ca
             ),
         )
     )
-    project.kb = SimpleNamespace(functions=SimpleNamespace(get=lambda _addr: function))
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x4014: bytes.fromhex("8b5e06"), 0x4018: bytes.fromhex("8907")})
 
     changed = apply_runtime_segment_lowering_8616(codegen)
 
@@ -10795,7 +10875,7 @@ def test_apply_runtime_segment_lowering_reassembles_pointer_word_store_byte_pair
             ),
         )
     )
-    project.kb = SimpleNamespace(functions=SimpleNamespace(get=lambda _addr: function))
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x4014: bytes.fromhex("8b5e06"), 0x4018: bytes.fromhex("8907")})
 
     changed = apply_runtime_segment_lowering_8616(codegen)
 
@@ -10879,7 +10959,7 @@ def test_runtime_segment_lowering_materializes_one_word_store_from_ir_width():
             ),
         )
     )
-    project.kb = SimpleNamespace(functions=SimpleNamespace(get=lambda _addr: function))
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x4014: bytes.fromhex("8b5e06"), store_addr: bytes.fromhex("8907")})
     _publish_logical_accesses(
         project,
         function_addr=codegen.cfunc.addr,
@@ -11065,9 +11145,7 @@ def test_apply_runtime_segment_lowering_promotes_only_binary_proven_pointer_argu
             ),
         )
     )
-    project.kb = SimpleNamespace(
-        functions=SimpleNamespace(get=lambda _addr: function),
-    )
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x1000: bytes.fromhex("8b5e06"), 0x1003: bytes.fromhex("ff37")})
 
     changed = apply_runtime_segment_lowering_8616(codegen)
 
@@ -11167,7 +11245,7 @@ def test_apply_runtime_segment_lowering_appends_exact_trailing_pointer_argument(
             ),
         )
     )
-    project.kb = SimpleNamespace(functions=SimpleNamespace(get=lambda _addr: function))
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x1000: bytes.fromhex("8b5e06"), 0x1003: bytes.fromhex("ff37")})
 
     changed = apply_runtime_segment_lowering_8616(codegen)
 
@@ -11239,7 +11317,7 @@ def test_apply_runtime_segment_lowering_refuses_noncontiguous_pointer_argument()
             ),
         )
     )
-    project.kb = SimpleNamespace(functions=SimpleNamespace(get=lambda _addr: function))
+    _bind_function_fixture(project, function, codegen.cfunc.addr, {0x1000: bytes.fromhex("8b5e08"), 0x1003: bytes.fromhex("ff37")})
 
     changed = apply_runtime_segment_lowering_8616(codegen)
 
@@ -11556,6 +11634,7 @@ def test_runtime_segment_lowering_resolves_dirty_ds_copy_chain_before_helper_mat
             ),
         ),
     )
+    _bind_function_fixture(project, codegen._func, codegen.cfunc.addr, {0x4020: bytes.fromhex("a1460b")})
     ir_artifact = IRFunctionArtifact(
         function_addr=0x4010,
         blocks=(IRBlock(addr=0x4010),),

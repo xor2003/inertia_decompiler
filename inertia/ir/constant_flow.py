@@ -13,7 +13,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 import operator
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field, replace
 
 from inertia.semantics.register_value_preservation import (
@@ -314,6 +314,68 @@ class IRConstantFlow8616:
         """Read a proven value at the current program point; never guess zero."""
         result = self._read(value)
         return None if result is None else result.constant
+
+    def seed_register_constants_8616(
+        self, constants: Mapping[str, int],
+    ) -> frozenset[str]:
+        """Seed proven register values from externally authenticated entry state.
+
+        Every ``(name, word)`` pair must name a register family member with an
+        authoritative view and carry a value fitting that view's width. The
+        lanes are merged into the storage parent exactly like an observed
+        write: overlapping seeds must agree on shared bits; a conflict leaves
+        the disagreeing bits unproven for the whole seed batch, including later
+        wider views. Compatible known bits and newly supplied bits survive.
+        Returns the register names actually applied; malformed names or values
+        are skipped so callers can count what was refused.
+        """
+        applied: set[str] = set()
+        rejected: dict[str, int] = {}
+        for name in sorted(constants):
+            word = constants[name]
+            if type(name) is not str or type(word) is not int or word < 0:
+                continue
+            view = register_value_projection_8616(name, name)
+            if view is None or view[1] is None or word >= (1 << view[1]):
+                continue
+            parent = _storage_parent_8616(name)
+            parent_view = register_value_projection_8616(parent, parent)
+            lane = register_value_projection_8616(parent, name)
+            if parent_view is None or lane is None:
+                continue
+            shift, bits = lane
+            if bits != view[1]:
+                continue
+            entry = self._registers.get(parent)
+            if entry is None or entry.bits != parent_view[1]:
+                entry = self._new(parent_view[1])
+            lane_mask = ((1 << bits) - 1) << shift
+            overlap_known = entry.known & lane_mask
+            declared = (word << shift) & lane_mask
+            conflicts = rejected.get(parent, 0) | ((entry.value ^ declared) & overlap_known)
+            rejected[parent] = conflicts
+            known = (entry.known | lane_mask) & ~conflicts
+            entry = _Value(
+                entry.identity, entry.bits, known,
+                ((entry.value & ~lane_mask) | declared) & known,
+            )
+            self._registers[parent] = entry
+            applied.add(name)
+        self._views.clear()
+        return frozenset(applied)
+
+    def register_constants_8616(
+        self, names: Collection[str],
+    ) -> dict[str, int]:
+        """Snapshot complete proven constants for the requested register names."""
+        snapshot: dict[str, int] = {}
+        for name in sorted(set(names)):
+            if type(name) is not str:
+                continue
+            value = self._register(name)
+            if value is not None and value.constant is not None:
+                snapshot[name] = value.constant
+        return snapshot
 
     def _result(self, instruction: IRInstr) -> _Value | None:
         """Evaluate only explicitly supported pure bitvector operations."""

@@ -8,6 +8,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CBreak,
     CConstant,
     CContinue,
+    CDoWhileLoop,
     CForLoop,
     CIfBreak,
     CIfElse,
@@ -19,9 +20,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.structuring.canonical_for_loops import (
+    CanonicalForLoopRecoveryStats8616,
+    canonical_for_loop_recovery_applicable_8616,
     canonical_loop_validation_shape_8616,
     recover_canonical_for_loops_8616,
 )
@@ -593,3 +596,169 @@ def test_refuses_adjacent_initializer_for_different_for_induction() -> None:
     assert recover_canonical_for_loops_8616(codegen) is False
     assert root.statements == [initializer, loop]
     assert loop.initializer is None
+
+
+def _loop_free_codegen() -> _Codegen:
+    """Build branches, a switch, nested sequences, and a do-while without candidates."""
+    codegen = _Codegen()
+    if_else = CIfElse(
+        [
+            (
+                _const(1, codegen),
+                CStatements(
+                    [
+                        CAssignment(
+                            _local(-8, codegen),
+                            _const(2, codegen),
+                            codegen=codegen,
+                        )
+                    ],
+                    codegen=codegen,
+                ),
+            )
+        ],
+        else_node=CStatements(
+            [CAssignment(_local(-10, codegen), _const(0, codegen), codegen=codegen)],
+            codegen=codegen,
+        ),
+        codegen=codegen,
+    )
+    switch = CSwitchCase(
+        _local(-12, codegen),
+        [
+            (
+                1,
+                CStatements(
+                    [
+                        CAssignment(
+                            _local(-14, codegen),
+                            _const(3, codegen),
+                            codegen=codegen,
+                        )
+                    ],
+                    codegen=codegen,
+                ),
+            )
+        ],
+        CStatements([], codegen=codegen),
+        codegen=codegen,
+    )
+    do_while = CDoWhileLoop(
+        _const(0, codegen),
+        CStatements(
+            [CAssignment(_local(-16, codegen), _const(1, codegen), codegen=codegen)],
+            codegen=codegen,
+        ),
+        codegen=codegen,
+    )
+    root = CStatements(
+        [
+            if_else,
+            CStatements([switch], codegen=codegen),
+            do_while,
+        ],
+        addr=0x4010,
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(statements=root)
+    return codegen
+
+
+def test_applicability_false_only_for_proven_loop_free_ast() -> None:
+    codegen = _loop_free_codegen()
+
+    assert canonical_for_loop_recovery_applicable_8616(codegen) is False
+
+    stats = codegen._inertia_canonical_for_loop_recovery_stats_8616
+    assert stats == CanonicalForLoopRecoveryStats8616()
+
+
+def test_applicability_false_for_loop_free_non_sequence_root() -> None:
+    codegen = _Codegen()
+    codegen.cfunc = SimpleNamespace(
+        statements=CIfElse(
+            [(_const(1, codegen), CBreak(codegen=codegen))],
+            codegen=codegen,
+        )
+    )
+
+    assert canonical_for_loop_recovery_applicable_8616(codegen) is False
+    assert (
+        codegen._inertia_canonical_for_loop_recovery_stats_8616
+        == CanonicalForLoopRecoveryStats8616()
+    )
+
+
+def test_applicability_detects_while_or_for_anywhere() -> None:
+    nested, _outer = _codegen_with_nested_candidate()
+    assert canonical_for_loop_recovery_applicable_8616(nested) is True
+
+    codegen = _loop_free_codegen()
+    root = codegen.cfunc.statements
+    inner_sequence = root.statements[1]
+    assert isinstance(inner_sequence, CStatements)
+    switch = inner_sequence.statements[0]
+    assert isinstance(switch, CSwitchCase)
+    case_body = switch.cases[0][1]
+    case_body.statements.append(
+        CForLoop(
+            None,
+            _const(1, codegen),
+            None,
+            CStatements([], codegen=codegen),
+            codegen=codegen,
+        )
+    )
+    assert canonical_for_loop_recovery_applicable_8616(codegen) is True
+
+
+def test_applicability_stays_conservative_for_unknown_or_cyclic_input() -> None:
+    missing_cfunc = _Codegen()
+    assert canonical_for_loop_recovery_applicable_8616(missing_cfunc) is True
+
+    missing_statements = _Codegen()
+    missing_statements.cfunc = SimpleNamespace()
+    assert canonical_for_loop_recovery_applicable_8616(missing_statements) is True
+
+    nonstatement_root = _Codegen()
+    nonstatement_root.cfunc = SimpleNamespace(statements=object())
+    assert canonical_for_loop_recovery_applicable_8616(nonstatement_root) is True
+
+    unknown_child = _loop_free_codegen()
+    unknown_child.cfunc.statements.statements.append(object())
+    assert canonical_for_loop_recovery_applicable_8616(unknown_child) is True
+
+    cyclic = _Codegen()
+    cycle_root = CStatements([], codegen=cyclic)
+    cycle_root.statements.append(cycle_root)
+    cyclic.cfunc = SimpleNamespace(statements=cycle_root)
+    assert canonical_for_loop_recovery_applicable_8616(cyclic) is True
+
+
+def test_applicability_rechecks_current_root_each_call() -> None:
+    codegen = _loop_free_codegen()
+    assert canonical_for_loop_recovery_applicable_8616(codegen) is False
+
+    codegen.cfunc.statements.statements.append(
+        CWhileLoop(
+            _const(1, codegen),
+            CStatements([], codegen=codegen),
+            codegen=codegen,
+        )
+    )
+
+    assert canonical_for_loop_recovery_applicable_8616(codegen) is True
+
+
+def test_applicability_skip_publishes_noop_recovery_diagnostics() -> None:
+    skipped = _loop_free_codegen()
+    assert canonical_for_loop_recovery_applicable_8616(skipped) is False
+
+    executed = _loop_free_codegen()
+    assert recover_canonical_for_loops_8616(executed) is False
+
+    assert (
+        skipped._inertia_canonical_for_loop_recovery_stats_8616
+        == executed._inertia_canonical_for_loop_recovery_stats_8616
+        == CanonicalForLoopRecoveryStats8616()
+    )

@@ -17,9 +17,6 @@ from tools.comparator.cfg import (
     ARCH as ARCH,
 )
 from tools.comparator.cfg import (
-    REG32 as REG32,
-)
-from tools.comparator.cfg import (
     Block as Block,
 )
 from tools.comparator.cfg import (
@@ -41,10 +38,36 @@ from tools.comparator.cfg import (
     static_next as static_next,
 )
 from tools.comparator.native import OUTPUT_REGS, S
+from tools.comparator.native import REG32 as REG32
 from tools.comparator.verdict import Status, aggregate, checked_results
 from tools.dosunit.contracts.comparison import EXPLICIT_COMPARISON_POLICY
 from tools.dosunit.contracts.proof_contracts import ProofStatus, legacy_status_for, proof_status_from_legacy
 from tools.dosunit.contracts.proof_scope import ProofScope, admit_scope_status
+
+
+def _normalization_changes(document: dict[str, Any], normalization: dict[int, int]) -> bool:
+    """Check the canonical rewrite policy on every serialized SSA constant.
+
+    No map is installed when it changes nothing. Scanning all assignments,
+    including unused ones, is conservative; this is not a liveness claim.
+    Use the translator's width and low-word policy rather than an address
+    membership approximation that could miss an actual rewritten constant.
+    """
+    policy = {"_constant_normalization": normalization,
+              "_constant_normalization_reasons": dict.fromkeys(normalization, "global_reloc")}
+    pending: list[Any] = [document["functions"]]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            if item.get("op") == "const":
+                raw = item["value"]
+                value = int(raw, 0) if isinstance(raw, str) else int(raw)
+                if S._normalized_constant_value(value, width=item["width"], document=policy) != value:
+                    return True
+            pending.extend(item.values())
+    return False
 
 
 def compare_cfg(
@@ -57,8 +80,14 @@ def compare_cfg(
     outputs: tuple[str, ...],
     timeout_ms: int,
     max_blocks: int = 128,
+    normalization: dict[int, int] | None = None,
 ) -> dict[str, Any]:
-    """Prove matching CFGs including loops by checking every inductive edge relation."""
+    """Check every inductive edge, retaining optional relocation as a premise.
+
+    Constant rewriting proves only the rewritten SSA relation. A map that
+    actually changes constants makes successful induction conditional; unused
+    maps are omitted before proof. Neither case masks any observable.
+    """
     outputs = tuple(dict.fromkeys((*outputs, *OUTPUT_REGS[2:])))
     try:
         oblocks = discover(oracle, *oracle_range, max_blocks)
@@ -68,6 +97,12 @@ def compare_cfg(
         cssa = lower_blocks(cblocks, [right for _, right in pairs], "candidate", outputs)
     except CfgRefusal as error:
         return {"function": {"name": name}, "status": Status.REFUSED, "reason": str(error)}
+    if normalization and not _normalization_changes(cssa, normalization):
+        normalization = None
+    if normalization:
+        for function in cssa["functions"]:
+            function["_constant_normalization"] = normalization
+            function["_constant_normalization_reasons"] = dict.fromkeys(normalization, "global_reloc")
     compared = S.compare_ssa_documents(
         oracle=ossa,
         candidate=cssa,
@@ -84,20 +119,28 @@ def compare_cfg(
         comparison_policy=EXPLICIT_COMPARISON_POLICY,
     )
     expected = {f"block_{i}": f"oracle:block_{i}" for i in range(len(pairs))}
-    verdicts = checked_results(expected, compared)
+    verdicts = checked_results(expected, compared, relocation=normalization)
     backend_status = aggregate(verdicts)
     admitted = admit_scope_status(proof_status_from_legacy(backend_status) or ProofStatus.UNKNOWN,
                                  ProofScope.CUTPOINT_SIMULATION)
     status = Status(legacy_status_for(admitted))
-    return {
+    result: dict[str, Any] = {
         "function": {"name": name},
         "status": status,
         "reason": "matched_cfg_induction",
         "proof_scope": ProofScope.CUTPOINT_SIMULATION,
         "backend_status": backend_status,
+        "normalization_used": bool(normalization),
         "block_pairs": [[hex(left), hex(right)] for left, right in pairs],
         "oracle_ssa": ossa,
         "candidate_ssa": cssa,
         "block_compare": compared,
         "block_verdicts": verdicts,
     }
+    if normalization:
+        result["assumptions"] = {
+            "constant_map": {hex(mapped): hex(original) for mapped, original in sorted(normalization.items())},
+            "proved": False,
+            "scope": "equality of rewritten SSA; original memory/alias relation unproved",
+        }
+    return result

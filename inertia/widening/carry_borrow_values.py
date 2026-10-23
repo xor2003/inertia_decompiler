@@ -20,7 +20,9 @@ from inertia.alias.carry_borrow_contracts import (
     CarryBorrowAliasResolution8616,
     CarryBorrowAliasVerdict8616,
     CarryBorrowCallOutputAlias8616,
+    CarryBorrowOperandAlias8616,
 )
+from inertia.alias.carry_borrow_sources import register_domain_for_value_8616
 from inertia.alias.domains import DomainKey
 from inertia.alias.storage_fact_join import SegmentedAliasRange8616
 from inertia.ir.core import IRValue, MemSpace
@@ -30,6 +32,11 @@ from inertia.semantics.carry_borrow_contracts import (
     CarryBorrowKind8616,
     CarryBorrowLink8616,
     CarryBorrowOperandUse8616,
+)
+
+from .pair_type_contracts import (
+    WidePairEvidence8616,
+    materialize_wide_pair_evidence_8616,
 )
 
 
@@ -47,6 +54,7 @@ class WideCarryBorrowFailure8616(StrEnum):
     ALIAS_INCOMPLETE = "alias_incomplete"
     ALIAS_REFUSED = "alias_refused"
     ARITHMETIC_LINK_MISMATCH = "arithmetic_link_mismatch"
+    PAIR_LEGALITY_UNPROVEN = "pair_legality_unproven"
 
 
 class WideValueSignedness8616(StrEnum):
@@ -73,7 +81,12 @@ class WideRegisterSlice8616:
 
 @dataclass(frozen=True, slots=True)
 class WideCarryBorrowValue8616:
-    """Typed 32-bit value retaining exact slices and carry/borrow provenance."""
+    """Typed 32-bit value retaining exact slices and carry/borrow provenance.
+
+    ``pair`` is the retained named logical pair type and per-operation
+    pair/split legality evidence materialized from the same proven slices;
+    later passes consume it instead of re-inferring widths or ordering.
+    """
 
     kind: CarryBorrowKind8616
     size: int
@@ -85,6 +98,7 @@ class WideCarryBorrowValue8616:
     low: WideRegisterSlice8616
     high: WideRegisterSlice8616
     provenance: CarryBorrowLink8616
+    pair: WidePairEvidence8616
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +223,16 @@ def _source_alias_matches(fact: CarryBorrowAliasFact8616) -> bool:
     )
 
 
+def _operand_carrier_bound_8616(operand: CarryBorrowOperandAlias8616) -> bool:
+    """Bind one claimed carrier identity to its exact proven source value."""
+    if not operand.complete:
+        return False
+    if operand.register_domain is None:
+        return True
+    proven_domain = register_domain_for_value_8616(operand.source)
+    return proven_domain is not None and operand.register_domain == proven_domain
+
+
 def _fact_gate_8616(
     alias: CarryBorrowAliasResolution8616,
     fact: CarryBorrowAliasFact8616,
@@ -224,10 +248,20 @@ def _fact_gate_8616(
     if fact.low_result_domain == fact.high_result_domain:
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if (
+        fact.low_result_domain != register_domain_for_value_8616(low_result)
+        or fact.high_result_domain != register_domain_for_value_8616(high_result)
+    ):
+        return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
+    if (
         fact.low_lhs.use != link.low_lhs
         or fact.low_rhs.use != link.low_rhs
         or fact.high_lhs.use != link.high_lhs
         or fact.high_rhs.use != link.high_rhs
+    ):
+        return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
+    if not all(
+        _operand_carrier_bound_8616(operand)
+        for operand in (fact.low_lhs, fact.low_rhs, fact.high_lhs, fact.high_rhs)
     ):
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if (
@@ -279,6 +313,8 @@ def _materialize_fact(
     low_result = link.low_result_write.instruction.dst
     high_result = link.high_result_write.instruction.dst
     assert low_result is not None and high_result is not None
+    assert fact.low_lhs.register_domain is not None
+    assert fact.high_lhs.register_domain is not None
     low_slice = WideRegisterSlice8616(
         result=low_result,
         result_domain=fact.low_result_domain,
@@ -303,12 +339,22 @@ def _materialize_fact(
         arithmetic=link.high_base_arithmetic,
         result_write=link.high_result_write,
     )
+    pair = materialize_wide_pair_evidence_8616(
+        kind=link.kind,
+        claimed_size=low_slice.result.size + high_slice.result.size,
+        signedness=WideValueSignedness8616.UNKNOWN,
+        address_space=None if fact.source_memory is None else fact.source_memory.space,
+        low=low_slice,
+        high=high_slice,
+    )
+    if not pair.combine_authorized:
+        return _refusal(alias, WideCarryBorrowFailure8616.PAIR_LEGALITY_UNPROVEN)
     return WideCarryBorrowResolution8616(
         alias=alias,
         verdict=WideCarryBorrowVerdict8616.PROVEN,
         value=WideCarryBorrowValue8616(
             kind=link.kind,
-            size=4,
+            size=pair.type.total_size,
             signedness=WideValueSignedness8616.UNKNOWN,
             address_space=None if fact.source_memory is None else fact.source_memory.space,
             source_memory=fact.source_memory,
@@ -317,6 +363,7 @@ def _materialize_fact(
             low=low_slice,
             high=high_slice,
             provenance=link,
+            pair=pair,
         ),
     )
 

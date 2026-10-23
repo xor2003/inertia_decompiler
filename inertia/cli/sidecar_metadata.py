@@ -538,13 +538,13 @@ def _load_tdinfo_sidecar(
                 source="turbo_debug_tdinfo",
             )
         )
-    for member in tdinfo.enum_members:
+    for enum_member in tdinfo.enum_members:
         debug_enum_members.append(
             DebugEnumMemberEvidence(
-                name=member.name,
-                value=member.value,
-                owner_type_index=member.owner_type_index,
-                attributes=member.attributes,
+                name=enum_member.name,
+                value=enum_member.value,
+                owner_type_index=enum_member.owner_type_index,
+                attributes=enum_member.attributes,
                 source="turbo_debug_tdinfo",
             )
         )
@@ -1163,7 +1163,7 @@ def attach_lst_metadata_to_project(project: angr.Project | None, metadata: LSTMe
     """
     if project is None or metadata is None:
         return False
-    metadata_obj = cast(LSTMetadata, metadata)
+    metadata_obj = metadata
     changed = False
     project_like = cast(_ProjectLike, project)
     _attach_debug_evidence_attrs(project_like, metadata_obj)
@@ -1176,14 +1176,14 @@ def attach_lst_metadata_to_project(project: angr.Project | None, metadata: LSTMe
     labels = _dynamic_attr(_dynamic_attr(project, "kb", None), "labels", None)
     if not isinstance(labels, dict):
         return changed
-    data_labels = cast(dict[int, str], metadata_obj.data_labels)
+    data_labels = metadata_obj.data_labels
     if not isinstance(data_labels, dict):
         return changed
     for addr, name in data_labels.items():
         if labels.get(addr) != name:
             labels[addr] = name
             changed = True
-    code_labels = cast(dict[int, str], metadata_obj.code_labels)
+    code_labels = metadata_obj.code_labels
     if not isinstance(code_labels, dict):
         return changed
     for addr, name in code_labels.items():
@@ -1196,20 +1196,20 @@ def attach_lst_metadata_to_project(project: angr.Project | None, metadata: LSTMe
 def _lst_data_label(metadata: LSTMetadata | None, offset: int | None) -> str | None:
     if metadata is None or offset is None:
         return None
-    metadata_obj = cast(LSTMetadata, metadata)
-    data_labels = cast(dict[int, str], metadata_obj.data_labels)
+    metadata_obj = metadata
+    data_labels = metadata_obj.data_labels
     return data_labels.get(offset)
 
 
 def _lst_code_label(metadata: LSTMetadata | None, addr: int | None, code_base: int | None) -> str | None:
     if metadata is None or addr is None:
         return None
-    metadata_obj = cast(LSTMetadata, metadata)
+    metadata_obj = metadata
     absolute_addrs = metadata_obj.absolute_addrs
     lookup_addr = addr if absolute_addrs else addr - code_base if code_base is not None else None
     if lookup_addr is None:
         return None
-    code_labels = cast(dict[int, str], metadata_obj.code_labels)
+    code_labels = metadata_obj.code_labels
     if not isinstance(code_labels, dict):
         return None
     label = code_labels.get(lookup_addr)
@@ -1256,7 +1256,7 @@ def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[in
     def _impl() -> tuple[int, int] | None:
         if metadata is None or addr is None:
             return None
-        code_ranges = cast(dict[int, tuple[int, int]], metadata.code_ranges)
+        code_ranges = metadata.code_ranges
         span = code_ranges.get(addr)
         if span is not None:
             return span

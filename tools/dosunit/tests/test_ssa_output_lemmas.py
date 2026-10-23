@@ -24,8 +24,40 @@ def _pairs() -> list[L.OutputPair]:
 def test_restored_array_and_loaded_output_prove() -> None:
     result = L.prove_output_equalities(_pairs(), z3.Solver(), deadline=time.monotonic() + 5)
     assert result.status is ProofStatus.PROVED
-    assert len(result.lemmas) == 1
-    assert result.lemmas[0].status is ProofStatus.PROVED
+    assert {lemma.output for lemma in result.lemmas} == {"memory", "loaded"}
+    assert all(lemma.status is ProofStatus.PROVED for lemma in result.lemmas)
+
+
+def test_identical_scalar_outputs_do_not_spend_solver_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unchanged observations need exact simplification, not repeated SMT searches."""
+    solver = z3.Solver()
+    value = z3.BitVec("unchanged_output", 32)
+    solver.add(value >= 0)
+    pairs = [(f"output_{index}", value + index, value + index) for index in range(32)]
+
+    def unexpected_check(self: z3.Solver, *assumptions: z3.BoolRef) -> z3.CheckSatResult:
+        raise AssertionError("identical outputs must not consume solver queries")
+
+    monkeypatch.setattr(z3.Solver, "check", unexpected_check)
+    result = L.prove_output_equalities(pairs, solver, deadline=time.monotonic() + 5)
+    assert result.status is ProofStatus.PROVED
+    assert len(solver.assertions()) == 1
+
+
+@pytest.mark.parametrize("constrained", [False, True])
+def test_changed_output_after_identical_outputs_preserves_domain(constrained: bool) -> None:
+    """Eliminating tautologies must retain the last observation and caller domain."""
+    solver = z3.Solver()
+    value = z3.BitVec("observed_output", 32)
+    if constrained:
+        solver.add(value == 0)
+    pairs = [(f"unchanged_{index}", value, value) for index in range(32)]
+    pairs.append(("changed", value, z3.BitVecVal(0, 32)))
+    result = L.prove_output_equalities(pairs, solver, deadline=time.monotonic() + 5)
+    assert result.status is (ProofStatus.PROVED if constrained else ProofStatus.COUNTEREXAMPLE)
+    if not constrained:
+        assert result.model is not None
+        assert result.model.eval(value).as_long() != 0
 
 
 def test_changed_scalar_retains_countermodel() -> None:
@@ -147,3 +179,142 @@ def test_read_over_write_cannot_extend_expired_budget() -> None:
     result = L.prove_output_equalities([("return", value, value)], z3.Solver(),
         deadline=time.monotonic() - 1, scalar_preprocessing=L.ScalarPreprocessing.READ_OVER_WRITE)
     assert result.status is ProofStatus.UNKNOWN
+
+
+@pytest.mark.parametrize("mutation", ["scalar", "memory", "ninth", "none"])
+def test_scalar_probes_preserve_complete_query(monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
+    """Timeout recovery respects inputs and never drops unproved outputs."""
+    def unknown(name, _left, _right, _solver, _timeout_ms):
+        return L.OutputLemma(name, ProofStatus.UNKNOWN, L.OutputLemmaReason.UNKNOWN, 0), None
+    monkeypatch.setattr(L, "_array_lemma", unknown)
+    memory = z3.Array("probe_memory", z3.BitVecSort(32), z3.BitVecSort(8))
+    x = z3.BitVec("probe_x", 32)
+    solver = z3.Solver()
+    solver.add(x == 0)
+    pairs = [(f"scalar{i}", x, z3.BitVecVal(0, 32)) for i in range(9)]
+    if mutation == "scalar":
+        pairs[0] = ("scalar0", x, x + 1)
+    if mutation == "ninth":
+        pairs[8] = ("scalar8", x, x + 1)
+    changed = z3.Store(memory, x, z3.BitVecVal(7, 8)) if mutation == "memory" else memory
+    pairs.append(("memory", memory, changed))
+    result = L.prove_output_equalities(pairs, solver, deadline=time.monotonic() + 5)
+    if mutation == "none":
+        assert result.status is ProofStatus.PROVED
+    else:
+        assert result.status is ProofStatus.COUNTEREXAMPLE
+        assert result.model is not None
+        assert z3.is_true(result.model.eval(x == 0))
+        assert any(z3.is_true(result.model.eval(left != right, model_completion=True))
+                   for _, left, right in pairs)
+    assert any(lemma.reason is L.OutputLemmaReason.SCALAR_COUNTEREXAMPLE
+               for lemma in result.lemmas) is (mutation == "scalar")
+    if mutation == "scalar":
+        assert len(solver.assertions()) == 1
+
+
+@pytest.mark.parametrize("branched", [False, True])
+def test_finite_store_query_equals_full_array_disequality(branched: bool) -> None:
+    """All aliases and both branch arms remain represented by the smaller query."""
+    memory = z3.Array("finite_mem", z3.BitVecSort(32), z3.BitVecSort(8))
+    a, b = z3.BitVecs("finite_a finite_b", 32)
+    x, y = z3.BitVecs("finite_x finite_y", 8)
+    left = z3.Store(z3.Store(memory, a, x), b, y)
+    right = z3.Store(z3.Store(memory, b, y), a, x)
+    if branched:
+        right = z3.If(z3.Bool("finite_condition"), right, memory)
+    reduced = L._finite_store_inequality(left, right)
+    assert reduced is not None
+    solver = z3.Solver()
+    solver.add(z3.Xor(left != right, reduced[0]))
+    assert solver.check() == z3.unsat
+
+
+def test_finite_store_differing_bases_keep_extensional_check() -> None:
+    """Matching writes cannot hide a difference at an unwritten address."""
+    a = z3.Array("base_a", z3.BitVecSort(32), z3.BitVecSort(8))
+    b = z3.Array("base_b", z3.BitVecSort(32), z3.BitVecSort(8))
+    left, right = z3.Store(a, 0, 1), z3.Store(b, 0, 1)
+    assert L._finite_store_inequality(left, right) is None
+    result = L.prove_output_equalities([("memory", left, right)], z3.Solver(),
+                                      deadline=time.monotonic() + 5)
+    assert result.status is ProofStatus.COUNTEREXAMPLE
+
+
+def test_finite_store_budget_falls_back_without_dropping_writes() -> None:
+    memory = z3.Array("bounded_mem", z3.BitVecSort(32), z3.BitVecSort(8))
+    changed = memory
+    for index in range(130):
+        changed = z3.Store(changed, index, 1)
+    assert L._finite_store_inequality(memory, changed) is None
+
+
+@pytest.mark.parametrize("bounded,corrupt", [(True, False), (False, False), (True, True)])
+def test_saved_register_read_lemma_retains_address_constraints(bounded: bool, corrupt: bool) -> None:
+    """Restoring a saved byte is equal only if later writes cannot alias it."""
+    memory = z3.Array("restore_mem", z3.BitVecSort(32), z3.BitVecSort(8))
+    esp = z3.BitVec("restore_esp", 32)
+    saved = z3.BitVec("restore_saved", 8)
+    changed = z3.Store(memory, esp - 4, saved)
+    for address in range(0x100, 0x120):
+        changed = z3.Store(changed, address, z3.BitVecVal(7, 8))
+    left = z3.Select(changed, esp - 4)
+    right = saved + 1 if corrupt else saved
+    solver = z3.Solver()
+    if bounded:
+        solver.add(z3.UGE(esp, 0x70000), z3.ULE(esp, 0x80000))
+    result = L.prove_output_equalities([("ebp", left, right)], solver, deadline=time.monotonic() + 5)
+    expected = ProofStatus.PROVED if bounded and not corrupt else ProofStatus.COUNTEREXAMPLE
+    assert result.status is expected
+    proved = [lemma for lemma in result.lemmas if lemma.output == "ebp" and lemma.status is ProofStatus.PROVED]
+    assert bool(proved) == (expected is ProofStatus.PROVED)
+
+
+@pytest.mark.parametrize("mutated", [False, True])
+def test_lambda_region_equality_observes_every_address(mutated: bool) -> None:
+    memory = z3.Array("region_memory", z3.BitVecSort(32), z3.BitVecSort(8))
+    index, start, size = z3.BitVecs("region_index region_start region_size", 32)
+    inside = z3.ULT(index - start, size)
+    left = z3.Lambda(index, z3.If(inside, z3.BitVecVal(7, 8), memory[index]))
+    right = z3.Lambda(index, z3.If(z3.Not(inside), memory[index], z3.BitVecVal(7, 8)))
+    if mutated:
+        right = z3.Store(right, start + size - 1, z3.BitVecVal(8, 8))
+    solver = z3.Solver()
+    solver.add(size == 4096)
+    result = L.prove_output_equalities([("memory", left, right)], solver, deadline=time.monotonic() + 5)
+    assert result.status is (ProofStatus.COUNTEREXAMPLE if mutated else ProofStatus.PROVED)
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_final_array_query_is_extensional_after_unknown_lemma(monkeypatch, changed):
+    first = z3.Array("first", z3.BitVecSort(32), z3.BitVecSort(8))
+    second = z3.Array("second", z3.BitVecSort(32), z3.BitVecSort(8))
+    address = z3.BitVec("cell", 32)
+    inside = z3.And(z3.UGE(address, 0x1000), z3.ULE(address, 0x1007))
+    left = z3.Lambda(address, z3.If(inside, first[address], second[address]))
+    right = z3.Lambda(address, z3.If(inside, first[address], second[address]))
+    if changed:
+        right = z3.Lambda(address, z3.If(address == 0x1007, second[address], left[address]))
+
+    def unknown(name, *args):
+        return L.OutputLemma(name, ProofStatus.UNKNOWN, L.OutputLemmaReason.UNKNOWN, 0), None
+
+    monkeypatch.setattr(L, "_array_lemma", unknown)
+    result = L.prove_output_equalities([("memory", left, right)], z3.Solver(), deadline=time.monotonic() + 2)
+    assert result.status is (ProofStatus.COUNTEREXAMPLE if changed else ProofStatus.PROVED)
+
+
+@pytest.mark.parametrize("constrain,corrupt", [(True, False), (True, True), (False, False)])
+def test_split_outputs_preserve_domain_and_check_all_outputs(constrain, corrupt):
+    value = z3.BitVec("value", 32)
+    memory = z3.Array("memory", z3.BitVecSort(32), z3.BitVecSort(8))
+    solver = z3.Solver()
+    if constrain:
+        solver.add(value == 0)
+    byte_change = z3.BitVecVal(1, 8) if corrupt else z3.Extract(7, 0, value)
+    changed = z3.Store(memory, z3.BitVecVal(0x1000, 32), memory[0x1000] ^ byte_change)
+    pairs = [("eax", value, z3.BitVecVal(0, 32)), ("memory", memory, changed)]
+    result = L._compare_refined(pairs, [], solver, time.monotonic() + 2, (),
+                               L.ScalarPreprocessing.STANDARD)
+    expected = ProofStatus.PROVED if constrain and not corrupt else ProofStatus.COUNTEREXAMPLE
+    assert result.status is expected

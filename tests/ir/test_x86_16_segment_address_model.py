@@ -37,7 +37,12 @@ class _DummyCodegen:
 
 
 def _project():
-    return SimpleNamespace(arch=Arch86_16())
+    return SimpleNamespace(
+        arch=Arch86_16(),
+        kb=SimpleNamespace(
+            functions=SimpleNamespace(function=lambda addr, create=False: None)
+        ),
+    )
 
 
 def _codegen(*, summary=None):

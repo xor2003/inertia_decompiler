@@ -9,8 +9,6 @@ dynamic attribute access limited to that boundary and diagnostic counters.
 
 from __future__ import annotations
 
-import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -22,6 +20,7 @@ from .const_prop import _constant_propagation_8616
 from .dce import _dead_code_elimination_8616
 from .dead_setup import _prune_dead_setup_carriers_8616
 from .local_declarations import dedupe_equivalent_stack_local_declarations_8616
+from .rule_runtime import run_optimization_rules_8616
 from .trivial_copy import prune_adjacent_temporary_copy_assignments_8616
 
 __all__ = [
@@ -120,43 +119,16 @@ def _run_optimization_passes_8616(codegen: object) -> bool:
 
     The codegen object crosses a dynamic third-party angr boundary; this driver
     only reads dynamic codegen shape and diagnostic counters after semantic
-    recovery has already completed.
+    recovery has already completed. Named rules are executed through the shared
+    runtime contract in ``rule_runtime``, which applies the
+    ``INERTIA_SKIP_POSTPROCESS_PASSES`` ``optimization:<rule>`` skip policy,
+    audits per-rule outcomes, and refuses same-codegen recursive entry.
 
     Returns True if any pass modified the codegen.
     """
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    # Normalize: unwrap CStatements before passes walk the tree.
-    # Some angr codegen produces CStatements objects that are not iterable.
-    _normalize_cfunc_root_for_optimization_8616(codegen)
-
-    changed = False
-    for spec in OPTIMIZATION_PASSES:
-        if spec.func(codegen):
-            changed = True
-            if os.environ.get("INERTIA_DEBUG_OPTIMIZATION", "").strip().lower() in {"1", "true", "yes", "on"}:
-                print(f"[optimization] pass_changed={spec.name}", file=sys.stderr, flush=True)
-        elif os.environ.get("INERTIA_DEBUG_OPTIMIZATION", "").strip().lower() in {"1", "true", "yes", "on"}:
-            print(f"[optimization] pass_stable={spec.name}", file=sys.stderr, flush=True)
-    if os.environ.get("INERTIA_DEBUG_OPTIMIZATION", "").strip().lower() in {"1", "true", "yes", "on"}:
-        print(
-            "[optimization] counters "
-            f"dce_candidates={int(getattr(codegen, 'dce_candidates', 0) or 0)} "
-            f"dce_deleted={int(getattr(codegen, 'dce_deleted', 0) or 0)} "
-            f"dce_keep_live_use={int(getattr(codegen, 'dce_keep_live_use', 0) or 0)} "
-            f"dce_keep_side_effect={int(getattr(codegen, 'dce_keep_side_effect', 0) or 0)} "
-            f"dce_keep_protected={int(getattr(codegen, 'dce_keep_protected', 0) or 0)} "
-            f"dce_keep_observable={int(getattr(codegen, 'dce_keep_observable', 0) or 0)} "
-            f"dce_keep_unknown={int(getattr(codegen, 'dce_keep_unknown', 0) or 0)} "
-            f"dce_duplicate_assignment_candidates="
-            f"{int(getattr(codegen, 'dce_duplicate_assignment_candidates', 0) or 0)} "
-            f"dce_duplicate_assignment_deleted="
-            f"{int(getattr(codegen, 'dce_duplicate_assignment_deleted', 0) or 0)} "
-            f"dce_duplicate_assignment_refused="
-            f"{int(getattr(codegen, 'dce_duplicate_assignment_refused', 0) or 0)}",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    return changed
+    report = run_optimization_rules_8616(
+        codegen,
+        OPTIMIZATION_PASSES,
+        prepare=_normalize_cfunc_root_for_optimization_8616,
+    )
+    return bool(report.changed)

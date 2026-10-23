@@ -30,15 +30,14 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeInt, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+
 import inertia.postprocess.decompiler_postprocess_stage as postprocess_stage
+import inertia.postprocess.pass_validation_policy as pass_validation_policy
+import inertia.validation.tail_validation as tail_validation_module
+import inertia.validation.tail_validation_condition_context as condition_context_module
+import inertia.validation.tail_validation_fingerprint as tail_validation_fingerprint_module
+from inertia.cli.tail_validation import tail_validation_snapshot_for_function_run
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
-    CallsiteReturnUseKind8616,
-    CallsiteSummary8616,
-    record_caller_return_use_evidence_8616,
-)
 from inertia.lowering.call_output_stack_objects import (
     CallOutputStackObjectFact8616,
 )
@@ -47,11 +46,13 @@ from inertia.lowering.segmented_global_loads import (
     IndexedSegmentedGlobalEvidence8616,
     IndexedSegmentedGlobalStoreEvidence8616,
 )
-import inertia.postprocess.pass_validation_policy as pass_validation_policy
-
-import inertia.validation.tail_validation as tail_validation_module
-import inertia.validation.tail_validation_condition_context as condition_context_module
-import inertia.validation.tail_validation_fingerprint as tail_validation_fingerprint_module
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+    CallsiteSummary8616,
+    record_caller_return_use_evidence_8616,
+)
 from inertia.structuring.loop_break_jcc import (
     LoopHeaderDuplicateGuardRemovalFact8616,
 )
@@ -106,7 +107,6 @@ from inertia.validation.tail_validation import (
 from inertia.validation.tail_validation_condition_context import build_x86_16_contextual_condition_fingerprints
 from inertia.validation.tail_validation_fingerprint import build_x86_16_contextual_call_fingerprints
 from inertia.validation.tail_validation_stack_policy import include_x86_16_tail_validation_stack_write
-from inertia.cli.tail_validation import tail_validation_snapshot_for_function_run
 
 
 class _DummyCodegen:
@@ -5959,6 +5959,8 @@ def test_tail_validation_surface_summarizes_headline_rates_and_hotspots():
             "changed_function_count": 2,
             "structuring": {
                 "stable_count": 3,
+            "conditional_count": 0,
+            "refused_count": 0,
                 "changed_count": 1,
                 "unknown_count": 1,
                 "missing_count": 0,
@@ -5970,6 +5972,8 @@ def test_tail_validation_surface_summarizes_headline_rates_and_hotspots():
             },
             "postprocess": {
                 "stable_count": 2,
+            "conditional_count": 0,
+            "refused_count": 0,
                 "changed_count": 2,
                 "unknown_count": 1,
                 "missing_count": 0,
@@ -6018,6 +6022,8 @@ def test_tail_validation_surface_summarizes_headline_rates_and_hotspots():
             "stage": "structuring",
             "changed_count": 1,
             "stable_count": 3,
+            "conditional_count": 0,
+            "refused_count": 0,
             "unknown_count": 1,
             "missing_count": 0,
             "coverage_count": 5,
@@ -6030,6 +6036,8 @@ def test_tail_validation_surface_summarizes_headline_rates_and_hotspots():
             "stage": "postprocess",
             "changed_count": 2,
             "stable_count": 2,
+            "conditional_count": 0,
+            "refused_count": 0,
             "unknown_count": 1,
             "missing_count": 0,
             "coverage_count": 5,
@@ -7410,7 +7418,7 @@ def test_postprocess_force_validates_nonmandatory_large_function_pass(monkeypatc
     )
     monkeypatch.setattr(postprocess_stage, "collect_x86_16_tail_validation_summary", _summary)
     monkeypatch.setattr(postprocess_stage, "compare_x86_16_tail_validation_summaries", _compare)
-    monkeypatch.setattr(postprocess_stage, "x86_16_tail_validation_result_passed", lambda result: not result["changed"])
+    monkeypatch.setattr(postprocess_stage, "x86_16_tail_validation_result_preserves_behavior", lambda result: not result["changed"])
     monkeypatch.setattr(postprocess_stage, "_regenerate_text_safely", lambda *_args, **_kwargs: True)
 
     changed = postprocess_stage._postprocess_codegen_8616(project, codegen)

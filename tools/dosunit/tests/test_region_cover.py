@@ -79,3 +79,47 @@ def test_call_continuation_remains_a_separate_cutpoint() -> None:
     assert cover.regions[0].kind is K.CALL
     assert cover.regions[0].exits == (2,)
     assert cover.regions[cover.cutpoints[2]].members == (2,)
+
+
+def test_terminal_suffix_is_shared_without_removing_return_effects() -> None:
+    """Both the predecessor and direct entrance retain the complete return block."""
+    nodes = {0: RegionNode(0, (1, 2), K.BORING),
+             1: RegionNode(1, (2,), K.BORING), 2: RegionNode(2, (), K.RETURN)}
+    ordinary = cover_regions(nodes, 0)
+    shared = cover_regions(nodes, 0, include_terminal_suffixes=True)
+    assert ordinary.regions[ordinary.cutpoints[1]].members == (1,)
+    assert shared.regions[shared.cutpoints[1]].members == (1, 2)
+    assert shared.regions[shared.cutpoints[1]].kind is K.RETURN
+    assert shared.regions[shared.cutpoints[2]].members == (2,)
+    assert shared.covered == frozenset(nodes)
+
+
+def test_terminal_sharing_cannot_hide_conditional_or_call_boundary() -> None:
+    """A shared return does not justify bypassing a conditional or an external effect."""
+    for kind, edges in [(K.BORING, (2, 1)), (K.CALL, (2,))]:
+        nodes = {0: RegionNode(0, (1, 2), K.BORING),
+                 1: RegionNode(1, edges, kind), 2: RegionNode(2, (), K.RETURN)}
+        shared = cover_regions(nodes, 0, include_terminal_suffixes=True)
+        region = shared.regions[shared.cutpoints[1]]
+        assert region.members == (1,)
+        assert region.exits == edges
+
+
+def test_shared_terminal_proposals_cover_extra_unconditional_prefix() -> None:
+    """The new candidate retains the extra instructions before a shared return."""
+    from tools.dosunit.compare.region_pairing import RegionFormation, propose_region_pairings
+
+    left = {0: RegionNode(0, (1, 2), K.BORING),
+            1: RegionNode(1, (2,), K.BORING), 2: RegionNode(2, (), K.RETURN)}
+    right = {10: RegionNode(10, (11, 12), K.BORING),
+             11: RegionNode(11, (), K.RETURN), 12: RegionNode(12, (), K.RETURN)}
+    ordinary = propose_region_pairings(left, right, 0, 10, deadline_seconds=1)
+    assert not ordinary.candidates
+    shared = propose_region_pairings(left, right, 0, 10, deadline_seconds=1,
+                                     allow_terminal_merges=True, allow_state_merges=True)
+    assert shared.candidates
+    for candidate in shared.candidates:
+        assert candidate.evidence.formation is RegionFormation.TERMINAL_COVER
+        assert candidate.oracle.covered == frozenset(left)
+        assert candidate.candidate.covered == frozenset(right)
+        assert any(region.members == (1, 2) for region in candidate.oracle.regions)

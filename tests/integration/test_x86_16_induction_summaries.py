@@ -3,15 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.structuring.decompiler_structuring_stage import (
-    DECOMPILER_STRUCTURING_PASSES,
-    _induction_summary_artifact_8616,
-)
-
-from inertia.cli.cli_access_profiles import (
+from inertia.lowering.access_profiles import (
     AccessTraitEvidenceProfile,
     AccessTraitStrideEvidence,
     infer_induction_summary,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    DECOMPILER_STRUCTURING_PASSES,
+    _induction_summary_artifact_8616,
 )
 
 

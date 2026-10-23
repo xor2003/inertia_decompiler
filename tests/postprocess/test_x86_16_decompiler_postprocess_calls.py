@@ -121,9 +121,95 @@ class _LoopLikeNode:
         self.condition_and_nodes = ()
 
 
+
+def _capture_raw_memory_stores(root):
+    stores = tuple((node, node.lhs, node.rhs) for node in _iter_c_nodes_deep_8616(root)
+                   if isinstance(node, CAssignment) and isinstance(node.lhs, CUnaryOp)
+                   and node.lhs.op == "Dereference")
+    assert stores, "fixture must exercise unknown raw memory storage"
+    return stores
+
+
+def _assert_raw_memory_stores_retained(root, stores):
+    live = {id(node) for node in _iter_c_nodes_deep_8616(root)}
+    for statement, lhs, rhs in stores:
+        assert id(statement) in live
+        assert statement.lhs is lhs
+        assert statement.rhs is rhs
+
 def _project():
     return SimpleNamespace(arch=Arch86_16())
 
+
+def test_consumed_call_argument_memory_store_kept_for_later_read():
+    """Materializing an argument does not prove its physical PUSH storage dead."""
+    from inertia.postprocess.decompiler_postprocess_calls import _CallsiteStackArgsMaterializer8616
+
+    project = _project()
+    codegen = _empty_codegen(project)
+    ss = CVariable(SimRegisterVariable(project.arch.registers["ss"][0], 2), codegen=codegen)
+    offset = CVariable(SimRegisterVariable(0x46, 2), codegen=codegen)
+    address = CBinaryOp(
+        "Add", CBinaryOp("Shl", ss, CConstant(4, SimTypeShort(False), codegen=codegen), codegen=codegen),
+        offset, codegen=codegen,
+    )
+    value = CConstant(9, SimTypeShort(False), codegen=codegen)
+    store = CAssignment(CUnaryOp("Dereference", address, codegen=codegen), value, codegen=codegen)
+    call = CFunctionCall("callee", None, [value], codegen=codegen)
+    read = CReturn(CUnaryOp("Dereference", address, codegen=codegen), codegen=codegen)
+    statements = [store, CExpressionStatement(call, codegen=codegen), read]
+    materializer = _CallsiteStackArgsMaterializer8616(project, codegen)
+    materializer.stats = CallsiteMaterializationStats()
+
+    materializer._delete_consumed_indices_8616(statements, [0])
+
+    assert statements[0] is store
+    assert statements[-1] is read
+    assert call.args == [value]
+    assert materializer.stats.live_setup_definition_preserved_count == 1
+
+
+
+@pytest.mark.parametrize("address_taken", [False, True])
+def test_materializer_keeps_native_push_byte_pairs_read_after_call(address_taken):
+    project = _project_with_bytes(0x1000, b"\xb8\x03\x00\x50\xb8\x09\x00\x50\xe8\x39\x05\x59\x59")
+    codegen = _empty_codegen(project)
+
+    def const(value):
+        return CConstant(value, SimTypeShort(False), codegen=codegen)
+
+    slots = [CVariable(SimStackVariable(offset, 1, base="bp", region=0x4010),
+                       variable_type=SimTypeChar(False), codegen=codegen)
+             for offset in (-4, -3, -6, -5)]
+    stores = []
+    for pos, value, address in ((0, 3, 0x1003), (2, 9, 0x1007)):
+        stores.extend([
+            CAssignment(slots[pos], const(value), codegen=codegen, tags={"ins_addr": address}),
+            CAssignment(slots[pos + 1], CBinaryOp("Shr", const(value), const(8), codegen=codegen),
+                        codegen=codegen, tags={"ins_addr": address}),
+        ])
+    call = CFunctionCall("DemoCall", SimpleNamespace(name="DemoCall"), [const(9), const(3)], codegen=codegen)
+    high_byte = (CUnaryOp("Dereference", CBinaryOp("Add",
+                 CUnaryOp("Reference", slots[0], codegen=codegen), const(1), codegen=codegen), codegen=codegen)
+                 if address_taken else slots[1])
+    read = CReturn(CBinaryOp("Or", slots[0], CBinaryOp("Shl", high_byte, const(8), codegen=codegen),
+                            codegen=codegen), codegen=codegen)
+    root = CStatements([*stores, CExpressionStatement(call, codegen=codegen), read], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=0x4010, statements=root, body=root)
+    codegen._inertia_callsite_summaries = {id(call): CallsiteSummary8616(
+        callsite_addr=0x1008, target_addr=0x1544, return_addr=0x100b, kind="direct_near",
+        arg_count=2, arg_widths=(2, 2), stack_cleanup=4, return_register=None, return_used=False,
+        push_arg_sources=(("imm", 3), ("imm", 9)), push_arg_instruction_addrs=(0x1003, 0x1007),
+    )}
+    before = tuple((store, store.lhs, store.rhs) for store in stores)
+
+    _materialize_callsite_stack_arguments_8616(project, codegen)
+
+    _assert_raw_memory_stores_retained(root, before)
+    assert read in root.statements
+    assert any(isinstance(stmt, CExpressionStatement) and stmt.expr is call for stmt in root.statements)
+    assert len(call.args) == 2 and all(isinstance(arg, CConstant) for arg in call.args)
+    assert [arg.value for arg in call.args] == [9, 3]
 
 def test_structured_root_prefers_current_statements_over_stale_body():
     current = SimpleNamespace(name="current")
@@ -1244,11 +1330,13 @@ def test_materialize_callsite_stack_arguments_rewrites_preceding_stack_store_int
         )
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 1
-    only_stmt = codegen.cfunc.statements.statements[0]
+    assert len(codegen.cfunc.statements.statements) == 1 + len(retained_stores)
+    only_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(only_stmt, CExpressionStatement)
     assert _args_match(only_stmt.expr.args, [arg_slot])
 
@@ -1873,10 +1961,12 @@ def test_materialize_callsite_stack_arguments_resolves_register_carrier_before_m
             return_used=False,
         )
     }
+    retained_stores = _capture_raw_memory_stores(after_codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, after_codegen)
+    _assert_raw_memory_stores_retained(after_codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    only_stmt = after_codegen.cfunc.statements.statements[1]
+    only_stmt = after_codegen.cfunc.statements.statements[-1]
     assert isinstance(only_stmt, CExpressionStatement)
     assert len(only_stmt.expr.args) == 1
     actual_fp = _expr_fingerprint(only_stmt.expr.args[0], project)
@@ -2109,10 +2199,12 @@ def test_materialize_callsite_stack_arguments_materializes_binary_proven_multi_a
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 1
+    assert len(codegen.cfunc.statements.statements) == 1 + len(retained_stores)
     only_call_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(only_call_stmt, CExpressionStatement)
     assert only_call_stmt.expr is call
@@ -2210,10 +2302,12 @@ def test_materialize_callsite_stack_arguments_keeps_generic_ss_backtracking_with
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 2
+    assert len(codegen.cfunc.statements.statements) == 2 + len(retained_stores)
     assert codegen.cfunc.statements.statements[0] is probe
     only_call_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(only_call_stmt, CExpressionStatement)
@@ -2307,10 +2401,12 @@ def test_materialize_callsite_stack_arguments_accepts_virtual_dirty_ss_carrier_w
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 2
+    assert len(codegen.cfunc.statements.statements) == 2 + len(retained_stores)
     assert codegen.cfunc.statements.statements[0] is probe
     only_call_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(only_call_stmt, CExpressionStatement)
@@ -2445,13 +2541,15 @@ def test_materialize_callsite_stack_arguments_matches_same_register_with_renamed
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 3
-    probe_assignment = codegen.cfunc.statements.statements[0]
-    assert isinstance(probe_assignment, CAssignment)
-    assert probe_assignment.rhs is probe.expr
+    assert len(codegen.cfunc.statements.statements) == 3 + len(retained_stores)
+    assert codegen.cfunc.statements.statements[0] is probe
+    assert any(isinstance(stmt, CAssignment) and stmt.lhs is carrier_def and stmt.rhs is row_index
+               for stmt in codegen.cfunc.statements.statements)
     only_call_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(only_call_stmt, CExpressionStatement)
     assert len(only_call_stmt.expr.args) == 1
@@ -3013,11 +3111,18 @@ def test_materialize_callsite_stack_arguments_accepts_vvar_carrier_store_with_ty
         ),
     }
 
+    carrier_definition = next(stmt for stmt in codegen.cfunc.statements.statements
+                              if isinstance(stmt, CAssignment) and stmt.lhs is carrier)
+    carrier_rhs = carrier_definition.rhs
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 1
-    final_stmt = codegen.cfunc.statements.statements[0]
+    assert len(codegen.cfunc.statements.statements) == 2 + len(retained_stores)
+    assert carrier_definition in codegen.cfunc.statements.statements
+    assert carrier_definition.lhs is carrier and carrier_definition.rhs is carrier_rhs
+    final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
     assert _args_match(final_stmt.expr.args, [arg_slot])
 
@@ -3106,18 +3211,25 @@ def test_materialize_callsite_stack_arguments_prefers_typed_probe_stores_over_pu
         ),
     }
 
+    carrier_definition = next(stmt for stmt in codegen.cfunc.statements.statements
+                              if isinstance(stmt, CAssignment) and stmt.lhs is carrier)
+    carrier_rhs = carrier_definition.rhs
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 1
-    final_stmt = codegen.cfunc.statements.statements[0]
+    assert len(codegen.cfunc.statements.statements) == 2 + len(retained_stores)
+    assert carrier_definition in codegen.cfunc.statements.statements
+    assert carrier_definition.lhs is carrier and carrier_definition.rhs is carrier_rhs
+    final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
     assert _args_match(final_stmt.expr.args, [arg_slot])
 
 
 @pytest.mark.parametrize("matching_value", [False, True])
 @pytest.mark.parametrize("instruction", [None, 0x400F, 0x4011])
-def test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence(matching_value, instruction):
+def test_materialize_callsite_stack_arguments_keeps_unknown_memory_even_with_exact_push_evidence(matching_value, instruction):
     project = _project()
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -3204,11 +3316,13 @@ def test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evide
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    consumed = matching_value and instruction == 0x4011
-    assert (store not in codegen.cfunc.statements.statements) is consumed
+    # Even exact consumed PUSH provenance does not prove memory liveness.
+    assert store in codegen.cfunc.statements.statements
     assert codegen.cfunc.statements.statements[0] is probe
     final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
@@ -3315,11 +3429,18 @@ def test_materialize_callsite_stack_arguments_rematerializes_typed_probe_call_ev
         ),
     }
 
+    carrier_definition = next(stmt for stmt in codegen.cfunc.statements.statements
+                              if isinstance(stmt, CAssignment) and stmt.lhs is carrier)
+    carrier_rhs = carrier_definition.rhs
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 1
-    final_stmt = codegen.cfunc.statements.statements[0]
+    assert len(codegen.cfunc.statements.statements) == 2 + len(retained_stores)
+    assert carrier_definition in codegen.cfunc.statements.statements
+    assert carrier_definition.lhs is carrier and carrier_definition.rhs is carrier_rhs
+    final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
     assert _args_match(final_stmt.expr.args, [arg_slot])
 
@@ -3875,7 +3996,9 @@ def test_materialize_callsite_stack_arguments_scans_past_value_assignments_betwe
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
     final_stmt = next(
@@ -3889,7 +4012,7 @@ def test_materialize_callsite_stack_arguments_scans_past_value_assignments_betwe
     assert carrier_after in [getattr(stmt, "lhs", None) for stmt in codegen.cfunc.statements.statements]
     assert ax_7 in [getattr(stmt, "lhs", None) for stmt in codegen.cfunc.statements.statements]
     assert ax_8 in [getattr(stmt, "lhs", None) for stmt in codegen.cfunc.statements.statements]
-    assert codegen._inertia_callsite_materialization_stats.live_setup_definition_preserved_count == 1
+    assert codegen._inertia_callsite_materialization_stats.live_setup_definition_preserved_count == 1 + len(retained_stores)
 
 
 def test_materialize_callsite_stack_arguments_refuses_name_only_probe_summary_upgrade():
@@ -4169,13 +4292,15 @@ def test_materialize_callsite_stack_arguments_carries_probe_evidence_into_loop_b
         )
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(loop_body.statements) == 1
-    final_stmt = loop_body.statements[0]
+    assert len(loop_body.statements) == 1 + len(retained_stores)
+    final_stmt = loop_body.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
-    assert len(final_stmt.expr.args) == 1
+    assert _args_match(final_stmt.expr.args, [arg_slot])
     assert codegen._inertia_callsite_summaries[id(call)].arg_count == 1
     assert codegen._inertia_callsite_summaries[id(call)].arg_widths == (2,)
 
@@ -4703,10 +4828,12 @@ def test_materialize_callsite_stack_arguments_accepts_ss_shift_linear_store_shap
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 2
+    assert len(codegen.cfunc.statements.statements) == 2 + len(retained_stores)
     assert codegen.cfunc.statements.statements[0] is probe
     final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
@@ -4900,19 +5027,21 @@ def test_materialize_callsite_stack_arguments_extracts_inline_store_before_call_
         ),
     }
 
+    retained_stores = _capture_raw_memory_stores(codegen.cfunc.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained_stores)
 
     assert changed is True
     wrapped_drawbar = codegen.cfunc.statements.statements[1]
     wrapped_drawtime = codegen.cfunc.statements.statements[2]
     assert isinstance(wrapped_drawbar, CStatements)
     assert isinstance(wrapped_drawtime, CStatements)
-    assert len(wrapped_drawbar.statements) == 1
-    assert len(wrapped_drawtime.statements) == 1
-    assert isinstance(wrapped_drawbar.statements[0], CExpressionStatement)
-    assert isinstance(wrapped_drawtime.statements[0], CExpressionStatement)
-    assert _args_match(wrapped_drawbar.statements[0].expr.args, [irow2])
-    assert _args_match(wrapped_drawtime.statements[0].expr.args, [irow1])
+    assert len(wrapped_drawbar.statements) == 2
+    assert len(wrapped_drawtime.statements) == 2
+    assert isinstance(wrapped_drawbar.statements[-1], CExpressionStatement)
+    assert isinstance(wrapped_drawtime.statements[-1], CExpressionStatement)
+    assert _args_match(wrapped_drawbar.statements[-1].expr.args, [irow2])
+    assert _args_match(wrapped_drawtime.statements[-1].expr.args, [irow1])
 
 
 def test_materialize_callsite_stack_arguments_consumes_repeated_value_carrier_assignments():
@@ -5621,7 +5750,7 @@ def test_materialize_callsite_stack_arguments_keeps_unproved_local_expr_setup_as
     assert codegen.cfunc.statements.statements[0] is setup
 
 
-def test_materialize_callsite_stack_arguments_prunes_proven_local_immediate_push_setup_assignment():
+def test_materialize_callsite_stack_arguments_keeps_local_immediate_push_storage():
     project = _project_with_bytes(0x105B, b"\xb8\x30\x00\x50")
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -5664,11 +5793,14 @@ def test_materialize_callsite_stack_arguments_prunes_proven_local_immediate_push
         ),
     }
 
+    retained = ((setup, setup.lhs, setup.rhs),)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained)
 
     assert changed is True
-    assert list(codegen.cfunc.statements.statements) == [codegen.cfunc.statements.statements[0]]
-    assert codegen.cfunc.statements.statements[0].expr is call
+    assert len(codegen.cfunc.statements.statements) == 2
+    assert codegen.cfunc.statements.statements[0] is setup
+    assert codegen.cfunc.statements.statements[1].expr is call
     assert call.args == [row_arg, col_arg]
 
 
@@ -9225,7 +9357,7 @@ def test_materialize_callsite_stack_arguments_prunes_adjacent_stale_dx_ax_pair_w
     assert getattr(codegen, "_inertia_dx_ax_return_pair_assignments_folded_8616", 0) == 1
 
 
-def test_materialize_callsite_prunes_ret_reg_pre_call_stack_carriers_after_return_arg_materialized():
+def test_materialize_callsite_keeps_ret_reg_stack_storage_after_return_arg_materialized():
     project = _project()
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -9298,10 +9430,12 @@ def test_materialize_callsite_prunes_ret_reg_pre_call_stack_carriers_after_retur
         ),
     }
 
+    retained = ((stale_local, stale_local.lhs, stale_local.rhs),)
     assert _materialize_callsite_stack_arguments_8616(project, codegen) is True
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained)
 
     statements = codegen.cfunc.statements.statements
-    assert statements == [call_stmt]
+    assert statements == [stale_local, call_stmt]
     assert len(sprintf_call.args) == 3
     assert isinstance(sprintf_call.args[2], CFunctionCall)
     assert sprintf_call.args[2].callee_target == "aNldiv"
@@ -10438,7 +10572,7 @@ def test_recover_missing_direct_calls_ignores_rendered_text_presence(monkeypatch
     assert [getattr(call, "callee_target", None) for call in calls] == []
 
 
-def test_materialize_callsite_prunes_consumed_immediate_bp_setup_assignment():
+def test_materialize_callsite_keeps_consumed_immediate_bp_storage():
     project = _project()
     codegen = _DummyCodegen(project)
     irow1 = CVariable(
@@ -10497,12 +10631,14 @@ def test_materialize_callsite_prunes_consumed_immediate_bp_setup_assignment():
         ),
     }
 
+    retained = ((setup, setup.lhs, setup.rhs),)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained)
 
-    assert changed is True
-    assert setup not in root.statements
+    assert changed is False
+    assert setup in root.statements
     assert call in [getattr(stmt, "expr", None) for stmt in root.statements]
-    assert codegen._inertia_call_arg_setup_assignments_pruned_8616 == 1
+    assert getattr(codegen, "_inertia_call_arg_setup_assignments_pruned_8616", 0) == 0
 
 
 def test_materialize_callsite_context_preserves_nested_live_stack_setup_assignment():
@@ -10851,7 +10987,7 @@ def test_materialize_callsite_prunes_byte_proven_dirty_source_alias_after_dirty_
     assert codegen._inertia_callsite_pre_call_source_alias_artifacts_pruned_8616 == 1
 
 
-def test_materialize_callsite_prunes_full_byte_proven_pre_call_setup_window():
+def test_materialize_callsite_prunes_register_setup_but_keeps_stack_storage():
     project = _project_with_bytes(0x1052, b"\xb8\x30\x00\x50\x8b\x46\xfe\x05\x02\x00\x50")
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -10901,10 +11037,14 @@ def test_materialize_callsite_prunes_full_byte_proven_pre_call_setup_window():
         ),
     }
 
+    retained = ((alias, alias.lhs, alias.rhs),)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
+    _assert_raw_memory_stores_retained(codegen.cfunc.statements, retained)
 
     assert changed is True
-    assert root.statements == [call_stmt]
+    assert root.statements == [alias, call_stmt]
+    assert len(call.args) == 2 and call.args[0] is row_arg
+    assert isinstance(call.args[1], CConstant) and call.args[1].value == 48
 
 
 def test_materialize_callsite_keeps_pre_call_setup_window_without_full_byte_evidence():

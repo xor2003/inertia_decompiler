@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import cast
 
 from .cache import _load_cache_json, _recovery_cache_key, _store_cache_json
 from .cache_source_manifest import RecoveryCacheSourceScope8616
@@ -241,7 +242,7 @@ def _mz_linear_candidates_from_prologues(binary_path: Path) -> tuple[list[int], 
     return ordered, "mz_prologue_fallback"
 
 
-def _cached_discovery_result(key: str, started: float) -> RizinDiscoveryResult | None:
+def _cached_discovery_result(key: dict[str, object], started: float) -> RizinDiscoveryResult | None:
     """Return a persisted discovery result for one cache key when present."""
     cached = _load_cache_json("recovery", key)
     if not isinstance(cached, dict):
@@ -264,7 +265,7 @@ def _cached_discovery_result(key: str, started: float) -> RizinDiscoveryResult |
     return None
 
 
-def _cached_error_result(key: str | None, started: float, detail: str) -> RizinDiscoveryResult:
+def _cached_error_result(key: dict[str, object] | None, started: float, detail: str) -> RizinDiscoveryResult:
     """Build, persist, and return one ERROR discovery result."""
     error_result = RizinDiscoveryResult(
         RizinDiscoveryStatus.ERROR,
@@ -279,7 +280,7 @@ def _cached_error_result(key: str | None, started: float, detail: str) -> RizinD
     return error_result
 
 
-def _empty_result(key: str | None, started: float, detail: str) -> RizinDiscoveryResult:
+def _empty_result(key: dict[str, object] | None, started: float, detail: str) -> RizinDiscoveryResult:
     """Build, persist, and return one EMPTY discovery result."""
     empty_result = RizinDiscoveryResult(
         RizinDiscoveryStatus.EMPTY,
@@ -320,7 +321,7 @@ def _call_target_candidates(binary_path: Path, timeout_sec: int) -> list[dict[st
 
 
 def _mz_fallback_result(
-    key: str | None, started: float, binary_path: Path
+    key: dict[str, object] | None, started: float, binary_path: Path
 ) -> RizinDiscoveryResult:
     """Return a linear MZ prologue result when rizin found no candidates."""
     mz_fallback, fallback_detail = _mz_linear_candidates_from_prologues(binary_path)
@@ -346,7 +347,7 @@ def _mz_fallback_result(
 
 
 def _run_function_analysis(
-    binary_path: Path, key: str | None, started: float, timeout_sec: int
+    binary_path: Path, key: dict[str, object] | None, started: float, timeout_sec: int
 ) -> tuple[subprocess.CompletedProcess[str] | None, RizinDiscoveryResult | None]:
     """Run rizin's conservative analysis; return (process, early_result)."""
     cmd = ["rizin", "-2", "-q", "-c", _RIZIN_FUNCTION_ANALYSIS_COMMAND, str(binary_path)]
@@ -413,8 +414,11 @@ def discover_rizin_function_entries(binary_path: Path, *, timeout_sec: int = 8) 
     completed, early = _run_function_analysis(binary_path, key, started, timeout_sec)
     if early is not None:
         return early
+    # The paired-None contract of _run_function_analysis guarantees a process
+    # result whenever the early lane did not produce one.
+    completed_process = cast(subprocess.CompletedProcess[str], completed)
     try:
-        payload = json.loads(completed.stdout)
+        payload = json.loads(completed_process.stdout)
     except Exception:
         return _cached_error_result(key, started, "invalid JSON")
     if not isinstance(payload, list):

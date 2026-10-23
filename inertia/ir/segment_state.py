@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     )
 
     from .direct_call_segment_context import SegmentEntryContext8616
+    from .near_call_jump_scope import NearCallJumpScope8616
     from .near_return_continuation_view import (
         ScopedNearReturnContinuationView8616,
     )
@@ -26,14 +27,20 @@ if TYPE_CHECKING:
     from .scoped_function_ir_view import ScopedFunctionIRView8616
 
 from .core import IRFunctionArtifact, IRValue, MemSpace, SegmentOrigin
+from .declared_selector_native_effects import NativeEffectSurvey8616, survey_native_effects_8616
 from .segment_call_preservation import SegmentCallPreservationResult8616
-from .segment_state_solver import solve_segment_state_8616
+from .segment_state_solver import (
+    SegmentStateSolution8616,
+    _solve_identity_segment_survey_8616,
+    solve_segment_state_8616,
+)
 from .segment_state_transfer import (
     SEGMENT_REGISTERS,
     InstructionStateKey,
     SegmentRegisterState,
     SegmentRestoreSource,
     SegmentValueKind8616,
+    architectural_live_in_state,
     call_preservation_at_instruction_8616,
     declared_call_effect_at_instruction_8616,
     join_register_states,
@@ -88,6 +95,9 @@ class SegmentStateArtifact:
     consuming entry. Its presence marks the state as scoped evidence for
     that entry only — never universal function proof. Builder/codegen paths
     attach one only when the consuming caller supplies it explicitly.
+    ``near_call_scope`` is a distinct conditional selector premise, never an
+    invocation-domain substitute. State consumers must retain the scoped view
+    and this premise; the result cannot close a universal callee summary.
     """
 
     entry_states: dict[int, dict[str, SegmentRegisterState]]
@@ -99,6 +109,7 @@ class SegmentStateArtifact:
     call_preservations: tuple[SegmentCallPreservationResult8616, ...] = ()
     declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
     entry_context: SegmentEntryContext8616 | None = field(default=None, repr=False, compare=False)
+    near_call_scope: NearCallJumpScope8616 | None = field(default=None, repr=False, compare=False)
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, repr=False, compare=False)
     scoped_view: (
         ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
@@ -146,6 +157,7 @@ class SegmentStateArtifact:
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
         return {
+            "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "invocation_scope": None if self.invocation_scope is None else self.invocation_scope.to_dict(),
             "scoped_view": None if self.scoped_view is None else self.scoped_view.to_dict(),
             "entry_context_callsite": None if self.entry_context is None else self.entry_context.candidate.callsite_addr,
@@ -188,6 +200,7 @@ def build_x86_16_segment_state_artifact(
     call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
     entry_context: SegmentEntryContext8616 | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
     scoped_view: (
         ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
     ) = None,
@@ -232,7 +245,7 @@ def build_x86_16_segment_state_artifact(
                         DeclaredCallEffectConsumption8616.from_admission_8616(admission)
                     )
     solution = solve_segment_state_8616(
-        artifact, function_ssa, restore_sources, call_preservations, entry_context=entry_context, invocation_scope=invocation_scope, scoped_view=scoped_view, declared_call_effects=declared_call_effects,
+        artifact, function_ssa, restore_sources, call_preservations, entry_context=entry_context, invocation_scope=invocation_scope, near_call_scope=near_call_scope, scoped_view=scoped_view, declared_call_effects=declared_call_effects,
     )
     call_boundary_count = sum(
         1
@@ -262,13 +275,34 @@ def build_x86_16_segment_state_artifact(
         ][instruction.dst.name].origin
         is SegmentOrigin.PROVEN
     )
-    entry_context_count = int(entry_context is not None)
-    raw_fact_count = explicit_write_count + call_boundary_count + entry_context_count
     classified_call_count = sum(
         call_preservation_at_instruction_8616(artifact, block, instruction, call_preservations, invocation_scope) is not None
         or declared_call_effect_at_instruction_8616(artifact, block, instruction, declared_call_effects) is not None
+        or (near_call_scope is not None
+            and isinstance(instruction.addr, int)
+            and solution.instruction_entry_states.get(instruction.addr, {}).get("cs") == architectural_live_in_state("cs"))
         for block in artifact.blocks for instruction in block.instrs if instruction.op == "CALL"
     )
+    return _assemble_segment_state_8616(
+        artifact, solution, explicit_write_count, call_boundary_count,
+        classified_write_count, classified_call_count, declared_consumptions,
+        call_preservations, entry_context, invocation_scope, near_call_scope, scoped_view)
+
+
+def _assemble_segment_state_8616(
+    artifact: IRFunctionArtifact, solution: SegmentStateSolution8616,
+    explicit_write_count: int, call_boundary_count: int,
+    classified_write_count: int, classified_call_count: int,
+    declared_consumptions: list[DeclaredCallEffectConsumption8616],
+    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    entry_context: SegmentEntryContext8616 | None,
+    invocation_scope: Real16InvocationDomain8616 | None,
+    near_call_scope: NearCallJumpScope8616 | None,
+    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+) -> SegmentStateArtifact:
+    """Assemble one authoritative summary from a solved state and classified counts."""
+    entry_context_count = int(entry_context is not None)
+    raw_fact_count = explicit_write_count + call_boundary_count + entry_context_count
     scoped_projection = solution.scoped_projection
     summary: dict[str, object] = {
         "block_count": len(artifact.blocks),
@@ -318,8 +352,26 @@ def build_x86_16_segment_state_artifact(
         call_preservations=call_preservations,
         declared_call_consumptions=tuple(declared_consumptions),
         entry_context=entry_context, invocation_scope=invocation_scope,
-        scoped_view=scoped_view,
+        scoped_view=scoped_view, near_call_scope=near_call_scope,
     )
+
+
+def build_segment_state_with_native_survey_8616(
+    artifact: IRFunctionArtifact, expected_addrs: frozenset[int],
+) -> tuple[SegmentStateArtifact, NativeEffectSurvey8616, int]:
+    """Classify once for universal segment solving and later selector induction.
+
+    The sparse identity solve is limited to a complete freshly produced survey
+    with no selector-affecting or unknown rows. Other bodies retain the ordinary
+    solver; their additional full instruction visit remains charged.
+    """
+    survey = survey_native_effects_8616(artifact.blocks, expected_addrs)
+    work = survey.raw
+    if survey.census_covered is True and survey.segment_identity_transfer:
+        solution, solved_work = _solve_identity_segment_survey_8616(artifact, survey)
+        state = _assemble_segment_state_8616(artifact, solution, 0, 0, 0, 0, [], (), None, None, None, None)
+        return state, survey, work + solved_work + 2 * len(artifact.blocks)
+    return build_x86_16_segment_state_artifact(artifact), survey, work + survey.raw + len(artifact.blocks)
 
 
 def _retained_refresh_context_8616(
@@ -328,33 +380,36 @@ def _retained_refresh_context_8616(
     artifact: object,
 ) -> tuple[
     Real16InvocationDomain8616 | None,
+    NearCallJumpScope8616 | None,
     ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
 ]:
     """Retain a consumed scoped context; never infer one from the project."""
     try:
         previous = boundary._inertia_segment_state_artifact
     except AttributeError:
-        return None, None
+        return None, None, None
     if previous is None:
-        return None, None
+        return None, None, None
     if not isinstance(previous, SegmentStateArtifact):
         raise TypeError("retained segment state must be a SegmentStateArtifact or None")
     scope, view = previous.invocation_scope, previous.scoped_view
-    if scope is None and view is None and not previous.summary.get("scoped_view_bound"):
-        return None, None
+    near_scope = previous.near_call_scope
+    active_scope = near_scope if near_scope is not None else scope
+    if active_scope is None and view is None and not previous.summary.get("scoped_view_bound"):
+        return None, None, None
     if (
-        scope is None or view is None or scope.project is not project
+        active_scope is None or view is None or active_scope.project is not project
         or previous.source_artifact is not artifact
     ):
         raise ValueError("retained conditional segment state no longer binds the codegen source")
     # The canonical builder below reauthenticates these retained inputs and
     # recomputes state with the current restore/call preservation evidence.
-    return scope, view
+    return scope, near_scope, view
 
 
 def _scoped_semantic_source_8616(
     boundary: _SegmentStateCodegenBoundary, project: object, artifact: object,
-    scope: Real16InvocationDomain8616 | None,
+    scope: Real16InvocationDomain8616 | NearCallJumpScope8616 | None,
     view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
 ) -> object:
     """Authenticate a retained conditional Semantics projection back to raw IR."""
@@ -372,7 +427,7 @@ def _scoped_semantic_source_8616(
         except AttributeError:
             previous = None
         if isinstance(previous, SegmentStateArtifact):
-            scope, view = previous.invocation_scope, previous.scoped_view
+            scope, view = previous.near_call_scope or previous.invocation_scope, previous.scoped_view
     context = projection.scoped_input
     if context.project is not project or context.scope is not scope or context.view is not view:
         raise ValueError("conditional Semantics requires its explicitly consumed entry")
@@ -392,6 +447,7 @@ def apply_x86_16_segment_state_artifact(
     codegen: object,
     *,
     invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
     scoped_view: (
         ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
     ) = None,
@@ -404,16 +460,20 @@ def apply_x86_16_segment_state_artifact(
     explicit inputs, a previously consumed conditional scope is retained and
     reauthenticated over the identical source. Fresh codegen remains unscoped.
     """
+    if near_call_scope is not None and near_call_scope.project is not project:
+        raise ValueError("near-call segment scope belongs to another project")
     boundary = cast(_SegmentStateCodegenBoundary, codegen)
     try:
         artifact = boundary._inertia_vex_ir_artifact
     except AttributeError:
         artifact = None
-    artifact = _scoped_semantic_source_8616(boundary, project, artifact, invocation_scope, scoped_view)
-    if invocation_scope is None and scoped_view is None:
-        invocation_scope, scoped_view = _retained_refresh_context_8616(boundary, project, artifact)
+    artifact = _scoped_semantic_source_8616(
+        boundary, project, artifact, near_call_scope or invocation_scope, scoped_view,
+    )
+    if invocation_scope is None and near_call_scope is None and scoped_view is None:
+        invocation_scope, near_call_scope, scoped_view = _retained_refresh_context_8616(boundary, project, artifact)
     if not isinstance(artifact, IRFunctionArtifact):
-        if invocation_scope is not None or scoped_view is not None:
+        if invocation_scope is not None or near_call_scope is not None or scoped_view is not None:
             raise ValueError("conditional segment state requires its identical source artifact")
         return False
     try:
@@ -452,7 +512,7 @@ def apply_x86_16_segment_state_artifact(
         call_preservations=call_preservations,
         declared_call_effects=declared_call_effects,
         invocation_scope=invocation_scope,
-        scoped_view=scoped_view,
+        scoped_view=scoped_view, near_call_scope=near_call_scope,
     )
     boundary._inertia_segment_state_artifact = segment_artifact
     _publish_declared_consumption_receipts_8616(

@@ -11,8 +11,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
+from typing import TYPE_CHECKING
 
 from .instruction_origin import IRInstructionOrigin8616
+
+if TYPE_CHECKING:
+    from .call_stack_coordinates import IRCallStackCoordinates8616
+    from .scoped_call_stack_coordinates import (
+        IRScopedCallStackCoordinates8616,
+    )
 
 __all__ = [
     "SEGMENTED_LOAD_ADDRESS_TAG_8616",
@@ -42,6 +49,7 @@ class MemSpace(Enum):
     """Segmented storage space for typed IR values and addresses."""
 
     REG = "reg"
+    CS = "cs"
     DS = "ds"
     ES = "es"
     SS = "ss"
@@ -219,6 +227,10 @@ class IRCallStackEffect8616:
     ``bp_preserved`` proves the incoming BP word survives the callee. False is
     absence of that proof, not a claim that BP must change. Memory preservation
     alone never establishes the value of a register used to address that memory.
+    ``stack_coordinates`` retains the independently evidenced per-call
+    decomposition (callee purge, caller cleanup, return-frame width, argument
+    top); ``net_stack_delta`` remains the owned caller-visible SP projection
+    and a proven coordinate derives and validates it.
     """
 
     net_stack_delta: int | None = None
@@ -226,6 +238,31 @@ class IRCallStackEffect8616:
     escaped_ranges: tuple[IRAddress, ...] = ()
     complete: bool = False
     bp_preserved: bool = False
+    stack_coordinates: IRCallStackCoordinates8616 | None = None
+    scoped_coordinates: IRScopedCallStackCoordinates8616 | None = None
+
+    def scoped_net_stack_delta_for(
+        self, caller_scope: object, callee_scope: object,
+    ) -> int | None:
+        """Project the caller-visible delta under both authenticated scopes.
+
+        The scoped carrier owns every check; this accessor adds nothing to
+        ``current_net_stack_delta`` and never fabricates a universal value.
+        """
+        carrier = self.scoped_coordinates
+        if carrier is None:
+            return None
+        return carrier.net_sp_delta_for(caller_scope, callee_scope)
+
+    @property
+    def current_net_stack_delta(self) -> int | None:
+        """Consume present coordinate authority without falling back to a guess."""
+        coordinates = self.stack_coordinates
+        if coordinates is None:
+            return self.net_stack_delta
+        if not coordinates.has_proven_sp_delta or coordinates.net_sp_delta != self.net_stack_delta:
+            return None
+        return self.net_stack_delta
 
     def preserves(self, address: IRAddress) -> bool:
         """Require explicit preservation and no overlapping or unresolved escape."""
@@ -237,9 +274,10 @@ class IRCallStackEffect8616:
             (item.space, item.base, item.offset, item.size) for item in self.preserved_ranges
         }
         escaped = any(stack_ranges_may_overlap_8616(address, item) for item in self.escaped_ranges)
-        coordinate_is_stable = address.base != ("sp",) or self.net_stack_delta == 0
+        current_delta = self.current_net_stack_delta
+        coordinate_is_stable = address.base != ("sp",) or current_delta == 0
         return bool(
-            self.complete and self.net_stack_delta is not None and coordinate_is_stable
+            self.complete and current_delta is not None and coordinate_is_stable
             and identity in preserved and not escaped
         )
 
@@ -247,10 +285,21 @@ class IRCallStackEffect8616:
         """Serialize this call effect for diagnostics and clean workers."""
         return {
             "net_stack_delta": self.net_stack_delta,
+            "current_net_stack_delta": self.current_net_stack_delta,
             "bp_preserved": self.bp_preserved,
             "preserved_ranges": [item.to_dict() for item in self.preserved_ranges],
             "escaped_ranges": [item.to_dict() for item in self.escaped_ranges],
             "complete": self.complete,
+            "stack_coordinates": (
+                None
+                if self.stack_coordinates is None
+                else self.stack_coordinates.to_dict()
+            ),
+            "scoped_coordinates": (
+                None
+                if self.scoped_coordinates is None
+                else self.scoped_coordinates.to_dict()
+            ),
         }
 
 

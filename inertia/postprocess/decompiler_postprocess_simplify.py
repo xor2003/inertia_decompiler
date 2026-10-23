@@ -43,7 +43,7 @@ import contextlib
 import logging
 import operator
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
@@ -650,11 +650,10 @@ class _VirtualInlineRun8616:
         """Keep statements whose virtual definitions are still live."""
         kept = []
         for statement in statements:
-            keys = (
-                _virtual_inline_identity_keys_8616(_virtual_expr_keys_8616(statement.lhs))
-                if isinstance(statement, CAssignment)
-                else ()
-            )
+            if not isinstance(statement, CAssignment):
+                kept.append(statement)
+                continue
+            keys = _virtual_inline_identity_keys_8616(_virtual_expr_keys_8616(statement.lhs))
             if (
                 keys
                 and any(key in self.replacements for key in keys)
@@ -1365,11 +1364,14 @@ class _SimplifyExpressionRun8616:
             folded_constant = self._pure_constant_expr_value_8616(node)
             if folded_constant is not None:
                 self._bump_stat_8616("_inertia_pure_constant_folded_count_8616")
-                return CConstant(
-                    folded_constant,
-                    cast(Any, self._constant_result_type_8616(node, folded_constant)),
-                    codegen=self.codegen,
-                    tags=node.tags,
+                return cast(
+                    object,
+                    CConstant(
+                        folded_constant,
+                        cast(Any, self._constant_result_type_8616(node, folded_constant)),
+                        codegen=self.codegen,
+                        tags=node.tags,
+                    ),
                 )
         return None
 
@@ -1406,7 +1408,7 @@ class _SimplifyExpressionRun8616:
     def _fold_tail_binary_8616(self, node: CBinaryOp) -> object | None:
         """Last-chance binary folds: same-operand dedup, zero-compare, and self-cancel."""
         if node.op in {"LogicalAnd", "LogicalOr", "And", "Or"} and _same_c_expression_8616(node.lhs, node.rhs):
-            return node.lhs
+            return cast(object, node.lhs)
         if node.op in {"CmpEQ", "CmpNE"}:
             folded_cmp = self._fold_cmp_against_zero_8616(node)
             if folded_cmp is not None:
@@ -1414,7 +1416,7 @@ class _SimplifyExpressionRun8616:
         if node.op in {"Sub", "Xor"} and _same_c_expression_8616(node.lhs, node.rhs):
             type_ = node.type or node.lhs.type
             if type_ is not None:
-                return CConstant(0, type_, codegen=self.codegen)
+                return cast(object, CConstant(0, type_, codegen=self.codegen))
         return None
 
     def _fold_binary_transform_8616(self, node: CBinaryOp) -> object | None:
@@ -1422,7 +1424,7 @@ class _SimplifyExpressionRun8616:
         if node.op == "Concat":
             return self._fold_concat_8616(node)
         if node.op in {"Shl", "Shr", "Sar"} and self._is_c_constant_int_8616(node.rhs, 0):
-            return node.lhs
+            return cast(object, node.lhs)
         if node.op in {"Mul", "And"}:
             return self._fold_zero_operand_binary_8616(node)
         if node.op == "Or":
@@ -1453,7 +1455,7 @@ class _SimplifyExpressionRun8616:
         if self._is_c_constant_int_8616(node.lhs, 0) or self._is_c_constant_int_8616(node.rhs, 0):
             type_ = node.type or node.lhs.type or node.rhs.type
             if type_ is not None:
-                return CConstant(0, type_, codegen=self.codegen)
+                return cast(object, CConstant(0, type_, codegen=self.codegen))
         return None
 
     def _fold_or_word_or_zero_8616(self, node: CBinaryOp) -> object | None:
@@ -1468,15 +1470,15 @@ class _SimplifyExpressionRun8616:
             if folded is not None:
                 return folded
         if self._is_c_constant_int_8616(node.lhs, 0):
-            return node.rhs
+            return cast(object, node.rhs)
         if self._is_c_constant_int_8616(node.rhs, 0):
-            return node.lhs
+            return cast(object, node.lhs)
         return None
 
     def _fold_not_transform_8616(self, node: CUnaryOp) -> object | None:
         operand = node.operand
         if isinstance(operand, CUnaryOp) and operand.op == "Not":
-            return operand.operand
+            return cast(object, operand.operand)
         if isinstance(operand, CBinaryOp):
             inverted = self._invert_cmp_op_8616(operand.op)
             if inverted is not None:
@@ -1490,13 +1492,16 @@ class _SimplifyExpressionRun8616:
                         if operand_type is not None:
                             operand_type.size  # noqa: B018
                 except ValueError:
-                    return node
-                return CBinaryOp(
-                    inverted,
-                    operand.lhs,
-                    operand.rhs,
-                    codegen=self.codegen,
-                    tags=node.tags or operand.tags,
+                    return cast(object, node)
+                return cast(
+                    object,
+                    CBinaryOp(
+                        inverted,
+                        operand.lhs,
+                        operand.rhs,
+                        codegen=self.codegen,
+                        tags=node.tags or operand.tags,
+                    ),
                 )
         return None
 
@@ -1506,7 +1511,7 @@ class _SimplifyExpressionRun8616:
             if not (isinstance(probe, CConstant) and probe.value == 0):
                 continue
             if isinstance(other, CBinaryOp) and other.op == "Sub" and isinstance(other.rhs, CConstant):
-                return CBinaryOp(node.op, other.lhs, other.rhs, codegen=self.codegen, tags=node.tags)
+                return cast(object, CBinaryOp(node.op, other.lhs, other.rhs, codegen=self.codegen, tags=node.tags))
         return None
 
     def _materialize_word_or_update_statements_8616(self, root_node: object) -> bool:
@@ -2123,7 +2128,7 @@ def _safe_inline_expr_8616(expr: object) -> bool:
     return False
 
 
-def _count_var_uses_seq_8616(seq: object, target: object) -> int:
+def _count_var_uses_seq_8616(seq: Iterable[object], target: object) -> int:
     """Sum temporary uses inside one sequence attribute."""
     total = 0
     for item in seq:
@@ -2136,7 +2141,7 @@ def _count_var_uses_seq_8616(seq: object, target: object) -> int:
     return total
 
 
-def _count_var_uses_pairs_8616(pairs: object, target: object) -> int:
+def _count_var_uses_pairs_8616(pairs: Iterable[tuple[object, object]], target: object) -> int:
     """Sum temporary uses inside condition/body pairs."""
     total = 0
     for cond, body in pairs:
@@ -2173,7 +2178,7 @@ def _count_var_uses_8616(node: object, target: object, *, assignment_lhs: bool =
     return total
 
 
-def _replace_var_use_in_seq_8616(seq: object, target: object, replacement: object) -> tuple[list[object], bool]:
+def _replace_var_use_in_seq_8616(seq: Iterable[object], target: object, replacement: object) -> tuple[list[object], bool]:
     """Rewrite uses inside one sequence attribute, returning the rebuilt list."""
     new_seq: list[object] = []
     seq_changed = False
@@ -2188,7 +2193,7 @@ def _replace_var_use_in_seq_8616(seq: object, target: object, replacement: objec
 
 
 def _replace_var_use_in_pairs_8616(
-    pairs: object, target: object, replacement: object
+    pairs: Iterable[tuple[object, object]], target: object, replacement: object
 ) -> tuple[list[tuple[object, object]], bool]:
     """Rewrite uses inside condition/body pairs, returning the rebuilt pairs."""
     new_pairs: list[tuple[object, object]] = []

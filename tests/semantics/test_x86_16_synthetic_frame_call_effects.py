@@ -44,7 +44,9 @@ def test_synthetic_frame_effect_materializes_bp_proof(project):
 
     assert result.complete
     assert result.facts[0].effect.bp_preserved
-    assert result.facts[0].effect.net_stack_delta == 0
+    # No real callee bytes: a refused coordinate proof must not leave the
+    # caller-cleanup-conflated zero guess as a positive SP fact.
+    assert result.facts[0].effect.net_stack_delta is None
     calls = [i for b in result.function.blocks for i in b.instrs if i.op == "CALL"]
     assert calls[0].call_stack_effect == result.facts[0].effect
 

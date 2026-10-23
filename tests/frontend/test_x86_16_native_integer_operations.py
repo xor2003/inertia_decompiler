@@ -159,8 +159,7 @@ def test_word_rendered_shift_keeps_native_low_word(tmp_path, value, count_value,
     import shutil
     import subprocess
     compiler = shutil.which("gcc")
-    if compiler is None:
-        pytest.skip("host gcc is required to execute generated integer expression")
+    assert compiler is not None, "host gcc is required to execute generated integer expression"
     expression, native = _operation(bits=16, count_value=count_value)
     native.lhs.value = value
     result = lower_native_integer_operation_8616(expression, native)

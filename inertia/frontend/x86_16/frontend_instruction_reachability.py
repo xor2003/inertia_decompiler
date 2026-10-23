@@ -81,9 +81,18 @@ class _ProjectBoundary8616(Protocol):
     """Dynamic angr project boundary used by frontend traversal."""
 
     _inertia_instruction_reachability_cache_8616: dict[
-        tuple[int, int, int, frozenset[int]],
+        tuple[int, int, int, frozenset[int], tuple[ConditionalIndirectEdge8616, ...]],
         InstructionReachabilityEvidence8616,
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionalIndirectEdge8616:
+    """Inventory assumption only; IR must independently prove its destination."""
+
+    block_addr: int
+    instruction_addr: int
+    target_addr: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,10 +112,16 @@ class InstructionReachabilityEvidence8616:
     block_partition: FrontendBlockPartitionArtifact8616 | None = dataclass_field(
         default=None, compare=False, repr=False,
     )
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = ()
 
     @property
     def complete(self) -> bool:
-        """Return whether every visited block had a resolved successor class."""
+        """Require a closed census without unproved indirect-edge assumptions."""
+        return not self.conditional_edges and self.inventory_complete
+
+    @property
+    def inventory_complete(self) -> bool:
+        """Close decoding only; conditional edges still need semantic proof."""
         return (
             self.raw_fact_count > 0
             and self.raw_fact_count == self.normalized_fact_count
@@ -119,7 +134,7 @@ class InstructionReachabilityEvidence8616:
 
 def _reachability_cache_8616(
     project: object,
-) -> dict[tuple[int, int, int, frozenset[int]], InstructionReachabilityEvidence8616]:
+) -> dict[tuple[int, int, int, frozenset[int], tuple[ConditionalIndirectEdge8616, ...]], InstructionReachabilityEvidence8616]:
     """Return immutable byte-reachability evidence cached on one project."""
     boundary = cast(_ProjectBoundary8616, project)
     try:
@@ -158,6 +173,7 @@ def x86_16_block_successors_from_capstone_8616(
     region_end: int,
     *,
     proven_return_block_addrs: frozenset[int] = frozenset(),
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
 ) -> tuple[set[int], bool]:
     """Return bounded successors, refusing unknown or out-of-region edges.
 
@@ -189,6 +205,7 @@ def x86_16_block_successors_from_capstone_8616(
         region_start,
         region_end,
         proven_return_block_addrs,
+        conditional_edges,
     )
 
 
@@ -200,6 +217,7 @@ def _terminal_successors_8616(
     region_start: int,
     region_end: int,
     proven_return_block_addrs: frozenset[int],
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
 ) -> tuple[set[int], bool]:
     """Classify the decoded terminal into bounded edges or refusals."""
     successors: set[int] = set()
@@ -225,7 +243,15 @@ def _terminal_successors_8616(
         add_target(block_end)
         return successors, unresolved
     if mnemonic in {"jmp", "ljmp"}:
-        add_target(_direct_target_8616(last))
+        target = _direct_target_8616(last)
+        if target is None and mnemonic == "jmp":
+            terminal = cast(_InstructionBoundary8616, last)
+            matches = tuple(edge for edge in conditional_edges
+                            if edge.block_addr == boundary.addr
+                            and edge.instruction_addr == terminal.address)
+            if len(matches) == 1:
+                target = matches[0].target_addr
+        add_target(target)
         return successors, unresolved
     if mnemonic.startswith("j") or mnemonic in {"loop", "loope", "loopne", "loopnz", "loopz"}:
         target = _direct_target_8616(last)
@@ -246,6 +272,7 @@ def _visit_reachable_block_8616(
     unresolved: set[int],
     successor_edges: set[tuple[int, int]],
     proven_return_block_addrs: frozenset[int] = frozenset(),
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
 ) -> tuple[int, ...]:
     """Decode one block and fold its proven successors into the traversal."""
     try:
@@ -279,6 +306,7 @@ def _visit_reachable_block_8616(
         region_start,
         region_end,
         proven_return_block_addrs=proven_return_block_addrs,
+        conditional_edges=conditional_edges,
     )
     if successor_unresolved:
         unresolved.add(block_addr)
@@ -293,18 +321,21 @@ def collect_instruction_reachability_8616(
     region_start: int,
     region_end: int,
     proven_return_block_addrs: frozenset[int] = frozenset(),
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
 ) -> InstructionReachabilityEvidence8616:
     """Traverse binary-proven successors inside one bounded loaded image.
 
     ``proven_return_block_addrs`` is part of the cache identity: a
     premise-derived closed census is never served to a request that did
     not supply the same independently proven set.
+    Conditional edges also belong to the cache identity; they can complete
+    the decoding inventory but never make ``complete`` true.
     """
     if not (region_start <= entry < region_end):
         return InstructionReachabilityEvidence8616((), (), (), (), 0, 0, 0, 0, 0)
 
     cache = _reachability_cache_8616(project)
-    cache_key = (entry, region_start, region_end, proven_return_block_addrs)
+    cache_key = (entry, region_start, region_end, proven_return_block_addrs, conditional_edges)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -329,6 +360,7 @@ def collect_instruction_reachability_8616(
             unresolved,
             successor_edges,
             proven_return_block_addrs,
+            conditional_edges,
         )
         for successor in sorted(successors):
             if successor not in visited:
@@ -341,6 +373,9 @@ def collect_instruction_reachability_8616(
         region_end=region_end,
     )
     unresolved.update(fact.block_addr for fact in partition.facts if fact.failure is not None)
+    if any((edge.block_addr, edge.target_addr) not in successor_edges for edge in conditional_edges):
+        # An unused assumption cannot silently disappear from its inventory.
+        unresolved.add(entry)
     failure_count = len(unresolved)
     classified_count = len(visited)
     evidence = InstructionReachabilityEvidence8616(
@@ -355,6 +390,7 @@ def collect_instruction_reachability_8616(
         failure_count=failure_count,
         blocks=partition.blocks,
         block_partition=partition,
+        conditional_edges=conditional_edges,
     )
     cache[cache_key] = evidence
     return evidence

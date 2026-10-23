@@ -3,22 +3,31 @@
 Responsibility: require a verified Cython build for normal Python VEX lifting,
 while retaining explicit interpreted and opportunistic diagnostic modes.
 The source remains authoritative; this module introduces no instruction semantics.
+Manifest verification itself is owned by ``inertia.native_bundle``.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-import sys
-import sysconfig
 from enum import StrEnum
-from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 
+from inertia.native_bundle import BUILD_SCHEMA, file_digest, verified_bundle_directory
+
 LIFTER_SOURCE: str = "inertia/frontend/x86_16/lift_86_16.py"
+LIFTER_EXTENSION: str = "lift_86_16"
 PACKAGE_BUNDLE: str = "cython-vex"
-BUILD_SCHEMA: int = 1
+
+__all__ = [
+    "BUILD_SCHEMA",
+    "LIFTER_SOURCE",
+    "PACKAGE_BUNDLE",
+    "LifterBackend",
+    "activate_lifter_backend",
+    "file_digest",
+    "verified_extension_directory",
+    "verified_packaged_extension_directory",
+]
 
 
 class LifterBackend(StrEnum):
@@ -29,36 +38,10 @@ class LifterBackend(StrEnum):
     AUTO = "auto"
 
 
-def file_digest(path: Path) -> str:
-    """Fingerprint source or extension bytes without relying on timestamps."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _verified_extension_directory(manifest_path: Path, confinement: Path, source: Path) -> Path | None:
-    """Apply the schema/ABI/source/digest/confinement checks to one manifest layout."""
-    try:
-        manifest = json.loads(manifest_path.read_text())
-        if not isinstance(manifest, dict):
-            return None
-        if manifest["schema"] != BUILD_SCHEMA:
-            return None
-        if manifest["cache_tag"] != sys.implementation.cache_tag or manifest["soabi"] != sysconfig.get_config_var("SOABI"):
-            return None
-        if manifest["source_sha256"] != file_digest(source):
-            return None
-        relative_path = manifest["extension"]
-        if not isinstance(relative_path, str):
-            return None
-        extension = (confinement / relative_path).resolve()
-        if not extension.is_relative_to(confinement.resolve()):
-            return None
-        if extension.name not in {"lift_86_16" + suffix for suffix in EXTENSION_SUFFIXES}:
-            return None
-        if manifest["extension_sha256"] != file_digest(extension):
-            return None
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return extension.parent
+    """Apply the shared schema/ABI/source/digest/confinement checks to one manifest."""
+    directory: Path | None = verified_bundle_directory(manifest_path, confinement, source, LIFTER_EXTENSION)
+    return directory
 
 
 def verified_extension_directory(root: Path) -> Path | None:

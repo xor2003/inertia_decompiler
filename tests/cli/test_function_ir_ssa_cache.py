@@ -7,21 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from inertia.ir.core import IRBlock, IRCallStackEffect8616, IRInstr
-from inertia.ir.function_artifact import IRFunctionArtifact
-from inertia.ir.function_ir_registry import (
-    FunctionIRArtifactVerdict8616,
-    publish_function_ir_artifact_8616,
-    registered_function_ir_artifact_8616,
-)
-from inertia.ir.function_ssa_registry import (
-    FunctionSSAArtifactStage8616,
-    FunctionSSAArtifactVerdict8616,
-    function_ssa_artifact_for_boundary_8616,
-    publish_function_ssa_artifact_8616,
-    registered_function_ssa_artifact_8616,
-)
-from inertia.ir.ssa_function import build_x86_16_function_ssa
 
 import inertia.cli.cache as cache_module
 import inertia.cli.function_ir_ssa_cache as ir_ssa_cache
@@ -40,6 +25,22 @@ from inertia.cli.function_ir_ssa_cache_codec import (
     function_ir_ssa_bundle_from_record_8616,
     function_ir_ssa_bundle_record_8616,
 )
+from inertia.ir.core import IRBlock, IRCallStackEffect8616, IRInstr
+from inertia.ir.function_artifact import IRFunctionArtifact
+from inertia.ir.function_ir_registry import (
+    FunctionIRArtifactVerdict8616,
+    publish_function_ir_artifact_8616,
+    registered_function_ir_artifact_8616,
+)
+from inertia.ir.function_ssa_registry import (
+    FunctionSSAArtifactStage8616,
+    FunctionSSAArtifactVerdict8616,
+    function_ssa_artifact_at_address_8616,
+    function_ssa_artifact_for_boundary_8616,
+    publish_function_ssa_artifact_8616,
+    registered_function_ssa_artifact_8616,
+)
+from inertia.ir.ssa_function import build_x86_16_function_ssa
 
 
 @pytest.mark.parametrize("bp_preserved", [False, True])
@@ -319,3 +320,173 @@ def test_catalog_hydration_prevents_ir_and_ssa_rebuild(
     )
     assert retained.stats.closed
     assert retained.results[0].verdict is FunctionIRSSACacheVerdict8616.HIT
+
+
+def test_catalog_hydration_verified_restore_and_stale_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Real save/restore verifies the bundle then reacquires authority.
+
+    A fresh project over unchanged source hydrates proven artifacts through
+    the explicit restoration boundary; after the bytes change, the persisted
+    generation is refused, not republished as observed evidence.
+    """
+    from tests.pipeline.test_function_readiness import (
+        BASE,
+        MOV_AX_BX_RET,
+        MOV_AX_DX_RET,
+        _project,
+    )
+
+    _enable_cache(monkeypatch, tmp_path)
+    project, function = _project(MOV_AX_BX_RET)
+    resolution = function_ssa_artifact_at_address_8616(project, BASE)
+    assert resolution.artifact is not None
+    stored = store_function_ir_ssa_catalog_8616(project, (function,))
+    assert stored.stats.closed
+    assert stored.stats.materialized_count == 1
+
+    restored_project, restored_function = _project(MOV_AX_BX_RET)
+    hydrated = hydrate_function_ir_ssa_catalog_8616(
+        restored_project,
+        (restored_function,),
+    )
+    assert hydrated.stats.closed
+    assert hydrated.stats.materialized_count == 1
+    assert (
+        registered_function_ssa_artifact_8616(
+            restored_project, BASE
+        ).verdict
+        is FunctionSSAArtifactVerdict8616.PROVEN
+    )
+
+    stale_project, stale_function = _project(MOV_AX_DX_RET)
+    stale = hydrate_function_ir_ssa_catalog_8616(
+        stale_project,
+        (stale_function,),
+    )
+    assert stale.stats.closed
+    assert stale.stats.materialized_count == 0
+    assert stale.results[0].verdict is FunctionIRSSACacheVerdict8616.MISS
+
+    # A persisted bundle attesting a foreign generation under this
+    # function's own cache key must be refused at the restoration boundary —
+    # never republished as observed evidence.
+    foreign = function_ssa_artifact_at_address_8616(stale_project, BASE)
+    assert foreign.artifact is not None
+    foreign_ir = registered_function_ir_artifact_8616(
+        stale_project, BASE
+    ).artifact
+    bx_key = function_ir_ssa_cache_key_8616(project, function)
+    assert bx_key is not None
+    seeded = store_function_ir_ssa_cache_8616(
+        bx_key,
+        FunctionIRSSABundle8616(foreign_ir, foreign.artifact),
+    )
+    assert seeded.verdict is FunctionIRSSACacheVerdict8616.STORED
+
+    second_restore, second_function = _project(MOV_AX_BX_RET)
+    refused = hydrate_function_ir_ssa_catalog_8616(
+        second_restore,
+        (second_function,),
+    )
+    assert refused.stats.closed
+    assert refused.stats.materialized_count == 0
+    assert refused.stats.failure_count == 1
+    assert (
+        refused.results[0].failure
+        is FunctionIRSSACacheFailure8616.RESTORATION_UNVERIFIED
+    )
+
+
+def test_explicit_native_range_cache_preserves_actual_source_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit native ranges persist and restore without a function-manager entry."""
+    from inertia.cli.project_loading import _build_project_from_bytes
+    from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
+    from inertia.ir.function_readiness_contracts import FunctionSourceScope8616
+    from inertia.ir.function_ssa_registry import function_ssa_artifact_for_boundary_8616
+    from tests.pipeline.test_function_readiness import BASE, MOV_AX_BX_RET
+
+    _enable_cache(monkeypatch, tmp_path)
+    project = _build_project_from_bytes(MOV_AX_BX_RET, base_addr=BASE, entry_point=BASE)
+    boundary = exact_function_range_boundary_8616(project, BASE, BASE + len(MOV_AX_BX_RET))
+    assert boundary is not None
+    built = function_ssa_artifact_for_boundary_8616(project, BASE, boundary)
+    assert built.artifact is not None
+    key = function_ir_ssa_cache_key_8616(project, boundary)
+    assert key is not None
+    assert key["source_scope"] == {
+        "kind": FunctionSourceScope8616.EXACT_RANGE.value,
+        "end": BASE + len(MOV_AX_BX_RET),
+    }
+    stored = store_function_ir_ssa_catalog_8616(project, (boundary,))
+    assert stored.stats.closed and stored.stats.materialized_count == 1
+
+    restored_project = _build_project_from_bytes(MOV_AX_BX_RET, base_addr=BASE, entry_point=BASE)
+    restored_boundary = exact_function_range_boundary_8616(
+        restored_project, BASE, BASE + len(MOV_AX_BX_RET),
+    )
+    assert restored_boundary is not None
+    hydrated = hydrate_function_ir_ssa_catalog_8616(restored_project, (restored_boundary,))
+    assert hydrated.stats.closed and hydrated.stats.materialized_count == 1
+    restored = registered_function_ssa_artifact_8616(restored_project, BASE)
+    assert restored.artifact is not None and restored.artifact.source_revision is not None
+    assert restored.artifact.source_revision.scope is FunctionSourceScope8616.EXACT_RANGE
+
+
+def test_native_cache_restore_refuses_loss_of_function_manager_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A saved manager-framed source cannot turn into an unbound native model."""
+    from tests.pipeline.test_function_readiness import BASE, MOV_AX_BX_RET, _project
+
+    _enable_cache(monkeypatch, tmp_path)
+    project, function = _project(MOV_AX_BX_RET)
+    built = function_ssa_artifact_at_address_8616(project, BASE)
+    assert built.artifact is not None
+    stored = store_function_ir_ssa_catalog_8616(project, (function,))
+    assert stored.stats.materialized_count == 1
+
+    restored_project, restored_function = _project(MOV_AX_BX_RET)
+    restored_project.kb.functions.clear()
+    hydrated = hydrate_function_ir_ssa_catalog_8616(restored_project, (restored_function,))
+    assert hydrated.stats.closed and hydrated.stats.materialized_count == 0
+    assert hydrated.stats.failure_count == 1
+    assert hydrated.results[0].failure is FunctionIRSSACacheFailure8616.RESTORATION_UNVERIFIED
+
+
+def test_cache_restore_rejects_another_scope_over_identical_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Matching bytes cannot substitute an explicit range for a manager input."""
+    from inertia.cli.project_loading import _build_project_from_bytes
+    from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
+    from inertia.ir.function_ssa_registry import function_ssa_artifact_for_boundary_8616
+    from tests.pipeline.test_function_readiness import BASE, MOV_AX_BX_RET, _project
+
+    _enable_cache(monkeypatch, tmp_path)
+    project, function = _project(MOV_AX_BX_RET)
+    requested_key = function_ir_ssa_cache_key_8616(project, function)
+    assert requested_key is not None
+    explicit_project = _build_project_from_bytes(MOV_AX_BX_RET, base_addr=BASE, entry_point=BASE)
+    explicit = exact_function_range_boundary_8616(
+        explicit_project, BASE, BASE + len(MOV_AX_BX_RET),
+    )
+    assert explicit is not None
+    built = function_ssa_artifact_for_boundary_8616(explicit_project, BASE, explicit)
+    raw = registered_function_ir_artifact_8616(explicit_project, BASE).artifact
+    assert raw is not None and built.artifact is not None
+    seeded = store_function_ir_ssa_cache_8616(
+        requested_key, FunctionIRSSABundle8616(raw, built.artifact),
+    )
+    assert seeded.verdict is FunctionIRSSACacheVerdict8616.STORED
+    hydrated = hydrate_function_ir_ssa_catalog_8616(project, (function,))
+    assert hydrated.stats.closed and hydrated.stats.materialized_count == 0
+    assert hydrated.stats.failure_count == 1
+    assert hydrated.results[0].failure is FunctionIRSSACacheFailure8616.RESTORATION_UNVERIFIED

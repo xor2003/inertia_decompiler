@@ -99,11 +99,6 @@ def test_function_ir_ssa_source_scope_has_exact_layer_owners() -> None:
         "inertia/postprocess/decompiler_postprocess_stage.py",
         "inertia/lowering/register_local_declarations.py",
         "inertia/structuring/condition_lowering.py",
-        "inertia/semantics/compiler_helpers.py",
-        "inertia/ir/analysis/alias.py",
-        "inertia/pipeline/errors.py",
-        "inertia/ir/address_ir_8616.py",
-        "inertia/frontend/x86_16/lift_86_16.py",
     }.isdisjoint(paths)
     # IR additions must remain cache dependencies; a fixed file count is not
     # an architectural boundary. Reject downstream layer ownership directly.
@@ -162,6 +157,6 @@ def test_function_ir_ssa_key_uses_versioned_exact_source_scope(
     )
 
     assert key is not None
-    assert key["schema"] == 2
+    assert key["schema"] == 3
     assert key["source_sha256"] == "exact-source-digest"
     assert observed == [FUNCTION_IR_SSA_CACHE_SOURCE_FILES]

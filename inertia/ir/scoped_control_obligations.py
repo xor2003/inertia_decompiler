@@ -586,6 +586,7 @@ def prove_scoped_control_obligations_8616(
     s1_artifact = IRFunctionArtifact(
         function_addr=artifact.function_addr,
         blocks=s1_blocks,
+        source_revision=artifact.source_revision,
     )
     proof = prove_entry_jump_domains_8616(
         s1_artifact,
@@ -688,6 +689,7 @@ def _joint_replay_8616(
     s1_artifact = IRFunctionArtifact(
         function_addr=function_addr,
         blocks=s1_blocks,
+        source_revision=view.source_artifact.source_revision,
     )
     binding = proof.source_binding
     if (

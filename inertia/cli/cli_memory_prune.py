@@ -33,7 +33,7 @@ def _is_prunable_generated_memory_name_8616(name: object) -> bool:
 
 
 def _collect_used_variable_ids_8616(
-    cfunc: object, iter_c_nodes_deep: Callable[[object], Iterable[object]]
+    cfunc: _CFunctionLike, iter_c_nodes_deep: Callable[[object], Iterable[object]]
 ) -> set[int]:
     """Collect ids of variables still referenced anywhere in the function body."""
     used_variables: set[int] = set()

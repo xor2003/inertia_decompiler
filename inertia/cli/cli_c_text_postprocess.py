@@ -5310,34 +5310,6 @@ def _prune_unused_local_declarations_text(c_text: str) -> str:
         normalized += "\n"
     return normalized
 
-def _prune_standalone_stack_probe_calls_text(c_text: str) -> str:
-    def _impl() -> str:
-        trailing_newline = c_text.endswith("\n")
-        probe_names = ("aNchkstk", "__aNchkstk", "_chkstk", "__chkstk")
-        probe_alt = "|".join(re.escape(name) for name in probe_names)
-        call_re = re.compile(rf"^\s*(?:{probe_alt})\s*\(\s*\)\s*;\s*$")
-        proto_re = re.compile(rf"^\s*void\s+(?:{probe_alt})\s*\(\s*(?:void)?\s*\)\s*;\s*$")
-        lines = c_text.splitlines()
-        without_calls = [line for line in lines if call_re.match(line) is None]
-        if without_calls == lines:
-            return c_text
-        remaining_text = "\n".join(without_calls)
-        kept_lines = []
-        for line in without_calls:
-            if (
-                proto_re.match(line) is not None
-                and re.search(rf"\b(?:{probe_alt})\s*\(", remaining_text.replace(line, "", 1)) is None
-            ):
-                continue
-            kept_lines.append(line)
-        result = "\n".join(kept_lines)
-        if trailing_newline:
-            result += "\n"
-        return result
-
-    return _impl()
-
-
 def _helper_literal_mappings_8616(project: angr.Project) -> dict[str, str]:
     """Map literal address spellings to sim-procedure helper names."""
 
@@ -5389,7 +5361,7 @@ def _apply_int21_helper_replacements_8616(replacements: list[str], c_text: str) 
     return c_text
 
 
-def _apply_interrupt_replacements_8616(interrupt_replacements: dict[str, list[str]], c_text: str) -> str:
+def _apply_interrupt_replacements_8616(interrupt_replacements: Mapping[str, Sequence[str]], c_text: str) -> str:
     """Apply one replacement per interrupt source name (longest first)."""
 
     for source_name, source_replacements in sorted(

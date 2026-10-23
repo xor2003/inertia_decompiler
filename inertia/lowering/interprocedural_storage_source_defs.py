@@ -49,6 +49,8 @@ def _load_definitions_8616(
         if instr.op != "LOAD" or instr.addr != fact.push_addr or instr.dst is None or not instr.args:
             continue
         address = instr.args[0]
+        if not isinstance(address, IRAddress):
+            continue
         if not _load_address_covers_8616(address, base, space, offset, end):
             continue
         candidates.append((site, address, instr.dst))
@@ -90,7 +92,11 @@ def _store_data_sites_8616(
         if instr.op != "STORE" or instr.addr != fact.push_addr or len(instr.args) != 2:
             continue
         address, value = instr.args
-        if _is_ss_sp_address_8616(address) and _store_value_matches_8616(value, fact.width):
+        if (
+            isinstance(value, IRValue)
+            and _is_ss_sp_address_8616(address)
+            and _store_value_matches_8616(value, fact.width)
+        ):
             stores.append((site, value))
     return tuple(stores)
 

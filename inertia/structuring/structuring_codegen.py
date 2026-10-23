@@ -1522,7 +1522,7 @@ def _validated_callsite_inventory_8616(
 def _summary_for_direct_call_occurrence_8616(
     call: structured_c.CFunctionCall,
     summary_map: dict[int, CallsiteSummary8616],
-    inventory: dict[int, CallsiteSummary8616],
+    inventory: Mapping[int, CallsiteSummary8616],
 ) -> CallsiteSummary8616 | None:
     """Resolve one call occurrence from node identity or an exact instruction tag.
 
@@ -1544,7 +1544,7 @@ def _summary_for_direct_call_occurrence_8616(
 
 
 def _inventory_has_unique_target_callsite_8616(
-    inventory: dict[int, CallsiteSummary8616],
+    inventory: Mapping[int, CallsiteSummary8616],
     target_addr: int,
 ) -> bool:
     """Return whether one machine callsite uniquely owns a direct target."""
@@ -2354,7 +2354,7 @@ class _SwitchSafetyScan8616:
     statement_positions: dict[int, tuple[list[object], int]]
     statements_node_positions: dict[int, tuple[list[object], int]]
     statement_list_paths: dict[int, tuple[str, ...]]
-    statement_container_shapes: dict[int, object]
+    statement_container_shapes: dict[int, dict[str, object]]
     statement_parent_paths: dict[int, tuple[str, ...]]
     positioned_statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]]
     positioned_statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]]

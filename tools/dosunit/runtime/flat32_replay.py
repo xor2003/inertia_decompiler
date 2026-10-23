@@ -15,6 +15,7 @@ import unicorn
 from capstone import x86_const as decoded_registers
 from unicorn.unicorn_py3.unicorn import Uc, UcError
 
+from tools.dosunit.runtime.flat32_defined_flags import advance_integer_flags
 from tools.dosunit.runtime.flat32_memory_permissions import PAGE_SIZE, DeclaredAccess, PageGrant
 from tools.dosunit.runtime.flat32_replay_memory import _capture_observation, _initialize_guest
 from tools.dosunit.runtime.flat32_replay_memory import image_from_project as image_from_project
@@ -103,6 +104,8 @@ class _RunState:
     detail: str = ""
     instructions: int = 0
     writes: set[int] = field(default_factory=set)
+    last_instruction: tuple[int, bytes] | None = None
+    undefined_flags: int = 0
 
 
 def _page_access(grants: tuple[PageGrant, ...]) -> dict[int, DeclaredAccess]:
@@ -156,6 +159,23 @@ def _instruction_scope(decoded: capstone.CsInsn | None) -> ReplayInstructionReas
     return None
 
 
+def _instruction_rejection(
+    decoded: capstone.CsInsn | None, allowed: frozenset[int] | None, state: _RunState,
+) -> str | None:
+    """Apply the architectural scope before an optional narrower instruction contract."""
+    reason = _instruction_scope(decoded)
+    if reason is not None:
+        return reason.value
+    assert decoded is not None
+    if allowed is not None and decoded.id not in allowed:
+        return "instruction_outside_declared_subset"
+    if allowed is not None:
+        state.undefined_flags, flag_reason = advance_integer_flags(decoded, state.undefined_flags)
+        if flag_reason is not None:
+            return flag_reason.value
+    return None
+
+
 def _boundary_stop(uc: Uc, address: int, boundary_state: _CaptureState | None) -> bool:
     """Record one fetch; stop for a capture-local boundary or trace overflow.
 
@@ -193,6 +213,7 @@ def _run_guest(
     vector: ReplayVector,
     instruction_limit: int,
     boundary_state: _CaptureState | None = None,
+    allowed_instruction_ids: frozenset[int] | None = None,
 ) -> tuple[Uc, _RunState, tuple[PageGrant, ...]]:
     """Initialize one guest and run it under the full replay guard contract.
 
@@ -216,10 +237,13 @@ def _run_guest(
             uc.emu_stop()
             return
         decoded = next(decoder.disasm(bytes(uc.mem_read(address, size)), address), None)
-        reason = _instruction_scope(decoded)
+        reason = _instruction_rejection(decoded, allowed_instruction_ids, state)
         if reason is not None:
-            state.status, state.detail = ReplayStatus.UNSUPPORTED, reason.value
+            state.status, state.detail = ReplayStatus.UNSUPPORTED, reason
             uc.emu_stop()
+            return
+        assert decoded is not None
+        state.last_instruction = (address, bytes(decoded.bytes))
 
     page_access = _page_access(grants)
 
@@ -270,9 +294,12 @@ def replay(
     vector: ReplayVector,
     *,
     instruction_limit: int = 100000,
+    allowed_instruction_ids: frozenset[int] | None = None,
 ) -> ReplayResult:
     """Run a pure integer function to a return trap in a fresh Unicorn guest."""
-    guest, state, grants = _run_guest(image, entry, vector, instruction_limit)
+    guest, state, grants = _run_guest(
+        image, entry, vector, instruction_limit, allowed_instruction_ids=allowed_instruction_ids,
+    )
     grant_by_page = {grant.address: grant for grant in grants}
     observed = tuple(_capture_observation(guest, grant_by_page, region) for region in vector.observations)
     result = ReplayResult(
@@ -284,6 +311,7 @@ def replay(
         state.detail,
         grants,
         vector.observations,
+        state.last_instruction,
     )
     # Native hook trampolines form cycles through the guest. Each retained
     # guest owns a large translator reservation that ordinary Python object

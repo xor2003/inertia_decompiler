@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, NoReturn, cast
+from typing import TYPE_CHECKING, NoReturn
 
 if TYPE_CHECKING:
     from inertia.ir.vex_terminal_jump import TerminalJumpEvidenceStats8616, TerminalJumpRefusalReason8616
@@ -51,7 +51,7 @@ def proven_terminal_target(
     )
     if evidence.failure is not None or not evidence.stats.closed:
         return None
-    return cast(int | None, evidence.proven_target)
+    return evidence.proven_target
 
 
 class RelativeCallTargetFailure(StrEnum):

@@ -16,7 +16,9 @@ dependencies = [
     "claripy==9.3.3",
     "pyvex==9.3.3",
     "capstone==5.0.9",
-    "pycparser>=3,<4",
+    "pycparser>=3,<3.12",
+    "bitstring>=4,<5",
+    "immutables==0.21",
     "textual==8.2.8",
     "z3-solver==4.13.0.0",
     "Cython>=3.2,<4",
@@ -292,5 +294,8 @@ exclude = [
 ignore_names = [
     "test_*",
     "pytest_*",
+    "exclude_specials",
+    "stmt_results",
+    "register_reader",
 ]
 min_confidence = 80

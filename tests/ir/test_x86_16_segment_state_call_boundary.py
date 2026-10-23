@@ -17,6 +17,9 @@ from inertia.alias.segment_stack_restore import (
     build_x86_16_segment_stack_restore_artifact,
 )
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import (
+    Lifter86_16,  # noqa: F401 -- register the lifter for the byte-derived control
+)
 from inertia.ir import (
     AddressStatus,
     IRAddress,

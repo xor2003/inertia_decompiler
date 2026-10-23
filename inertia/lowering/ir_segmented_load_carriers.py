@@ -14,6 +14,7 @@ import copy
 import functools
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -23,7 +24,7 @@ from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimTemporaryVariable
 from archinfo import Arch
 
-from inertia.ir.core import AddressStatus, IRAddress, IRBinaryValue, IRValue, MemSpace, SegmentOrigin
+from inertia.ir.core import AddressStatus, IRAddress, IRBinaryValue, IRInstr, IRValue, MemSpace, SegmentOrigin
 from inertia.ir.function_ir_registry import (
     FunctionIRArtifactVerdict8616,
     registered_function_ir_artifact_8616,
@@ -38,7 +39,10 @@ from inertia.ir.logical_memory_register_transfer_contracts import (
     LogicalMemoryRegisterTransferKind8616,
 )
 from inertia.ir.segment_state import SegmentStateArtifact
+from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_cfg import build_ssa_cfg_snapshot_8616, compute_ssa_dominators_8616
+from inertia.ir.ssa_cfg_contracts import SSADominators8616
+from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.lowering.c_ast_utils import (
     _iter_c_nodes_deep_8616,
     _replace_c_children_8616,
@@ -578,22 +582,24 @@ def _offset_expr_8616(codegen: _Codegen8616, address: IRAddress) -> object | Non
 
 
 def _track_mov_constants_8616(
-    instruction: object,
+    instruction: IRInstr,
     register_constants: dict[str, int],
     segment_constants: dict[MemSpace, int],
 ) -> None:
     """Track constant propagation through ``MOV`` into GP/segment registers."""
     destination = instruction.dst
+    args = instruction.args
     if not (
         instruction.op == "MOV"
         and isinstance(destination, IRValue)
         and destination.space is MemSpace.REG
         and isinstance(destination.name, str)
-        and len(instruction.args) == 1
-        and isinstance(instruction.args[0], IRValue)
+        and len(args) == 1
     ):
         return
-    source = instruction.args[0]
+    source = args[0]
+    if not isinstance(source, IRValue):
+        return
     constant = (
         source.const
         if source.space is MemSpace.CONST and isinstance(source.const, int)
@@ -613,20 +619,22 @@ def _track_mov_constants_8616(
             segment_constants[segment_space] = constant & 0xFFFF
 
 
-def _stable_load_address_8616(instruction: object) -> IRAddress | None:
+def _stable_load_address_8616(instruction: IRInstr) -> IRAddress | None:
     """Return the instruction's stable segmented load address, if proven."""
     destination = instruction.dst
+    args = instruction.args
     if not (
         instruction.op == "LOAD"
         and isinstance(instruction.addr, int)
         and isinstance(destination, IRValue)
         and destination.space is MemSpace.TMP
         and isinstance(destination.source_tmp, int)
-        and len(instruction.args) == 1
-        and isinstance(instruction.args[0], IRAddress)
+        and len(args) == 1
     ):
         return None
-    address = instruction.args[0]
+    address = args[0]
+    if not isinstance(address, IRAddress):
+        return None
     if (
         address.space not in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
         or address.status is not AddressStatus.STABLE
@@ -673,19 +681,21 @@ def _load_facts_8616(codegen: _Codegen8616) -> dict[tuple[int, int], _SegmentedL
         for instruction in block.instrs:
             _track_mov_constants_8616(instruction, register_constants, segment_constants)
             address = _stable_load_address_8616(instruction)
-            if address is None:
-                continue
             destination = instruction.dst
+            source_tmp = destination.source_tmp if destination is not None else None
+            instruction_addr = instruction.addr
+            if address is None or source_tmp is None or instruction_addr is None:
+                continue
             segment_constant = segment_constants.get(address.space)
             if segment_constant is None and isinstance(segment_state, SegmentStateArtifact):
                 state = segment_state.state_before_instruction(
-                    instruction.addr,
+                    instruction_addr,
                     address.space.value,
                 )
                 segment_constant = state.constant_value() if state is not None else None
             fact = _SegmentedLoadFact8616(
-                destination.source_tmp,
-                instruction.addr,
+                source_tmp,
+                instruction_addr,
                 address,
                 segment_constant,
             )
@@ -851,14 +861,14 @@ def _same_block_reload_for_read_8616(
         for value in candidate.address.base_values
         if value.space is MemSpace.REG and isinstance(value.name, str)
     }
-    clobber_names = base_registers | register_names
+    clobber_names = frozenset(base_registers | register_names)
     if not _same_block_window_clear_8616(block, candidate, use_addr, clobber_names):
         return None
     return candidate
 
 
 def _same_block_window_clear_8616(
-    block: object,
+    block: SSABlock,
     candidate: _LogicalRegisterWriteFact8616,
     use_addr: int,
     clobber_names: frozenset[str],
@@ -950,7 +960,7 @@ def _identity_register_names_8616(
     )
 
 
-def _use_block_for_addr_8616(artifact: object, use_addr: int) -> object | None:
+def _use_block_for_addr_8616(artifact: SSAFunctionArtifact, use_addr: int) -> SSABlock | None:
     """Return the unique SSA block containing ``use_addr``."""
     blocks = tuple(
         block
@@ -963,7 +973,7 @@ def _use_block_for_addr_8616(artifact: object, use_addr: int) -> object | None:
 def _debug_nearest_fact_8616(
     identity: _RegisterSSAIdentity8616,
     use_addr: int,
-    use_block: object,
+    use_block: SSABlock,
     logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
     names: frozenset[str],
 ) -> None:
@@ -989,7 +999,7 @@ def _debug_nearest_fact_8616(
 def _nearest_dominating_fact_8616(
     logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
     names: frozenset[str],
-    dominators: object,
+    dominators: SSADominators8616,
     use_block_addr: int,
     use_addr: int,
 ) -> _LogicalRegisterWriteFact8616 | None:
@@ -1012,7 +1022,9 @@ def _nearest_dominating_fact_8616(
     return max(nearest, key=lambda fact: fact.instruction_addr)
 
 
-def _ssa_reachable_set_8616(edges: object, seed: int, stop: int) -> set[int]:
+def _ssa_reachable_set_8616(
+    edges: Callable[[int], tuple[int, ...] | None], seed: int, stop: int
+) -> set[int]:
     """Blocks reachable from ``seed`` along ``edges``, stopping at ``stop``."""
     reached = {seed}
     pending = [seed]
@@ -1028,7 +1040,7 @@ def _ssa_reachable_set_8616(edges: object, seed: int, stop: int) -> set[int]:
 
 
 def _path_window_instructions_clear_8616(
-    block: object,
+    block: SSABlock,
     block_addr: int,
     candidate: _LogicalRegisterWriteFact8616,
     use_block_addr: int,
@@ -1099,7 +1111,7 @@ def _nearest_linear_logical_fact_8616(
     path_blocks = forward & reverse
     if candidate.block_addr not in path_blocks or use_block_addr not in path_blocks:
         return None
-    clobber_names = base_registers | names
+    clobber_names = frozenset(base_registers | names)
     for block_addr in sorted(path_blocks):
         block = blocks_by_addr.get(block_addr)
         if block is None or not _path_window_instructions_clear_8616(
@@ -1667,7 +1679,7 @@ class _CarrierTransform8616:
         if replacement is None:
             return None
         self.materialized.add(read_key)
-        return replacement
+        return cast(object, replacement)
 
     def _assignment(self, node: structured_c.CAssignment) -> object:
         """Replay segmented helpers into one proven assignment carrier."""

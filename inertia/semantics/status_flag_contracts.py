@@ -44,10 +44,11 @@ SHIFT_COUNT_MANY_STATUS_FLAG_WRITES_8616: StatusFlag8616 = (
 
 @dataclass(frozen=True, slots=True)
 class DecodedStatusFlagInstruction8616:
-    """Minimal decoded instruction evidence needed by flag liveness."""
+    """Decoded flag evidence, including REP's possible zero-iteration path."""
 
     mnemonic: str
     immediate_count: int | None = None
+    repeat_prefix: bool = False
 
 
 @dataclass(frozen=True, slots=True)

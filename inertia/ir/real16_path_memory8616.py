@@ -24,21 +24,29 @@ boundary.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, field
+from typing import Protocol, cast
 
 from .core import IRAddress, IRBinaryValue, IRInstr, IRValue, MemSpace
 from .real16_initial_memory8616 import InvocationInitialMemory8616
+from .real16_persistent_bytes8616 import (
+    PersistentBytes8616,
+    canonical_known_root_8616,
+)
 
 #: Linear-address formation from a proven 16-bit segment base.
 SEGMENT_SHIFT_8616: int = 4
 
-# The effective-address segment bases this domain can resolve: SS, DS and
-# ES are proven from their named register lanes. Every other address space
+# The effective-address segment bases this domain can resolve: CS, SS, DS and
+# ES are proven from their named register lanes. CS identity grants no constant
+# selector or table contents: the same known/dirty lane and memory guards apply.
+# Every other address space
 # is either a bare absolute offset (``MemSpace.UNKNOWN`` with the
 # ``absolute_const`` provenance, handled by the store evaluator) or an
 # unproven span.
 SEGMENT_BASE_NAME_8616: dict[MemSpace, str] = {
+    MemSpace.CS: "cs",
     MemSpace.SS: "ss",
     MemSpace.DS: "ds",
     MemSpace.ES: "es",
@@ -66,24 +74,89 @@ class PathMemory8616:
     control row — may have modified memory anywhere. Readers must treat
     every byte as unproven once it is set; the maps stay cleared so the
     state is canonical.
+
+    ``known`` is a mutable facade over an immutable ``immutables.Map``
+    root: ``copy()`` shares the root in O(1) and every write — through
+    this API or a direct ``memory.known[addr] = byte`` — swaps only that
+    overlay's root, so an independent snapshot never observes a sibling's
+    mutation (the same isolation the previous full ``dict`` clone
+    provided). ``unknown`` stays an ordinary ``set`` — only the known map
+    is large enough to need structural sharing.
     """
 
-    known: dict[int, int] = field(default_factory=dict)
+    known: MutableMapping[int, int] = field(
+        default_factory=PersistentBytes8616
+    )
     unknown: set[int] = field(default_factory=set)
     tainted: bool = False
 
+    def __post_init__(self) -> None:
+        """Normalize containers so no external alias can reach the state.
+
+        A plain ``dict`` argument is folded into a fresh immutable root —
+        later mutation of the caller's dict cannot reach this overlay.
+        A facade passed in (``copy()``, ``restore()``,
+        ``dataclasses.replace``) is re-wrapped, so the new overlay owns
+        its own facade while still sharing the immutable root. The small
+        ``unknown`` set is copied outright.
+        """
+        if type(self.known) is PersistentBytes8616:
+            self.known = cast(_PersistentBytesFacadeLike8616, self.known).share_8616()
+        else:
+            self.known = PersistentBytes8616(self.known)
+        self.unknown = set(self.unknown)
+
+    def __copy__(self) -> PathMemory8616:
+        """``copy.copy`` takes the same isolated-snapshot route."""
+        return self.copy()
+
     def copy(self) -> PathMemory8616:
-        """Return an independent overlay with the same contents."""
+        """Return an independent overlay with the same contents.
+
+        The known-root share makes the copy O(1) in ``known``; any write
+        on either side replaces only that overlay's facade root, so
+        logical isolation matches the former full clone exactly.
+        """
         return PathMemory8616(
-            known=dict(self.known),
-            unknown=set(self.unknown),
+            known=self.known,
+            unknown=self.unknown,
             tainted=self.tainted,
         )
 
+    def copy_work_units_8616(self) -> int:
+        """Return the actual work ``copy()`` performs for this overlay.
+
+        Constant terms cover the instance allocation, the ``__post_init__``
+        normalization and one facade share. ``unknown`` is an honest
+        per-element set copy. ``known`` costs ``len(known)`` only when the
+        field currently holds a plain/foreign mapping that normalization
+        must fold into an immutable root — the canonical facade on a
+        native ``immutables.Map`` shares its root for free.
+        """
+        known_cost = (
+            0 if canonical_known_root_8616(self.known) else len(self.known)
+        )
+        return len(self.unknown) + known_cost + 8
+
     def assign(self, other: PathMemory8616) -> None:
-        """Overwrite this overlay's contents with ``other``'s."""
-        self.known.clear()
-        self.known.update(other.known)
+        """Overwrite this overlay's contents with ``other``'s.
+
+        The known facade adopts ``other``'s root in place — this overlay
+        keeps its own facade object (an external reference to
+        ``self.known`` observes the new contents, matching the previous
+        clear-and-update contract) while paying O(1) instead of
+        O(|known|). ``unknown`` keeps the honest per-element copy.
+        """
+        if self is other:
+            return
+        if type(self.known) is PersistentBytes8616:
+            cast(_PersistentBytesFacadeLike8616, self.known).adopt_8616(other.known)
+        else:
+            # Foreign field replacement (e.g. a plain dict injected by an
+            # external caller): keep the in-place clear-and-update contract
+            # so the retained container observes the assigned contents.
+            self.known.clear()
+            self.known.update(other.known)
         self.unknown.clear()
         self.unknown.update(other.unknown)
         self.tainted = other.tainted
@@ -300,3 +373,30 @@ def path_load_value_8616(
             return None
         value |= byte << (offset * 8)
     return value
+
+
+class _PersistentBytesFacadeLike8616(Protocol):
+    """Owned persistent-bytes facade contract at the untyped owner boundary.
+
+    ``real16_persistent_bytes8616`` sits outside the strictly typed file
+    set, so the facade class resolves dynamically here; this Protocol
+    names only the facade methods ``PathMemory8616`` consumes.
+    """
+
+    def share_8616(self) -> MutableMapping[int, int]:
+        """Return an independent facade over the identical immutable root."""
+        ...
+
+    def adopt_8616(self, other: Mapping[int, int]) -> None:
+        """Point this facade at another map's contents in place."""
+        ...
+
+
+class PathMemoryProducerBindings8616(Protocol):
+    """Typed namespace of helper identities actually retained by this consumer.
+
+    This metadata view grants no call authority and invokes no accessor.
+    Consumers read the existing module bindings directly for cache keys.
+    """
+
+    canonical_known_root_8616: object

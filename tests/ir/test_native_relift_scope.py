@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
@@ -27,10 +28,37 @@ from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.segment_call_preservation import prove_segment_call_preservation_8616
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
 
+_CALLER_CODE = bytes.fromhex("8cd8e8fb0f8ec0c3")  # mov ax,ds; call 0x2000; mov es,ax; ret
+_CALLEE_CODE = bytes.fromhex("b800b8c3")          # mov ax,0xb800; ret
+
+
+def _load_native_bytes_8616(addr: int, size: int) -> bytes:
+    """Serve retained native bytes for the two mock block extents."""
+    for base, code in ((0x1000, _CALLER_CODE), (0x2000, _CALLEE_CODE)):
+        if base <= addr and addr + size <= base + len(code):
+            return code[addr - base: addr - base + size]
+    return b""
+
+
+def _decoded_block_8616(addr: int, code: bytes,
+                        extents: tuple[tuple[int, int], ...]) -> object:
+    """Mint the decoded-block surface bound-block authentication reads."""
+    return SimpleNamespace(
+        addr=addr, size=len(code), bytes=code,
+        capstone=SimpleNamespace(insns=tuple(
+            SimpleNamespace(address=head, size=size) for head, size in extents)),
+    )
+
 
 @pytest.fixture
 def leaf_proof():
-    project = SimpleNamespace()
+    # Bound-block authentication requires a real arch, live loader bytes and
+    # retained decoded blocks; the mock supplies that exact surface.
+    project = SimpleNamespace(
+        arch=Arch86_16(),
+        loader=SimpleNamespace(
+            memory=SimpleNamespace(load=_load_native_bytes_8616)),
+    )
     caller = IRFunctionArtifact(0x1000, (IRBlock(0x1000, instrs=(
         IRInstr("MOV", IRValue(MemSpace.REG, name="ax", size=2),
                 (IRValue(MemSpace.REG, name="ds", size=2),), addr=0x1000),
@@ -48,9 +76,13 @@ def leaf_proof():
     publish_function_ir_artifact_8616(project, callee)
     caller_boundary = ExactFunctionRangeBoundary8616(
         project, 0x1000, 8, frozenset({0x1000}), frozenset({0x1000, 0x1002, 0x1005, 0x1007}), (),
+        blocks=(_decoded_block_8616(
+            0x1000, _CALLER_CODE,
+            ((0x1000, 2), (0x1002, 3), (0x1005, 2), (0x1007, 1))),),
     )
     callee_boundary = ExactFunctionRangeBoundary8616(
         project, 0x2000, 4, frozenset({0x2000}), frozenset({0x2000, 0x2003}), (),
+        blocks=(_decoded_block_8616(0x2000, _CALLEE_CODE, ((0x2000, 3), (0x2003, 1))),),
     )
     caller_coverage = prove_ir_boundary_coverage_8616(project, caller_boundary, caller)
     callee_coverage = prove_ir_boundary_coverage_8616(project, callee_boundary, callee)
@@ -108,7 +140,18 @@ def test_mutation_between_transfers_is_revalidated(leaf_proof, mutation):
 
     assert transfer()["ds"].origin is SegmentOrigin.PROVEN
     if mutation == "registry":
-        publish_function_ir_artifact_8616(project, replace(callee))
+        # Immutable bindings refuse republish even for a different body, so
+        # swap the registry entry directly to test the revalidation contract.
+        changed = replace(
+            callee.blocks[0],
+            instrs=(
+                IRInstr("MOV", IRValue(MemSpace.REG, name="es", size=2),
+                        (IRValue(MemSpace.CONST, const=0xB801, size=2),), addr=0x2000),
+                callee.blocks[0].instrs[1],
+            ),
+        )
+        project._inertia_function_ir_artifacts_8616[0x2000] = replace(
+            callee, blocks=(changed,))
     elif mutation == "exit_state":
         proof.callee.state.exit_states[callee.function_addr]["ds"] = unknown_segment_state("ds")
     else:

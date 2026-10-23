@@ -6,7 +6,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
     CConstant,
     CDirtyExpression,
+    CExpressionStatement,
     CFunctionCall,
+    CIfElse,
     CIndexedVariable,
     CStatements,
     CStructField,
@@ -20,8 +22,16 @@ from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVa
 
 import inertia.validation.tail_validation_fingerprint as tail_validation_fingerprint_module
 from inertia.alias.alias_model import _stack_storage_facts_for_segmented_address_8616
+from inertia.alias.stack_pointer_alias_map import (
+    StackPointerAliasResult8616,
+    StackPointerAliasStatus8616,
+    compute_stack_pointer_aliases_8616,
+    read_stack_pointer_alias_map_8616,
+    write_stack_pointer_alias_map_8616,
+)
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.semantic_cast import CSemanticCast8616
+from inertia.lowering.stack_lowering_impl import _StackCvarCanonicalize8616
 from inertia.lowering.stack_variable_binding import StackVariableBinding
 from inertia.lowering.stack_variable_coordinates import record_stack_variable_coordinate_projection_8616
 from inertia.lowering.structured_intrinsics import lower_structured_insert_call_8616
@@ -29,10 +39,13 @@ from inertia.postprocess.decompiler_postprocess_stage import (
     _attach_tail_validation_widened_carrier_provenance_8616,
     _deepcopy_cfunc_for_validation_8616,
 )
+from inertia.semantics.expression_analysis import _unwrap_c_casts
 from inertia.validation.tail_validation_fingerprint import (
     _canonical_or_unresolved_stack_fingerprint_8616,
     _expr_fingerprint,
     _location_fingerprint,
+    _resolve_stack_alias_base_offset_8616,
+    _stack_alias_map_8616,
 )
 
 
@@ -1501,9 +1514,20 @@ def test_indexed_stack_carrier_matches_materialized_local_with_alias_map():
         variables_in_use={base_var: base_cvar, alias_var: alias_cvar, local_var: local_cvar},
         statements=CStatements([], codegen=codegen),
     )
-    codegen._inertia_stack_pointer_aliases_for_cvars = (
-        codegen.cfunc.statements,
-        {id(alias_var): (base_cvar, 0)},
+    write_stack_pointer_alias_map_8616(
+        codegen,
+        StackPointerAliasResult8616(
+            root=codegen.cfunc.statements,
+            status=StackPointerAliasStatus8616.COMPLETE,
+            aliases={id(alias_var): (base_cvar, 0)},
+            definition_index={id(alias_var): 0},
+            refused=frozenset(),
+            raw_fact_count=1,
+            normalized_fact_count=1,
+            classified_fact_count=1,
+            materialized_count=1,
+            decision_count=1,
+        ),
     )
 
     indexed = CIndexedVariable(CUnaryOp("Reference", alias_cvar, codegen=codegen), _const(4, codegen), codegen=codegen)
@@ -1560,9 +1584,20 @@ def test_raw_stack_plus_zero_is_not_emitted_when_alias_proof_exists():
         variables_in_use={base_var: base_cvar, alias_var: alias_cvar, local_var: local_cvar},
         statements=CStatements([], codegen=codegen),
     )
-    codegen._inertia_stack_pointer_aliases_for_cvars = (
-        codegen.cfunc.statements,
-        {id(alias_var): (base_cvar, 0)},
+    write_stack_pointer_alias_map_8616(
+        codegen,
+        StackPointerAliasResult8616(
+            root=codegen.cfunc.statements,
+            status=StackPointerAliasStatus8616.COMPLETE,
+            aliases={id(alias_var): (base_cvar, 0)},
+            definition_index={id(alias_var): 0},
+            refused=frozenset(),
+            raw_fact_count=1,
+            normalized_fact_count=1,
+            classified_fact_count=1,
+            materialized_count=1,
+            decision_count=1,
+        ),
     )
 
     indexed = CIndexedVariable(CUnaryOp("Reference", alias_cvar, codegen=codegen), _const(4, codegen), codegen=codegen)
@@ -1658,3 +1693,382 @@ def test_temporary_cvariables_have_distinct_terminating_location_fingerprints():
     assert _location_fingerprint(first, codegen.project) == "virtual:tmp_57"
     assert _expr_fingerprint(first, codegen.project) == "virtual:tmp_57"
     assert _location_fingerprint(second, codegen.project) == "virtual:tmp_59"
+
+
+def _stack_lowering_canonicalizer(codegen):
+    """Build the real lowering canonicalizer bound to ``codegen``."""
+    canonicalizer = _StackCvarCanonicalize8616(
+        None,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        resolve_stack_cvar_at_offset=lambda *_args, **_kwargs: None,
+        materialize_stack_cvar_at_offset=None,
+        active_expr_ids=set(),
+        analysis_context={},
+    )
+    canonicalizer.codegen_dynamic = codegen
+    canonicalizer.context = canonicalizer.analysis_context
+    canonicalizer.debug_stats = {}
+    canonicalizer.synthetic_sp_anchor = None
+    canonicalizer.synthetic_bp_anchor = None
+    canonicalizer.inferred_stack_base_alias = None
+    canonicalizer.run_8616_part1()
+    return canonicalizer
+
+
+def _build_ordered_carrier_chain(codegen):
+    """Ordered unique-definition chain: a=&local; b=a; c=b; d=c."""
+    local_var = SimStackVariable(-20, 2, base="bp", name="local_20")
+    local_cvar = CVariable(local_var, codegen=codegen)
+    carriers = {}
+    for idx, name in enumerate(("s_2", "s_4", "s_6", "s_8")):
+        var = SimStackVariable(-2 - idx * 2, 2, base="bp", name=name)
+        carriers[name] = (var, CVariable(var, codegen=codegen))
+    a, b, c, d = (carriers[name] for name in ("s_2", "s_4", "s_6", "s_8"))
+    root = CStatements(
+        [
+            CAssignment(a[1], CUnaryOp("Reference", local_cvar, codegen=codegen), codegen=codegen),
+            CAssignment(b[1], a[1], codegen=codegen),
+            CAssignment(c[1], b[1], codegen=codegen),
+            CAssignment(d[1], c[1], codegen=codegen),
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(
+        statements=root,
+        variables_in_use={local_var: local_cvar, **dict(carriers.values())},
+    )
+    return carriers, local_cvar
+
+
+def _build_reversed_carrier_chain(codegen):
+    """Reversed chain d=c; c=b; b=a; a=&local — only ``a`` is provable."""
+    local_var = SimStackVariable(-20, 2, base="bp", name="local_20")
+    local_cvar = CVariable(local_var, codegen=codegen)
+    carriers = {}
+    for idx, name in enumerate(("s_2", "s_4", "s_6", "s_8")):
+        var = SimStackVariable(-2 - idx * 2, 2, base="bp", name=name)
+        carriers[name] = (var, CVariable(var, codegen=codegen))
+    a, b, c, d = (carriers[name] for name in ("s_2", "s_4", "s_6", "s_8"))
+    root = CStatements(
+        [
+            CAssignment(d[1], c[1], codegen=codegen),
+            CAssignment(c[1], b[1], codegen=codegen),
+            CAssignment(b[1], a[1], codegen=codegen),
+            CAssignment(a[1], CUnaryOp("Reference", local_cvar, codegen=codegen), codegen=codegen),
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(
+        statements=root,
+        variables_in_use={local_var: local_cvar, **dict(carriers.values())},
+    )
+    return carriers, local_cvar
+
+
+def test_stack_alias_map_consumes_lowering_produced_result():
+    """Both layers share one authoritative alias result."""
+    codegen = _DummyCodegen()
+    carriers, _local_cvar = _build_ordered_carrier_chain(codegen)
+    _stack_lowering_canonicalizer(codegen)._stack_pointer_aliases()
+
+    d_var, _d_cvar = carriers["s_8"]
+    alias_map = _stack_alias_map_8616(codegen)
+
+    assert id(d_var) in alias_map
+    assert getattr(codegen, "_inertia_tail_validation_stack_alias_incomplete", None) is not True
+
+
+def test_stack_alias_map_converges_ordered_chain():
+    """A converged shared result resolves the full ordered chain."""
+    codegen = _DummyCodegen()
+    carriers, _local_cvar = _build_ordered_carrier_chain(codegen)
+    _d_var, d_cvar = carriers["s_8"]
+
+    assert _resolve_stack_alias_base_offset_8616(d_cvar, codegen) == -20
+
+    first = _stack_alias_map_8616(codegen)
+    second = _stack_alias_map_8616(codegen)
+    assert first is second
+
+
+def test_stack_alias_map_refuses_use_before_definition_carriers():
+    """Reversed chain: carriers read before their only definition refuse."""
+    codegen = _DummyCodegen()
+    carriers, _local_cvar = _build_reversed_carrier_chain(codegen)
+    _stack_lowering_canonicalizer(codegen)._stack_pointer_aliases()
+
+    a_var, _a_cvar = carriers["s_2"]
+    d_var, d_cvar = carriers["s_8"]
+    alias_map = _stack_alias_map_8616(codegen)
+
+    # `a` is read inside `b = a` before its own definition, so the shared
+    # owner refuses global publication of every carrier in the chain.
+    assert alias_map == {}
+    assert id(a_var) not in alias_map
+    assert id(d_var) not in alias_map
+    assert _resolve_stack_alias_base_offset_8616(d_cvar, codegen) is None
+
+
+def test_stack_alias_map_refuses_exhausted_result():
+    """A non-complete shared result keeps the refusal contract."""
+    codegen = _DummyCodegen()
+    root = CStatements([], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(statements=root, variables_in_use={})
+    write_stack_pointer_alias_map_8616(
+        codegen,
+        StackPointerAliasResult8616(
+            root=root,
+            status=StackPointerAliasStatus8616.NODE_BUDGET_EXHAUSTED,
+            aliases={123: (object(), 4)},
+            definition_index={},
+            refused=frozenset(),
+        ),
+    )
+
+    assert _stack_alias_map_8616(codegen) == {}
+    assert codegen._inertia_tail_validation_stack_alias_incomplete is True
+
+
+def test_stack_alias_map_refuses_legacy_tuple_cache():
+    """A legacy bare ``(root, dict)`` cache tuple is never consumed."""
+    codegen = _DummyCodegen()
+    carriers, _local_cvar = _build_ordered_carrier_chain(codegen)
+    root = codegen.cfunc.statements
+    d_var, d_cvar = carriers["s_8"]
+    codegen._inertia_stack_pointer_aliases_for_cvars = (
+        root,
+        {id(d_var): (carriers["s_2"][1], 4)},
+    )
+
+    assert _resolve_stack_alias_base_offset_8616(d_cvar, codegen) == -20
+
+
+def test_indexed_carrier_fingerprint_unaffected_by_lowering_cache_seed():
+    """Lowering-seeded shared result gives the same carrier fingerprint."""
+    codegen_fresh = _DummyCodegen()
+    carriers_fresh, _ = _build_ordered_carrier_chain(codegen_fresh)
+    d_cvar_fresh = carriers_fresh["s_8"][1]
+    indexed_fresh = CIndexedVariable(
+        CUnaryOp("Reference", d_cvar_fresh, codegen=codegen_fresh),
+        _const(0, codegen_fresh),
+        codegen=codegen_fresh,
+    )
+    deref_fresh = CUnaryOp(
+        "Dereference",
+        CTypeCast(SimTypeShort(False), SimTypeShort(False), indexed_fresh, codegen=codegen_fresh),
+        codegen=codegen_fresh,
+    )
+    fp_fresh = _expr_fingerprint(deref_fresh, codegen_fresh.project)
+
+    codegen_seeded = _DummyCodegen()
+    carriers_seeded, _ = _build_ordered_carrier_chain(codegen_seeded)
+    _stack_lowering_canonicalizer(codegen_seeded)._stack_pointer_aliases()
+    d_cvar_seeded = carriers_seeded["s_8"][1]
+    indexed_seeded = CIndexedVariable(
+        CUnaryOp("Reference", d_cvar_seeded, codegen=codegen_seeded),
+        _const(0, codegen_seeded),
+        codegen=codegen_seeded,
+    )
+    deref_seeded = CUnaryOp(
+        "Dereference",
+        CTypeCast(SimTypeShort(False), SimTypeShort(False), indexed_seeded, codegen=codegen_seeded),
+        codegen=codegen_seeded,
+    )
+    fp_seeded = _expr_fingerprint(deref_seeded, codegen_seeded.project)
+
+    assert fp_fresh == "stack_slot:SS:BP-0x14:size2"
+    assert fp_seeded == fp_fresh
+
+
+def test_stack_alias_map_refuses_plain_pointer_copy():
+    """``p = q`` copies a value; validation must not resolve p to q's slot."""
+    codegen = _DummyCodegen()
+    q_var = SimStackVariable(-4, 2, base="bp", name="local_4")
+    q_cvar = CVariable(q_var, codegen=codegen)
+    p_var = SimStackVariable(-2, 2, base="bp", name="s_2")
+    p_cvar = CVariable(p_var, codegen=codegen)
+    root = CStatements(
+        [CAssignment(p_cvar, q_cvar, codegen=codegen)],
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(
+        statements=root, variables_in_use={q_var: q_cvar, p_var: p_cvar}
+    )
+
+    assert _stack_alias_map_8616(codegen) == {}
+    assert _resolve_stack_alias_base_offset_8616(p_cvar, codegen) is None
+    entry = codegen._inertia_stack_pointer_aliases_for_cvars
+    assert id(p_var) in entry.refused
+
+
+def test_stack_alias_map_refuses_conditional_definition():
+    """A sole definition under an unknown condition cannot prove a global alias."""
+    codegen = _DummyCodegen()
+    local_var = SimStackVariable(-20, 2, base="bp", name="local_20")
+    local_cvar = CVariable(local_var, codegen=codegen)
+    cond_var = SimStackVariable(-6, 2, base="bp", name="cond_6")
+    cond_cvar = CVariable(cond_var, codegen=codegen)
+    p_var = SimStackVariable(-2, 2, base="bp", name="s_2")
+    p_cvar = CVariable(p_var, codegen=codegen)
+    root = CStatements(
+        [
+            CIfElse(
+                [
+                    (
+                        cond_cvar,
+                        CStatements(
+                            [
+                                CAssignment(
+                                    p_cvar,
+                                    CUnaryOp("Reference", local_cvar, codegen=codegen),
+                                    codegen=codegen,
+                                )
+                            ],
+                            codegen=codegen,
+                        ),
+                    )
+                ],
+                codegen=codegen,
+            )
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(
+        statements=root,
+        variables_in_use={local_var: local_cvar, cond_var: cond_cvar, p_var: p_cvar},
+    )
+
+    assert _stack_alias_map_8616(codegen) == {}
+    assert _resolve_stack_alias_base_offset_8616(p_cvar, codegen) is None
+
+
+def test_read_before_definition_refuses_at_resolution():
+    """A read preceding the unique definition blocks global publication."""
+    codegen = _DummyCodegen()
+    local_var = SimStackVariable(-20, 2, base="bp", name="local_20")
+    local_cvar = CVariable(local_var, codegen=codegen)
+    x_var = SimStackVariable(-2, 2, base="bp", name="s_2")
+    x_cvar = CVariable(x_var, codegen=codegen)
+    y_var = SimStackVariable(-24, 2, base="bp", name="local_24")
+    y_cvar = CVariable(y_var, codegen=codegen)
+    root = CStatements(
+        [
+            CExpressionStatement(
+                CBinaryOp("Add", x_cvar, y_cvar, codegen=codegen), codegen=codegen
+            ),
+            CAssignment(
+                x_cvar,
+                CUnaryOp("Reference", local_cvar, codegen=codegen),
+                codegen=codegen,
+            ),
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(
+        statements=root, variables_in_use={local_var: local_cvar, x_var: x_cvar}
+    )
+
+    assert _stack_alias_map_8616(codegen) == {}
+    assert _resolve_stack_alias_base_offset_8616(x_cvar, codegen) is None
+
+
+def test_computed_exhaustion_refuses_at_validation():
+    """A real budget-exhausted walk (not a seeded flag) refuses consumers."""
+    local_var = SimStackVariable(-20, 2, base="bp", name="local_20")
+    p_var = SimStackVariable(-2, 2, base="bp", name="s_2")
+    q_var = SimStackVariable(-4, 2, base="bp", name="s_4")
+    codegen = _DummyCodegen()
+    local_cvar = CVariable(local_var, codegen=codegen)
+    p_cvar = CVariable(p_var, codegen=codegen)
+    q_cvar = CVariable(q_var, codegen=codegen)
+    p_cvar.variable_type = SimTypeShort(False).with_arch(codegen.project.arch)
+    expr = p_cvar
+    for _ in range(100):
+        expr = CUnaryOp("Not", expr, codegen=codegen)
+    root = CStatements(
+        [
+            CAssignment(
+                p_cvar, CUnaryOp("Reference", local_cvar, codegen=codegen), codegen=codegen
+            ),
+            CAssignment(q_cvar, expr, codegen=codegen),
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc = SimpleNamespace(
+        statements=root,
+        variables_in_use={local_var: local_cvar, p_var: p_cvar, q_var: q_cvar},
+    )
+
+    write_stack_pointer_alias_map_8616(
+        codegen,
+        compute_stack_pointer_aliases_8616(codegen, root, max_nodes=4),
+    )
+
+    assert _stack_alias_map_8616(codegen) == {}
+    assert codegen._inertia_tail_validation_stack_alias_incomplete is True
+
+
+def test_stale_refusal_flags_clear_on_replaced_root_success():
+    """An exhausted cached result replaced by a fresh root clears refusals."""
+    codegen = _DummyCodegen()
+    stale_root = CStatements([], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(statements=stale_root, variables_in_use={})
+    write_stack_pointer_alias_map_8616(
+        codegen,
+        StackPointerAliasResult8616(
+            root=stale_root,
+            status=StackPointerAliasStatus8616.NODE_BUDGET_EXHAUSTED,
+            aliases={},
+            definition_index={},
+            refused=frozenset(),
+        ),
+    )
+    assert _stack_alias_map_8616(codegen) == {}
+    assert codegen._inertia_tail_validation_stack_alias_incomplete is True
+    assert codegen._inertia_tail_validation_stack_alias_candidate_budget_exceeded is True
+
+    carriers, _local_cvar = _build_ordered_carrier_chain(codegen)
+    d_var, _d_cvar = carriers["s_8"]
+
+    alias_map = _stack_alias_map_8616(codegen)
+
+    assert id(d_var) in alias_map
+    assert codegen._inertia_tail_validation_stack_alias_incomplete is False
+    assert codegen._inertia_tail_validation_stack_alias_candidate_budget_exceeded is False
+    result = read_stack_pointer_alias_map_8616(codegen)
+    assert codegen._inertia_tail_validation_stack_alias_nodes == result.visited_nodes
+    assert codegen._inertia_tail_validation_stack_alias_iterations == 1
+    assert codegen._inertia_tail_validation_stack_pointer_aliases == dict(result.aliases)
+
+
+def test_stale_refusal_flags_clear_on_lowering_seeded_success():
+    """A successful lowering-cached result clears validation refusal flags."""
+    codegen = _DummyCodegen()
+    root = CStatements([], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(statements=root, variables_in_use={})
+    write_stack_pointer_alias_map_8616(
+        codegen,
+        StackPointerAliasResult8616(
+            root=root,
+            status=StackPointerAliasStatus8616.NODE_BUDGET_EXHAUSTED,
+            aliases={},
+            definition_index={},
+            refused=frozenset(),
+        ),
+    )
+    assert _stack_alias_map_8616(codegen) == {}
+    assert codegen._inertia_tail_validation_stack_alias_incomplete is True
+
+    carriers, _local_cvar = _build_ordered_carrier_chain(codegen)
+    _stack_lowering_canonicalizer(codegen)._stack_pointer_aliases()
+    d_var, _d_cvar = carriers["s_8"]
+
+    alias_map = _stack_alias_map_8616(codegen)
+
+    assert id(d_var) in alias_map
+    assert codegen._inertia_tail_validation_stack_alias_incomplete is False
+    assert codegen._inertia_tail_validation_stack_alias_candidate_budget_exceeded is False
+    result = read_stack_pointer_alias_map_8616(codegen)
+    assert codegen._inertia_tail_validation_stack_alias_nodes == result.visited_nodes
+    assert codegen._inertia_tail_validation_stack_alias_iterations == 1

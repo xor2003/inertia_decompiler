@@ -59,3 +59,16 @@ def test_expired_public_entry_does_not_discover_cfg(monkeypatch: pytest.MonkeyPa
         assert result["status"] is lane.verdict.Status.REFUSED
         assert result["reason"] == MacroStepReason.MACRO_DEADLINE.value
         assert calls == []
+
+
+def test_expired_guard_does_not_project_or_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Projection and solver work both belong to the original macro deadline."""
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("expired guard began work")
+
+    monkeypatch.setattr(proof, "project_flag_dependencies", forbidden)
+    monkeypatch.setattr(proof, "prove_terms_equal", forbidden)
+    term = {"op": "const", "width": 1, "value": "0x1"}
+    with pytest.raises(proof._Flat32Refusal) as refused:
+        proof.prove_guard_equal32(term, term, time.monotonic() - 1)
+    assert refused.value.reason is MacroStepReason.MACRO_DEADLINE

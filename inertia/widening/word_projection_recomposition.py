@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+from angr.sim_type import SimTypeChar, SimTypeNum, SimTypeShort
 from angr.sim_variable import SimTemporaryVariable
 
 from inertia.lowering.c_ast_utils import (
@@ -24,6 +25,7 @@ from inertia.lowering.c_ast_utils import (
     _same_c_expression_8616,
 )
 from inertia.lowering.codegen_metadata import get_codegen_side_metadata
+from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.alias_query import describe_alias_storage
 from inertia.semantics.expression_analysis import describe_virtual_value_identity_8616
@@ -109,6 +111,9 @@ def _high_byte_source_8616(node: object) -> object | None:
 
 def _word_projection_sources_8616(node: object) -> tuple[object, object] | None:
     """Return low/high sources from one complete 16-bit recomposition."""
+    typed_sources = _typed_word_projection_sources_8616(node)
+    if typed_sources is not None:
+        return typed_sources
     node = _unwrap_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return None
@@ -117,6 +122,79 @@ def _word_projection_sources_8616(node: object) -> tuple[object, object] | None:
         high_source = _high_byte_source_8616(high_node)
         if low_source is not None and high_source is not None:
             return low_source, high_source
+    return None
+
+
+def _unsigned_integer_width_8616(type_: object, width: int) -> bool:
+    """Recognize explicit unsigned scalar widths without pointer coercion."""
+    if type(type_) not in (SimTypeChar, SimTypeShort, SimTypeNum):
+        return False
+    scalar = cast(SimTypeChar | SimTypeShort | SimTypeNum, type_)
+    if scalar.signed is not False or scalar.qualifier is not None:
+        return False
+    if type(type_) is SimTypeChar:
+        return width == 8
+    if type(type_) is SimTypeShort:
+        return width == 16
+    return bool(scalar.size == width)
+
+
+def _required_byte_source_8616(node: object) -> structured_c.CExpression | None:
+    """Consume a required unsigned word-to-byte conversion, not cosmetic casts."""
+    if (
+        isinstance(node, CSemanticCast8616)
+        and _unsigned_integer_width_8616(node.src_type, 16)
+        and _unsigned_integer_width_8616(node.dst_type, 8)
+    ):
+        return node.expr
+    return None
+
+
+def _exact_byte_shift_8616(node: object) -> bool:
+    """Require the literal byte-lane displacement without stripping casts."""
+    return (
+        isinstance(node, structured_c.CConstant)
+        and type(node.value) is int
+        and node.value == 8
+    )
+
+
+def _typed_word_projection_sources_8616(node: object) -> tuple[object, object] | None:
+    """Prove required byte lanes reconstruct an explicitly unsigned machine word.
+
+    The shift's explicit machine type is required: arbitrary C byte shifts can
+    overflow signed-int promotion on a sixteen-bit host. No semantic cast is
+    stripped outside this exact word/byte conversion chain.
+    """
+    if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
+        return None
+    if not _unsigned_integer_width_8616(node.type, 16):
+        return None
+    for low, high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
+        low_source = _required_byte_source_8616(low)
+        if low_source is None or not isinstance(high, CSemanticCast8616):
+            continue
+        if not _unsigned_integer_width_8616(low_source.type, 16):
+            continue
+        if not all(_unsigned_integer_width_8616(type_, 16) for type_ in (high.src_type, high.dst_type)):
+            continue
+        shift = high.expr
+        if (
+            not isinstance(shift, structured_c.CBinaryOp)
+            or shift.op != "Shl"
+            or not _unsigned_integer_width_8616(shift.type, 16)
+            or not _exact_byte_shift_8616(shift.rhs)
+        ):
+            continue
+        upper = _required_byte_source_8616(shift.lhs)
+        if (
+            isinstance(upper, structured_c.CBinaryOp)
+            and upper.op == "Shr"
+            and _exact_byte_shift_8616(upper.rhs)
+            and _unsigned_integer_width_8616(upper.lhs.type, 16)
+            and _unsigned_integer_width_8616(upper.type, 16)
+        ):
+            return low_source, upper.lhs
     return None
 
 

@@ -1,0 +1,29 @@
+{
+  "schema": "dosunit.flat32_abi_observation.v1",
+  "functions": {
+    "sub_5C130": {
+      "return_bits": 32,
+      "private_stack_bytes": 4,
+      "entry_memory_ranges": [
+        {
+          "address": 571536,
+          "width": 32,
+          "min": 0,
+          "max": 64
+        }
+      ]
+    },
+    "sub_5CD10": {
+      "return_bits": 32,
+      "private_stack_bytes": 28,
+      "entry_memory_ranges": [
+        {
+          "address": 571488,
+          "width": 32,
+          "min": 0,
+          "max": 0
+        }
+      ]
+    }
+  }
+}

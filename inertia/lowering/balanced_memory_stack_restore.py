@@ -204,7 +204,9 @@ def _balanced_pairs_8616(
                 stack.clear()
             continue
         if not stack:
-            return ()
+            # No local PUSH belongs to this POP. Closed windows remain valid;
+            # an epilogue POP after a branch cannot invalidate their pairs.
+            continue
         push_addr, push_key, push_register_width = stack.pop()
         pop_key = _memory_operand_key_8616(instruction)
         if push_key is not None and push_key == pop_key:
@@ -238,7 +240,8 @@ def _balanced_immediate_register_transfers_8616(
             continue
         if instruction_id == X86_INS_POP:
             if not stack:
-                return ()
+                # Skip only this unpaired POP, preserving independent windows.
+                continue
             transfer = _immediate_pop_transfer_8616(instruction, operands, address, stack.pop())
             if transfer is not None:
                 transfers.append(transfer)
@@ -963,11 +966,12 @@ def _rebind_pair_8616(
         word_pair and {push_identity[1], pop_identity[1]} <= {1, 2}
     ):
         return (0, 0)
+    # Match the original byte identity before widening possibly shared storage.
+    # PUSH and POP projections may refer to the same SimStackVariable object.
+    changed = _rebind_pop_statements_8616(pop_statements, pop_identity, exemplar, word_pair)
     if word_pair:
         exemplar.variable.size = 2
         exemplar.variable_type = SimTypeShort(False).with_arch(exemplar.codegen.project.arch)
-    changed = _rebind_pop_statements_8616(pop_statements, pop_identity, exemplar, word_pair)
-    if word_pair:
         changed = _rewrite_word_pair_push_8616(root, push_statements, push_identity, exemplar) or changed
     return (1, int(changed))
 

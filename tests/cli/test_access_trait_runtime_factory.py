@@ -8,7 +8,7 @@ from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
 
 import inertia.cli.cli_c_ast_rewrites as cli_c_ast_rewrites
-from inertia.cli.cli_access_profiles import AccessTraitStrideEvidence
+from inertia.lowering.access_profiles import AccessTraitStrideEvidence
 
 
 def test_access_trait_factory_creates_and_reuses_typed_records() -> None:

@@ -50,7 +50,7 @@ __all__ = [
 ]
 
 _SEGMENT_REGISTERS = ("cs", "ds", "es", "ss", "fs", "gs")
-_SPACE_SEGMENTS = {MemSpace.DS: "ds", MemSpace.ES: "es", MemSpace.SS: "ss"}
+_SPACE_SEGMENTS = {MemSpace.CS: "cs", MemSpace.DS: "ds", MemSpace.ES: "es", MemSpace.SS: "ss"}
 
 
 class _SegmentContractCodegenBoundary(Protocol):

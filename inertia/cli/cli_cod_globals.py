@@ -13,9 +13,9 @@ from typing import Protocol
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from inertia.lowering.object_lowering import AccessTraitObjectHint, BaseKey
-
-from .cli_storage_objects import (
+from inertia.lowering.storage_objects import (
     EvidenceProfiles,
+    StorageObjectArtifact,
     build_storage_object_artifact,
     storage_object_record_for_key,
 )
@@ -43,7 +43,7 @@ class _CodGlobalLoadFold8616:
 
     codegen: _CodegenLike
     synthetic_globals: object
-    storage_object_artifact: object
+    storage_object_artifact: StorageObjectArtifact | None
     project: object
     global_load_addr: Callable[[object, object], int | None]
     match_scaled_high_byte: Callable[[object, object], int | None]
@@ -90,7 +90,7 @@ def _storage_object_artifact_for(
     collect_access_traits: Callable[[object, _CodegenLike], object],
     build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], EvidenceProfiles],
     build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
-) -> object:
+) -> StorageObjectArtifact | None:
     """Return the storage-object artifact for this function's access traits."""
     # dynamic angr boundary: access traits are attached to Project by earlier passes.
     traits_cache = getattr(project, "_inertia_access_traits", None)

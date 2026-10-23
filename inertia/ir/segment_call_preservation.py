@@ -25,6 +25,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -116,6 +117,10 @@ class SegmentCallDependencyTraversal8616:
     #: pins each key; no callback or semantic reuse is authorized by this map.
     invocation_prefixes: dict[int, _OwnedPrefixCensus8616] = field(default_factory=dict)
     remaining_domains: int = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
+    #: Explicit shared request allowance; independent of local operation limits.
+    census_work_limit: int = 20000
+    #: Local selector-batch allowance, inherited without nested renewal.
+    selector_batch_work_limit: int = 20000
     census_work_units: int = 0
     census_deadline: float | None = None
     active_closures: set[int] = field(default_factory=set)
@@ -130,6 +135,10 @@ class SegmentCallDependencyTraversal8616:
     ] = field(default_factory=dict)
     remaining_closures: int = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
     remaining_proofs: int = _SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616
+    #: Request-local advice to use the ordinary bounded fixpoint after an
+    #: unsuccessful optional ordering attempt. No graph, state or verdict is
+    #: retained; even changed geometry remains safe on the ordinary path.
+    callee_default_order: set[int] = field(default_factory=set)
 
 
 _AMBIENT_DEPENDENCY_TRAVERSAL_8616: ContextVar[SegmentCallDependencyTraversal8616 | None] = ContextVar(
@@ -137,8 +146,20 @@ _AMBIENT_DEPENDENCY_TRAVERSAL_8616: ContextVar[SegmentCallDependencyTraversal861
 )
 
 
+def _validate_request_work_limit_8616(value: int | None, name: str) -> None:
+    """Reject noninteger or nonpositive explicitly configured work allowances."""
+    if value is not None:
+        if type(value) is not int:
+            raise TypeError(f"{name} must be an integer")
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
+
+
 @contextmanager
-def segment_call_dependency_traversal_scope_8616() -> Iterator[SegmentCallDependencyTraversal8616]:
+def segment_call_dependency_traversal_scope_8616(
+    *, census_work_limit: int | None = None, selector_batch_work_limit: int | None = None,
+    inherit_existing_limits: bool = False,
+) -> Iterator[SegmentCallDependencyTraversal8616]:
     """Reuse the ambient bounded traversal, or open one fresh bounded scope.
 
     Sibling modules (``segment_effect_closure``) enter this scope so nested
@@ -147,17 +168,51 @@ def segment_call_dependency_traversal_scope_8616() -> Iterator[SegmentCallDepend
     synchronous validation snapshot: retained state mappings must not be
     mutated while it is active. Cached verdicts never survive that request.
     An in-progress revisit is cyclic evidence and the active-set refuses it.
+    An outer request may configure its work allowance explicitly. Nested scopes
+    inherit it unchanged; a conflicting explicit allowance raises rather than
+    resetting the ledger. A request entry point may opt to inherit an existing
+    allowance instead of applying its root defaults; no ambient limit changes.
+    Deadlines and local proof limits remain independent.
     """
+    _validate_request_work_limit_8616(census_work_limit, "census_work_limit")
+    _validate_request_work_limit_8616(selector_batch_work_limit, "selector_batch_work_limit")
     ambient = _AMBIENT_DEPENDENCY_TRAVERSAL_8616.get()
     if ambient is not None:
+        if (not inherit_existing_limits and census_work_limit is not None
+                and census_work_limit != ambient.census_work_limit):
+            raise ValueError("census_work_limit differs from the ambient request")
+        if (not inherit_existing_limits and selector_batch_work_limit is not None
+                and selector_batch_work_limit != ambient.selector_batch_work_limit):
+            raise ValueError("selector_batch_work_limit differs from the ambient request")
         yield ambient
         return
-    traversal = SegmentCallDependencyTraversal8616()
+    traversal = (SegmentCallDependencyTraversal8616() if census_work_limit is None
+                 else SegmentCallDependencyTraversal8616(census_work_limit=census_work_limit))
+    if selector_batch_work_limit is not None:
+        traversal.selector_batch_work_limit = selector_batch_work_limit
     token = _AMBIENT_DEPENDENCY_TRAVERSAL_8616.set(traversal)
     try:
         yield traversal
     finally:
         _AMBIENT_DEPENDENCY_TRAVERSAL_8616.reset(token)
+
+
+@contextmanager
+def declared_entry_dependency_traversal_scope_8616() -> Iterator[SegmentCallDependencyTraversal8616]:
+    """Bound one declared-entry proof or replay, without renewing an outer request.
+
+    This request includes selector induction and independent record/CFG seals.
+    Its measured structural allowance is separate from universal proof defaults;
+    both preparation and later fresh consumers use the same resource policy.
+    No admission or cached proof survives the context.
+    """
+    with segment_call_dependency_traversal_scope_8616(
+        census_work_limit=128000, selector_batch_work_limit=25000, inherit_existing_limits=True,
+    ) as traversal:
+        deadline = time.monotonic() + 50.0
+        traversal.census_deadline = (deadline if traversal.census_deadline is None
+                                     else min(deadline, traversal.census_deadline))
+        yield traversal
 
 
 @dataclass(frozen=True, slots=True)

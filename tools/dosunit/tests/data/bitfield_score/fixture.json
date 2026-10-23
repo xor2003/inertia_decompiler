@@ -1,0 +1,45 @@
+{
+  "schema": "bitfield-score-fixture.v1",
+  "provenance": {
+    "source": {
+      "path": ".cache/bitfield-route/original-dosbox/BITNBR.EXE",
+      "sha256": "d9b3548a1d181a131dd957abfcd0540d052b32110878aa24d2bcaf8de25a2e7b"
+    },
+    "candidate": {
+      "path": ".cache/score-fixture/fresh-dos/work/HARNESS.EXE",
+      "sha256": "d6a21a69b7d7d88e42f9f6c2985c3c6f655da61abb69e82f1af2600f1c8cfae8"
+    },
+    "payload": {
+      "path": ".cache/score-fixture/fresh-generated/conditional/00001d12-sub_1d12.c",
+      "sha256": "4a0360e081b2b5929b8aea4a2f172f7d0c1468b213b4c3c9eb6e85c88bda897a"
+    },
+    "compiler_profile": "BC31-small -Od -ms DOSBox"
+  },
+  "oracle": {
+    "module": "BITNBR.EXE",
+    "entry": 754,
+    "entry_hex": "0x2f2",
+    "size": 49,
+    "sha256": "05d2b1862b3d3b7543cd5f8d89d6c621c300ce96bee90618123bf5602378b908",
+    "relocation_overlaps": [],
+    "code_hex": "558bec568b76048a04b103d3e8251f00b103d3e0508a042507005a03c28a540183e201b108d3e203c2034402eb005e5dc3"
+  },
+  "candidate": {
+    "module": "HARNESS.EXE",
+    "entry": 706,
+    "entry_hex": "0x2c2",
+    "size": 233,
+    "sha256": "99c7f7d5c30c8857e0fe8a9151852c368492d86708f201d6e9bb2992908289f5",
+    "relocation_overlaps": [],
+    "code_hex": "558bec83ec0c56578b7604a1a60a25ffff8946f88bfe893ea60a8a04b40025ff00998b1e980a8b0e960a83e10083e3ff0bc80bda891e980a890e960a8b16980aa1960a25ffff83e200b103e81f03251f00b103d3e08946f68b46f6a3960aa1960a25ffff8946fa8a04b40025ff008b56f681e200ff0bd08956f48b46f4a3960a8b46fa8946fe8e06440d268a4501b40025ff008b56fa81e200ff0bd08956fc8b46f825ffff8b16a80a8b1ea60a83e30083e2ff0bd883ca008916a80a891ea60a8e06440d8b46fc250100b108d3e006508b46f42507000346fe5a03c20726034502eb005f5e8be55dc3"
+  },
+  "helper": {
+    "module": "HARNESS.EXE",
+    "entry": 1583,
+    "entry_hex": "0x62f",
+    "size": 33,
+    "sha256": "f16d29348a58322d91f744b66a787a47e025912cba96b8a06fa3563ca729f14b",
+    "relocation_overlaps": [],
+    "code_hex": "5b0e5380f91073108bdad3e8d3eaf6d980c110d3e30bc3cb80e9109233d2d3e8cb"
+  }
+}

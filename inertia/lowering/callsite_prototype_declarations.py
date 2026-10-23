@@ -26,8 +26,10 @@ from angr.sim_type import (
     SimType,
     SimTypeArray,
     SimTypeBottom,
+    SimTypeChar,
     SimTypeFixedSizeArray,
     SimTypeFunction,
+    SimTypeInt,
     SimTypePointer,
 )
 from archinfo import Arch
@@ -46,6 +48,10 @@ from inertia.semantics.callsite_summary import (
     structured_callsite_addr_8616,
 )
 
+from .authoritative_function_prototypes import (
+    authoritative_function_prototype_8616,
+    authoritative_function_prototype_for_address_8616,
+)
 from .c_runtime_header import (
     KNOWN_EXTERNAL_RETURN_TYPES_8616,
     is_lowered_runtime_macro_8616,
@@ -60,6 +66,8 @@ from .callsite_pointer_tables import (
 )
 from .dos_interrupt_abi import dos_interrupt_prototype_declaration_8616
 from .interprocedural_storage_contracts import (
+    FunctionStorageContract8616,
+    StorageTrialRole8616,
     StorageTrialSignedness8616,
     StorageTrialValueClass8616,
 )
@@ -75,6 +83,7 @@ from .return_type_evidence import (
     caller_return_use_evidence_proves_unused_8616,
     collect_unobserved_callee_void_evidence_8616,
 )
+from .scalar_interface_transport import current_scalar_interface_8616
 
 __all__ = [
     "CallTargetIdentityStats8616",
@@ -1109,6 +1118,56 @@ def _merge_prototype_declarations_8616(
     )
 
 
+def _scalar_storage_compatible_8616(contract: FunctionStorageContract8616 | None) -> bool:
+    """Permit C scalar interpretation only for independently proven value storage."""
+    return contract is None or all(
+        slot.value_class is StorageTrialValueClass8616.VALUE
+        for slot in (*contract.inputs, *(output for output in contract.outputs if output.role is StorageTrialRole8616.RETURN))
+    )
+
+
+def _scalar_return_width_8616(contract: FunctionStorageContract8616 | None) -> int | None:
+    """Retain the physical width of an already proven scalar return slot."""
+    if contract is None:
+        return None
+    returns = tuple(slot for slot in contract.outputs if slot.role is StorageTrialRole8616.RETURN)
+    return returns[0].width if len(returns) == 1 else None
+
+
+def _scalar_declaration_types_8616(
+    project: object, target: int | None, widths: tuple[int, ...], return_type: str, name: str, return_width: int | None,
+) -> tuple[tuple[StorageTrialSignedness8616, ...], str, tuple[str, ...] | None] | None:
+    """Consume exact-arity scalar snapshots without overriding pointer storage."""
+    scalar_signedness = tuple(StorageTrialSignedness8616.UNSIGNED for _ in widths)
+    spellings = None
+    if type(target) is int:
+        transported = current_scalar_interface_8616(project, target)
+        if transported is not None and tuple(item.width for item in transported.arguments) != widths:
+            return None
+        prototype = authoritative_function_prototype_for_address_8616(project, target, argument_count=len(widths))
+        if prototype is None:
+            try:
+                function = cast(_ProjectSurface8616, project).kb.functions.function(addr=target, create=False)
+            except AttributeError:
+                function = None
+            prototype = authoritative_function_prototype_8616(project, function, argument_count=len(widths))
+        if prototype is not None and all(isinstance(item, (SimTypeInt, SimTypeChar)) for item in prototype.args):
+            if prototype.variadic or any(item.size != width * 8 for item, width in zip(prototype.args, widths, strict=True)):
+                return None
+            if isinstance(prototype.returnty, (SimTypeInt, SimTypeChar)):
+                if return_width is not None and prototype.returnty.size != return_width * 8:
+                    return None
+                return_type = prototype.returnty.c_repr()
+            if any(callee_pointer_argument_is_proven_8616(project, name, index) for index in range(len(widths))):
+                return None
+            spellings = tuple(item.c_repr() for item in prototype.args)
+            scalar_signedness = tuple(
+                StorageTrialSignedness8616.SIGNED if item.signed else StorageTrialSignedness8616.UNSIGNED
+                for item in prototype.args
+            )
+    return scalar_signedness, return_type, spellings
+
+
 def _prototype_decl_8616(
     project: object,
     codegen: object,
@@ -1145,8 +1204,15 @@ def _prototype_decl_8616(
     arguments = tuple(cast(Sequence[object], node.args or ()))
     if name is None or widths is None or len(arguments) != len(widths):
         return None
+    scalar_types = _scalar_declaration_types_8616(
+        project, summary.target_addr if _scalar_storage_compatible_8616(storage_contract) else None,
+        widths, return_type, name, _scalar_return_width_8616(storage_contract),
+    )
+    if scalar_types is None:
+        return None
+    scalar_signedness, return_type, scalar_spellings = scalar_types
     args = "void" if not arguments else ", ".join(
-        _argument_decl_8616(
+        f"{scalar_spellings[index]} a{index}" if scalar_spellings is not None else _argument_decl_8616(
             codegen,
             argument,
             width,
@@ -1160,7 +1226,7 @@ def _prototype_decl_8616(
             signedness=(
                 storage_contract.inputs[index].signedness
                 if storage_contract is not None
-                else StorageTrialSignedness8616.UNSIGNED
+                else scalar_signedness[index]
             ),
         )
         for index, (argument, width) in enumerate(zip(arguments, widths, strict=True))

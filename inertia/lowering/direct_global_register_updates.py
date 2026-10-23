@@ -123,8 +123,9 @@ def collect_direct_global_register_updates_8616(
                 continue
             facts.append(
                 DirectGlobalRegisterUpdate8616(
-                    source[0], destination[0], source[1], register_id, operation,
-                    previous_address, update_address,
+                    source[0], destination[0], source[1],
+                    cast(int, register_id), cast(DirectGlobalRegisterUpdateOp8616, operation),
+                    cast(int, previous_address), cast(int, update_address),
                 )
             )
     return tuple(dict.fromkeys(facts))

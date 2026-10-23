@@ -263,8 +263,9 @@ def _defer_mz_static_invocation_8616(
 def _build_project(
     path: Path, *, force_blob: bool, base_addr: int, entry_point: int,
     real16_declared_input: Path | None = None,
+    base_addr_is_linear: bool = False,
 ) -> angr.Project:
-    """Build the selected project, authenticating explicit declarations first."""
+    """Build a project; mapped linear bases bypass CLI paragraph/listing inference."""
     if real16_declared_input is not None:
         return _finalize_x86_16_project(build_declared_project_8616(
             path, real16_declared_input, force_blob=force_blob,
@@ -310,7 +311,9 @@ def _build_project(
         )
 
         if suffix == ".exe":
-            explicit_base = _probe_ida_base_linear(path, base_addr << 4 if base_addr < 0x10000 else base_addr)
+            explicit_base = base_addr if base_addr_is_linear else _probe_ida_base_linear(
+                path, base_addr << 4 if base_addr < 0x10000 else base_addr,
+            )
             exe_backend = "dos_mz" if packed_detection is not None else (
                 "dos_ne" if _looks_like_ne_executable(path) else "dos_mz"
             )
@@ -336,10 +339,15 @@ def _build_project(
                 return _finalize_x86_16_project(_mark_packed_project(proj, packed_detection))
 
         try:
-            proj = angr.Project(_project_source(project_input), auto_load_libs=False)
+            proj = angr.Project(
+                _project_source(project_input), auto_load_libs=False,
+                main_opts={"base_addr": base_addr} if base_addr_is_linear else {},
+            )
         except Exception as ex:
             if suffix == ".exe" and "Position-DEPENDENT object" in str(ex):
-                explicit_base = _probe_ida_base_linear(path, base_addr << 4 if base_addr < 0x10000 else base_addr)
+                explicit_base = base_addr if base_addr_is_linear else _probe_ida_base_linear(
+                    path, base_addr << 4 if base_addr < 0x10000 else base_addr,
+                )
                 _debug_print(
                     f"[dbg] retrying DOS MZ load with explicit base_addr={hex(explicit_base)} after {type(ex).__name__}"
                 )
@@ -370,26 +378,32 @@ def _build_project_cached_impl(
     force_blob: bool,
     base_addr: int,
     entry_point: int,
+    base_addr_is_linear: bool = False,
 ) -> angr.Project:
+    """Cache static loads with the address interpretation included in their key."""
     return _build_project(
         Path(path),
         force_blob=force_blob,
         base_addr=base_addr,
         entry_point=entry_point,
+        base_addr_is_linear=base_addr_is_linear,
     )
 
 def _build_project_cached(
     path: str, *, force_blob: bool, base_addr: int, entry_point: int,
     real16_declared_input: Path | None = None,
+    base_addr_is_linear: bool = False,
 ) -> angr.Project:
     """Reuse static projects only; live declarations reauthenticate every load."""
     if real16_declared_input is not None:
         return _build_project(
             Path(path), force_blob=force_blob, base_addr=base_addr,
             entry_point=entry_point, real16_declared_input=real16_declared_input,
+            base_addr_is_linear=base_addr_is_linear,
         )
     return _build_project_cached_impl(
         path, force_blob=force_blob, base_addr=base_addr, entry_point=entry_point,
+        base_addr_is_linear=base_addr_is_linear,
     )
 
 

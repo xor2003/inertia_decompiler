@@ -10,6 +10,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import partial
@@ -76,6 +77,12 @@ from .function_ir_registry import (
     publish_function_ir_artifact_8616,
     registered_function_ir_artifact_8616,
 )
+from .function_readiness_contracts import (
+    FunctionSourceRevision8616,
+    function_artifact_body_digest_8616,
+    observed_function_source_revision_8616,
+    record_function_build_attestation_8616,
+)
 from .instruction_origin import vex_instruction_origin_8616
 from .logical_memory_capture import (
     IRLogicalMemoryCaptureRecord8616,
@@ -83,8 +90,16 @@ from .logical_memory_capture import (
     collect_accesses_for_function,
 )
 from .logical_memory_resolution import resolve_logical_memory_accesses_8616
+from .native_copy_memo import native_copy_memo_producers_8616, seed_native_copy_memo_8616, seed_native_decisions_8616
 from .native_import_capture import native_capture_copyable_8616
-from .native_import_surface_cache import native_import_request_8616, request_native_surface_8616
+from .native_import_surface_cache import (
+    NativeFactRebind8616,
+    NativeFactRebindState8616,
+    native_import_request_8616,
+    request_native_fact_rebind_8616,
+    request_native_surface_8616,
+)
+from .near_call_jump_scope import NearCallJumpScope8616
 from .near_return_continuation_view import (
     NEAR_RETURN_CONTINUATION_PENDING_KIND_8616,
 )
@@ -94,14 +109,20 @@ from .no_effect_instructions import (
     terminal_no_effect_instr_8616,
 )
 from .regs import register_name_from_offset
-from .ssa import build_x86_16_block_local_ssa
+from .ssa import _block_local_ssa_binding_count_8616
 from .ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from .vex_addressing import SegmentHintMap, block_segment_hints, expr_to_address
 from .vex_condition_demand import (
     VexConditionDemand8616,
     collect_vex_condition_demand_8616,
 )
-from .vex_condition_lifting import build_condition_from_binop, expr_to_condition
+from .vex_condition_lifting import (
+    _expr_cond,
+    _expr_iffalse,
+    _expr_iftrue,
+    build_condition_from_binop,
+    expr_to_condition,
+)
 from .vex_condition_transport import (
     VexConditionTransportNormalizer8616,
     VexConditionTransportStats8616,
@@ -118,11 +139,14 @@ from .vex_terminal_jump import (
 from .vex_types import vex_expr_size_bytes
 
 if TYPE_CHECKING:
+    from .declared_entry_pipeline import DeclaredEntryInput8616
+    from .near_call_entry_pipeline import NativeNearCallPipeline8616
     from .near_return_continuation_view import (
         ScopedNearReturnContinuationView8616,
     )
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import ScopedFunctionIRView8616
+    from .source_graph_binding import ImmutableSourceGraphFacts8616
 
 __all__ = (
     "RawIRFunctionImportBundle8616",
@@ -151,6 +175,7 @@ class IRImportRefusalReason8616(StrEnum):
     """Typed reason an IR import cannot finish its optional evidence work."""
 
     DIRECT_EVIDENCE_DEADLINE_EXPIRED = "ir_import_direct_evidence_deadline_expired"
+    INDIRECT_TERMINAL_PENDING = "indirect_terminal_pending"
 
 
 class _VexConstBoundary(Protocol):
@@ -912,6 +937,56 @@ def _wrtmp_ite_condition_8616(
         conditions[tmp_id] = cond
 
 
+def _bound_select_atom_8616(
+    expr: object, tmps: _TmpValues, conditions: _TmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRValue | None:
+    """Convert an atomic select input without hiding nested computations."""
+    tag = _expr_tag(expr)
+    if tag == "Iex_RdTmp":
+        value = tmps.get(_expr_tmp(expr))
+    elif tag in {"Iex_Const", "Iex_Get"}:
+        value = ctx.convert(expr, tmps, conditions)
+    else:
+        return None
+    if value is None or value.space is MemSpace.UNKNOWN or value.size <= 0:
+        return None
+    return value
+
+
+def _wrtmp_select_instr_8616(
+    data: object, tmp_id: int, dst: IRValue,
+    tmps: _MutableTmpValues, conditions: _TmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr | None:
+    """Retain a typed atomic VEX ITE as a three-input temporary selection.
+
+    Guard width must be proven as I1, never inferred from byte storage or
+    a literal value. Unbound inputs and nested expressions keep the existing
+    explicit UNKNOWN import until their complete semantics can be represented.
+    """
+    if ctx.type_environment is None:
+        return None
+    guard_expr, true_expr, false_expr = _expr_cond(data), _expr_iftrue(data), _expr_iffalse(data)
+    if guard_expr is None or true_expr is None or false_expr is None:
+        return None
+    bits = _unop_result_bits_8616(data, ctx.type_environment, 0)
+    widths = tuple(_unop_result_bits_8616(expr, ctx.type_environment, 0)
+                   for expr in (guard_expr, true_expr, false_expr))
+    if bits not in {1, 8, 16, 32, 64} or widths != (1, bits, bits):
+        return None
+    args = tuple(_bound_select_atom_8616(expr, tmps, conditions, ctx)
+                 for expr in (guard_expr, true_expr, false_expr))
+    if any(value is None for value in args):
+        return None
+    operands = cast(tuple[IRValue, IRValue, IRValue], args)
+    if tuple(value.size for value in operands) != (1, dst.size, dst.size):
+        return None
+    tmps[tmp_id] = dst
+    return IRInstr(op=f"SELECT{bits}", dst=dst, args=operands, size=dst.size,
+                   addr=ctx.instruction_addr)
+
+
 def _wrtmp_instr_8616(
     stmt: object,
     tmps: _MutableTmpValues,
@@ -948,6 +1023,9 @@ def _wrtmp_instr_8616(
             return instr
     if data_tag == "Iex_ITE":
         _wrtmp_ite_condition_8616(data, tmp_id, tmps, conditions, ctx)
+        selection = _wrtmp_select_instr_8616(data, tmp_id, dst, tmps, conditions, ctx)
+        if selection is not None:
+            return selection
     value = ctx.convert(data, tmps, conditions)
     tmps[tmp_id] = IRValue(
         value.space,
@@ -1195,8 +1273,13 @@ def _block_to_ir(
     block: object,
     *,
     return_terminal: bool = False,
+    indirect_terminal_pending: bool = False,
 ) -> tuple[IRBlock, VexConditionTransportStats8616, TerminalJumpEvidence8616 | None]:
     """Import one angr block boundary into a typed IR block.
+
+    ``indirect_terminal_pending`` retains a discovery-only target expression.
+    It grants neither a successor nor a return claim; the explicit refusal
+    prevents this partial surface from becoming universal evidence.
 
     ``return_terminal`` asserts the Frontend census independently proved
     this block's indirect terminal is the incoming near-CALL
@@ -1254,7 +1337,7 @@ def _block_to_ir(
     refusals.extend(terminal_jump.refusals)
     terminal = terminal_control_flow_instr_8616(
         vex, instruction_addr,
-        retain_boring_transfer=terminal_jump.retain or return_terminal,
+        retain_boring_transfer=terminal_jump.retain or return_terminal or indirect_terminal_pending,
         proven_target=terminal_jump.proven_target,
         resolve_target=partial(
             _expr_to_value, tmps=tmps, conditions=conditions,
@@ -1265,6 +1348,12 @@ def _block_to_ir(
     )
     if terminal is not None:
         instrs.append(terminal)
+    if indirect_terminal_pending:
+        refusals.append(IRRefusal(
+            IRImportRefusalReason8616.INDIRECT_TERMINAL_PENDING,
+            "discovery-only indirect terminal requires authenticated invocation target evidence",
+            addr,
+        ))
     if return_terminal:
         if terminal is None or terminal.op != "JMP":
             refusals.append(IRRefusal(
@@ -1355,14 +1444,14 @@ def _entry_domain_call_preservations_8616(
         return ()
     from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 
-    return collect_entry_domain_call_preservations_8616(
+    return tuple(collect_entry_domain_call_preservations_8616(
         project,
         domain_artifact,
         boundary,
         direct_target_resolver=partial(
             resolve_direct_call_target_from_instruction_8616, project,
         ),
-    )
+    ))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1460,28 +1549,30 @@ def _native_import_producers_8616() -> tuple[object, ...]:
         _native_import_boundary_8616, capture_function_boundary_8616,
         restore_function_boundary_8616,
         _copy_native_surface_8616,
+        seed_native_copy_memo_8616, native_copy_memo_producers_8616,
+        *native_copy_memo_producers_8616(),
+        _wrtmp_instr_8616, _wrtmp_select_instr_8616, _bound_select_atom_8616,
+        _expr_cond, _expr_iftrue, _expr_iffalse, _unop_result_bits_8616,
         _normalize_native_temporaries_8616,
         *dead_temporary_surface_producers_8616(),
     )
 
 
 def _copy_native_surface_8616(surface: _X86_16ImportedSurface8616) -> _X86_16ImportedSurface8616:
-    """Isolate mutable captures while sharing frozen typed instruction DAGs.
+    """Detach the complete native graph while preserving its internal sharing.
 
-    Admission rejects opaque condition operands. Blocks, memory operands,
-    terminal decisions and condition results are frozen owned contracts;
-    only their containers and pending ConditionSource records are mutable.
+    Frozen dataclasses are not an isolation boundary: a changed consumer node
+    must never also change its cached native oracle. One deepcopy memo keeps
+    cross-field DAG relationships intact without sharing nodes with callers.
+    Exact owned nodes use typed detached constructors in that same memo;
+    other objects retain standard deepcopy behavior. Admission already
+    rejects opaque condition operands.
     """
-    capture = surface.condition_capture
-    return replace(
-        surface,
-        terminal_evidence=dict(surface.terminal_evidence),
-        condition_capture=ConditionLiftCaptureSession8616(
-            {address: list(rows) for address, rows in capture.condition_cache.items()},
-            {address: replace(source) for address, source in capture.pending_sources.items()},
-            set(capture._successful_blocks),
-        ),
-    )
+    memo = seed_native_copy_memo_8616(surface.blocks)
+    if surface.dead_temporary_normalization is not None:
+        for result in surface.dead_temporary_normalization.results:
+            seed_native_decisions_8616(result.decisions, memo)
+    return deepcopy(surface, memo)
 
 
 def _native_surface_copyable_8616(
@@ -1493,6 +1584,38 @@ def _native_surface_copyable_8616(
         and sum(len(block.instrs) for block in surface.blocks) <= 16384
         and native_capture_copyable_8616(surface.condition_capture)
     )
+
+
+def _native_surface_facts_8616(
+    surface: _X86_16ImportedSurface8616,
+) -> ImmutableSourceGraphFacts8616 | None:
+    """Canonicalize the retained native surface once per session record.
+
+    The frozen facts replay the exact surface ``source_graphs_equal_8616``
+    validates — function root, block census, instruction fields and
+    refusals — plus the sealed function/block refusal evidence compared
+    explicitly by callers. A foreign surface type yields ``None`` so the
+    rebind refuses rather than guessing; malformed owned graphs propagate
+    the canonical owner's typed serialization refusal.
+    """
+    if type(surface) is not _X86_16ImportedSurface8616:
+        return None
+    from .source_graph_binding import capture_immutable_source_graph_facts_8616
+
+    return capture_immutable_source_graph_facts_8616(
+        surface.function_addr, surface.blocks, surface.refusals)
+
+
+def _detached_terminal_evidence_8616(
+    surface: _X86_16ImportedSurface8616,
+) -> Mapping[int, TerminalJumpEvidence8616]:
+    """Detach terminal evidence for one authenticated raw rebinding.
+
+    The retained record's surface stays private; every authenticated rebind
+    receives its own deep copy so a mutated evidence value can never reach
+    the retained native oracle or a later consumer.
+    """
+    return deepcopy(surface.terminal_evidence)
 
 
 def _normalize_native_temporaries_8616(
@@ -1531,7 +1654,9 @@ def _lift_x86_16_function_surface_8616(
     condition_blocks: list[ConditionReliftBlock8616] = []
     exact_block_sizes: dict[int, int] | None = None
     proven_return_block_addrs: frozenset[int] = frozenset()
+    pending_indirect_blocks: frozenset[int] = frozenset()
     if isinstance(function, ExactFunctionRangeBoundary8616):
+        pending_indirect_blocks = frozenset(edge.block_addr for edge in function.conditional_edges)
         exact_block_sizes = {
             _block_addr(block): _external_int(cast(_BlockBoundary, block).size)
             for block in function.blocks
@@ -1572,6 +1697,7 @@ def _lift_x86_16_function_surface_8616(
             ir_block, transport_report, terminal_evidence = _block_to_ir(
                 block,
                 return_terminal=block_addr_int in proven_return_block_addrs,
+                indirect_terminal_pending=block_addr_int in pending_indirect_blocks,
             )
             if terminal_evidence is not None:
                 terminal_evidence_by_block[block_addr_int] = terminal_evidence
@@ -1761,25 +1887,111 @@ def raw_x86_16_import_bundle_for_artifact_8616(
     artifact no longer recomputes the native source surface and no
     evidence may be trusted for it; the rederived object is never
     substituted.
-    """
-    if type(artifact) is not IRFunctionArtifact:
-        return None
-    rederived = _import_raw_x86_16_function_bundle_8616(project, function)
-    if artifact.function_addr != rederived.artifact.function_addr:
-        return None
-    from .entry_jump_domain import _source_digest_8616
 
-    if _source_digest_8616(
-        artifact.function_addr, artifact.blocks
-    ) != _source_digest_8616(
-        rederived.artifact.function_addr, rederived.artifact.blocks
+    Compare the normalized native surface before artifact finalization:
+    finalization retains these exact blocks/refusals and derives only memory,
+    condition and summary products that this operation neither compares nor
+    returns. Ordinary raw imports still produce all of those products.
+
+    Inside a live request with a validated retained native record, the same
+    comparison runs over the record's PRIVATE canonical facts instead of a
+    freshly cloned-and-encoded surface: the caller artifact is canonicalized
+    once per call and replayed against frozen native facts — graph nodes,
+    function refusals and block refusals — before detached terminal evidence
+    is returned. Any missing or stale authority falls back to the ordinary
+    fresh re-derivation below unchanged.
+    """
+    if type(artifact) is not IRFunctionArtifact or direct_evidence_deadline_expired_8616(project):
+        return None
+    from .source_graph_binding import (
+        capture_immutable_source_graph_facts_8616,
+        source_graphs_equal_8616,
+    )
+
+    resolved = _native_import_boundary_8616(project, function)
+    rebound = request_native_fact_rebind_8616(
+        project, resolved, _lift_x86_16_function_surface_8616,
+        producers=_native_import_producers_8616(),
+        admit=_native_surface_copyable_8616,
+        clone=_copy_native_surface_8616,
+        native_facts=_native_surface_facts_8616,
+        caller_facts=lambda: capture_immutable_source_graph_facts_8616(
+            artifact.function_addr, artifact.blocks, artifact.refusals),
+        detached_evidence=_detached_terminal_evidence_8616,
+    )
+    if rebound.state is NativeFactRebindState8616.REFUSED:
+        return None
+    if rebound.state is NativeFactRebindState8616.AUTHENTICATED:
+        if direct_evidence_deadline_expired_8616(project):
+            return None
+        return RawIRFunctionImportBundle8616(
+            artifact=artifact,
+            terminal_evidence=cast(
+                Mapping[int, TerminalJumpEvidence8616], rebound.evidence),
+        )
+    rederived = _import_x86_16_function_surface_8616(project, resolved)
+    if direct_evidence_deadline_expired_8616(project):
+        return None
+    if artifact.function_addr != rederived.function_addr:
+        return None
+    if not source_graphs_equal_8616(
+        artifact.function_addr, artifact.blocks,
+        rederived.function_addr, rederived.blocks,
     ):
         return None
-    if artifact.refusals != rederived.artifact.refusals:
+    if artifact.refusals != rederived.refusals or direct_evidence_deadline_expired_8616(project):
         return None
     return RawIRFunctionImportBundle8616(
         artifact=artifact,
         terminal_evidence=rederived.terminal_evidence,
+    )
+
+
+def native_census_facts_rebind_8616(
+    project: object,
+    boundary: ExactFunctionRangeBoundary8616,
+    caller_facts: Callable[[], ImmutableSourceGraphFacts8616 | None],
+) -> NativeFactRebind8616:
+    """Rebind fresh caller facts to the request-local native fact record.
+
+    The scoped native census seals only immutable graph facts: inside a live
+    import request the retained record's private canonical facts replay the
+    exact comparison a fresh guarded census import would produce, so the
+    caller's freshly captured snapshot authenticates the whole re-derivation
+    without cloning or finalizing a second native surface. This route is
+    admitted only while the canonical census importer and every census
+    finishing producer keep their pinned identities — a replaced producer
+    reports UNRESOLVED so the caller's ordinary guarded import still invokes
+    it. All other UNRESOLVED cases (no live request, missing or stale
+    record, expired budget before authentication) likewise fall back to the
+    ordinary route unchanged; REFUSED already proves the caller foreign or
+    the deadline spent and must never bind.
+    """
+    from .real16_invocation_domain import (
+        _CANONICAL_NATIVE_CENSUS_IMPORT_8616,
+        real16_native_census_import_8616,
+    )
+
+    finishing = _census_finishing_producers_8616()
+    canonical = _CANONICAL_CENSUS_FINISHING_PRODUCERS_8616
+    if (
+        real16_native_census_import_8616 is not _CANONICAL_NATIVE_CENSUS_IMPORT_8616
+        or len(finishing) != len(canonical)
+        or any(
+            offered is not required
+            for offered, required in zip(finishing, canonical, strict=True)
+        )
+    ):
+        return NativeFactRebind8616(NativeFactRebindState8616.UNRESOLVED)
+    resolved = _native_import_boundary_8616(project, boundary)
+    return request_native_fact_rebind_8616(
+        project, resolved, _lift_x86_16_function_surface_8616,
+        producers=_native_import_producers_8616(),
+        admit=_native_surface_copyable_8616,
+        clone=_copy_native_surface_8616,
+        native_facts=_native_surface_facts_8616,
+        caller_facts=caller_facts,
+        detached_evidence=_detached_terminal_evidence_8616,
     )
 
 
@@ -1799,6 +2011,52 @@ def raw_x86_16_function_bundle_8616(
 def native_census_import_active_8616(project: object) -> bool:
     """Expose the census re-derivation marker for transport-time gates."""
     return _native_census_import_active_8616(project)
+
+
+_UNIVERSAL_CENSUS_PROOF_PRODUCERS_8616 = (
+    prove_entry_jump_domains_8616, apply_entry_jump_domain_8616,
+)
+
+
+def _universal_census_producers_current_8616() -> bool:
+    """Keep independent normalization tied to its canonical proof producers."""
+    from . import entry_jump_domain as owner
+
+    expected_prove, expected_apply = _UNIVERSAL_CENSUS_PROOF_PRODUCERS_8616
+    return (prove_entry_jump_domains_8616 is expected_prove
+            and apply_entry_jump_domain_8616 is expected_apply
+            and owner.prove_entry_jump_domains_8616 is expected_prove
+            and owner.apply_entry_jump_domain_8616 is expected_apply)
+
+
+def universally_normalized_census_blocks_8616(
+    project: object, boundary: ExactFunctionRangeBoundary8616,
+) -> tuple[tuple[IRBlock, ...], tuple[IRBlock, ...]] | None:
+    """Reprove a leaf's universal jump normalization without caller premises.
+
+    Return fresh raw and normalized rows for the census to bind independently.
+    No source is registered or modified. A conditional proof, residual refusal,
+    replaced proof producer, or CALL prevents this narrow normalization route.
+    """
+    if (not _universal_census_producers_current_8616()
+            or boundary.project is not project
+            or direct_evidence_deadline_expired_8616(project)):
+        return None
+    bundle = raw_x86_16_function_bundle_8616(project, boundary)
+    artifact = bundle.artifact
+    if any(row.op == "CALL" for block in artifact.blocks for row in block.instrs):
+        return None
+    proof = prove_entry_jump_domains_8616(artifact, bundle.terminal_evidence, project=project)
+    application = apply_entry_jump_domain_8616(artifact, proof)
+    if proof.invocation_scope is not None or proof.near_call_scope is not None:
+        return None
+    if (application.status is not EntryJumpDomainApplicationStatus8616.APPLIED
+            or application.refusals or any(block.refusals for block in application.blocks)):
+        return None
+    if (direct_evidence_deadline_expired_8616(project)
+            or not _universal_census_producers_current_8616()):
+        return None
+    return artifact.blocks, application.blocks
 
 
 def _scoped_call_preservations_8616(
@@ -1824,14 +2082,14 @@ def _scoped_call_preservations_8616(
         return ()
     from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 
-    return collect_entry_domain_call_preservations_8616(
+    return tuple(collect_entry_domain_call_preservations_8616(
         project,
         artifact,
         boundary,
         direct_target_resolver=partial(
             resolve_direct_call_target_from_instruction_8616, project,
         ),
-    )
+    ))
 
 
 def prove_scoped_x86_16_ir_function_view_8616(
@@ -1839,10 +2097,15 @@ def prove_scoped_x86_16_ir_function_view_8616(
     bundle: RawIRFunctionImportBundle8616,
     boundary: ExactFunctionRangeBoundary8616,
     *,
-    invocation_scope: Real16InvocationDomain8616 | None,
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
     call_preservations: tuple[EntryDomainCallPreservation8616, ...] | None = None,
 ) -> ScopedFunctionIRView8616:
     """Construct the scoped CFG view for one authenticated consuming entry.
+
+    ``near_call_scope`` offers a distinct conditional selector-entry premise
+    with its complete CALL census. It is retained by the private view and never
+    converted to a full invocation domain or published as universal evidence.
 
     ``bundle`` must be the typed raw import product for the identical
     surface the consuming entry owns: its ``artifact`` is the
@@ -1872,6 +2135,7 @@ def prove_scoped_x86_16_ir_function_view_8616(
         return _prove_scoped_x86_16_ir_function_view_8616(
             project, bundle, boundary, invocation_scope=invocation_scope,
             call_preservations=call_preservations,
+            near_call_scope=near_call_scope,
         )
 
 
@@ -1880,8 +2144,9 @@ def _prove_scoped_x86_16_ir_function_view_8616(
     bundle: RawIRFunctionImportBundle8616,
     boundary: ExactFunctionRangeBoundary8616,
     *,
-    invocation_scope: Real16InvocationDomain8616 | None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] | None,
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
+    call_preservations: tuple[EntryDomainCallPreservation8616, ...] | None = None,
 ) -> ScopedFunctionIRView8616:
     """Revalidate scoped proofs while sharing only request-local native facts."""
     if type(bundle) is not RawIRFunctionImportBundle8616:
@@ -1915,17 +2180,31 @@ def _prove_scoped_x86_16_ir_function_view_8616(
             boundary,
             entry_call_preservations=records,
         )
+    if near_call_scope is not None and invocation_scope is None:
+        from .scoped_function_ir_view import _staged_scoped_function_ir_view_8616
+
+        return _staged_scoped_function_ir_view_8616(
+            artifact,
+            boundary,
+            bundle.terminal_evidence,
+            project=project,
+            near_call_scope=near_call_scope,
+        )
     proof = prove_entry_jump_domains_8616(
         artifact,
         bundle.terminal_evidence,
         project=project,
         call_preservations=records,
         invocation_resolver=invocation_resolver,
+        near_call_scope=near_call_scope,
+        offered_invocation_scope=(invocation_scope if any(
+            record.selector_projection is not None for record in records) else None),
     )
     from .scoped_function_ir_view import prove_scoped_function_ir_view_8616
 
     return prove_scoped_function_ir_view_8616(
         artifact, boundary, proof, invocation_scope=invocation_scope,
+        near_call_scope=near_call_scope,
     )
 
 
@@ -2013,7 +2292,12 @@ def _deadline_refused_ir_import_8616(surface: _X86_16ImportedSurface8616) -> IRF
 
 
 def build_x86_16_ir_function_artifact(project: object, function: object) -> IRFunctionArtifact:
-    """Build with request-local native facts and fresh proof attempts on every call."""
+    """Retain the native owner before decoding, then build from fresh facts."""
+    from .function_readiness_contracts import bind_function_source_owner_8616
+
+    # The native Function holds a weak manager proxy. Keep its actual owner
+    # alive before block decoding can release a temporary analysis context.
+    bind_function_source_owner_8616(project, function)
     with native_import_request_8616():
         return _build_x86_16_ir_function_artifact_8616(project, function)
 
@@ -2047,6 +2331,71 @@ def _census_finishing_producers_8616() -> tuple[object, ...]:
     )
 
 
+def _import_source_revision_8616(
+    project: object,
+    function: object,
+) -> FunctionSourceRevision8616 | None:
+    """Observe the canonical source generation for the supplied boundary.
+
+    Bind the boundary this producer actually consumes. An explicit range is
+    a distinct source scope even when a function-manager entry shares its head;
+    registries reconstruct that scope when checking the recorded attestation.
+    """
+    try:
+        addr = cast(_FunctionBoundary, function).addr
+    except AttributeError:
+        return None
+    if not isinstance(addr, int) or addr < 0:
+        return None
+    return observed_function_source_revision_8616(
+        project,
+        addr,
+        boundary=function,
+    )
+
+
+def _bind_import_source_revision_8616(
+    project: object,
+    function: object,
+    artifact: IRFunctionArtifact,
+    before: FunctionSourceRevision8616 | None,
+) -> IRFunctionArtifact:
+    """Attest one finalized artifact to the exact generation it consumed.
+
+    The generation is observed both before and after the actual import —
+    request-local surface reuse included — so a stamp is attached only when
+    both ends prove the same unchanged generation. A mid-import change keeps
+    the artifact but marks it refused; an unobservable generation leaves it
+    unattested, so publication records only an observed binding.
+    """
+    after = _import_source_revision_8616(project, function)
+    if before is None or after is None:
+        return artifact
+    if before != after:
+        return replace(
+            artifact,
+            refusals=(
+                *artifact.refusals,
+                IRRefusal(
+                    "source_revision_changed",
+                    "function source generation changed during IR import",
+                ),
+            ),
+        )
+    stamped = replace(artifact, source_revision=after)
+    body_digest = function_artifact_body_digest_8616(stamped)
+    if body_digest is not None:
+        record_function_build_attestation_8616(
+            project,
+            stamped.function_addr,
+            body_digest,
+            after,
+            "x86_16_vex_ir",
+            boundary=function,
+        )
+    return stamped
+
+
 def _build_x86_16_ir_function_artifact_8616(project: object, function: object) -> IRFunctionArtifact:
     """Import a recovered function or the exact Frontend block partition.
 
@@ -2058,6 +2407,7 @@ def _build_x86_16_ir_function_artifact_8616(project: object, function: object) -
     Its separate application summary retains the diagnostic without changing
     the native surface that scoped consumers must independently authenticate.
     """
+    before_revision = _import_source_revision_8616(project, function)
     surface = _import_x86_16_function_surface_8616(project, function)
     if direct_evidence_deadline_expired_8616(project):
         return _deadline_refused_ir_import_8616(surface)
@@ -2132,13 +2482,18 @@ def _build_x86_16_ir_function_artifact_8616(project: object, function: object) -
             ]
     if direct_evidence_deadline_expired_8616(project):
         return _deadline_refused_ir_import_8616(surface)
-    return _finalize_x86_16_ir_artifact_8616(
+    return _bind_import_source_revision_8616(
         project,
-        surface,
-        tuple(blocks),
-        tuple(refusals),
-        entry_jump_domain=entry_jump_domain,
-        entry_jump_application=entry_jump_application,
+        function,
+        _finalize_x86_16_ir_artifact_8616(
+            project,
+            surface,
+            tuple(blocks),
+            tuple(refusals),
+            entry_jump_domain=entry_jump_domain,
+            entry_jump_application=entry_jump_application,
+        ),
+        before_revision,
     )
 
 
@@ -2199,7 +2554,7 @@ def build_x86_16_ir_function_artifact_summary(artifact: IRFunctionArtifact) -> d
     """Summarize typed IR import facts for diagnostics and downstream gates."""
     tally = _ArtifactSummaryTally8616()
     for block in artifact.blocks:
-        tally.ssa_binding_count += len(build_x86_16_block_local_ssa(block).bindings)
+        tally.ssa_binding_count += _block_local_ssa_binding_count_8616(block)
         for instr in block.instrs:
             atoms: tuple[IRAtom, ...] = instr.args + (() if instr.dst is None else (instr.dst,))
             for atom in atoms:
@@ -2302,6 +2657,95 @@ def _existing_artifacts_current_8616(
     )
 
 
+def _attach_vex_ir_surface_8616(
+    project: object, codegen_boundary: _CodegenBoundary, function: object,
+    artifact: IRFunctionArtifact, function_ssa: SSAFunctionArtifact | None,
+    declared_entry: DeclaredEntryInput8616 | None,
+) -> None:
+    """Attach the shared raw/frame/SSA surface to one codegen.
+
+    Only an unscoped artifact may reach the universal registries; a typed
+    entry input attaches conditionally to this one consumer and is
+    re-retained as the identical object — never published or promoted.
+    """
+    from .declared_entry_pipeline import retain_declared_entry_pipeline_8616
+    from .function_ssa_registry import (
+        FunctionSSAArtifactStage8616,
+        publish_function_ssa_artifact_8616,
+    )
+
+    if function_ssa is None:
+        function_ssa = build_x86_16_function_ssa(artifact)
+    frame_artifact = build_x86_16_ir_frame_access_artifact(artifact)
+    if not artifact.refusals and declared_entry is None:
+        publish_function_ir_artifact_8616(project, artifact)
+        publish_function_ssa_artifact_8616(
+            project,
+            function_ssa,
+            FunctionSSAArtifactStage8616.IR,
+        )
+    codegen_boundary._inertia_vex_ir_artifact = artifact
+    codegen_boundary._inertia_vex_ir_summary = artifact.summary
+    codegen_boundary._inertia_vex_ir_frame = frame_artifact
+    codegen_boundary._inertia_vex_ir_function_ssa = function_ssa
+    codegen_boundary._inertia_vex_ir_source_function_8616 = function
+    codegen_boundary._inertia_raw_vex_ir_artifact_8616 = artifact
+    codegen_boundary._inertia_raw_vex_ir_frame_8616 = frame_artifact
+    codegen_boundary._inertia_raw_vex_ir_function_ssa_8616 = function_ssa
+    if declared_entry is not None:
+        retain_declared_entry_pipeline_8616(codegen_boundary, declared_entry)
+    info = _function_info(function)
+    if info is not None:
+        if declared_entry is not None:
+            info["x86_16_declared_entry"] = {
+                "premise": declared_entry.premise.value,
+                "failure": (None if declared_entry.view.failure is None
+                            else declared_entry.view.failure.value),
+                "detail": declared_entry.view.detail,
+            }
+        info["x86_16_vex_ir_artifact"] = artifact.to_dict()
+        info["x86_16_vex_ir_summary"] = dict(artifact.summary)
+        info["x86_16_vex_ir_frame"] = frame_artifact.to_dict()
+        info["x86_16_vex_ir_function_ssa"] = function_ssa.to_dict()
+
+
+def _apply_retained_native_entry_artifact_8616(
+    project: object, codegen: object,
+) -> NativeNearCallPipeline8616 | None:
+    """Attach a retained native entry's raw bundle without claiming proof.
+
+    Only the synchronous structuring prefix calls this private route. The
+    declared owner validates deferred source membership and the retained
+    entry's exact identities — never the ``authenticates`` replay — and
+    the retained raw bundle attaches to this one codegen with no
+    universal registry publication; the returned entry is the identical
+    pinned object, even when its raw attachments were already present.
+    ``None`` means no retained native entry applied and the ordinary
+    public attach route owns the request. The canonical full-scope
+    consume stays with ``call_stack_effects``.
+    """
+    from .declared_entry_pipeline import _retained_input_8616, _retained_native_entry_for_8616
+    from .near_call_entry_pipeline import NativeNearCallPipeline8616
+
+    if not isinstance(_retained_input_8616(codegen), NativeNearCallPipeline8616):
+        return None
+    codegen_boundary = cast(_CodegenBoundary, codegen)
+    resolved = codegen_function_8616(project, codegen)
+    if resolved is None:
+        return None
+    function, func_addr = resolved
+    entry = _retained_native_entry_for_8616(project, codegen, func_addr)
+    if entry is None:
+        return None
+    if not (_existing_artifacts_current_8616(codegen_boundary, function, func_addr)
+            and codegen_boundary._inertia_vex_ir_artifact is entry.bundle.artifact):
+        _attach_vex_ir_surface_8616(
+            project, codegen_boundary, function,
+            entry.bundle.artifact, None, entry,
+        )
+    return entry
+
+
 def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
     """Attach or reuse typed IR for one immutable codegen function snapshot."""
     codegen_boundary = cast(_CodegenBoundary, codegen)
@@ -2309,10 +2753,7 @@ def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
     if resolved is None:
         return False
     function, func_addr = resolved
-    from .declared_entry_pipeline import (
-        prepare_declared_entry_pipeline_8616,
-        retain_declared_entry_pipeline_8616,
-    )
+    from .declared_entry_pipeline import prepare_declared_entry_pipeline_8616
 
     declared_entry = prepare_declared_entry_pipeline_8616(project, codegen, func_addr)
     if _existing_artifacts_current_8616(codegen_boundary, function, func_addr) and (
@@ -2323,7 +2764,6 @@ def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
     from .function_ssa_registry import (
         FunctionSSAArtifactStage8616,
         FunctionSSAArtifactVerdict8616,
-        publish_function_ssa_artifact_8616,
         registered_function_ssa_artifact_8616,
     )
 
@@ -2345,39 +2785,10 @@ def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
         function_ssa = None
     if artifact is None:
         artifact = build_x86_16_ir_function_artifact(project, function)
-    if function_ssa is None:
-        function_ssa = build_x86_16_function_ssa(artifact)
-    frame_artifact = build_x86_16_ir_frame_access_artifact(artifact)
-    if not artifact.refusals and declared_entry is None:
-        publish_function_ir_artifact_8616(project, artifact)
-        publish_function_ssa_artifact_8616(
-            project,
-            function_ssa,
-            FunctionSSAArtifactStage8616.IR,
-        )
-    codegen_boundary._inertia_vex_ir_artifact = artifact
-    codegen_boundary._inertia_vex_ir_summary = artifact.summary
-    codegen_boundary._inertia_vex_ir_frame = frame_artifact
-    codegen_boundary._inertia_vex_ir_function_ssa = function_ssa
-    codegen_boundary._inertia_vex_ir_source_function_8616 = function
-    codegen_boundary._inertia_raw_vex_ir_artifact_8616 = artifact
-    codegen_boundary._inertia_raw_vex_ir_frame_8616 = frame_artifact
-    codegen_boundary._inertia_raw_vex_ir_function_ssa_8616 = function_ssa
-    if declared_entry is not None:
-        retain_declared_entry_pipeline_8616(codegen, declared_entry)
-    info = _function_info(function)
-    if info is not None:
-        if declared_entry is not None:
-            info["x86_16_declared_entry"] = {
-                "premise": declared_entry.premise.value,
-                "failure": (None if declared_entry.view.failure is None
-                            else declared_entry.view.failure.value),
-                "detail": declared_entry.view.detail,
-            }
-        info["x86_16_vex_ir_artifact"] = artifact.to_dict()
-        info["x86_16_vex_ir_summary"] = dict(artifact.summary)
-        info["x86_16_vex_ir_frame"] = frame_artifact.to_dict()
-        info["x86_16_vex_ir_function_ssa"] = function_ssa.to_dict()
+    _attach_vex_ir_surface_8616(
+        project, codegen_boundary, function,
+        artifact, function_ssa, declared_entry,
+    )
     return False
 
 # Producer identities authenticate a block-preserving canonical finishing path.

@@ -13,7 +13,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
@@ -1206,7 +1206,7 @@ def _conditional_break_matches(
 
 
 def _normalized_contract_observations_8616(
-    observations: list[CallObservation],
+    observations: Iterable[CallObservation],
     call_name_aliases: Mapping[str, str] | None,
 ) -> dict[str, list[tuple[int, CallObservation]]]:
     """Group observations by alias-normalized call name."""
@@ -1229,7 +1229,7 @@ def _normalized_contract_observations_8616(
 def _check_call_requirements_8616(
     contract: FunctionCallContract,
     observations_by_name: dict[str, list[tuple[int, CallObservation]]],
-    null_arguments: object,
+    null_arguments: dict[int, tuple[bool, ...]],
 ) -> tuple[list[str], list[str], list[str], set[str]]:
     """Return missing/count/argument mismatches plus the expected-name set."""
     missing_calls: list[str] = []

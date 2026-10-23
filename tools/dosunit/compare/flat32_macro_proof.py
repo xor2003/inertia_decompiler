@@ -14,16 +14,17 @@ and memory — masked under the row's exact path guard.
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from functools import partial
+from dataclasses import asdict, replace
 from typing import Any
 
 from tools.comparator.services import proof_owners
 from tools.dosunit.architectures.flat32 import flat32_register_architecture
-from tools.dosunit.architectures.flat32_control import finish_flat32_control
+from tools.dosunit.architectures.flat32_cfg_summary import lower_cfg_block
 from tools.dosunit.compare import flat32_macro_terms as ft
 from tools.dosunit.compare import macro_step_pairing as pairing
+from tools.dosunit.compare import straightline_ssa as S
 from tools.dosunit.compare.flat32_environment_coverage import environment_parts
+from tools.dosunit.compare.flat32_macro_cuts import propose_feedback_cut_pairs
 from tools.dosunit.compare.flat32_macro_terms import _Flat32Refusal
 from tools.dosunit.compare.flat32_region_attempts import compare_attempt, comparison_deadline
 from tools.dosunit.compare.macro_step_contracts import (
@@ -42,16 +43,15 @@ from tools.dosunit.compare.paired_region_graph import (
     RegionGraphRefusal,
     RegionNode,
 )
-from tools.dosunit.compare.real16_call_contracts import prove_terms_equal
 from tools.dosunit.contracts.proof_contracts import FactCounters, ProofStatus, proof_status_from_legacy
 from tools.dosunit.contracts.proof_scope import ProofScope, admit_scope_status
 from tools.dosunit.ssa import region_path_terms as T
 
 
-def _block_tokens(blocks: dict[int, Any], entry: int) -> dict[int, int]:
+def _block_tokens(blocks: dict[int, Any], entry: int, cuts: tuple[int, ...] = ()) -> dict[int, int]:
     """Stable token map: the physical entry block is always token zero."""
-    tokens = {entry: 0}
-    for address in sorted(set(blocks) - {entry}):
+    tokens = {address: index for index, address in enumerate(cuts or (entry,))}
+    for address in sorted(set(blocks) - set(tokens)):
         tokens[address] = len(tokens)
     return tokens
 
@@ -62,15 +62,15 @@ def _lower_members(
 ) -> dict[int, dict[str, Any]]:
     """Lower every discovered CFG block under the adapter token map."""
     docs: dict[int, dict[str, Any]] = {}
-    full_state = tuple(name for name, _width in adapter.REG32.values())
+    full_state = tuple(name for name, _width in flat32_register_architecture().registers)
     for address, block in sorted(blocks.items()):
         ft.remaining_ms32(deadline)
-        body = adapter.S._lower_irsb(
-            block.irsb, output_regs=full_state, max_assignments_per_function=4096,
-            architecture=flat32_register_architecture(),
-            block_finisher=partial(finish_flat32_control, control_targets=tokens),
+        body = lower_cfg_block(
+            block.irsb, output_regs=full_state, control_targets=tokens,
+            repeat_instructions=block.repeat_instructions,
+            control_word_instruction=block.control_word_instruction,
         )
-        if isinstance(body, adapter.S.LowerFailure):
+        if isinstance(body, S.LowerFailure):
             raise refusal(f"{body.reason}: {body.message}")
         docs[address] = body
     return docs
@@ -100,8 +100,7 @@ def _resolve_pairs(
             slow_state, slow_guard = ft.compose_concat32(
                 slow_docs, slow_concat, slow_tokens, adapter, macro_limits, deadline,
             )
-            remaining = ft.remaining_ms32(deadline)
-            equal = prove_terms_equal(fast_guard, slow_guard, remaining)
+            equal = ft.prove_guard_equal32(fast_guard, slow_guard, deadline)
             facts += 1
             if equal is not ProofStatus.PROVED:
                 continue
@@ -115,8 +114,7 @@ def _resolve_pairs(
             break
         if paired:
             continue
-        remaining = ft.remaining_ms32(deadline)
-        infeasible = prove_terms_equal(fast_guard, T.guard_false(), remaining)
+        infeasible = ft.prove_guard_equal32(fast_guard, T.guard_false(), deadline)
         facts += 1
         if infeasible is ProofStatus.PROVED:
             continue  # Provably infeasible frontier path: recorded, never paired.
@@ -132,6 +130,31 @@ def _resolve_pairs(
 def _member_count(paths: tuple[Any, ...]) -> int:
     """Total binary member blocks consumed by a concatenated path."""
     return sum(len(region.members) for path in paths for region in path.regions)
+
+
+def _cut_coverage(
+    proposal: Any, resolved: list[tuple[Any, Any, dict[str, Any], T.Term, dict[str, Any], T.Term]],  # noqa: ANN401
+    adapter: Any, deadline: float,  # noqa: ANN401
+) -> tuple[list[MacroCoverageProof], int, int]:
+    """Discharge complete disjoint path coverage separately at every cut pair."""
+    oracle_is_fast = proposal.direction is MacroDirection.CANDIDATE_SLOWER
+    coverage: list[MacroCoverageProof] = []
+    facts = failures = 0
+    for cut_index, (oracle_cut, candidate_cut) in enumerate(proposal.macro_pairs):
+        oracle_guards = [
+            og for path, concat, _os, og, _cs, _cg in resolved
+            if (path.start_cut if oracle_is_fast else concat[0].start_cut) == oracle_cut
+        ]
+        candidate_guards = [
+            cg for path, concat, _os, _og, _cs, cg in resolved
+            if (concat[0].start_cut if oracle_is_fast else path.start_cut) == candidate_cut
+        ]
+        for side, guards in (("oracle", oracle_guards), ("candidate", candidate_guards)):
+            proof, cover_facts, cover_failures = ft.coverage32(side, guards, adapter, deadline)
+            coverage.append(replace(proof, diagnostics={**proof.diagnostics, "cut_pair": cut_index}))
+            facts += cover_facts
+            failures += cover_failures
+    return coverage, facts, failures
 
 
 def _attempt_flat32(
@@ -155,8 +178,8 @@ def _attempt_flat32(
         )
         facts += pair_facts
         failures += pair_failures
-        ossa = {"name": "oracle", "functions": []}
-        cssa = {"name": "candidate", "functions": []}
+        ossa: dict[str, Any] = {"name": "oracle", "functions": []}
+        cssa: dict[str, Any] = {"name": "candidate", "functions": []}
         for index, (fast_path, slow_concat, o_state, o_guard, c_state, c_guard) in enumerate(resolved):
             oracle_paths = (fast_path,) if oracle_is_fast else slow_concat
             candidate_paths = slow_concat if oracle_is_fast else (fast_path,)
@@ -212,22 +235,17 @@ def _attempt_flat32(
                 index,
                 tuple(m for p in oracle_paths for r in p.regions for m in r.members),
                 tuple(m for p in candidate_paths for r in p.regions for m in r.members),
-                len(oracle_paths), len(candidate_paths), end_kind, 0, row_status,
-                ProofStatus.PROVED, tuple(obligations), {"verdict": row_verdict},
+                len(oracle_paths), len(candidate_paths), end_kind,
+                next((i for i, pair in enumerate(proposal.macro_pairs)
+                      if pair[0] == oracle_paths[-1].end_head), 0), row_status,
+                ProofStatus.PROVED, tuple(obligations), {"verdict": row_verdict,
+                    "start_cut": oracle_paths[0].start_cut},
             ))
-        oracle_guards = [g for _p, _c, _s, g, _cs, _cg in resolved] if oracle_is_fast else [
-            g for _p, _c, _s, _g, _cs, g in resolved
-        ]
-        candidate_guards = [g for _p, _c, _s, _g, _cs, g in resolved] if oracle_is_fast else [
-            g for _p, _c, _s, g, _cs, _cg in resolved
-        ]
-        for side, guards in (("oracle", oracle_guards), ("candidate", candidate_guards)):
-            proof, cover_facts, cover_failures = ft.coverage32(
-                side, guards, adapter, deadline,
-            )
-            coverage.append(proof)
-            facts += cover_facts
-            failures += cover_failures
+        coverage, cover_facts, cover_failures = _cut_coverage(
+            proposal, resolved, adapter, deadline,
+        )
+        facts += cover_facts
+        failures += cover_failures
     except _Flat32Refusal as error:
         counters = FactCounters(facts, facts, facts, facts, failures + 1)
         attempt = MacroStepAttempt(
@@ -286,11 +304,12 @@ def compare_macro_cfg(
             )
             for address, block in cblocks.items()
         }
-        o_tokens = _block_tokens(oblocks, oracle_range[0])
-        c_tokens = _block_tokens(cblocks, candidate_range[0])
+        cut_pairs = propose_feedback_cut_pairs(o_nodes, c_nodes, oracle_range[0], candidate_range[0])
+        o_tokens = _block_tokens(oblocks, oracle_range[0], tuple(left for left, _right in cut_pairs))
+        c_tokens = _block_tokens(cblocks, candidate_range[0], tuple(right for _left, right in cut_pairs))
         search = pairing.propose_macro_steps(
             o_nodes, c_nodes, oracle_range[0], candidate_range[0],
-            limits=macro_bound,
+            limits=macro_bound, cut_pairs=cut_pairs,
             deadline_seconds=ft.remaining_ms32(deadline) / 1000.0,
         )
         o_docs = _lower_members(oblocks, adapter, o_tokens, cfg.CfgRefusal, deadline)
@@ -326,6 +345,7 @@ def compare_macro_cfg(
         "status": verdict.Status.PASSED if proved else verdict.Status.REFUSED,
         "reason": "macro_step_cfg_induction" if proved else "macro_step_unproved",
         "macro": {
+            "cut_pairs": cut_pairs,
             "search": {"status": search.status.value,
                        "counters": asdict(search.counters)},
             "attempts": [asdict(a) for a in attempts],

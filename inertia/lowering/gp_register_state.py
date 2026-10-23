@@ -20,21 +20,37 @@ from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
 from archinfo import Arch
 
 from inertia.ir.function_ssa_registry import (
+    FunctionSSAArtifactResolution8616,
     FunctionSSAArtifactVerdict8616,
     registered_function_ssa_artifact_8616,
 )
 from inertia.ir.register_live_in import register_live_in_names_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
+from inertia.lowering.c_ast_utils import (
+    _iter_c_node_occurrences_8616,
+    _iter_c_nodes_deep_8616,
+    _replace_c_children_8616,
+)
+from inertia.lowering.physical_registers import physical_register_view_8616
+from inertia.semantics.expression_analysis import (
+    VirtualValueIdentityKind8616,
+    describe_virtual_value_identity_8616,
+)
 
 from .global_declarations import (
     GlobalDeclarationCType8616,
     record_global_declaration_spec_8616,
 )
-from .gp_register_versions import capture_gp_register_versions_8616
+from .gp_register_read_order import RegisterUpdateOrder8616, register_update_read_order_8616
+from .gp_register_versions import (
+    RegisterIdentity8616,
+    _linear_sequence,
+    capture_gp_register_versions_8616,
+)
 from .gp_word_assignment import project_gp_word_assignment_8616, refresh_gp_word_pointer_projection_8616
 from .gp_word_runtime import initialize_gp_runtime_abi_8616
 from .stack_value_projection import project_pointer_storage_value_8616
+from .terminal_return_expressions import contains_effectful_call_8616
 
 __all__ = [
     "GPRegisterStateLoweringStats8616",
@@ -50,6 +66,9 @@ __all__ = [
     "runtime_gp_state_names_8616",
     "runtime_gp_state_symbols_8616",
 ]
+
+_ENTRY_STATEMENT_PHASES: int = 2
+_ENTRY_STORE_PHASE: int = 1
 
 _RUNTIME_GP_STATE_SYMBOLS_8616 = {
     "eax": "inertia_eax",
@@ -299,6 +318,7 @@ class _CodegenGPRegisters8616(Protocol):
     cfunc: _CFunctionGPRegisters8616 | None
     project: _ProjectGPRegisters8616 | None
     _inertia_gp_register_state_lowering_stats_8616: GPRegisterStateLoweringStats8616
+    _inertia_gp_state_ssa_readiness_8616: FunctionSSAArtifactResolution8616
 
 
 def _runtime_gp_lane_type_8616(codegen: object) -> SimTypeLong:
@@ -340,7 +360,7 @@ def gp_live_in_names_from_ssa_8616(artifact: SSAFunctionArtifact) -> frozenset[s
 def _c_register_identity_8616(
     node: object,
     project: _ProjectGPRegisters8616,
-) -> tuple[tuple[int, int, str | None, int | None], str] | None:
+) -> tuple[RegisterIdentity8616, str] | None:
     """Return one exact structured-C register identity and its GP parent."""
     if not isinstance(node, structured_c.CVariable) or not isinstance(
         node.variable,
@@ -360,20 +380,89 @@ def _c_register_identity_8616(
     )
 
 
+def _c_dirty_register_identity_8616(
+    node: object,
+    project: _ProjectGPRegisters8616,
+) -> tuple[RegisterIdentity8616, str] | None:
+    """Return the exact SSA identity for a ``CDirtyExpression`` register carrier.
+
+    Only a projectable register view carrying an explicit SSA ``varid`` proves
+    the version read. Ambiguous payloads (missing register category, non-varid
+    identities, or offsets outside the GP view inventory) refuse instead of
+    inheriting unproven entry evidence.
+    """
+    if not isinstance(node, structured_c.CDirtyExpression):
+        return None
+    # Dynamic angr boundary: opaque dirty payloads only expose typed offsets
+    # and bits through the shared physical-register view projection.
+    view = physical_register_view_8616(node)
+    identity = describe_virtual_value_identity_8616(node)
+    if (
+        view is None
+        or identity is None
+        or identity.kind is not VirtualValueIdentityKind8616.VARIABLE_ID
+    ):
+        return None
+    projection = _register_projection_for_shape_8616(project, view.reg_offset, view.width)
+    if projection is None:
+        return None
+    return (
+        (view.reg_offset, view.width, identity.value, None),
+        projection[0],
+    )
+
+
+def _c_ast_dirty_carrier_census_8616(
+    root: object,
+    project: _ProjectGPRegisters8616,
+) -> tuple[dict[RegisterIdentity8616, str], set[RegisterIdentity8616], set[str]]:
+    """Observe dirty definitions and lanes whose saved values need capture.
+
+    A write-only destination needs no snapshot. Count AST edge occurrences so
+    a shared destination/read object still requires value capture.
+    """
+    observed: dict[RegisterIdentity8616, str] = {}
+    defined: set[RegisterIdentity8616] = set()
+    occurrences: dict[RegisterIdentity8616, int] = {}
+    definitions: dict[RegisterIdentity8616, int] = {}
+    for node in _iter_c_node_occurrences_8616(root):
+        identity = _c_dirty_register_identity_8616(node, project)
+        if identity is not None:
+            observed[identity[0]] = identity[1]
+            occurrences[identity[0]] = occurrences.get(identity[0], 0) + 1
+        if isinstance(node, structured_c.CAssignment):
+            lhs_identity = _c_dirty_register_identity_8616(node.lhs, project)
+            if lhs_identity is not None:
+                defined.add(lhs_identity[0])
+                definitions[lhs_identity[0]] = definitions.get(lhs_identity[0], 0) + 1
+    capture_lanes = {
+        observed[key] for key in defined if occurrences.get(key, 0) > definitions[key]
+    }
+    return observed, defined, capture_lanes
+
+
 def gp_live_in_names_from_c_ast_8616(
     root: object,
     project: _ProjectGPRegisters8616,
 ) -> frozenset[str]:
-    """Return GP parents with an SSA C carrier read but never defined in the AST."""
-    observed: dict[tuple[int, int, str | None, int | None], str] = {}
-    defined: set[tuple[int, int, str | None, int | None]] = set()
+    """Return GP parents with an SSA C carrier read but never defined in the AST.
+
+    Both ``CVariable``/``SimRegisterVariable`` carriers and dirty register
+    carriers with an explicit ``varid`` participate; a version is a live-in
+    only when no assignment inside the AST defines that exact identity.
+    """
+    observed: dict[RegisterIdentity8616, str] = {}
+    defined: set[RegisterIdentity8616] = set()
     for node in _iter_c_nodes_deep_8616(root):
         identity = _c_register_identity_8616(node, project)
+        if identity is None:
+            identity = _c_dirty_register_identity_8616(node, project)
         if identity is not None:
-            key, register_name = identity
-            observed[key] = register_name
+            observed[identity[0]] = identity[1]
         if isinstance(node, structured_c.CAssignment):
             lhs_identity = _c_register_identity_8616(node.lhs, project)
+            if lhs_identity is None:
+                lhs_identity = _c_dirty_register_identity_8616(node.lhs, project)
             if lhs_identity is not None:
                 defined.add(lhs_identity[0])
     return frozenset(
@@ -389,15 +478,14 @@ def _register_projection_for_shape_8616(
     size: int,
 ) -> tuple[str, int, int] | None:
     """Resolve one exact GP view into its coherent 32-bit runtime lane."""
-    names = {
-        name.lower(): _GP_REGISTER_VIEWS_8616[name.lower()]
+    projections = {
+        _GP_REGISTER_VIEWS_8616[name.lower()]
         for name, shape in project.arch.registers.items()
-        if name.lower() in _GP_REGISTER_VIEWS_8616
-        and len(shape) >= 2
+        if len(shape) >= 2
         and shape[0] == offset
         and shape[1] == size
+        and name.lower() in _GP_REGISTER_VIEWS_8616
     }
-    projections = frozenset(names.values())
     return next(iter(projections)) if len(projections) == 1 else None
 
 
@@ -660,12 +748,14 @@ def runtime_gp_state_names_8616(codegen: object) -> frozenset[str]:
     if cfunc is None or project is None:
         return frozenset()
     resolution = registered_function_ssa_artifact_8616(project, cfunc.addr)
-    live_ins: set[str] = set()
     if resolution.verdict is FunctionSSAArtifactVerdict8616.PROVEN and resolution.artifact is not None:
-        live_ins.update(gp_live_in_names_from_ssa_8616(resolution.artifact))
+        live_ins: set[str] = set(gp_live_in_names_from_ssa_8616(resolution.artifact))
     else:
         # Missing C assignments cannot contradict an authoritative SSA definition.
-        live_ins.update(gp_live_in_names_from_c_ast_8616(cfunc.statements, project))
+        # Record the typed refusal (including source invalidation) for diagnostics
+        # instead of silently consuming the unbound C fallback.
+        boundary._inertia_gp_state_ssa_readiness_8616 = resolution
+        live_ins = set(gp_live_in_names_from_c_ast_8616(cfunc.statements, project))
     state_owned_names = set(live_ins)
     state_owned_names.update(
         register_name
@@ -697,6 +787,9 @@ class _GpStateLoweringContext8616:
     state_owned_names: frozenset[str]
     raw_ids: set[int]
     materialized_ids: set[int]
+    undefined_entry_identities: frozenset[RegisterIdentity8616]
+    first_lane_write_index: Mapping[str, int]
+    entry_read_index: Mapping[int, int]
 
 
 def _lhs_register_projection_8616(
@@ -728,6 +821,98 @@ def _lhs_register_projection_8616(
             lhs.variable.size,
         )
     return None
+
+
+def _lane_write_parents_8616(
+    project: _ProjectGPRegisters8616,
+    lhs: object,
+    state_owned_names: frozenset[str],
+) -> frozenset[str]:
+    """Return owned runtime lanes an assignment destination may overwrite.
+
+    A projected register destination clobbers its parent lane; a register
+    dirty destination without a provable offset/width conservatively clobbers
+    every owned lane. Provably non-register destinations clobber none.
+    """
+    projection = _lhs_register_projection_8616(project, lhs)
+    if projection is not None:
+        return (
+            frozenset({projection[0]})
+            if projection[0] in state_owned_names
+            else frozenset()
+        )
+    runtime_view = runtime_gp_expression_view_8616(lhs)
+    if runtime_view is not None:
+        return frozenset({runtime_view.parent_name}) & state_owned_names
+    if isinstance(lhs, structured_c.CDirtyExpression):
+        dirty = lhs.dirty
+        # Dynamic angr boundary: opaque dirty expressions may omit category.
+        if getattr(dirty, "category", None) is not VirtualVariableCategory.REGISTER:
+            return frozenset()
+        # Dynamic angr AIL boundary: compatibility payloads may omit offset.
+        oident = getattr(dirty, "oident", None)
+        # Dynamic angr AIL boundary: compatibility payloads may omit size.
+        size = getattr(dirty, "size", None)
+        if not (isinstance(oident, int) and isinstance(size, int)):
+            return state_owned_names
+    return frozenset()
+
+
+def _entry_version_placement_8616(
+    root: object,
+    project: _ProjectGPRegisters8616,
+    state_owned_names: frozenset[str],
+) -> tuple[dict[str, int], dict[int, int]]:
+    """Locate clobbers and dirty reads using operand/store phase positions.
+
+    Pure scalar assignments read operands before publishing their store.
+    Conditional/loop statements and unsupported effects stay atomic. Shared
+    nodes retain their latest read position, so every evaluation must be safe.
+    """
+    first_write: dict[str, int] = {}
+    read_index: dict[int, int] = {}
+    for index, statement in enumerate(_linear_sequence(root)):
+        read_position = index * _ENTRY_STATEMENT_PHASES
+        order = register_update_read_order_8616(
+            statement, lambda node: _c_dirty_register_identity_8616(node, project) is not None,
+        )
+        write_position = (
+            read_position + _ENTRY_STORE_PHASE
+            if order is RegisterUpdateOrder8616.READS_BEFORE_WRITE else read_position
+        )
+        if contains_effectful_call_8616(statement):
+            for parent in state_owned_names:
+                first_write.setdefault(parent, read_position)
+        for node in _iter_c_nodes_deep_8616(statement):
+            if isinstance(node, structured_c.CDirtyExpression):
+                read_index[id(node)] = read_position
+            if isinstance(node, structured_c.CAssignment):
+                for parent in _lane_write_parents_8616(project, node.lhs, state_owned_names):
+                    first_write.setdefault(parent, write_position)
+    return first_write, read_index
+
+
+def _unsafe_entry_version_read_8616(
+    ctx: _GpStateLoweringContext8616,
+    node: object,
+    register_name: str,
+) -> bool:
+    """Refuse projecting a never-defined version that may follow a lane write.
+
+    An entry-version dirty read denotes the architectural live-in only while
+    no owned-lane write can execute first. A read placed at or past the
+    earliest write conservatively refuses rather than reading current state.
+    """
+    if not isinstance(node, structured_c.CDirtyExpression):
+        return False
+    identity = _c_dirty_register_identity_8616(node, ctx.project)
+    if identity is None or identity[0] not in ctx.undefined_entry_identities:
+        return False
+    first_write = ctx.first_lane_write_index.get(register_name)
+    if first_write is None:
+        return False
+    read_index = ctx.entry_read_index.get(id(node))
+    return read_index is None or read_index >= first_write
 
 
 def _node_register_projection_8616(
@@ -822,6 +1007,8 @@ def _transform_node_projection_8616(
     ctx.raw_ids.add(id(node))
     if register_name not in ctx.state_owned_names:
         return node
+    if _unsafe_entry_version_read_8616(ctx, node, register_name):
+        return node
     ctx.materialized_ids.add(id(node))
     _record_runtime_gp_global_8616(ctx.codegen, register_name)
     return cast(
@@ -868,7 +1055,12 @@ def _drop_shadowed_unified_locals_8616(
 
 
 def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
-    """Materialize SSA-proven GP live-ins as explicit runtime globals."""
+    """Materialize SSA-proven GP live-ins as explicit runtime globals.
+
+    Entry-version dirty register reads lower to the runtime lane only while
+    no owned-lane write can execute first; a read placed at or past the
+    earliest lane write is refused instead of silently reading current state.
+    """
     initialize_gp_runtime_abi_8616(codegen)
     boundary = cast(_CodegenGPRegisters8616, codegen)
     cfunc = boundary.cfunc
@@ -878,9 +1070,30 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
         return False
     state_owned_names = runtime_gp_state_names_8616(codegen)
     captured = capture_gp_register_versions_8616(
-        codegen, state_owned_names, lambda node: _c_register_identity_8616(node, project),
+        codegen, state_owned_names,
+        lambda node: (_c_dirty_register_identity_8616(node, project)
+                      or _c_register_identity_8616(node, project)),
     )
-    ctx = _GpStateLoweringContext8616(codegen, cfunc.addr, project, state_owned_names, set(), set())
+    dirty_observed, dirty_defined, capture_lanes = _c_ast_dirty_carrier_census_8616(
+        cfunc.statements, project
+    )
+    # A captured definition now has immutable local storage and one explicit
+    # architectural publication. Any still-unresolved version excludes its lane.
+    state_owned_names -= capture_lanes
+    first_lane_write_index, entry_read_index = _entry_version_placement_8616(
+        cfunc.statements, project, state_owned_names
+    )
+    ctx = _GpStateLoweringContext8616(
+        codegen,
+        cfunc.addr,
+        project,
+        state_owned_names,
+        set(),
+        set(),
+        frozenset(key for key in dirty_observed if key not in dirty_defined),
+        first_lane_write_index,
+        entry_read_index,
+    )
 
     def transform(node: object) -> object:
         """Replace one exact live-in register carrier."""

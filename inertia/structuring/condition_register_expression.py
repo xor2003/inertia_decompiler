@@ -11,41 +11,9 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from typing import Protocol, cast
-
 from inertia.alias.condition_register_definition import resolve_condition_register_definition_8616
+from inertia.ir.vex_import import codegen_function_8616
 from inertia.semantics import register_source_block_inventory as register_source_block_inventory
-
-
-class _FunctionManager(Protocol):
-    """angr function lookup boundary."""
-
-    def function(self, *, addr: int, create: bool) -> object | None:
-        """Find an existing function without changing CFG discovery."""
-
-
-class _KnowledgeBase(Protocol):
-    """angr knowledge-base boundary."""
-
-    functions: _FunctionManager
-
-
-class _Project(Protocol):
-    """angr project boundary."""
-
-    kb: _KnowledgeBase
-
-
-class _CFunction(Protocol):
-    """angr structured function coordinate."""
-
-    addr: int
-
-
-class _Codegen(Protocol):
-    """angr codegen boundary for the current function."""
-
-    cfunc: _CFunction
 
 
 def condition_register_expression_8616(
@@ -59,13 +27,12 @@ def condition_register_expression_8616(
 ) -> object | None:
     """Select only a definition proven to reach this exact condition boundary."""
     try:
-        function = cast(_Project, project).kb.functions.function(
-            addr=cast(_Codegen, codegen).cfunc.addr, create=False,
-        )
+        resolved = codegen_function_8616(project, codegen)
     except (AttributeError, TypeError):
         return None
-    if function is None:
+    if resolved is None:
         return None
+    function, _ = resolved
     candidates = {
         address: expression
         for (address, name, width), expression in expressions.items()

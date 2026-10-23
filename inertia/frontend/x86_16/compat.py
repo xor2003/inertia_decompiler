@@ -253,6 +253,7 @@ def _install_clinic_entry_jump_conversion_8616() -> None:
             prepare_declared_entry_pipeline_8616,
             retain_declared_entry_pipeline_8616,
         )
+        from inertia.ir.near_call_entry_pipeline import NativeNearCallPipeline8616
 
         from .clinic_scoped_control import (
             prepare_clinic_scoped_partition_8616,
@@ -260,7 +261,7 @@ def _install_clinic_entry_jump_conversion_8616() -> None:
         )
 
         entry = prepare_declared_entry_pipeline_8616(clinic.project, clinic, clinic.function.addr)
-        if type(entry) is DeclaredEntryPipeline8616:
+        if type(entry) is DeclaredEntryPipeline8616 or type(entry) is NativeNearCallPipeline8616:
             prepare_clinic_scoped_partition_8616(clinic, entry)
         elif entry is not None:
             # Unproved declared entry: no premise authority reaches the
@@ -268,7 +269,7 @@ def _install_clinic_entry_jump_conversion_8616() -> None:
             retain_declared_entry_pipeline_8616(clinic, entry)
         begin_clinic_entry_jump_conversion_8616(clinic)
         current_all(clinic)
-        if type(entry) is DeclaredEntryPipeline8616:
+        if type(entry) is DeclaredEntryPipeline8616 or type(entry) is NativeNearCallPipeline8616:
             transport_clinic_scoped_control_8616(clinic, entry)
             return
         report = transport_clinic_entry_jumps_8616(clinic, next_atom=clinic._ail_manager.next_atom)

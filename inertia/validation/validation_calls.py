@@ -73,6 +73,11 @@ from .validation_call_argument_sources import (
     call_argument_source_dependency_facts_8616,
     call_argument_source_stack_dependencies_8616,
 )
+from .validation_call_stack_inputs import (
+    CallStackInputIssue8616,
+    CallStackInputValidation8616,
+    validate_call_stack_inputs_8616,
+)
 
 __all__ = [
     "CallArgumentClassIssue8616",
@@ -417,6 +422,7 @@ class CallInterfaceValidationReport8616:
     materialized_count: int = 0
     failure_count: int = 0
     issues: tuple[CallInterfaceIssue8616, ...] = ()
+    architectural_stack_issues: tuple[CallStackInputIssue8616, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -425,7 +431,8 @@ class CallInterfaceValidationReport8616:
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return deterministic issue tokens for canonical tail snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return (tuple(issue.token() for issue in self.issues)
+                + tuple(issue.token() for issue in self.architectural_stack_issues))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1634,8 +1641,10 @@ def validate_call_interfaces_8616(
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
     surface: RequiredCallValidationSurface8616 | None = None,
+    architectural_inputs: CallStackInputValidation8616 | None = None,
 ) -> CallInterfaceValidationReport8616:
-    """Refuse final direct calls whose arity contradicts typed binary facts."""
+    """Require both typed arity and current architectural stack-input evidence."""
+    architectural_inputs = architectural_inputs or validate_call_stack_inputs_8616(codegen, root)
     surface = surface or build_required_call_validation_surface_8616(
         codegen, root, query_index=query_index
     )
@@ -1653,6 +1662,7 @@ def validate_call_interfaces_8616(
         normalized_fact_count=len(matched),
         classified_fact_count=len(classified),
         materialized_count=materialized_count,
-        failure_count=len(issues),
+        failure_count=len(issues) + len(architectural_inputs.issues),
         issues=tuple(issues),
+        architectural_stack_issues=architectural_inputs.issues,
     )

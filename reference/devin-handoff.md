@@ -16,11 +16,23 @@ under ignored `.cache/devin-prompts/`. Start each CLI process with
 and retain its output/session ID. Use a PTY for the supervising tool session
 when available, so its interrupt reaches the owned process group even when
 later shell commands have separate PID namespaces. Wrap unattended launches
-with `timeout --signal=INT --kill-after=15s 20m`; retain logs and classify that
+with `timeout --signal=INT --kill-after=15s 4h`; retain logs and classify that
 exit as interrupted work, never acceptance. A host PID observed in one tool
 namespace is not a safe signal target in another. Continue a completed bounded
 job with its explicit Devin session ID to reuse context; do not rely on “latest”
 when several jobs share the state directory.
+
+The user-authorized default time allowance is four hours per task. Keep the
+15–20 minute progress/review checkpoint from `agent-execution.md`; it is not
+a 20-minute timeout and does not shorten that allowance merely because a
+worker is still making meaningful progress.
+
+Set Python/pytest niceness to **10 once**. A Devin launched through a
+`nice -n 10` sandbox launcher already passes niceness10 to every child.
+In that worker, invoke Python/pytest directly: adding another `nice -n 10`
+increments niceness to19 and can severely delay tests under host contention.
+Check the inherited value with `nice` once and state it in the handoff prompt;
+do not stack relative niceness adjustments. The required value remains10.
 
 Writable staging/type-check overlays must use private regular-file copies.
 Never copy or write staged replacements through symlinks or hardlinks to shared

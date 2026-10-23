@@ -45,7 +45,7 @@ _CLI_PROXY_MODULES: tuple[str, ...] = (
     "cli_c_text_postprocess",
     "cli_interrupt_modeling",
     "cache",
-    "cli_access_profiles",
+    "inertia.lowering.access_profiles",
     "non_optimized_fallback",
     "disassembly_helpers",
     "project_loading",
@@ -62,16 +62,18 @@ _CLI_DISABLE_LAZY_IMPORTS: bool = _env_truthy("INERTIA_DISABLE_CLI_LAZY_IMPORTS"
 
 
 def _import_cli_module(module_name: str) -> ModuleType:
+    """Resolve CLI facade exports through their canonical module owners."""
+    qualified_name = module_name if module_name.startswith("inertia.") else f"{__package__}.{module_name}"
     module = _PROXY_MODULE_CACHE.get(module_name)
     if module is not None:
         return module
     if module_name in _PROXY_LOADING:
-        raise RuntimeError(f"circular lazy import detected for inertia.cli.{module_name}")
+        raise RuntimeError(f"circular lazy import detected for {qualified_name}")
     _PROXY_LOADING.add(module_name)
     try:
-        module = import_module(f"{__package__}.{module_name}")
+        module = import_module(qualified_name)
         if not isinstance(module, ModuleType):
-            raise TypeError(f"inertia.cli.{module_name} is not a ModuleType: {type(module)!r}")
+            raise TypeError(f"{qualified_name} is not a ModuleType: {type(module)!r}")
         for override_name, override_value in _PROXY_ATTR_OVERRIDES.items():
             if override_name == "_recovery_code_labels" and module.__name__.endswith("sidecar_metadata"):
                 continue
@@ -146,7 +148,7 @@ def _load_angr_sim_types(name: str) -> object:
 
 
 def _load_access_profile_attr(name: str) -> object:
-    from . import cli_access_profiles
+    from inertia.lowering import access_profiles as cli_access_profiles
 
     return {
         "_AccessTraitEvidenceProfile": cli_access_profiles.AccessTraitEvidenceProfile,
@@ -236,7 +238,8 @@ def _joinable_register_pair_proof(analysis: object) -> object | None:
     # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
     if getattr(proof, "left_version", None) != getattr(proof, "right_version", None):
         return None
-    return proof
+    # Dynamic boundary: proof is an analysis-owned object read through getattr.
+    return cast(object, proof)
 
 
 def _match_adjacent_register_pair_impl(

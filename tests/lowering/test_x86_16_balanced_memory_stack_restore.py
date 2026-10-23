@@ -2,15 +2,11 @@
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.errors import SimEngineError
 from angr.sim_type import SimTypeChar
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
-from inertia.lowering.balanced_memory_stack_restore import (
-    materialize_balanced_immediate_register_restores_8616,
-    rebind_balanced_memory_stack_restores_8616,
-)
-from inertia.lowering.gp_register_state import runtime_gp_name_for_variable_8616
 from archinfo import ArchX86
 from capstone.x86_const import (
     X86_GRP_JUMP,
@@ -21,6 +17,14 @@ from capstone.x86_const import (
     X86_OP_MEM,
     X86_OP_REG,
 )
+
+from inertia.lowering.balanced_memory_stack_restore import (
+    _balanced_immediate_register_transfers_8616,
+    _balanced_pairs_8616,
+    materialize_balanced_immediate_register_restores_8616,
+    rebind_balanced_memory_stack_restores_8616,
+)
+from inertia.lowering.gp_register_state import runtime_gp_name_for_variable_8616
 
 
 class _Codegen(SimpleNamespace):
@@ -63,6 +67,39 @@ def _stack_variable(codegen: _Codegen, offset: int, name: str) -> structured_c.C
         variable_type=SimTypeChar(False),
         codegen=codegen,
     )
+
+
+@pytest.mark.parametrize("immediate", [False, True])
+@pytest.mark.parametrize("unknown_address", [False, True])
+def test_unmatched_pop_preserves_independent_pairing_windows(immediate, unknown_address) -> None:
+    """A reset POP cannot erase closed windows or pair across a branch."""
+    def push(address):
+        if not immediate:
+            return _instruction(address, X86_INS_PUSH, displacement=0x42)
+        return SimpleNamespace(address=address, id=X86_INS_PUSH, groups=(),
+                               operands=(SimpleNamespace(type=X86_OP_IMM, size=2, imm=7),))
+
+    def pop(address):
+        if not immediate:
+            return _instruction(address, X86_INS_POP, displacement=0x42)
+        return SimpleNamespace(address=address, id=X86_INS_POP, groups=(),
+                               operands=(SimpleNamespace(type=X86_OP_REG, size=2, reg=7),),
+                               reg_name=lambda _: "si")
+
+    branch = _instruction(0x120, 0)
+    branch.groups = (X86_GRP_JUMP,)
+    rows = [push(0x100), pop(0x108), push(0x110), branch, pop(0x128),
+            push(0x130), pop(0x138), pop(0x140)]
+    # An unknown operand still occupies its LIFO slot and cannot acquire a pair.
+    rows.extend((_instruction(0x148, X86_INS_PUSH), pop(0x150)))
+    if unknown_address:
+        rows.append(_instruction(None, X86_INS_POP))
+    if immediate:
+        result = tuple((pair.push_addr, pair.pop_addr)
+                       for pair in _balanced_immediate_register_transfers_8616(rows))
+    else:
+        result = tuple((start, end) for start, end, _ in _balanced_pairs_8616(rows))
+    assert result == (() if unknown_address else ((0x100, 0x108), (0x130, 0x138)))
 
 
 def _memory_variable(codegen: _Codegen) -> structured_c.CVariable:
@@ -402,3 +439,44 @@ def test_rebased_decode_skips_unmapped_original_candidate() -> None:
         project=project,
     ) is True
     assert pop_assignment.rhs.variable.offset == -2
+
+
+@pytest.mark.parametrize("shared_storage", [False, True])
+def test_word_recomposition_rebind_preserves_original_byte_identity(shared_storage: bool) -> None:
+    """Widening a shared PUSH carrier must not invalidate its POP match."""
+    from angr.sim_type import SimTypeShort
+
+    from inertia.lowering.balanced_memory_stack_restore import _rebind_pair_8616
+    from inertia.lowering.semantic_cast import CSemanticCast8616
+    from inertia.lowering.stack_word_recomposition import recognize_stack_word_recomposition_8616
+
+    codegen = _Codegen(project=SimpleNamespace(arch=ArchX86()))
+    pushed = _stack_variable(codegen, -4, "saved")
+    popped = pushed if shared_storage else _stack_variable(codegen, -8, "read")
+    word = SimTypeShort(False).with_arch(codegen.project.arch)
+    def constant(value: int) -> structured_c.CConstant:
+        return structured_c.CConstant(value, word, codegen=codegen)
+
+    def cast_word(value: structured_c.CExpression) -> CSemanticCast8616:
+        return CSemanticCast8616(None, word, value, codegen=codegen)
+    ss_offset, ss_size = codegen.project.arch.registers["ss"]
+    ss = structured_c.CVariable(SimRegisterVariable(ss_offset, ss_size), codegen=codegen)
+    address = structured_c.CBinaryOp(
+        "Add", structured_c.CBinaryOp("Shl", ss, constant(4), codegen=codegen),
+        structured_c.CBinaryOp("Add", structured_c.CUnaryOp("Reference", popped, codegen=codegen),
+                              constant(1), codegen=codegen), codegen=codegen)
+    high = structured_c.CUnaryOp("Dereference", address, codegen=codegen)
+    expression = structured_c.CBinaryOp("Or", popped, cast_word(structured_c.CBinaryOp(
+        "Shl", cast_word(high), constant(8), codegen=codegen)), codegen=codegen)
+    assert recognize_stack_word_recomposition_8616(expression) is not None
+    push = structured_c.CAssignment(pushed, constant(9), tags={"ins_addr": 0x100}, codegen=codegen)
+    cx_offset, cx_size = codegen.project.arch.registers["cx"]
+    pop = structured_c.CAssignment(
+        structured_c.CVariable(SimRegisterVariable(cx_offset, cx_size), codegen=codegen),
+        expression, tags={"ins_addr": 0x108}, codegen=codegen)
+    root = structured_c.CStatements([push, pop], codegen=codegen)
+    _rebind_pair_8616(project=None, function=object(), statements=(push, pop),
+                     push_addr=0x100, pop_addr=0x108, pair_width=2, root=root)
+    assert isinstance(pop.rhs, structured_c.CVariable)
+    assert pop.rhs.variable is pushed.variable
+    assert pop.rhs.variable.size == 2

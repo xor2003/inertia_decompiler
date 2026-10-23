@@ -114,6 +114,7 @@ class LogicalWordReadValueFact8616:
         """Reject missing, duplicate, or corrupted path/value evidence."""
         paths = tuple(item.source_block_addr for item in self.incoming)
         phi_nodes = tuple(phi for item in self.incoming for phi in item.phi_nodes if phi is not None)
+        expected: tuple[int | None, ...]
         if phi_nodes:
             expected = tuple(sorted(item.source_block_addr for item in phi_nodes[0].incoming))
             phi_paths_match = all(

@@ -54,3 +54,50 @@ def test_structuring_retains_only_preserved_conditional_result(attached, monkeyp
     assert codegen._inertia_structuring_pass_validation["local"] is result
     assert result["entry_premise"] is receipt
     assert not x86_16_tail_validation_result_passed(result)
+
+
+@pytest.mark.parametrize("encoded", [True, False])
+def test_terminal_refresh_sees_canonical_guard_and_original_origin(monkeypatch, encoded: bool) -> None:
+    """Normalize once before refresh; stable input must not request replay."""
+    from angr.rustylib.ailment import Tags
+
+    from tests.structuring.test_x86_16_boolean_condition_ites import (
+        _branch_with_ite,
+        _wrap_condition_in_logical_nots,
+    )
+
+    codegen, branch, comparison, _encoding = _branch_with_ite(0, 1)
+    if encoded:
+        wrapper = _wrap_condition_in_logical_nots(codegen, branch, 1)
+        wrapper.tags = Tags({"ins_addr": 0x101E, "vex_block_addr": 0x1010})
+    else:
+        comparison.tags = Tags({"ins_addr": 0x101E, "vex_block_addr": 0x1010})
+        branch.condition_and_nodes = [(comparison, branch.condition_and_nodes[0][1])]
+    surface = SimpleNamespace(project=codegen.project, codegen=codegen)
+    calls: list[str] = []
+
+    def refresh(project, current_codegen):
+        calls.append("refresh")
+        assert project is surface.project
+        assert current_codegen is codegen
+        guard = branch.condition_and_nodes[0][0]
+        assert guard is comparison
+        assert guard.tags["ins_addr"] == 0x101E
+        assert guard.tags["vex_block_addr"] == 0x1010
+        return stage._condition_refresh.StructuringConditionRefreshResult8616.stable()
+
+    def close_loop_breaks(_project, _codegen):
+        calls.append("loop-break")
+        return False
+
+    monkeypatch.setattr(stage, "_refresh_structuring_condition_semantics_8616", refresh)
+    monkeypatch.setattr(stage, "_materialize_structuring_unconsumed_loop_break_jcc_8616", close_loop_breaks)
+    monkeypatch.setattr(stage, "record_ast_condition_trace_8616", lambda *args, **kwargs: None)
+    flags = stage._ValidatedStructuringFlags8616()
+
+    changed = stage._validated_terminal_mid_phases_8616(surface, 0x1000, False, flags)
+
+    assert calls == ["refresh", "loop-break"]
+    assert changed is encoded
+    assert flags.boolean_ite is encoded
+    assert stage._final_lowering_boundary_changed_8616(flags) is encoded

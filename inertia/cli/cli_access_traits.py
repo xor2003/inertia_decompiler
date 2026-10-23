@@ -13,11 +13,6 @@ from typing import Protocol, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
-from inertia.cli.cli_access_profiles import (
-    AccessTraitStrideEvidence,
-    build_access_trait_evidence_profiles,
-    infer_induction_variable,
-)
 from inertia.cli.cli_induction_rewrite import (
     BuildAccessTraitEvidenceProfiles,
     InferInductionVariable,
@@ -28,6 +23,11 @@ from inertia.cli.cli_induction_rewrite import (
 )
 from inertia.cli.cli_induction_rewrite import (
     _ProjectLike as InductionProjectLike,
+)
+from inertia.lowering.access_profiles import (
+    AccessTraitStrideEvidence,
+    build_access_trait_evidence_profiles,
+    infer_induction_variable,
 )
 
 type BaseKey = tuple[object, ...]
@@ -188,13 +188,19 @@ def _new_traits_8616() -> Traits:
     }
 
 
+class _CFuncLike(Protocol):
+    """Structured-codegen function address surface."""
+
+    addr: int
+
+
 @dataclass(slots=True)
 class _AccessTraitCollector:
     """Collect one function's access-trait evidence from structured C."""
 
     project: _ProjectLike
     codegen: InductionCodegenLike
-    cfunc: object
+    cfunc: _CFuncLike
     cache: object
     iter_c_nodes_deep: NodeIterator
     unwrap_c_casts: CastUnwrapper
@@ -299,7 +305,7 @@ class _AccessTraitCollector:
             return None
         return ("stack", identity.base, base_offset + index, base_var.region)
 
-    def _product_stride_term(self, inner: object) -> tuple[BaseKey, int] | None:
+    def _product_stride_term(self, inner: structured_c.CBinaryOp) -> tuple[BaseKey, int] | None:
         """Extract (index_key, stride) from a Mul/Shl term, if proven."""
         for maybe_index, maybe_stride in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
             stride_value = self.c_constant_value(self.unwrap_c_casts(maybe_stride))

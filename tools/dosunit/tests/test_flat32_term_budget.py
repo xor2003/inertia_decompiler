@@ -243,3 +243,73 @@ def test_real_doubled_add_region_proves_under_dag_budget(tmp_path: Path, driver:
     assert equal["status"] == "passed", equal
     assert unequal["status"] == "failed", unequal
     assert tiny["status"] == "refused" and tiny["reason"] == "region_expression_limit", tiny
+
+
+def test_composed_add_chain_stays_within_original_depth_budget() -> None:
+    """Modular sums must not refuse merely because loop steps associate left."""
+    from tools.dosunit.ssa.composition import compose_block_outputs
+
+    term = _input("seed")
+    one = _const(1)
+    for _ in range(130):
+        term = _op("add", term, one)
+    assert _term_nodes(term, LIMIT) > LIMIT
+    result = compose_block_outputs({}, {"EAX": _op("add", _input("EAX"), one)}, {"EAX": term})
+    assert _term_nodes(result, LIMIT) < LIMIT
+
+
+@pytest.mark.parametrize("width", [8, 16, 32, 64])
+@pytest.mark.parametrize("relocated", [False, True])
+def test_balanced_sums_preserve_modular_values(width: int, relocated: bool) -> None:
+    """Prove universal equality including overflow and relocated literals."""
+    import z3
+
+    from tools.dosunit.ssa.composition import _balance_add
+
+    x = {"op": "input", "name": "x", "width": width}
+    term = x
+    for value in range(70):
+        leaf = x if value % 3 == 0 else {"op": "const", "width": width, "value": value}
+        term = {"op": "add", "width": width, "args": [term, leaf]}
+
+    def evaluate(node: dict[str, Any]) -> Any:
+        if node["op"] == "input":
+            return z3.BitVec(node["name"], width)
+        if node["op"] == "const":
+            value = node["value"]
+            return z3.BitVecVal(value * 7919 if relocated else value, width)
+        return evaluate(node["args"][0]) + evaluate(node["args"][1])
+
+    solver = z3.Solver()
+    balanced = _balance_add(term)
+    solver.add(evaluate(term) != evaluate(balanced))
+    assert solver.check() == z3.unsat
+    solver = z3.Solver()
+    solver.add(evaluate(term) != evaluate(balanced) + 1)
+    assert solver.check() == z3.sat
+
+
+def test_sum_balance_keeps_width_boundaries_and_metadata() -> None:
+    from tools.dosunit.ssa.composition import _balance_add
+
+    narrow = {"op": "add", "width": 8, "args": [
+        {"op": "const", "width": 8, "value": 255},
+        {"op": "const", "width": 8, "value": 1}]}
+    extended = _op("zext", narrow)
+    term = _op("add", _op("add", extended, _const(2)), _const(3))
+    result = _balance_add(term)
+    assert result["args"][0]["args"][0] is extended
+    annotated = {**term, "annotation": "keep"}
+    assert _balance_add(annotated) is annotated
+    malformed = _op("add", narrow, _const(1))
+    assert _balance_add(malformed) is malformed
+
+
+def test_sum_balance_bounds_diamonds_and_cycles() -> None:
+    from tools.dosunit.ssa.composition import _balance_add
+
+    diamond = _diamond_chain(20)
+    assert _balance_add(diamond) is diamond
+    cycle = _op("add", _const(1), _const(2))
+    cycle["args"][0] = cycle
+    assert _balance_add(cycle) is cycle

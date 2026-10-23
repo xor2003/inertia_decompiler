@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TypeGuard
+from typing import Protocol, TypeGuard
 
 from .core import (
     IRAddress,
@@ -45,9 +45,11 @@ __all__ = [
     "ScalarInstructionClobber8616",
     "ScalarInstructionEffect8616",
     "ScalarInstructionEffectKind8616",
+    "ScalarSemanticProducerBindings8616",
     "scalar_boolean_result_bits_8616",
     "scalar_dispatch_producers_8616",
     "scalar_instruction_effect_8616",
+    "scalar_select_result_bits_8616",
 ]
 
 
@@ -129,6 +131,43 @@ _WIDENING_PRODUCT_BYTES_8616: dict[str, int] = {
     for signedness in ("S", "U")
     for bits in (8, 16, 32)
 }
+
+# SELECT operands are guard, true value, false value. A guard is a one-bit
+# predicate stored in one byte; its least significant bit chooses the arm.
+_SELECT_BITS_8616: FrozenDispatch[str, int] = tuple(
+    (f"SELECT{bits}", bits) for bits in (1, 8, 16, 32, 64)
+)
+
+
+def scalar_select_result_bits_8616(instruction: IRInstr) -> int | None:
+    """Validate a scalar selection and return its exact semantic result width.
+
+    Only explicit temporary destinations qualify. All three input values
+    remain dependencies, even when another consumer can resolve the guard.
+    Value evaluation and purity remain separate from register-effect closure.
+    """
+    bits = frozen_dispatch_lookup(_SELECT_BITS_8616, instruction.op)
+    if bits is None or len(instruction.args) != 3:
+        return None
+    destination = _closed_destination_8616(instruction)
+    size = (bits + 7) // 8
+    if destination is None or destination.space is not MemSpace.TMP or destination.size != size:
+        return None
+    if not all(_readable_scalar_source_8616(value) for value in instruction.args):
+        return None
+    guard, true_value, false_value = instruction.args
+    if not isinstance(guard, IRValue) or not isinstance(true_value, IRValue) or not isinstance(false_value, IRValue):
+        return None
+    return bits if guard.size == 1 and true_value.size == false_value.size == size else None
+
+
+def _classify_select_8616(instruction: IRInstr) -> ScalarInstructionEffect8616 | None:
+    """Close a selection's temporary write without claiming a known value."""
+    if frozen_dispatch_lookup(_SELECT_BITS_8616, instruction.op) is None:
+        return None
+    if scalar_select_result_bits_8616(instruction) is None:
+        return _unknown_8616("select_shape")
+    return _closed_write_8616(instruction, "select")
 
 
 def _unknown_8616(detail: str) -> ScalarInstructionEffect8616:
@@ -459,6 +498,7 @@ def scalar_instruction_effect_8616(
     for classify in (
         _classify_comparison_8616, _classify_binary_8616,
         _classify_boolean_binary_8616, _classify_widening_product_8616,
+        _classify_select_8616,
     ):
         effect = classify(instruction)
         if effect is not None:
@@ -470,7 +510,7 @@ def scalar_boolean_result_bits_8616(instruction: IRInstr) -> int | None:
     """Authoritative semantic result width in bits for Boolean-producing IR ops.
 
     Returns ``1`` only when an owning classifier proves the instruction is a
-    pure integer comparison or a VEX one-bit Boolean operation
+    pure integer comparison, a validated SELECT1 or a VEX one-bit Boolean operation
     (``Iop_Xor1``/``Iop_And1``/``Iop_Or1``): the exact typed shape validates
     and the effect is CLOSED_DESTINATION. The returned width is semantic —
     one-bit predicates still occupy one byte of IR storage, so this is not a
@@ -481,9 +521,22 @@ def scalar_boolean_result_bits_8616(instruction: IRInstr) -> int | None:
     products, constants 0 or 1, and unsupported operators carry no one-bit
     evidence, and no operand value, name, or detail string may supply it.
     """
+    if scalar_select_result_bits_8616(instruction) == 1:
+        return 1
     for classify in (_classify_comparison_8616, _classify_boolean_binary_8616):
         effect = classify(instruction)
         if (effect is not None
                 and effect.kind is ScalarInstructionEffectKind8616.CLOSED_DESTINATION):
             return 1
     return None
+
+
+class ScalarSemanticProducerBindings8616(Protocol):
+    """Typed namespace of helper identities actually retained by this consumer.
+
+    This metadata view grants no call authority and invokes no accessor.
+    Consumers read the existing module bindings directly for cache keys.
+    """
+
+    no_effect_claim_shape_8616: object
+    scalar_binary_operation_8616: object

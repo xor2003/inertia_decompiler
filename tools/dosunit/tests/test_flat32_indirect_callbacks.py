@@ -653,3 +653,97 @@ def test_driver_pe32_corrupt_frame_refuses(
     row = report["results"][0]
     assert row["status"] == "refused", row
     assert str(_calls_attempt(row)["reason"]).startswith("call_return_target")
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_stored_native_callback(lane: dict[str, Any], changed: bool) -> None:
+    """A stored pointer resolves, while changed callee behavior still fails."""
+    code = "83ec04" + "c70424" + _imm32(CB_A) + "ff1424" + "83c404c3"
+    callee = "83c006c3" if changed else CB_A_EQUIV
+    verdict = _compare(
+        lane["flat32_adapter"], _image(code), _image(code, cb_a=callee),
+        oracle_functions=_functions(code),
+        candidate_functions=_functions(code, cb_a=callee),
+    )
+    assert verdict["status"] == ("failed" if changed else "passed"), verdict
+
+
+@pytest.mark.parametrize("overwrite,reason", [
+    ("890424", "call_indirect_target_unconstrained"),
+    ("c604242a", "call_target_unmapped"),
+])
+def test_stored_callback_overwrite_is_observed(
+    lane: dict[str, Any], overwrite: str, reason: str,
+) -> None:
+    """Symbolic or partial overlapping stores must not reuse the old pointer."""
+    code = "83ec04c70424" + _imm32(CB_A) + overwrite + "ff142483c404c3"
+    verdict = _compare(
+        lane["flat32_adapter"], _image(code), _image(code),
+        oracle_functions=_functions(code), candidate_functions=_functions(code),
+    )
+    assert verdict["status"] == "refused", verdict
+    assert verdict["reason"].startswith(reason), verdict
+
+
+def test_stored_callback_certificate(lane: dict[str, Any]) -> None:
+    """Accepted load/store targets retain the SSA used to recover them."""
+    code = "83ec04c70424" + _imm32(CB_A) + "ff142483c404c3"
+    with lane["flat32_adapter"].installed(region=True):
+        result = summarize_with_calls(
+            _project(_image(code)), entry=BASE, functions=_functions(code),
+            outputs=("eax",),
+        )
+    site = next(s for s in result["call_sites"] if s.get("indirect"))
+    proof = site["target_constant_proof"]
+    assert proof["target"] == hex(CB_A)
+    assert proof["input_premises"] == []
+    assert proof["ssa_witness"]["outputs"]["target"]
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_stored_finite_callback_selector(lane: dict[str, Any], changed: bool) -> None:
+    """Both alternatives survive spilling a selected callback to the stack."""
+    code = F_CMOV.replace("ffd1", "51ff142459")
+    cb_b = CB_B_CHANGED if changed else CB_B_BODY
+    verdict = _compare(
+        lane["flat32_adapter"], _image(code), _image(code, cb_b=cb_b),
+        oracle_functions=_functions(code),
+        candidate_functions=_functions(code, cb_b=cb_b),
+    )
+    assert verdict["status"] == ("failed" if changed else "passed"), verdict
+    if not changed:
+        assert {s["target"] for s in _indirect_sites(verdict)} == {hex(CB_A), hex(CB_B)}
+
+
+@pytest.mark.parametrize("unknown_arm", [False, True])
+def test_stored_selector_cannot_drop_targets(lane: dict[str, Any], unknown_arm: bool) -> None:
+    """Missing declared or symbolic alternatives cannot be an assumed default."""
+    code = F_CMOV3.replace("ffd1", "51ff142459")
+    if unknown_arm:
+        code = code.replace("b9" + _imm32(CB_C), "8b4c240c")
+    functions = _functions(code)
+    if not unknown_arm:
+        del functions[CB_C]
+    verdict = _compare(
+        lane["flat32_adapter"], _image(code), _image(code),
+        oracle_functions=functions, candidate_functions=functions,
+    )
+    assert verdict["status"] == "refused", verdict
+    assert verdict["reason"].startswith("call_indirect_target"), verdict
+
+
+def test_stored_selector_certificate(lane: dict[str, Any]) -> None:
+    """Recovered finite sets carry membership evidence for every call leaf."""
+    code = F_CMOV.replace("ffd1", "51ff142459")
+    with lane["flat32_adapter"].installed(region=True):
+        summary = summarize_with_calls(
+            _project(_image(code)), entry=BASE, functions=_functions(code),
+            outputs=("eax",),
+        )
+    sites = [s for s in summary["call_sites"] if s.get("indirect")]
+    assert len(sites) == 2
+    for site in sites:
+        proof = site["target_selector_proof"]
+        assert proof["proof"]["status"] == "passed"
+        assert proof["input_premises"] == []
+        assert set(proof["targets"]) == {hex(CB_A), hex(CB_B)}

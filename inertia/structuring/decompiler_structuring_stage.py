@@ -41,7 +41,6 @@ from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeShort
 from inertia.alias import indexed_address_projection as _indexed_address_aliases
 from inertia.alias import segment_stack_restore as _segment_stack_restore
 from inertia.alias import stack_memory_ssa as _stack_memory_ssa
-from inertia.cli.cli_access_profiles import build_access_trait_evidence_profiles, infer_induction_summary
 from inertia.cli.runtime_support import timing_output_enabled
 from inertia.cli.telemetry import annotate_current_span, span
 from inertia.ir import indexed_address_pipeline as _indexed_address_ir
@@ -51,15 +50,20 @@ from inertia.ir import vex_import as _vex_ir
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import AddressStatus, IRAddress, IRValue
 from inertia.ir.declared_entry_pipeline import (
-    DeclaredEntryPipeline8616,
+    DeclaredEntryInput8616,
     _retained_input_8616,
     apply_pipeline_segment_state_8616,
 )
+from inertia.ir.near_call_entry_pipeline import NativeNearCallPipeline8616
 from inertia.lowering import segmented_memory_reasoning as _segmented_mem
 from inertia.lowering import string_instruction_lowering as _string_instruction_lowering
 from inertia.lowering import type_array_matching as _array_match
 from inertia.lowering import type_equivalence_classes as _type_equiv
 from inertia.lowering import type_structure_merging as _struct_merge
+from inertia.lowering.access_profiles import build_access_trait_evidence_profiles, infer_induction_summary
+from inertia.lowering.array_matching_applicability_8616 import (
+    array_expression_matching_applicable_8616,
+)
 from inertia.lowering.c_ast_utils import (
     _c_ast_cycle_path_8616,
     _iter_c_nodes_deep_8616,
@@ -74,6 +78,8 @@ from inertia.lowering.call_cleanup_carriers import (
 )
 from inertia.lowering.call_return_frame_arguments import prune_exact_call_return_frame_arguments_8616
 from inertia.lowering.call_return_selectors import replay_call_return_switch_selectors_8616
+from inertia.lowering.call_stack_input_replay import run_call_stack_input_aware_lowering_8616
+from inertia.lowering.call_stack_inputs import apply_call_stack_input_lowering_8616
 from inertia.lowering.callee_pointer_evidence import (
     callee_pointer_argument_is_proven_8616,
 )
@@ -107,6 +113,7 @@ from inertia.lowering.indexed_address_collector_parity import (
     collect_indexed_address_collector_parity_8616,
 )
 from inertia.lowering.indexed_global_evidence import IndexedSegmentedGlobalEvidence8616
+from inertia.lowering.numeric_stack_pointer_returns import apply_numeric_stack_pointer_return_lowering_8616
 from inertia.lowering.pointer_memory_idioms import (
     PointerMemoryIdiomCallbacks8616,
     PointerMemoryIdiomMaterializationFact8616,
@@ -181,6 +188,7 @@ from inertia.lowering.unobserved_returns import neutralize_unobserved_unresolved
 from inertia.lowering.wide_call_output_assignments import lower_wide_call_output_stack_assignments_8616
 from inertia.lowering.wide_stack_pair_evidence import proven_wide_stack_ir_pair_8616
 from inertia.pipeline.errors import PipelineHardError
+from inertia.pipeline.function_readiness import function_structuring_production_scope_8616
 from inertia.pipeline.render_authority import mark_cfunction_ast_render_authority_8616
 from inertia.postprocess import decompiler_postprocess_simplify as _simplify
 from inertia.semantics import function_interface_surface as _interface_surface
@@ -191,6 +199,10 @@ from inertia.semantics.call_stack_effect_pipeline import (
     apply_x86_16_call_stack_effects_8616,
 )
 from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
+from inertia.semantics.numeric_stack_pointer_returns import (
+    apply_numeric_stack_pointer_return_inventory_8616,
+    numeric_stack_pointer_return_inventory_8616,
+)
 from inertia.structuring import condition_materialization as _structuring_conditions
 from inertia.structuring import condition_refresh as _condition_refresh
 from inertia.structuring import confidence_and_assumptions as _confidence
@@ -208,7 +220,10 @@ from inertia.structuring.branch_return_expressions import (
 )
 from inertia.structuring.call_argument_joins import materialize_call_argument_joins_8616
 from inertia.structuring.call_return_conditions import materialize_call_return_conditions_8616
-from inertia.structuring.canonical_for_loops import recover_canonical_for_loops_8616
+from inertia.structuring.canonical_for_loops import (
+    canonical_for_loop_recovery_applicable_8616,
+    recover_canonical_for_loops_8616,
+)
 from inertia.structuring.condition_lowering import lower_ir_value_to_c_expr_8616
 from inertia.structuring.condition_provenance import (
     replay_codegen_structured_condition_segment_provenance_8616,
@@ -317,16 +332,49 @@ from inertia.validation.validation_switch_loop_tail_breaks import (
     consume_switch_loop_tail_break_validation_delta_8616,
 )
 from inertia.validation.validation_terminal_returns import terminal_return_value_validation_delta_8616
-from inertia.widening.carry_borrow_pipeline import apply_carry_borrow_widening_pipeline_8616
+from inertia.widening.carry_borrow_pipeline import (
+    CarryBorrowWideningPipeline8616,
+    apply_carry_borrow_widening_pipeline_8616,
+)
 from inertia.widening.segmented_load_widening import apply_segmented_load_widening_8616
 from inertia.widening.stack_memory_objects import apply_x86_16_stack_memory_object_widening_8616
+from inertia.widening.stack_memory_objects_contracts import StackMemoryObjectWideningArtifact8616
 from inertia.widening.stack_subview_projection import materialize_contained_stack_subviews_8616
 from inertia.widening.widening_copyprop_8616 import _widening_copy_propagation_8616
+from inertia.widening.widening_subview_copyprop_applicability_8616 import (
+    widening_subview_copyprop_applicable_8616,
+)
 from inertia.widening.word_projection_recomposition import materialize_word_projection_recompositions_8616
 
 # angr project/codegen objects are plugin surfaces whose compatibility
 # metadata is attached dynamically across angr versions. Keep that boundary
 # explicit here; owned Inertia facts passed through it remain typed contracts.
+
+
+class _WideningProducerBoundary8616(Protocol):
+    """Typed producer attachments on the dynamic native codegen boundary."""
+
+    _inertia_carry_borrow_widening_pipeline_8616: CarryBorrowWideningPipeline8616
+    _inertia_stack_memory_object_widening_artifact: StackMemoryObjectWideningArtifact8616
+
+
+def _completed_widening_outputs_8616(
+    codegen: object,
+) -> tuple[CarryBorrowWideningPipeline8616, StackMemoryObjectWideningArtifact8616] | None:
+    """Read genuine Widening artifacts; missing boundary publications prove nothing."""
+    boundary = cast(_WideningProducerBoundary8616, codegen)
+    try:
+        carry = boundary._inertia_carry_borrow_widening_pipeline_8616
+        storage = boundary._inertia_stack_memory_object_widening_artifact
+    except AttributeError:
+        return None
+    if not isinstance(carry, CarryBorrowWideningPipeline8616):
+        return None
+    if not isinstance(storage, StackMemoryObjectWideningArtifact8616):
+        return None
+    if not storage.complete or carry.source_stack_alias is not storage.source_alias:
+        return None
+    return carry, storage
 
 
 class _GuardedDceResult8616(Protocol):
@@ -370,7 +418,12 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class DecompilerStructuringPassSpec:
-    """Configuration for a single decompiler structuring pass."""
+    """A pass and optional proof that its current AST has no applicable work.
+
+    An applicability callback may return false only for proven no-op input;
+    unknown input must remain applicable. It may publish zero-work diagnostics,
+    but must not transform the AST. Absent callbacks preserve ordinary execution.
+    """
 
     name: str
     func: Callable[..., bool]
@@ -378,6 +431,7 @@ class DecompilerStructuringPassSpec:
     lowering_replay_impact: StructuringLoweringReplayImpact8616 = (
         StructuringLoweringReplayImpact8616.FULL_AST
     )
+    applicable: Callable[[object], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -472,6 +526,22 @@ def _install_function_interface_surface_reporting_only_8616(project: AngrProject
     return False
 
 
+def _array_matching_applicable_after_priming_8616(codegen: AngrCodegenSurface) -> bool:
+    """Keep array rewriting until validation preparation has established its AST."""
+    # Priming state is attached to the dynamic third-party angr codegen boundary.
+    if not getattr(codegen, "_inertia_structuring_validation_semantics_primed", False):
+        return True
+    return array_expression_matching_applicable_8616(codegen)
+
+
+def _widening_copyprop_applicable_after_priming_8616(codegen: AngrCodegenSurface) -> bool:
+    """Keep the real pass until validation preparation has established its AST."""
+    # Priming state is attached to the dynamic third-party angr codegen boundary.
+    if not getattr(codegen, "_inertia_structuring_validation_semantics_primed", False):
+        return True
+    return widening_subview_copyprop_applicable_8616(codegen)
+
+
 def _run_structuring_widening_copy_propagation_8616(codegen: AngrCodegenSurface) -> bool:
     """Consume alias-proven copies before structuring interprets conditions."""
     subviews_changed = materialize_contained_stack_subviews_8616(codegen)
@@ -558,6 +628,7 @@ def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpe
             "_canonical_for_loop_recovery_8616",
             recover_structuring_canonical_for_loops_8616,
             False,
+            applicable=canonical_for_loop_recovery_applicable_8616,
         ),
         DecompilerStructuringPassSpec(
             "_hoisted_jcc_target_copy_repair_8616",
@@ -614,6 +685,7 @@ def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpe
             "_widening_copy_propagation_8616",
             _run_structuring_widening_copy_propagation_8616,
             False,
+            applicable=_widening_copyprop_applicable_after_priming_8616,
         ),
         DecompilerStructuringPassSpec(
             "_segment_stack_restore_artifact_8616",
@@ -667,8 +739,8 @@ def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpe
         ),
         # Phase 3: Segmented Memory Association Reasoning
         DecompilerStructuringPassSpec(
-            "_segmented_memory_reasoning_8616",
-            _segmented_mem.apply_x86_16_segmented_memory_reasoning,
+            "_segmented_memory_analysis_8616",
+            _segmented_mem.analyze_x86_16_segmented_memory,
             False,
         ),
         # Phase 2: Type Inference and Recovery
@@ -681,6 +753,7 @@ def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpe
             "_array_expression_matching_8616",
             _array_match.apply_x86_16_array_expression_matching,
             False,
+            applicable=_array_matching_applicable_after_priming_8616,
         ),
         DecompilerStructuringPassSpec(
             "_structure_field_merging_8616",
@@ -1840,6 +1913,21 @@ def _replay_structuring_callsite_arguments_after_regeneration_8616(
     *,
     preserve_setup: bool = False,
 ) -> bool:
+    """Replay source-backed arguments through the owning call-context protocol."""
+    def consume() -> bool:
+        """Retain the existing typed consumer and its setup-pruning contract."""
+        return _replay_unbound_structuring_callsite_arguments_after_regeneration_8616(
+            project, codegen, preserve_setup=preserve_setup)
+
+    return run_call_stack_input_aware_lowering_8616(codegen, consume)
+
+
+def _replay_unbound_structuring_callsite_arguments_after_regeneration_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    *,
+    preserve_setup: bool = False,
+) -> bool:
     """Reconsume typed callsite facts after core replaces the structured AST."""
     from inertia.lowering.far_callback_call_materialization import materialize_binary_far_callback_calls_8616
     from inertia.postprocess import decompiler_postprocess_calls as _calls
@@ -1867,6 +1955,15 @@ def _replay_structuring_callsite_arguments_after_regeneration_8616(
 
 
 def _materialize_structuring_callsite_stack_arguments_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+    """Consume typed callsite facts while keeping architectural inputs coherent."""
+    def consume() -> bool:
+        """Run source-backed argument consumers before rebinding their C context."""
+        return _materialize_unbound_structuring_callsite_stack_arguments_8616(project, codegen)
+
+    return run_call_stack_input_aware_lowering_8616(codegen, consume)
+
+
+def _materialize_unbound_structuring_callsite_stack_arguments_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
     """Consume existing typed callsite facts before Structuring validation.
 
     Call-target discovery remains a frontend responsibility. This bridge
@@ -2529,7 +2626,7 @@ class _PreparedStructuringStackSemantics8616:
     codegen: AngrCodegenSurface
     projection: CallSemanticProjection8616
     function: object
-    declared_entry: DeclaredEntryPipeline8616 | None
+    declared_entry: DeclaredEntryInput8616 | None
     alias_surface: tuple[object, ...]
 
     def matches(self, project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
@@ -2561,11 +2658,14 @@ class _PreparedStructuringStackSemantics8616:
 
 
 def _structuring_prefix_alias_surface_8616(codegen: AngrCodegenSurface) -> tuple[object, ...] | None:
-    """Retain opaque identities of eight immutable IR/Alias producer outputs.
+    """Retain opaque identities of nine immutable IR/Alias producer outputs.
 
     The receipt sequences consumers only; these objects never replace the
     producing owners' typed evidence or authenticate semantic behavior.
     """
+    numeric_returns = numeric_stack_pointer_return_inventory_8616(codegen)
+    if numeric_returns is None:
+        return None
     try:
         return (
             codegen._inertia_indexed_address_evidence_8616,
@@ -2576,6 +2676,7 @@ def _structuring_prefix_alias_surface_8616(codegen: AngrCodegenSurface) -> tuple
             codegen._inertia_indexed_address_alias_copy_evidence_8616,
             codegen._inertia_indexed_loop_range_alias_evidence_8616,
             codegen._inertia_stack_memory_ssa_alias_artifact,
+            numeric_returns,
         )
     except AttributeError:
         return None
@@ -2597,16 +2698,116 @@ def _timed_owner(owner: str) -> Iterator[None]:
             )
 
 
+def _native_prefix_input_bound_8616(
+    project: AngrProjectSurface, codegen: AngrCodegenSurface,
+    entry: NativeNearCallPipeline8616, function: object | None,
+) -> bool:
+    """Keep the original entry, installed source and consuming function after callbacks."""
+    resolved = _vex_ir.codegen_function_8616(project, codegen)
+    if resolved is None or resolved[0] is not function:
+        return False
+    return (
+        resolved[1] == entry.bundle.artifact.function_addr
+        and _retained_input_8616(codegen) is entry
+        and entry._source_current(project)
+    )
+
+
+def _fresh_native_projection_bound_8616(
+    project: AngrProjectSurface, codegen: AngrCodegenSurface,
+    retained_entry: NativeNearCallPipeline8616,
+    prior_projection: object | None, original_function: object | None,
+) -> bool:
+    """Require bound outputs and freshly authenticate a retained projection.
+
+    The Semantics owner can restore the same checked projection after raw IR
+    reattachment. Object novelty alone therefore cannot decide admission.
+    A retained result must still match the restored outputs and reauthenticate;
+    an early return leaving raw input attached cannot satisfy that binding.
+    """
+    try:
+        projection = codegen._inertia_call_semantic_projection_8616
+        current_ir = codegen._inertia_vex_ir_artifact
+        current_ssa = codegen._inertia_vex_ir_function_ssa
+    except AttributeError:
+        # These owned attachments may be absent on third-party angr codegen.
+        return False
+    if not isinstance(projection, CallSemanticProjection8616):
+        return False
+    if not _native_prefix_input_bound_8616(project, codegen, retained_entry, original_function):
+        return False
+    retained_projection = projection is prior_projection
+    if retained_projection:
+        from inertia.ir.near_call_jump_scope import _native_census_facts_8616
+
+        native_before = _native_census_facts_8616(retained_entry.scope)
+        if native_before is None or not projection.complete:
+            return False
+        # Reauthentication invokes proof callbacks. Keep the attachment and
+        # native entry checks after them, not only before their execution.
+        try:
+            if (
+                codegen._inertia_call_semantic_projection_8616 is not projection
+                or codegen._inertia_vex_ir_artifact is not current_ir
+                or codegen._inertia_vex_ir_function_ssa is not current_ssa
+            ):
+                return False
+        except AttributeError:
+            return False
+        if not _native_prefix_input_bound_8616(project, codegen, retained_entry, original_function):
+            return False
+        if _native_census_facts_8616(retained_entry.scope) != native_before:
+            return False
+    scoped = projection.scoped_input
+    return (
+        scoped is not None
+        and scoped.project is project
+        and scoped.function is original_function
+        and scoped.source_ir is retained_entry.bundle.artifact
+        and scoped.scope is retained_entry.scope
+        and scoped.view is retained_entry.view
+        and projection.source_ir is retained_entry.bundle.artifact
+        and projection.matches_codegen(current_ir, current_ssa)
+    )
+
+
 def _prepare_structuring_stack_semantics_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
 ) -> _PreparedStructuringStackSemantics8616 | None:
     """Run the canonical authenticated IR-to-Alias prefix exactly once."""
+    try:
+        prior_projection = codegen._inertia_call_semantic_projection_8616
+    except AttributeError:
+        prior_projection = None
+    retained_entry = None
+    original_function = None
     with _timed_owner("vex_ir"):
-        _vex_ir.apply_x86_16_vex_ir_artifact(project, codegen)
+        if isinstance(_retained_input_8616(codegen), NativeNearCallPipeline8616):
+            original = _vex_ir.codegen_function_8616(project, codegen)
+            original_function = None if original is None else original[0]
+            retained_entry = _vex_ir._apply_retained_native_entry_artifact_8616(
+                project, codegen,
+            )
+        if retained_entry is None:
+            _vex_ir.apply_x86_16_vex_ir_artifact(project, codegen)
     with _timed_owner("indexed_address_ir"):
         _indexed_address_ir.apply_x86_16_indexed_address_evidence_8616(project, codegen)
+    if retained_entry is not None and not _native_prefix_input_bound_8616(
+        project, codegen, retained_entry, original_function,
+    ):
+        raise PipelineHardError(
+            "retained native entry changed during indexed address evidence"
+        )
     with _timed_owner("call_stack_effects"):
         apply_x86_16_call_stack_effects_8616(project, codegen)
+    with _timed_owner("numeric_stack_pointer_return_evidence"):
+        apply_numeric_stack_pointer_return_inventory_8616(codegen)
+    if retained_entry is not None and not _fresh_native_projection_bound_8616(
+        project, codegen, retained_entry, prior_projection, original_function,
+    ):
+        raise PipelineHardError(
+            "retained native entry produced no fresh bound semantic projection"
+        )
     with _timed_owner("indexed_address_aliases"):
         _indexed_address_aliases.apply_x86_16_indexed_address_aliases_8616(project, codegen)
     with _timed_owner("stack_memory_ssa_alias"):
@@ -2624,7 +2825,23 @@ def _prepare_structuring_stack_semantics_8616(
     prepared = _PreparedStructuringStackSemantics8616(
         project, codegen, projection, resolved[0], _retained_input_8616(codegen), aliases,
     )
-    return prepared if prepared.matches(project, codegen) else None
+    if prepared.matches(project, codegen):
+        from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
+        from inertia.pipeline.function_readiness import record_function_stage_evidence_8616
+
+        record_function_stage_evidence_8616(
+            project,
+            resolved[1],
+            FunctionLifecycleStage8616.ALIAS,
+            producer="x86_16_structuring_prefix",
+            upstream=(
+                (FunctionLifecycleStage8616.IR, projection.source_ir),
+                (FunctionLifecycleStage8616.IR, codegen._inertia_vex_ir_function_ssa),
+            ),
+            outputs=(projection.effects, projection.outputs, *aliases),
+        )
+        return prepared
+    return None
 
 
 def _apply_structuring_stable_stack_semantics_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
@@ -2647,6 +2864,22 @@ def _lower_prepared_structuring_stack_semantics_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
 ) -> bool:
     """Consume the current IR/Alias projections through Widening and Lowering."""
+    from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
+    from inertia.pipeline.function_readiness import (
+        assert_function_stage_ready_8616,
+        drop_function_stage_evidence_8616,
+        record_function_stage_evidence_8616,
+    )
+
+    resolved = _vex_ir.codegen_function_8616(project, codegen)
+    function_addr = None if resolved is None else resolved[1]
+    if isinstance(function_addr, int):
+        assert_function_stage_ready_8616(
+            project,
+            function_addr,
+            FunctionLifecycleStage8616.ALIAS,
+            layer="structuring_lowering",
+        )
     changed = False
     with _timed_owner("carry_borrow_widening"):
         apply_carry_borrow_widening_pipeline_8616(project, codegen)
@@ -2654,6 +2887,22 @@ def _lower_prepared_structuring_stack_semantics_8616(
         codegen._inertia_cfg_execution_ownership_8616 = _cfg_ownership.build_cfg_ownership_artifact(codegen)
     with _timed_owner("stack_memory_object_widening"):
         apply_x86_16_stack_memory_object_widening_8616(project, codegen)
+    widening_outputs = _completed_widening_outputs_8616(codegen)
+    if isinstance(function_addr, int):
+        drop_function_stage_evidence_8616(project, function_addr, FunctionLifecycleStage8616.WIDENING)
+        drop_function_stage_evidence_8616(project, function_addr, FunctionLifecycleStage8616.TYPES)
+        drop_function_stage_evidence_8616(project, function_addr, FunctionLifecycleStage8616.STRUCTURING)
+        if widening_outputs is not None:
+            record_function_stage_evidence_8616(
+                project, function_addr, FunctionLifecycleStage8616.WIDENING,
+                producer="x86_16_widening_producers",
+                upstream=((FunctionLifecycleStage8616.ALIAS, widening_outputs[1].source_alias),),
+                outputs=widening_outputs,
+            )
+        assert_function_stage_ready_8616(
+            project, function_addr, FunctionLifecycleStage8616.WIDENING,
+            layer="structuring_lowering",
+        )
     before_materialized = int(getattr(codegen, "_inertia_semantic_stack_materialized_count", 0) or 0)
     with _timed_owner("stack_memory_ssa_lowering"):
         memory_ssa_lowering = lower_x86_16_stack_memory_ssa_alias_artifact(codegen)
@@ -2683,13 +2932,31 @@ def _lower_prepared_structuring_stack_semantics_8616(
         changed = bool(lower_runtime_ss_segment_helpers_to_stack_8616(codegen, project=project)) or changed
     with _timed_owner("stable_ss_linear_lowering"):
         changed = bool(lower_stable_ss_linear_stack_dereferences_8616(codegen, project=project)) or changed
+    with _timed_owner("numeric_stack_pointer_return_lowering"):
+        numeric_return_lowering = apply_numeric_stack_pointer_return_lowering_8616(codegen)
+    if numeric_return_lowering is not None:
+        changed = numeric_return_lowering.changed or changed
     with _timed_owner("dead_register_carrier_prune"):
         changed = bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
+    with _timed_owner("call_stack_input_lowering"):
+        call_stack_input_lowering = apply_call_stack_input_lowering_8616(codegen)
+    changed = bool(call_stack_input_lowering is not None and call_stack_input_lowering.changed) or changed
     with _timed_owner("terminal_return_render_projection"):
         render_projection = project_terminal_return_renderability_8616(codegen)
         cast(Any, codegen)._inertia_terminal_return_render_projection_8616 = render_projection
         changed = render_projection.changed or changed
     codegen._inertia_stable_stack_semantics_structuring_pass_ran_8616 = True
+    if isinstance(function_addr, int) and memory_ssa_lowering is not None:
+        record_function_stage_evidence_8616(
+            project, function_addr, FunctionLifecycleStage8616.TYPES,
+            producer="x86_16_stack_memory_lowering",
+            upstream=tuple(
+                (FunctionLifecycleStage8616.WIDENING, artifact)
+                for artifact in (widening_outputs or ())
+            ),
+            outputs=(memory_ssa_lowering, wide_call_output_lowering, numeric_return_lowering,
+                     call_stack_input_lowering, render_projection),
+        )
     if changed:
         codegen._inertia_codegen_decl_refresh_required_8616 = True
     return changed
@@ -2762,6 +3029,9 @@ def _prime_validation_pipeline_prefix_8616(
         codegen._inertia_codegen_decl_refresh_required_8616 = True
     lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project)
     _segmented_mem.apply_x86_16_segmented_memory_reasoning(codegen)
+    # SS projection creates typed byte lanes. Recompose their proven word
+    # values before condition ownership compares shared-epilogue return arms.
+    changed = materialize_word_projection_recompositions_8616(codegen) or changed
     # Keep structuring-tail validation stable: if priming already applied
     # SS stack lowering and alias-fact lowering, skip re-running it in the
     # structuring body to avoid representation-only drift.
@@ -3042,26 +3312,27 @@ def run_structuring_condition_cleanup_8616(project: AngrProjectSurface, codegen:
 
 
 def _regenerate_structuring_text_safely_8616(codegen: AngrCodegenSurface, *, context: str) -> bool:
-    cfunc = getattr(codegen, "cfunc", None)
-    render_text = getattr(codegen, "render_text", None)
-    if cfunc is None or not callable(render_text):
+    """Render pending Structuring output under its checked Types-input lease.
+
+    Contract failures propagate: publishing stale text after an AST mutation
+    would hide the actual semantics from executable consumers.
+    """
+    cfunc = codegen.cfunc
+    if cfunc is None:
         return False
-    try:
-        rendered = render_text(cfunc)
-        if isinstance(rendered, tuple):
-            rendered = rendered[0] if rendered and isinstance(rendered[0], str) else ""
-        if isinstance(rendered, str) and rendered.strip():
-            codegen.text = rendered
-            mark_cfunction_ast_render_authority_8616(codegen)
-            codegen._inertia_structuring_text_regenerated_8616 = (
-                int(getattr(codegen, "_inertia_structuring_text_regenerated_8616", 0) or 0) + 1
-            )
-            codegen._inertia_structuring_text_regeneration_context_8616 = context
-            return True
-    except Exception as exc:
-        codegen._inertia_structuring_text_regeneration_failed_8616 = True
-        codegen._inertia_structuring_text_regeneration_error_8616 = str(exc)
-    return False
+    with function_structuring_production_scope_8616(codegen.project, cfunc.addr, codegen):
+        rendered = codegen.render_text(cfunc)
+    if isinstance(rendered, tuple):
+        rendered = rendered[0] if rendered and isinstance(rendered[0], str) else ""
+    if not isinstance(rendered, str) or not rendered.strip():
+        raise PipelineHardError(f"Structuring render produced no text: {context}")
+    codegen.text = rendered
+    mark_cfunction_ast_render_authority_8616(codegen)
+    codegen._inertia_structuring_text_regenerated_8616 = (
+        int(getattr(codegen, "_inertia_structuring_text_regenerated_8616", 0) or 0) + 1
+    )
+    codegen._inertia_structuring_text_regeneration_context_8616 = context
+    return True
 
 
 def _is_structuring_call_chain_materialization_delta_8616(
@@ -3304,7 +3575,7 @@ def _append_validation_delta_8616(
 ) -> None:
     """Append one accepted-delta record to a dynamic codegen boundary tuple."""
     previous = getattr(codegen, name, ()) or ()
-    accepted = list(previous)
+    accepted: list[dict[str, object]] = list(previous)
     accepted.append(entry)
     setattr(codegen, name, tuple(accepted))
 
@@ -4443,28 +4714,14 @@ class _StructuringCodegenRun8616:
         return True
 
     def _contract_gate(self) -> bool:
-        """Enforce the pipeline classified-vs-materialized hard contract."""
-        # ── Hard contract gate: classified > 0 && materialized == 0 → PipelineHardError ──
-        # PipelineHardError MUST propagate — never silently caught.
-        # Only non-fatal errors (import, attribute) are logged and cause structuring abort.
+        """Require completed Types and closed semantic lanes before structuring."""
+        from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
         from inertia.pipeline.contracts import assert_pipeline_contracts_8616
 
-        codegen = self.codegen
-        try:
-            with span("x86_16.structuring.codegen.contracts", function=self.func_addr):
-                assert_pipeline_contracts_8616(codegen)
-        except PipelineHardError:
-            raise
-        except Exception as e:
-            codegen._inertia_structuring_failed = True
-            codegen._inertia_structuring_failure_pass = "pipeline_contracts"
-            codegen._inertia_structuring_failure_error = str(e)
-            logging.getLogger(__name__).warning(
-                "Pipeline contract gate setup error in %s: %s",
-                getattr(codegen, "cfunc", None) or "unknown",
-                e,
+        with span("x86_16.structuring.codegen.contracts", function=self.func_addr):
+            assert_pipeline_contracts_8616(
+                self.codegen, required_stage=FunctionLifecycleStage8616.TYPES,
             )
-            return False
         return True
 
     def _reset_state(self) -> None:
@@ -4542,6 +4799,13 @@ class _StructuringCodegenRun8616:
         """Invoke the pass under its span and per-pass validation closure."""
         codegen = self.codegen
         with span(f"x86_16.structuring.pass.{spec.name}", function=self.func_addr):
+            if (
+                spec.applicable is not None
+                and os.environ.get("INERTIA_VALIDATE_ALL_STRUCTURING_PASSES") != "1"
+                and spec.applicable(codegen) is False
+            ):
+                annotate_current_span(applicable=False, changed=False)
+                return False
             finalize_validation = _maybe_validate_structuring_pass_8616(
                 self.project, codegen, spec.name
             )
@@ -5008,7 +5272,17 @@ def _validated_terminal_mid_phases_8616(
     changed: bool,
     flags: _ValidatedStructuringFlags8616,
 ) -> bool:
-    """Run the final condition-refresh, loop-break closure, and ite spans."""
+    """Canonicalize Boolean guards before their final condition refresh."""
+    with span("x86_16.structuring.boolean_condition_ites", function=func_addr):
+        boolean_ite_stats = normalize_boolean_condition_ites_8616(self.codegen)
+        flags.boolean_ite = bool(boolean_ite_stats.changed)
+        changed = flags.boolean_ite or changed
+        annotate_current_span(
+            raw_fact_count=boolean_ite_stats.raw_fact_count,
+            classified_fact_count=boolean_ite_stats.classified_fact_count,
+            materialized_count=boolean_ite_stats.materialized_count,
+            failure_count=boolean_ite_stats.failure_count,
+        )
     with span("x86_16.structuring.final_condition_refresh", function=func_addr):
         final_condition_result = _refresh_structuring_condition_semantics_8616(
             self.project,
@@ -5029,16 +5303,6 @@ def _validated_terminal_mid_phases_8616(
         )
         changed = flags.final_loop_break_jcc or changed
         annotate_current_span(changed=flags.final_loop_break_jcc)
-    with span("x86_16.structuring.boolean_condition_ites", function=func_addr):
-        boolean_ite_stats = normalize_boolean_condition_ites_8616(self.codegen)
-        flags.boolean_ite = bool(boolean_ite_stats.changed)
-        changed = flags.boolean_ite or changed
-        annotate_current_span(
-            raw_fact_count=boolean_ite_stats.raw_fact_count,
-            classified_fact_count=boolean_ite_stats.classified_fact_count,
-            materialized_count=boolean_ite_stats.materialized_count,
-            failure_count=boolean_ite_stats.failure_count,
-        )
     return changed
 
 def _validated_selector_phases_8616(
@@ -5305,7 +5569,22 @@ def _validated_structuring_publish_8616(
         log.info("%s", validation["verdict"])
     self.project._inertia_decompiler_stage = "structuring_done"
 
+def _publish_final_structuring_ast_8616(self: AngrDecompilerSurface) -> None:
+    """Publish the final AST after every structuring and validation operation."""
+    from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
+    from inertia.pipeline.function_readiness import record_function_ast_stage_evidence_8616
+
+    codegen = self.codegen
+    if codegen is None or codegen.cfunc is None:
+        return
+    record_function_ast_stage_evidence_8616(
+        self.project, codegen.cfunc.addr, FunctionLifecycleStage8616.STRUCTURING,
+        codegen, producer="structuring_final_ast",
+    )
+
+
 def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
+    """Produce the final structured AST and publish its observed output version."""
     structuring_elapsed = _run_angr_core_decompile_8616(self)
     if self.project.arch.name != "86_16" or self.codegen is None:
         return
@@ -5313,9 +5592,15 @@ def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
     clinic = getattr(self, "clinic", None)
     if clinic is not None:
         self.codegen._clinic = clinic
+        from inertia.frontend.x86_16.clinic_scoped_control import (
+            handoff_clinic_declared_entry_8616,
+        )
+
+        handoff_clinic_declared_entry_8616(clinic, self.codegen, self.project)
     _bind_structuring_callsite_consumers_8616(self.codegen)
     if not bool(getattr(self.project, "_inertia_tail_validation_enabled", True)):
         _decompile_structuring_unvalidated_8616(self, structuring_elapsed)
+        _publish_final_structuring_ast_8616(self)
         return
 
     codegen = self.codegen
@@ -5424,6 +5709,7 @@ def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
         structuring_elapsed,
         changed,
     )
+    _publish_final_structuring_ast_8616(self)
 
 
 @dataclass

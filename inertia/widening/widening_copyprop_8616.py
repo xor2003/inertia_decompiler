@@ -34,7 +34,12 @@ from inertia.semantics.expression_analysis import (
     describe_virtual_value_identity_8616,
 )
 
-__all__ = ["_widening_copy_propagation_8616"]
+__all__ = [
+    "CopypropApplicabilityProbe8616",
+    "_widening_copy_propagation_8616",
+    "publish_copyprop_probe_diagnostics_8616",
+    "widening_copy_propagation_probe_8616",
+]
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -132,6 +137,15 @@ class _CopypropRun8616:
     nested bodies receive the same dict objects through ``inherited_defs`` so
     linear-flow mutations stay shared, and each walk restores its parent's
     maps on exit.
+
+    ``mutate=False`` selects the read-only applicability probe: every
+    propagation decision, guard, refusal counter, and definition-map update
+    runs identically, but the run never writes to the AST. Because every AST
+    write in this pass is conditioned on a propagation decision that also sets
+    ``changed``, a probe run finishing with ``changed == False`` proves the
+    mutating pass cannot change the AST. Stored definitions are then kept as
+    live AST references instead of clones: the probe never mutates them, so
+    the clone's insulation against later writes is unnecessary.
     """
 
     typed_codegen: _WideningCopypropCodegen8616
@@ -140,6 +154,7 @@ class _CopypropRun8616:
     call_push_definition_guard: SemanticLaneState
     nontrivial_definition_guard: SemanticLaneState
     copy_width_guard: SemanticLaneState
+    mutate: bool = True
     changed: bool = False
     guarded_call_push_assignment_ids: set[int] = field(default_factory=set)
     block_defs: dict[str, _ReusableDefinition8616] = field(default_factory=dict)
@@ -263,7 +278,8 @@ class _CopypropRun8616:
             self.nontrivial_definition_guard.normalized += 1
             self.nontrivial_definition_guard.classified += 1
             self.nontrivial_definition_guard.materialized += 1
-        return _ReusableDefinition8616(_clone_c_ast_tree_8616(rhs), condition_only=nontrivial)
+        stored = _clone_c_ast_tree_8616(rhs) if self.mutate else rhs
+        return _ReusableDefinition8616(stored, condition_only=nontrivial)
 
     def _expression_reads_storage_key(self, expr: object, storage_key: str) -> bool:
         """Return whether an expression reads the alias domain being defined."""
@@ -302,7 +318,9 @@ class _CopypropRun8616:
         self.typed_codegen.widening_copyprop_nested_replacements_8616 = (
             int(self.typed_codegen.widening_copyprop_nested_replacements_8616 or 0) + 1
         )
-        return _clone_c_ast_tree_8616(nested_replacement)
+        # Probe runs return the original node: the caller's replace traversal
+        # writes back only nodes that differ, so no AST mutation escapes.
+        return _clone_c_ast_tree_8616(nested_replacement) if self.mutate else node
 
     def _propagate_expr(self, expr: object, *, condition_use: bool = False) -> object:
         """Propagate expressions through the dynamic third-party angr C AST boundary."""
@@ -326,7 +344,9 @@ class _CopypropRun8616:
                 self.typed_codegen.widening_copyprop_nested_replacements_8616 = (
                     int(self.typed_codegen.widening_copyprop_nested_replacements_8616 or 0) + 1
                 )
-            return _clone_c_ast_tree_8616(replacement)
+            # Probe runs return the original expression so every caller-side
+            # `is not` write guard stays closed and no AST field is assigned.
+            return _clone_c_ast_tree_8616(replacement) if self.mutate else expr
         if not self.enable_nested:
             return expr
 
@@ -361,7 +381,7 @@ class _CopypropRun8616:
         if lhs_bits is None or lhs_bits != source_bits:
             self.virtual_defs.pop(identity, None)
             return
-        self.virtual_defs[identity] = _clone_c_ast_tree_8616(source)
+        self.virtual_defs[identity] = _clone_c_ast_tree_8616(source) if self.mutate else source
 
     def _propagate_virtual_comparison_operands(self, condition: object) -> None:
         """Replace direct comparison carriers from proven whole-value copies."""
@@ -381,10 +401,11 @@ class _CopypropRun8616:
                 replacement
             ):
                 continue
-            if is_lhs:
-                comparison.lhs = _clone_c_ast_tree_8616(replacement)
-            else:
-                comparison.rhs = _clone_c_ast_tree_8616(replacement)
+            if self.mutate:
+                if is_lhs:
+                    comparison.lhs = _clone_c_ast_tree_8616(replacement)
+                else:
+                    comparison.rhs = _clone_c_ast_tree_8616(replacement)
             self.typed_codegen.widening_copyprop_nested_replacements_8616 = (
                 int(self.typed_codegen.widening_copyprop_nested_replacements_8616 or 0) + 1
             )
@@ -447,15 +468,16 @@ class _CopypropRun8616:
         """Propagate through one ``CAssignment`` and update definition maps."""
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
-        rhs = stmt.rhs
-        lhs = stmt.lhs
+        assignment = cast(structured_c.CAssignment, stmt)
+        rhs = assignment.rhs
+        lhs = assignment.lhs
 
         # Attempt copy propagation on the RHS before applying memory-write
         # kills. The store itself is the effect; its value expression can
         # still consume earlier proven copies.
         propagated_rhs = self._propagate_expr(rhs)
         if propagated_rhs is not rhs:
-            stmt.rhs = propagated_rhs
+            assignment.rhs = propagated_rhs
             rhs = propagated_rhs
 
         # A memory write can invalidate any previous expression whose
@@ -480,7 +502,7 @@ class _CopypropRun8616:
             if isinstance(lhs, structured_c.CVariable)
             else None
         )
-        tags = stmt.tags
+        tags = assignment.tags
         ins_addr = tags.get("ins_addr") if isinstance(tags, dict) else None
         guarded_call_push_definition = (
             lhs_key is not None
@@ -535,8 +557,6 @@ class _CopypropRun8616:
         inherited_virtual_defs: dict[VirtualValueIdentity8616, object] | None = None,
     ) -> None:
         """Walk statements through the dynamic third-party angr C AST boundary."""
-        from angr.analyses.decompiler.structured_codegen import c as structured_c
-
         stmts = _unwrap_statements_8616(statements_obj)
         # Map storage domain key -> source_expr for last plain-variable definition.
         parent_defs = self.block_defs
@@ -545,13 +565,15 @@ class _CopypropRun8616:
         self.virtual_defs = inherited_virtual_defs if inherited_virtual_defs is not None else {}
         try:
             for stmt in stmts:
-                self._walk_statement_8616(stmt, structured_c)
+                self._walk_statement_8616(stmt)
         finally:
             self.block_defs = parent_defs
             self.virtual_defs = parent_virtual_defs
 
-    def _walk_statement_8616(self, stmt: object, structured_c: object) -> None:
+    def _walk_statement_8616(self, stmt: object) -> None:
         """Dispatch one structured statement to its propagation arm."""
+        from angr.analyses.decompiler.structured_codegen import c as structured_c
+
         if isinstance(stmt, structured_c.CStatements):
             self.walk_statements(
                 stmt,
@@ -645,6 +667,78 @@ def _iter_switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     return tuple(bodies)
 
 
+def _prepare_copyprop_run_8616(
+    inventory_owner: object,
+    counter_surface: _WideningCopypropCodegen8616,
+    *,
+    enable_nested: bool,
+    mutate: bool = True,
+) -> _CopypropRun8616:
+    """Build one propagation run with its guards and counter surface.
+
+    ``inventory_owner`` supplies the callsite summary inventory (always the
+    real codegen); ``counter_surface`` receives counters and guard state —
+    the real codegen for a mutating pass, or a disposable diagnostics sink for
+    a read-only applicability probe. Counter initialization crosses the
+    dynamic third-party angr codegen boundary.
+    """
+    callsite_inventory = callsite_summary_inventory_8616(inventory_owner)
+    raw_call_push_instruction_addrs = tuple(
+        instruction_addr
+        for summary in callsite_inventory.values()
+        for instruction_addr in summary.push_arg_instruction_addrs
+    )
+    call_push_instruction_addrs = frozenset(
+        instruction_addr
+        for instruction_addr in raw_call_push_instruction_addrs
+        if isinstance(instruction_addr, int)
+    )
+    call_push_definition_guard = SemanticLaneState(
+        name="widening_call_push_definition_guard",
+        raw=len(raw_call_push_instruction_addrs),
+        normalized=len(call_push_instruction_addrs),
+        failures=len(raw_call_push_instruction_addrs) - len(call_push_instruction_addrs),
+    )
+    counter_surface._inertia_widening_call_push_definition_guard_8616 = (
+        call_push_definition_guard
+    )
+    nontrivial_definition_guard = SemanticLaneState(
+        name="widening_nontrivial_definition_guard"
+    )
+    counter_surface._inertia_widening_nontrivial_definition_guard_8616 = (
+        nontrivial_definition_guard
+    )
+    copy_width_guard = SemanticLaneState(name="widening_copy_width_guard")
+    counter_surface._inertia_widening_copy_width_guard_8616 = copy_width_guard
+    for counter_name in _WIDENING_COPYPROP_COUNTERS_8616:
+        # Dynamic-name init at the angr codegen boundary (no owned container).
+        if not hasattr(counter_surface, counter_name):
+            setattr(counter_surface, counter_name, 0)
+
+    return _CopypropRun8616(
+        typed_codegen=counter_surface,
+        enable_nested=enable_nested,
+        call_push_instruction_addrs=call_push_instruction_addrs,
+        call_push_definition_guard=call_push_definition_guard,
+        nontrivial_definition_guard=nontrivial_definition_guard,
+        copy_width_guard=copy_width_guard,
+        mutate=mutate,
+    )
+
+
+def _walk_copyprop_roots_8616(cfunc: object, run: _CopypropRun8616) -> None:
+    """Walk the same roots the pass consumes, across the dynamic angr boundary."""
+    roots = (getattr(cfunc, "statements", None), getattr(cfunc, "body", None))
+    walked_root_ids: set[int] = set()
+    for root in roots:
+        if root is None or id(root) in walked_root_ids:
+            continue
+        walked_root_ids.add(id(root))
+        run.walk_statements(root)
+    if not walked_root_ids:
+        run.walk_statements(cfunc)
+
+
 def _widening_copy_propagation_8616(codegen: object, *, enable_nested: bool = False) -> bool:
     """Propagate copies using alias storage domains.
 
@@ -663,60 +757,147 @@ def _widening_copy_propagation_8616(codegen: object, *, enable_nested: bool = Fa
         return False
     if cfunc is None:
         return False
-    callsite_inventory = callsite_summary_inventory_8616(typed_codegen)
-    raw_call_push_instruction_addrs = tuple(
-        instruction_addr
-        for summary in callsite_inventory.values()
-        for instruction_addr in summary.push_arg_instruction_addrs
+    run = _prepare_copyprop_run_8616(
+        typed_codegen, typed_codegen, enable_nested=enable_nested
     )
-    call_push_instruction_addrs = frozenset(
-        instruction_addr
-        for instruction_addr in raw_call_push_instruction_addrs
-        if isinstance(instruction_addr, int)
-    )
-    call_push_definition_guard = SemanticLaneState(
-        name="widening_call_push_definition_guard",
-        raw=len(raw_call_push_instruction_addrs),
-        normalized=len(call_push_instruction_addrs),
-        failures=len(raw_call_push_instruction_addrs) - len(call_push_instruction_addrs),
-    )
-    typed_codegen._inertia_widening_call_push_definition_guard_8616 = (
-        call_push_definition_guard
-    )
-    nontrivial_definition_guard = SemanticLaneState(
-        name="widening_nontrivial_definition_guard"
-    )
-    typed_codegen._inertia_widening_nontrivial_definition_guard_8616 = (
-        nontrivial_definition_guard
-    )
-    copy_width_guard = SemanticLaneState(name="widening_copy_width_guard")
-    typed_codegen._inertia_widening_copy_width_guard_8616 = copy_width_guard
-    for counter_name in _WIDENING_COPYPROP_COUNTERS_8616:
-        # Dynamic-name init at the angr codegen boundary (no owned container).
-        if not hasattr(typed_codegen, counter_name):
-            setattr(typed_codegen, counter_name, 0)
-
-    run = _CopypropRun8616(
-        typed_codegen=typed_codegen,
-        enable_nested=enable_nested,
-        call_push_instruction_addrs=call_push_instruction_addrs,
-        call_push_definition_guard=call_push_definition_guard,
-        nontrivial_definition_guard=nontrivial_definition_guard,
-        copy_width_guard=copy_width_guard,
-    )
-    roots = (getattr(cfunc, "statements", None), getattr(cfunc, "body", None))
-    walked_root_ids: set[int] = set()
-    for root in roots:
-        if root is None or id(root) in walked_root_ids:
-            continue
-        walked_root_ids.add(id(root))
-        run.walk_statements(root)
-    if not walked_root_ids:
-        run.walk_statements(cfunc)
-    call_push_definition_guard.assert_closed_loop(layer="widening")
-    nontrivial_definition_guard.assert_closed_loop(layer="widening")
-    copy_width_guard.assert_closed_loop(layer="widening")
+    _walk_copyprop_roots_8616(cfunc, run)
+    run.call_push_definition_guard.assert_closed_loop(layer="widening")
+    run.nontrivial_definition_guard.assert_closed_loop(layer="widening")
+    run.copy_width_guard.assert_closed_loop(layer="widening")
     return run.changed
+
+
+@dataclass(slots=True)
+class _CopypropProbeDiagnostics8616:
+    """Disposable counter/guard surface isolating a read-only probe run.
+
+    Implements :class:`_WideningCopypropCodegen8616` so the shared run writes
+    diagnostic counters here instead of the real codegen; on a proven no-op
+    the accumulated values are replayed onto the real codegen exactly as an
+    executed no-op pass would have written them.
+    """
+
+    cfunc: object | None = None
+    widening_copyprop_nested_replacements_8616: int = 0
+    widening_copyprop_address_context_refused_8616: int = 0
+    widening_copyprop_memory_kills_8616: int = 0
+    widening_copyprop_nontrivial_stack_definitions_refused_8616: int = 0
+    widening_copyprop_nontrivial_assignment_uses_refused_8616: int = 0
+    widening_copyprop_recursive_definitions_refused_8616: int = 0
+    widening_copyprop_typed_cast_definitions_refused_8616: int = 0
+    widening_copyprop_unknown_identity_refused_8616: int = 0
+    widening_copyprop_width_mismatch_refused_8616: int = 0
+    _inertia_widening_call_push_definition_guard_8616: SemanticLaneState = field(
+        default_factory=SemanticLaneState
+    )
+    _inertia_widening_nontrivial_definition_guard_8616: SemanticLaneState = field(
+        default_factory=SemanticLaneState
+    )
+    _inertia_widening_copy_width_guard_8616: SemanticLaneState = field(
+        default_factory=SemanticLaneState
+    )
+
+
+    def counter_values(self) -> tuple[tuple[str, int], ...]:
+        """Project owned diagnostic counters for the external codegen boundary."""
+        return (
+            ("widening_copyprop_nested_replacements_8616", self.widening_copyprop_nested_replacements_8616),
+            ("widening_copyprop_address_context_refused_8616", self.widening_copyprop_address_context_refused_8616),
+            ("widening_copyprop_memory_kills_8616", self.widening_copyprop_memory_kills_8616),
+            ("widening_copyprop_nontrivial_stack_definitions_refused_8616", self.widening_copyprop_nontrivial_stack_definitions_refused_8616),
+            ("widening_copyprop_nontrivial_assignment_uses_refused_8616", self.widening_copyprop_nontrivial_assignment_uses_refused_8616),
+            ("widening_copyprop_recursive_definitions_refused_8616", self.widening_copyprop_recursive_definitions_refused_8616),
+            ("widening_copyprop_typed_cast_definitions_refused_8616", self.widening_copyprop_typed_cast_definitions_refused_8616),
+            ("widening_copyprop_unknown_identity_refused_8616", self.widening_copyprop_unknown_identity_refused_8616),
+            ("widening_copyprop_width_mismatch_refused_8616", self.widening_copyprop_width_mismatch_refused_8616),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CopypropApplicabilityProbe8616:
+    """Read-only evidence that copy propagation is a proven no-op.
+
+    ``diagnostics`` is ``None`` when the pass would exit before publishing
+    diagnostics (missing ``cfunc``), and otherwise carries the accumulated
+    counter surface an executed no-op run would have left on the codegen.
+    """
+
+    diagnostics: _CopypropProbeDiagnostics8616 | None
+
+
+def widening_copy_propagation_probe_8616(codegen: object) -> CopypropApplicabilityProbe8616 | None:
+    """Prove whether copy propagation can change the current C AST.
+
+    Runs the identical propagation decision walk as
+    :func:`_widening_copy_propagation_8616` with ``enable_nested=True`` — the
+    same roots, definition maps, guards, refusal counters, and replacement
+    conditions — with AST writes suppressed. Every mutating pass write is
+    conditioned on a decision that first sets ``run.changed``, so a probe
+    finishing with ``changed == False`` proves the mutating pass returns
+    ``False`` untouched.
+
+    Returns ``None`` when the pass may change the AST or when the decision
+    surface is unknown; the caller must keep the pass applicable. On a proven
+    no-op it returns the probe evidence for deferred diagnostic publication.
+    Boundary exceptions raised by the real decision path propagate
+    identically; unexpected boundary type failures are treated as unknown.
+    """
+    typed_codegen = cast(_WideningCopypropCodegen8616, codegen)
+    try:
+        cfunc = typed_codegen.cfunc
+    except AttributeError:
+        return CopypropApplicabilityProbe8616(diagnostics=None)
+    if cfunc is None:
+        return CopypropApplicabilityProbe8616(diagnostics=None)
+    diagnostics = _CopypropProbeDiagnostics8616(cfunc=cfunc)
+    for counter_name in _WIDENING_COPYPROP_COUNTERS_8616:
+        # Named counters cross the dynamic third-party angr codegen boundary.
+        if not isinstance(getattr(codegen, counter_name, 0), int):
+            return None
+    try:
+        run = _prepare_copyprop_run_8616(
+            codegen, diagnostics, enable_nested=True, mutate=False
+        )
+        _walk_copyprop_roots_8616(cfunc, run)
+    except (AttributeError, TypeError):
+        return None
+    if run.changed:
+        return None
+    run.call_push_definition_guard.assert_closed_loop(layer="widening")
+    run.nontrivial_definition_guard.assert_closed_loop(layer="widening")
+    run.copy_width_guard.assert_closed_loop(layer="widening")
+    return CopypropApplicabilityProbe8616(diagnostics=diagnostics)
+
+
+def publish_copyprop_probe_diagnostics_8616(
+    codegen: object, diagnostics: _CopypropProbeDiagnostics8616
+) -> None:
+    """Replay probe-accumulated counters onto the real codegen.
+
+    Matches the additive counter updates and guard publications an executed
+    no-op pass performs, so validation consumers observe identical evidence
+    whether the pass ran or was scheduled out.
+    """
+    for counter_name, probe_delta in diagnostics.counter_values():
+        if not hasattr(codegen, counter_name):
+            # Dynamic-name init at the angr codegen boundary (no owned container).
+            setattr(codegen, counter_name, 0)
+        # Dynamic-name read at the angr codegen boundary (no owned container).
+        current = getattr(codegen, counter_name)
+        if probe_delta:
+            base = int(current or 0)
+            # Dynamic-name update at the angr codegen boundary (no owned container).
+            setattr(codegen, counter_name, base + probe_delta)
+    codegen_attrs = cast(_WideningCopypropCodegen8616, codegen)
+    codegen_attrs._inertia_widening_call_push_definition_guard_8616 = (
+        diagnostics._inertia_widening_call_push_definition_guard_8616
+    )
+    codegen_attrs._inertia_widening_nontrivial_definition_guard_8616 = (
+        diagnostics._inertia_widening_nontrivial_definition_guard_8616
+    )
+    codegen_attrs._inertia_widening_copy_width_guard_8616 = (
+        diagnostics._inertia_widening_copy_width_guard_8616
+    )
 
 
 def _is_side_effecting(expr: object) -> bool:

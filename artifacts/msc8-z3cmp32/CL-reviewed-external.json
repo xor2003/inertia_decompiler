@@ -1,0 +1,1052 @@
+{
+  "schema": "dosunit.flat32_external_calls.v1",
+  "functions": {
+    "sub_1CC77": [
+      {
+        "dll": "kernel32.dll",
+        "name": "GetSystemTime",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": false,
+        "memory_access": "argument_region",
+        "write_address_argument": 0,
+        "write_size_bytes": 16
+      }
+    ],
+    "sub_1F890": [
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcessHeap",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      }
+    ],
+    "sub_1D5C0": [
+      {
+        "dll": "kernel32.dll",
+        "name": "CloseHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "CreateFileA",
+        "argument_count": 7,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "CreateProcessA",
+        "argument_count": 10,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "DeleteFileA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "DuplicateHandle",
+        "argument_count": 7,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "ExitProcess",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindClose",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindFirstFileA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindNextFileA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FlushFileBuffers",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCommandLineA",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetConsoleMode",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCurrentProcess",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCurrentProcessId",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetEnvironmentStrings",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetExitCodeProcess",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetFileAttributesA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetFileType",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetLastError",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetModuleFileNameA",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetModuleHandleA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcAddress",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcessHeap",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetStartupInfoA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetStdHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetSystemTime",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetVersion",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapAlloc",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "returned_region",
+        "write_size_argument": 2,
+        "preserved_memory_ranges": [
+          [
+            520164,
+            524299
+          ]
+        ]
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapFree",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapReAlloc",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "ReadFile",
+        "argument_count": 5,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "RtlUnwind",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetConsoleCtrlHandler",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetConsoleMode",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetEndOfFile",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetEnvironmentVariableA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetFilePointer",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetStdHandle",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "UnhandledExceptionFilter",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "WaitForSingleObject",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "WriteFile",
+        "argument_count": 5,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      }
+    ],
+    "sub_210C0": [
+      {
+        "dll": "kernel32.dll",
+        "name": "CloseHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "CreateFileA",
+        "argument_count": 7,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "CreateProcessA",
+        "argument_count": 10,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "DeleteFileA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "DuplicateHandle",
+        "argument_count": 7,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "ExitProcess",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindClose",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindFirstFileA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindNextFileA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FlushFileBuffers",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCommandLineA",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetConsoleMode",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCurrentProcess",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCurrentProcessId",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetEnvironmentStrings",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetExitCodeProcess",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetFileAttributesA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetFileType",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetLastError",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetModuleFileNameA",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetModuleHandleA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcAddress",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcessHeap",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetStartupInfoA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetStdHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetSystemTime",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetVersion",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapAlloc",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "returned_region",
+        "write_size_argument": 2,
+        "preserved_memory_ranges": [
+          [
+            520164,
+            524299
+          ]
+        ]
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapFree",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapReAlloc",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "ReadFile",
+        "argument_count": 5,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "RtlUnwind",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetConsoleCtrlHandler",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetConsoleMode",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetEndOfFile",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetEnvironmentVariableA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetFilePointer",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetStdHandle",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "UnhandledExceptionFilter",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "WaitForSingleObject",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "WriteFile",
+        "argument_count": 5,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      }
+    ],
+    "sub_1A3F5": [
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapAlloc",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "returned_region",
+        "write_size_argument": 2,
+        "preserved_memory_ranges": [
+          [
+            520156,
+            524299
+          ]
+        ]
+      }
+    ],
+    "sub_1D600": [
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapFree",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "preserved_memory_ranges": [
+          [
+            520172,
+            524291
+          ]
+        ],
+        "read_excluded_memory_ranges": [
+          [
+            520172,
+            524287
+          ]
+        ]
+      }
+    ],
+    "sub_20FE0": [
+      {
+        "dll": "kernel32.dll",
+        "name": "CloseHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      }
+    ],
+    "sub_1D55D": [
+      {
+        "dll": "kernel32.dll",
+        "name": "CloseHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "CreateFileA",
+        "argument_count": 7,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "CreateProcessA",
+        "argument_count": 10,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "DeleteFileA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "DuplicateHandle",
+        "argument_count": 7,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "ExitProcess",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindClose",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindFirstFileA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FindNextFileA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "FlushFileBuffers",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCommandLineA",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetConsoleMode",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCurrentProcess",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetCurrentProcessId",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetEnvironmentStrings",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetExitCodeProcess",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetFileAttributesA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetFileType",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetLastError",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetModuleFileNameA",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetModuleHandleA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "read_excluded_memory_ranges": [
+          [
+            520180,
+            524287
+          ]
+        ],
+        "preserved_memory_ranges": [
+          [
+            520180,
+            524291
+          ]
+        ]
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcAddress",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "read_excluded_memory_ranges": [
+          [
+            520180,
+            524287
+          ]
+        ],
+        "preserved_memory_ranges": [
+          [
+            520180,
+            524291
+          ]
+        ]
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetProcessHeap",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetStartupInfoA",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetStdHandle",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetSystemTime",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetVersion",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapAlloc",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapFree",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapReAlloc",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "ReadFile",
+        "argument_count": 5,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "RtlUnwind",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetConsoleCtrlHandler",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetConsoleMode",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetEndOfFile",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetEnvironmentVariableA",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetFilePointer",
+        "argument_count": 4,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "SetStdHandle",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "UnhandledExceptionFilter",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "WaitForSingleObject",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "WriteFile",
+        "argument_count": 5,
+        "cleanup": "callee",
+        "preserve_import_bindings": true
+      }
+    ],
+    "sub_1FC90": [
+      {
+        "dll": "kernel32.dll",
+        "name": "SetStdHandle",
+        "argument_count": 2,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      }
+    ],
+    "sub_1FB00": [
+      {
+        "dll": "kernel32.dll",
+        "name": "FlushFileBuffers",
+        "argument_count": 1,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      },
+      {
+        "dll": "kernel32.dll",
+        "name": "GetLastError",
+        "argument_count": 0,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "none"
+      }
+    ]
+  }
+}

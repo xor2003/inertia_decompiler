@@ -28,7 +28,7 @@ def test_capture_uses_current_production_modules() -> None:
     import tools.dosunit.runtime.real16_replay as real16_replay
     repository = Path.cwd().resolve()
     for module in (real16_replay, flat32_replay):
-        assert Path(module.__file__).resolve().parent == repository / "tools/dosunit"
+        assert Path(module.__file__).resolve().parent == repository / "tools/dosunit/runtime"
 
 
 

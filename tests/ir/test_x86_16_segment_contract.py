@@ -194,3 +194,16 @@ def test_segment_contract_keeps_clobber_on_external_branch() -> None:
     contract = build_x86_16_segment_function_contract(artifact, state)
     assert "ds" in contract.clobbered_registers
     assert "ds" not in contract.restored_registers
+
+
+def test_cs_memory_access_retains_entry_selector_requirement() -> None:
+    """CS-relative data is not omitted from the segment-access contract."""
+    artifact = IRFunctionArtifact(function_addr=0x1000, blocks=(IRBlock(
+        addr=0x1000, instrs=(IRInstr("LOAD", IRValue(MemSpace.TMP, name="t0", size=2),
+                                  (_address(MemSpace.CS),), addr=0x1000),)),))
+    state = build_x86_16_segment_state_artifact(artifact, build_x86_16_function_ssa(artifact))
+    contract = build_x86_16_segment_function_contract(artifact, state)
+    assert contract.entry_requirements == ("cs",)
+    assert len(contract.accesses) == 1
+    assert contract.accesses[0].physical_source == "cs"
+    assert contract.accesses[0].kind is SegmentAccessKind.READ

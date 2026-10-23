@@ -48,10 +48,23 @@ import pyvex
 
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.control_coordinates import ControlAddressDomain
+from inertia.frontend.x86_16.frontend_capstone_block import DirectCapstoneInstruction8616
+from inertia.frontend.x86_16.frontend_capstone_decode import (
+    CapstoneBlockDecodeArtifact8616,
+    CapstoneBlockDecodeStatus8616,
+)
 from inertia.frontend.x86_16.frontend_direct_callsite_index import DecodedDirectCallsite8616
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import is_synthetic_call_stub_8616
 from inertia.ir.core import IRBlock, IRInstr, IRValue, MemSpace
+from inertia.ir.direct_evidence_deadline import direct_evidence_deadline_expired_8616
 from inertia.ir.instruction_origin import IRInstructionOrigin8616
+from inertia.ir.native_import_surface_cache import (
+    NativeCensusSourceBinding8616,
+    _source_key_8616,
+    native_census_source_current_8616,
+    native_terminal_fact_store_8616,
+)
 from inertia.ir.real16_invocation_domain import (
     Real16CallInvocation8616,
     Real16InvocationDomain8616,
@@ -510,8 +523,8 @@ def _native_terminal_failure_8616(
     size = next_addr - block.addr
     if not 0 < size <= 4096:
         return DirectNearCallTargetBindingFailure8616.TERMINAL_POSITION_MISMATCH
-    native = project.factory.block(block.addr, size=size, opt_level=0, collect_data_refs=True).vex
-    failure = _native_terminal_identity_failure_8616(native, origin)
+    facts = _native_terminal_facts_for_8616(project, block.addr, size)
+    failure = _native_terminal_facts_failure_8616(facts, origin)
     if failure is None:
         return None
     from inertia.ir.status_flag_lift_context import architectural_status_flag_replay_8616
@@ -519,21 +532,183 @@ def _native_terminal_failure_8616(
     with architectural_status_flag_replay_8616() as suspended:
         if not suspended:
             return failure
-        native = project.factory.block(block.addr, size=size, opt_level=0, collect_data_refs=True).vex
-    return _native_terminal_identity_failure_8616(native, origin)
+        facts = _native_terminal_facts_for_8616(project, block.addr, size)
+    return _native_terminal_facts_failure_8616(facts, origin)
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeTerminalFacts8616:
+    """Immutable detached terminal facts; never the mutable lifted IRSB.
+
+    Records exactly the four scalars ``_native_terminal_facts_failure_8616``
+    consumes so a second check of an unchanged byte range need not relift.
+    No verdict or refusal is stored: the current origin is recompared on
+    every call.
+    """
+
+    jumpkind: object
+    statement_count: int
+    next_is_rdtmp: bool
+    next_tmp: object
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeTerminalFactRecord8616:
+    """One request-scoped record binding an exact byte range to its facts."""
+
+    binding: NativeCensusSourceBinding8616
+    flag_session: object
+    facts: _NativeTerminalFacts8616
+
+
+
+
+_NATIVE_TERMINAL_FACT_RECORD_LIMIT_8616 = 16
+
+
+def _terminal_fact_producers_8616() -> tuple[object, ...]:
+    """Resolve the live decoder authority so attribute swaps invalidate.
+
+    The producer tuple must carry the CURRENT objects on every call: a
+    module-level alias captured at import time would pin the old function
+    and never notice a canonical producer replacement.
+    """
+    import inertia.frontend.x86_16.frontend_capstone_decode as decoder_module
+
+    return (decoder_module.decode_exact_capstone_block_8616,)
+
+
+
+
+
+
+def _flag_view_session_8616() -> object | None:
+    """Return the active status-flag lift session keeping both views distinct."""
+    from inertia.ir.status_flag_lift_context import _active_session
+
+    return cast("object | None", _active_session.get())
+
+
+def _detach_native_terminal_facts_8616(native: object) -> _NativeTerminalFacts8616 | None:
+    """Detach the immutable terminal scalars from one freshly lifted IRSB."""
+    if not isinstance(native, pyvex.IRSB):
+        return None
+    following = native.next
+    is_rdtmp = isinstance(following, pyvex.expr.RdTmp)
+    return _NativeTerminalFacts8616(
+        jumpkind=native.jumpkind,
+        statement_count=len(native.statements),
+        next_is_rdtmp=is_rdtmp,
+        next_tmp=following.tmp if is_rdtmp else None,
+    )
+
+
+def _native_terminal_facts_failure_8616(
+    facts: _NativeTerminalFacts8616 | None, origin: IRInstructionOrigin8616,
+) -> DirectNearCallTargetBindingFailure8616 | None:
+    """Require the exact native terminal position and temporary in one view."""
+    if facts is None or facts.jumpkind != "Ijk_Call":
+        return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
+    if type(origin.statement_index) is not int or origin.statement_index != facts.statement_count:
+        return DirectNearCallTargetBindingFailure8616.TERMINAL_POSITION_MISMATCH
+    if not facts.next_is_rdtmp or facts.next_tmp != origin.block_next_tmp:
+        return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
+    return None
 
 
 def _native_terminal_identity_failure_8616(
     native: object, origin: IRInstructionOrigin8616,
 ) -> DirectNearCallTargetBindingFailure8616 | None:
-    """Require the exact native terminal position and temporary in one view."""
-    if not isinstance(native, pyvex.IRSB) or native.jumpkind != "Ijk_Call":
-        return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
-    if type(origin.statement_index) is not int or origin.statement_index != len(native.statements):
-        return DirectNearCallTargetBindingFailure8616.TERMINAL_POSITION_MISMATCH
-    if not isinstance(native.next, pyvex.expr.RdTmp) or native.next.tmp != origin.block_next_tmp:
-        return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
-    return None
+    """Run the identical terminal check on a freshly lifted IRSB."""
+    return _native_terminal_facts_failure_8616(
+        _detach_native_terminal_facts_8616(native), origin)
+
+
+def _terminal_fact_source_binding_8616(
+    project: angr.Project, addr: int, size: int, producers: tuple[object, ...],
+) -> NativeCensusSourceBinding8616 | None:
+    """Bind the exact lifted byte range through the shared source key.
+
+    The key re-reads live loader bytes and binds decode metadata, producer
+    and configuration identity on every revalidation, so changed bytes or
+    producers make a retained record unusable. Unsupported sources return
+    ``None`` and the caller follows the original lift path.
+    """
+    try:
+        code = bytes(project.loader.memory.load(addr, size))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    if len(code) != size:
+        return None
+    decoded = cast(
+        CapstoneBlockDecodeArtifact8616,
+        cast(Callable[[object, int, bytes], object], producers[0])(
+            project, addr, code))
+    block = decoded.block
+    if decoded.status is not CapstoneBlockDecodeStatus8616.COMPLETE or block is None:
+        return None
+    boundary = ExactFunctionRangeBoundary8616(
+        project=project, addr=addr, size=size,
+        block_addrs_set=frozenset({addr}),
+        reachable_instruction_addrs=frozenset(
+            cast(DirectCapstoneInstruction8616, instruction).address
+            for instruction in block.instructions),
+        successor_edges=(), blocks=(block,), info={})
+    keyed = _source_key_8616(project, boundary, producers)
+    if keyed is None or direct_evidence_deadline_expired_8616(project):
+        return None
+    return NativeCensusSourceBinding8616(project, boundary, keyed[0], keyed[1])
+
+
+def _lift_native_terminal_facts_8616(
+    project: angr.Project, block_addr: int, size: int,
+) -> _NativeTerminalFacts8616 | None:
+    """Lift once through the canonical producer and detach terminal facts."""
+    native = project.factory.block(
+        block_addr, size=size, opt_level=0, collect_data_refs=True
+    ).vex
+    return _detach_native_terminal_facts_8616(native)
+
+
+def _native_terminal_facts_for_8616(
+    project: angr.Project, block_addr: int, size: int,
+) -> _NativeTerminalFacts8616 | None:
+    """Return detached terminal facts under request-scoped source-key reuse.
+
+    Reuse only happens inside an active ``native_import_request_8616`` while
+    ``native_census_source_current_8616`` authenticates the exact byte range,
+    decoder evidence, producer/configuration identity and deadline against
+    CURRENT objects. Records live on the request session itself, so they are
+    released on outer exit and can never cross requests or projects. Facts
+    remain split per status-flag view; every result is a fact tuple, never a
+    cached verdict. The source authority is captured BEFORE the lift and
+    re-authenticated AFTER, so a source mutation during the canonical lift
+    is served to this caller but never retained for later requests.
+    """
+    store = native_terminal_fact_store_8616()
+    if store is None or direct_evidence_deadline_expired_8616(project):
+        return _lift_native_terminal_facts_8616(project, block_addr, size)
+    view = _flag_view_session_8616()
+    key = (id(project), block_addr, size, id(view) if view is not None else None)
+    producers = _terminal_fact_producers_8616()
+    entry = store.get(key)
+    record = entry if isinstance(entry, _NativeTerminalFactRecord8616) else None
+    if (record is not None and record.binding.project is project
+            and record.flag_session is view
+            and native_census_source_current_8616(
+                record.binding, producers=producers)):
+        return record.facts
+    binding = _terminal_fact_source_binding_8616(
+        project, block_addr, size, producers)
+    facts = _lift_native_terminal_facts_8616(project, block_addr, size)
+    if facts is None or binding is None:
+        return facts
+    if not native_census_source_current_8616(binding, producers=_terminal_fact_producers_8616()):
+        return facts
+    if key not in store and len(store) >= _NATIVE_TERMINAL_FACT_RECORD_LIMIT_8616:
+        store.pop(next(iter(store)))
+    store[key] = _NativeTerminalFactRecord8616(binding, view, facts)
+    return facts
 
 
 def _tmp_producers_8616(
@@ -1005,18 +1180,19 @@ def _control_operand_8616(
     return target
 
 
-def _origin_provenance_8616(
-    project: object,
+def _owned_origin_provenance_8616(
     block: IRBlock,
     instruction: IRInstr,
     target: IRValue,
     coordinates: DirectNearCallCoordinates8616,
 ) -> IRInstructionOrigin8616 | DirectNearCallTargetBinding8616:
-    """Prove retained block-``next`` origin provenance and native identity.
+    """Validate the retained origin's owned fields with no native callback.
 
-    The bounded native re-lift is a required premise of this binding: a
-    foreign control domain, truncated fetch window, or mismatched terminal
-    is refused rather than discharged as a selector-domain receipt.
+    The callback-free prefix of ``_origin_provenance_8616``: origin
+    presence, block-``next`` marking, block-address agreement, and the
+    ``block_next_tmp``/control-operand link. The native terminal re-lift
+    is deliberately not part of this helper — only callers owning a fresh
+    final-state pass may run it without one.
     """
     callsite_addr = coordinates.callsite_addr
     target_addr = coordinates.target_addr
@@ -1048,11 +1224,33 @@ def _origin_provenance_8616(
             DirectNearCallTargetBindingFailure8616.NEXT_TMP_MISMATCH,
             normalized=True,
         )
+    return origin
+
+
+def _origin_provenance_8616(
+    project: object,
+    block: IRBlock,
+    instruction: IRInstr,
+    target: IRValue,
+    coordinates: DirectNearCallCoordinates8616,
+) -> IRInstructionOrigin8616 | DirectNearCallTargetBinding8616:
+    """Prove retained block-``next`` origin provenance and native identity.
+
+    The bounded native re-lift is a required premise of this binding: a
+    foreign control domain, truncated fetch window, or mismatched terminal
+    is refused rather than discharged as a selector-domain receipt.
+    """
+    origin = _owned_origin_provenance_8616(block, instruction, target, coordinates)
+    if isinstance(origin, DirectNearCallTargetBinding8616):
+        return origin
     native_failure = _native_terminal_failure_8616(
-        project, block, origin, callsite_addr, coordinates.next_addr,
+        project, block, origin, coordinates.callsite_addr, coordinates.next_addr,
     )
     if native_failure is not None:
-        return _refuse_8616(callsite_addr, target_addr, native_failure, normalized=True)
+        return _refuse_8616(
+            coordinates.callsite_addr, coordinates.target_addr, native_failure,
+            normalized=True,
+        )
     return origin
 
 
@@ -1418,7 +1616,7 @@ class DirectNearCallTargetBindingPending8616:
 def _pending_source_graph_8616(block: IRBlock) -> str | None:
     """Capture complete owned source facts without loader or proof callbacks."""
     try:
-        return cast(str, canonical_source_graph_8616(block.addr, (block,)))
+        return canonical_source_graph_8616(block.addr, (block,))
     except SourceGraphSerializationError8616:
         return None
 

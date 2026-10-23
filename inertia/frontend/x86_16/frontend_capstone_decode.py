@@ -194,7 +194,7 @@ def _instruction_terminates_block_8616(instruction: object) -> tuple[bool, bool,
 
 
 def _scan_decoded_instructions_8616(
-    decoder: object,
+    decoder: _CapstoneDecoderBoundary8616,
     address: int,
     code: bytes,
     *,

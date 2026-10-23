@@ -7,10 +7,12 @@ or parallel clean-process execution without owning decompiler semantics.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
+
+import networkx as nx
 
 CLEAN_PROCESS_WORKER_CAP_8616: int = 4
 """Conservative aggregate-memory cap for isolated x86-16 workers.
@@ -137,3 +139,70 @@ def select_function_worker_policy_8616(
             ),
         ),
     )
+
+
+def dependency_ordered_function_work_8616[FunctionWorkItemT8616: _FunctionWorkItem8616](
+    items: Sequence[FunctionWorkItemT8616],
+    *,
+    caller_targets: Mapping[int, Sequence[int]] | None = None,
+) -> tuple[FunctionWorkItemT8616, ...]:
+    """Order known callees before callers without changing work/output identities.
+
+    Read only existing angr callsite metadata; unknown and ambiguous target
+    addresses supply no dependency. Recursive components retain stable index
+    order and do not imply that peer interfaces are already available. This is
+    execution ordering only, never authority for a call signature or effect.
+    """
+    graph = nx.DiGraph()
+    graph.add_nodes_from(range(len(items)))
+    by_address: dict[int, list[int]] = {}
+    for position, item in enumerate(items):
+        # Dynamic third-party angr Function boundary, including placeholders.
+        address = getattr(item.function, "addr", None)
+        if isinstance(address, int):
+            by_address.setdefault(address, []).append(position)
+    for caller, item in enumerate(items):
+        # Dynamic third-party Function boundary; native inventory hints are optional.
+        caller_address = getattr(item.function, "addr", None)
+        hints = (
+            caller_targets.get(caller_address, ())
+            if caller_targets is not None and isinstance(caller_address, int)
+            else ()
+        )
+        for address in (*_existing_direct_call_targets_8616(item.function), *hints):
+            candidates = by_address.get(address, ())
+            if len(candidates) == 1:
+                graph.add_edge(candidates[0], caller)
+    condensed = nx.condensation(graph)
+
+    def component_key(component: int) -> tuple[int, int]:
+        """Break independent component ties by stable output identity."""
+        return min((items[position].index, position)
+                   for position in condensed.nodes[component]["members"])
+
+    result: list[FunctionWorkItemT8616] = []
+    for component in nx.lexicographical_topological_sort(condensed, key=component_key):
+        positions = sorted(condensed.nodes[component]["members"],
+                           key=lambda position: (items[position].index, position))
+        result.extend(items[position] for position in positions)
+    return tuple(result)
+
+
+def _existing_direct_call_targets_8616(function: object) -> tuple[int, ...]:
+    """Read available third-party call metadata without discovery or guessing."""
+    # Dynamic third-party angr Function boundary: metadata methods are optional.
+    sites = getattr(function, "get_call_sites", None)
+    # Dynamic third-party angr Function boundary: targets may be unavailable.
+    target = getattr(function, "get_call_target", None)
+    if not callable(sites) or not callable(target):
+        return ()
+    callsites = sites()
+    if not isinstance(callsites, Iterable):
+        return ()
+    targets: list[int] = []
+    for callsite in callsites:
+        if isinstance(callsite, int):
+            address = target(callsite)
+            if isinstance(address, int):
+                targets.append(address)
+    return tuple(targets)

@@ -15,19 +15,19 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.lowering.type_array_matching import _rewrite_induction_loops_8616
 
-from inertia.validation.tail_validation import (
-    collect_x86_16_tail_validation_summary,
-    compare_x86_16_tail_validation_summaries,
-)
-from inertia.cli.cli_access_profiles import (
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.lowering.access_profiles import (
     AccessTraitEvidenceProfile,
     AccessTraitInductionVar,
     AccessTraitStrideEvidence,
     InductionSummary,
     infer_induction_variable,
+)
+from inertia.lowering.type_array_matching import _rewrite_induction_loops_8616
+from inertia.validation.tail_validation import (
+    collect_x86_16_tail_validation_summary,
+    compare_x86_16_tail_validation_summaries,
 )
 
 

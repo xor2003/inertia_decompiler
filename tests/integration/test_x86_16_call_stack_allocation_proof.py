@@ -26,7 +26,8 @@ def _write(register, source, address=0x1000, size=2):
 
 
 def _run(monkeypatch, *, code=PROBE, between=(), request=18, delta=0, marked_probe=True,
-         kind="direct_near"):
+         kind="direct_near", project_override: object | None = None,
+         function_override: object | None = None):
     def load(address, size):
         if address != TARGET:
             raise KeyError(address)
@@ -42,6 +43,8 @@ def _run(monkeypatch, *, code=PROBE, between=(), request=18, delta=0, marked_pro
             arch=project.arch, loader=SimpleNamespace(memory=SimpleNamespace(load=load)),
             _inertia_original_project=project, _inertia_original_linear_delta=delta,
         )
+    if project_override is not None:
+        project = project_override
     summary = CallsiteSummary8616(
         callsite_addr=0x1006, target_addr=0x2000,
         return_addr=0x100B if kind == "direct_far" else 0x1009,
@@ -57,7 +60,9 @@ def _run(monkeypatch, *, code=PROBE, between=(), request=18, delta=0, marked_pro
         IRInstr("CALL", None, (IRValue(MemSpace.CONST, const=TARGET - delta, size=2),), addr=0x1006),
     )),))
     effects, _outputs, _ssa = pipeline.build_semantic_function_ssa_8616(
-        project, SimpleNamespace(addr=0x1000), ir_artifact=artifact,
+        project,
+        SimpleNamespace(addr=0x1000) if function_override is None else function_override,
+        ir_artifact=artifact,
     )
     return effects.facts[-1]
 
@@ -122,9 +127,41 @@ def test_call_frame_must_match_binary_allocation_return_frame(monkeypatch, code,
 
 
 def test_ordinary_zero_argument_call_remains_complete(monkeypatch):
-    """A non-probe call with no allocation evidence keeps the balanced ABI."""
-    fact = _run(monkeypatch, code=b"\xc3", marked_probe=False, request=None)
+    """A real machine CALL and RET prove the balanced zero-argument ABI."""
+    import io
+
+    import angr
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+    from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401 - registers lifter
+    from inertia.frontend.x86_16.simos_86_16 import SimCC8616MSCsmall  # noqa: F401 - registers cc
+
+    blob = bytearray(b"\x00" * 0x1001)
+    blob[:3] = bytes.fromhex("b8 12 00")
+    blob[3:6] = b"\x90" * 3
+    blob[6:10] = bytes.fromhex("e8 f7 0f c3")
+    blob[0x1000] = 0xC3
+    arch = Arch86_16()
+    arch.bits = 32  # Loader-visible width, retaining the native 16-bit lifter.
+    project = angr.Project(
+        io.BytesIO(bytes(blob)),
+        main_opts={"backend": "blob", "arch": arch, "base_addr": 0x1000, "entry_point": 0x1000},
+    )
+    cfg = project.analyses.CFGFast(normalize=True)
+    fact = _run(
+        monkeypatch, code=b"\xc3", marked_probe=False, request=None,
+        project_override=project, function_override=cfg.kb.functions[0x1000],
+    )
 
     assert fact.effect.complete
     assert fact.effect.net_stack_delta == 0
     assert fact.failure is None
+
+
+def test_missing_caller_bytes_cannot_prove_balanced_stack_delta(monkeypatch):
+    """Callee bytes alone cannot establish the source CALL's stack frame."""
+    fact = _run(monkeypatch, code=b"\xc3", marked_probe=False, request=None)
+
+    assert fact.effect.stack_coordinates is not None
+    assert not fact.effect.stack_coordinates.has_proven_sp_delta
+    assert fact.effect.net_stack_delta is None

@@ -13,11 +13,12 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections.abc import MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
 from inertia.ir.core import IRFunctionArtifact
 from inertia.ir.declared_entry_pipeline import (
+    DeclaredEntryInput8616,
     DeclaredEntryPipeline8616,
     UnprovedDeclaredEntry8616,
     _retained_input_8616,
@@ -36,6 +37,7 @@ from inertia.ir.function_ssa_registry import (
     publish_function_ssa_artifact_8616,
     registered_function_ssa_artifact_8616,
 )
+from inertia.ir.near_call_entry_pipeline import NativeNearCallPipeline8616
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact, codegen_function_8616
 from inertia.pipeline.errors import PipelineHardError
@@ -44,6 +46,7 @@ from inertia.semantics.callsite_summary_program import (
 )
 
 from .call_outputs import CallOutputArtifact8616, materialize_call_outputs_8616
+from .call_register_roles import build_call_register_roles_8616
 from .call_return_segment import collect_return_segment_frames_8616
 from .call_stack_allocation import collect_call_stack_allocation_candidates_8616
 from .call_stack_effects import (
@@ -74,9 +77,13 @@ class _CodegenBoundary8616(Protocol):
     cfunc: _CFunctionBoundary8616 | None
     _inertia_vex_ir_artifact: IRFunctionArtifact
     _inertia_vex_ir_summary: dict[str, object]
+    _inertia_vex_ir_frame: object
+    _inertia_vex_ir_source_function_8616: object
     _inertia_vex_ir_function_ssa: SSAFunctionArtifact
     _inertia_vex_ir_function_ssa_stage_8616: FunctionSSAArtifactStage8616
     _inertia_raw_vex_ir_artifact_8616: IRFunctionArtifact
+    _inertia_raw_vex_ir_frame_8616: object
+    _inertia_raw_vex_ir_function_ssa_8616: SSAFunctionArtifact
     _inertia_call_stack_effect_artifact_8616: CallStackEffectArtifact8616
     _inertia_call_output_artifact_8616: CallOutputArtifact8616
     _inertia_call_semantic_projection_8616: CallSemanticProjection8616
@@ -102,6 +109,15 @@ class CallSemanticProjection8616:
             and self.effects.function.function_addr == function_addr
             and self.outputs.function.function_addr == function_addr
             and self.function_ssa.function_addr == function_addr
+            and (
+                self.outputs.register_roles is None
+                or (
+                    self.outputs.register_roles.function_addr == function_addr
+                    and self.outputs.register_roles.authenticates_output_facts(
+                        self.outputs.facts
+                    )
+                )
+            )
         )
         if not accounting or self.scoped_input is None:
             return accounting
@@ -185,6 +201,47 @@ def semantic_function_ssa_artifact_at_address_8616(
     )
 
 
+def _record_semantic_output_attestation_8616(
+    project: object,
+    outputs: CallOutputArtifact8616,
+    function_ssa: SSAFunctionArtifact | None = None,
+) -> None:
+    """Attest the derived semantic IR body to the generation it consumed.
+
+    ``outputs.function`` is produced in this run from an attested raw IR
+    artifact, so recording its build attestation here lets the semantic SSA
+    verify declared lineage instead of minting a copied revision.
+    """
+    function = outputs.function
+    if function.source_revision is None:
+        return
+    from inertia.ir.function_readiness_contracts import (
+        function_artifact_body_digest_8616,
+        record_function_build_attestation_8616,
+    )
+
+    digest = function_artifact_body_digest_8616(function)
+    if digest is not None:
+        record_function_build_attestation_8616(
+            project,
+            function.function_addr,
+            digest,
+            function.source_revision,
+            "call_semantics",
+        )
+    if function_ssa is not None:
+        ssa_digest = function_artifact_body_digest_8616(function_ssa)
+        if ssa_digest is not None:
+            record_function_build_attestation_8616(
+                project,
+                function.function_addr,
+                ssa_digest,
+                function.source_revision,
+                "call_semantics",
+                inputs=() if digest is None else (digest,),
+            )
+
+
 def _publish_resolved_semantic_8616(
     project: object,
     raw_ir: IRFunctionArtifact,
@@ -192,7 +249,15 @@ def _publish_resolved_semantic_8616(
     outputs: CallOutputArtifact8616,
     function_ssa: SSAFunctionArtifact,
 ) -> FunctionSSAArtifactResolution8616:
-    """Publish raw IR, semantic SSA, and the coherent projection together."""
+    """Publish raw IR, semantic SSA, and the coherent projection together.
+
+    The semantic SSA derives from ``raw_ir`` in this same build, so it carries
+    the IR artifact's builder-attested source generation forward rather than
+    minting a weaker publication-observed binding.
+    """
+    if function_ssa.source_revision is None and raw_ir.source_revision is not None:
+        function_ssa = replace(function_ssa, source_revision=raw_ir.source_revision)
+    _record_semantic_output_attestation_8616(project, outputs, function_ssa)
     ir_publication = publish_function_ir_artifact_8616(project, raw_ir)
     if ir_publication.verdict is not FunctionIRArtifactVerdict8616.PROVEN:
         return FunctionSSAArtifactResolution8616(
@@ -268,6 +333,14 @@ def build_semantic_function_ssa_8616(
             "call-output Semantics did not retain one typed outcome per CALL",
             layer="semantics",
         )
+    register_roles = build_call_register_roles_8616(
+        project,
+        function,
+        effects.function,
+        summaries,
+        outputs,
+    )
+    outputs = replace(outputs, register_roles=register_roles)
     return effects, outputs, build_x86_16_function_ssa(outputs.function)
 
 
@@ -296,6 +369,219 @@ def _proven_source_ir_8616(
     return cfunc, raw_ir, source_ir
 
 
+@dataclass(frozen=True, slots=True)
+class _NativeAttachmentSeal8616:
+    """Codegen Semantics attachment identities sealed around one proof run.
+
+    Identity-only snapshot: the proof evaluation is callback-bearing, so a
+    reuse is admissible only while every attached artifact this pass
+    previously produced — plus the consumed raw source — is still the
+    identical object. A removed slot records ``source_present=False`` only
+    for the optional raw-source attribute; every other slot must exist.
+    """
+
+    projection: CallSemanticProjection8616
+    output_ir: IRFunctionArtifact
+    summary: dict[str, object]
+    function_ssa: SSAFunctionArtifact
+    stage: FunctionSSAArtifactStage8616
+    effects: CallStackEffectArtifact8616
+    outputs: CallOutputArtifact8616
+    frame: object
+    source_function: object
+    raw_frame: object
+    raw_function_ssa: SSAFunctionArtifact
+    source_present: bool
+    source: IRFunctionArtifact | None
+
+
+def _capture_native_attachment_seal_8616(
+    boundary: _CodegenBoundary8616,
+) -> _NativeAttachmentSeal8616:
+    """Snapshot the Semantics attachments currently exposed on the codegen."""
+    try:
+        source: IRFunctionArtifact | None = boundary._inertia_raw_vex_ir_artifact_8616
+        source_present = True
+    except AttributeError:
+        source, source_present = None, False
+    return _NativeAttachmentSeal8616(
+        boundary._inertia_call_semantic_projection_8616,
+        boundary._inertia_vex_ir_artifact,
+        boundary._inertia_vex_ir_summary,
+        boundary._inertia_vex_ir_function_ssa,
+        boundary._inertia_vex_ir_function_ssa_stage_8616,
+        boundary._inertia_call_stack_effect_artifact_8616,
+        boundary._inertia_call_output_artifact_8616,
+        boundary._inertia_vex_ir_frame,
+        boundary._inertia_vex_ir_source_function_8616,
+        boundary._inertia_raw_vex_ir_frame_8616,
+        boundary._inertia_raw_vex_ir_function_ssa_8616,
+        source_present,
+        source,
+    )
+
+
+def _native_attachment_seal_current_8616(
+    boundary: _CodegenBoundary8616, seal: _NativeAttachmentSeal8616,
+) -> bool:
+    """Reverify the sealed attachment identities after the proof ran."""
+    try:
+        current = _capture_native_attachment_seal_8616(boundary)
+    except AttributeError:
+        return False
+    if (current.projection is not seal.projection
+            or current.output_ir is not seal.output_ir
+            or current.summary is not seal.summary
+            or current.function_ssa is not seal.function_ssa
+            or current.stage is not seal.stage):
+        return False
+    if (current.effects is not seal.effects
+            or current.outputs is not seal.outputs
+            or current.frame is not seal.frame
+            or current.source_function is not seal.source_function
+            or current.raw_frame is not seal.raw_frame):
+        return False
+    if (current.raw_function_ssa is not seal.raw_function_ssa
+            or current.source_present != seal.source_present):
+        return False
+    return not seal.source_present or current.source is seal.source
+
+
+def _native_retained_entry_current_8616(
+    boundary: _CodegenBoundary8616,
+    entry: NativeNearCallPipeline8616,
+    project: object,
+) -> bool:
+    """Revalidate the constructor's native retained-entry and source chain.
+
+    Mirrors the installed-source, scope/view/bundle and retained-identity
+    checks ``scoped_call_semantic_input_8616`` performs before and after its
+    own consumption, so a reused projection is admitted only while the
+    identical native premise remains installed.
+    """
+    return (
+        _retained_input_8616(boundary) is entry
+        and entry.scope.artifact is entry.bundle.artifact
+        and entry.view.near_call_scope is entry.scope
+        and entry._source_current(project)
+    )
+
+
+def _scoped_reuse_context_current_8616(
+    boundary: _CodegenBoundary8616,
+    entry: DeclaredEntryInput8616 | None,
+    scoped: ScopedCallSemanticInput8616,
+    source_ir: IRFunctionArtifact,
+    *,
+    project: object,
+    function: object,
+) -> bool:
+    """Check the admitted entry type and the recorded consuming context.
+
+    Reuse admits exactly the entry types ``scoped_call_semantic_input_8616``
+    can consume — ``DeclaredEntryPipeline8616`` and
+    ``NativeNearCallPipeline8616`` — and only while every recorded
+    project/function/source and the entry scope/view/bundle identities are
+    unchanged. A native entry additionally keeps the constructor's
+    installed-source chain before any proof evaluation runs.
+    """
+    if (entry is None
+            or (type(entry) is not DeclaredEntryPipeline8616
+                and type(entry) is not NativeNearCallPipeline8616)):
+        return False
+    if (scoped.project is not project
+            or scoped.function is not function or scoped.source_ir is not source_ir):
+        return False
+    if (entry.bundle.artifact is not source_ir
+            or scoped.scope is not entry.scope or scoped.view is not entry.view):
+        return False
+    return (type(entry) is not NativeNearCallPipeline8616
+            or _native_retained_entry_current_8616(boundary, entry, project))
+
+
+def _raw_reatach_current_8616(
+    boundary: _CodegenBoundary8616,
+    raw_ir: IRFunctionArtifact,
+    source_ir: IRFunctionArtifact,
+    function_ssa: SSAFunctionArtifact,
+    function: object,
+) -> bool:
+    """Check current codegen attachments are the exact retained raw bundle.
+
+    The raw IR pass reattaches the identical bundle surface for scoped
+    entries: the raw artifact, the function it was lifted from, and the raw
+    SSA. Any other attachment state means the retained projection cannot be
+    restored and the ordinary constructor path must rebuild.
+    """
+    try:
+        raw_source = boundary._inertia_raw_vex_ir_artifact_8616
+        source_function = boundary._inertia_vex_ir_source_function_8616
+        raw_function_ssa = boundary._inertia_raw_vex_ir_function_ssa_8616
+    except AttributeError:
+        return False
+    return (
+        raw_ir is source_ir
+        and raw_source is source_ir
+        and source_function is function
+        and function_ssa is raw_function_ssa
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RetainedSemanticsAdmission8616:
+    """Pre-proof admission for one retained Semantics projection.
+
+    ``restore`` marks the raw-reattached context: the identical retained
+    projection is still authoritative and must be reattached through the
+    existing owner after fresh authentication — never republished or
+    reconstructed.
+    """
+
+    entry: DeclaredEntryInput8616 | None
+    seal: _NativeAttachmentSeal8616 | None
+    restore: bool
+
+
+def _admit_retained_projection_8616(
+    boundary: _CodegenBoundary8616,
+    entry: DeclaredEntryInput8616 | None,
+    projection: CallSemanticProjection8616,
+    source_ir: IRFunctionArtifact,
+    raw_ir: IRFunctionArtifact,
+    function_ssa: SSAFunctionArtifact,
+    *,
+    project: object,
+    function: object,
+) -> _RetainedSemanticsAdmission8616 | None:
+    """Admit reuse in the identical context or the exact raw-reatached one.
+
+    A current raw-bundle surface may restore only the retained native
+    conditional projection: declared and unscoped projections keep the
+    ordinary constructor path on any attachment drift.
+    """
+    scoped = projection.scoped_input
+    restore = not projection.matches_codegen(raw_ir, function_ssa)
+    if restore and not _raw_reatach_current_8616(
+        boundary, raw_ir, source_ir, function_ssa, function,
+    ):
+        return None
+    if scoped is None:
+        if entry is not None or source_ir.refusals or restore:
+            return None
+        return _RetainedSemanticsAdmission8616(entry, None, False)
+    if not _scoped_reuse_context_current_8616(
+        boundary, entry, scoped, source_ir, project=project, function=function,
+    ):
+        return None
+    if type(entry) is not NativeNearCallPipeline8616:
+        return None if restore else _RetainedSemanticsAdmission8616(entry, None, False)
+    try:
+        seal = _capture_native_attachment_seal_8616(boundary)
+    except AttributeError:
+        return None
+    return _RetainedSemanticsAdmission8616(entry, seal, restore)
+
+
 def _reusable_projection_8616(
     boundary: _CodegenBoundary8616,
     source_ir: IRFunctionArtifact,
@@ -309,32 +595,48 @@ def _reusable_projection_8616(
         existing_ssa = boundary._inertia_vex_ir_function_ssa
     except AttributeError:
         existing_projection = None
-    if (
+    if not (
         isinstance(existing_projection, CallSemanticProjection8616)
         and existing_projection.source_ir is source_ir
         and existing_stage is FunctionSSAArtifactStage8616.SEMANTIC
-        and existing_projection.matches_codegen(raw_ir, existing_ssa)
     ):
-        entry = _retained_input_8616(boundary)
-        scoped = existing_projection.scoped_input
-        if scoped is None:
-            if entry is not None or source_ir.refusals:
-                return False
-        else:
-            if (entry is None or type(entry) is not DeclaredEntryPipeline8616
-                    or scoped.project is not project
-                    or scoped.function is not function or scoped.source_ir is not source_ir):
-                return False
-            if (entry.bundle.artifact is not source_ir
-                    or scoped.scope is not entry.scope or scoped.view is not entry.view):
-                return False
-        if not existing_projection.complete:
-            raise PipelineHardError(
-                "cached call Semantics projection has incomplete evidence accounting",
-                layer="semantics",
-            )
-        return True
-    return False
+        return False
+    admission = _admit_retained_projection_8616(
+        boundary,
+        _retained_input_8616(boundary),
+        existing_projection,
+        source_ir,
+        raw_ir,
+        existing_ssa,
+        project=project,
+        function=function,
+    )
+    if admission is None:
+        return False
+    if not existing_projection.complete:
+        raise PipelineHardError(
+            "cached call Semantics projection has incomplete evidence accounting",
+            layer="semantics",
+        )
+    entry = admission.entry
+    if type(entry) is NativeNearCallPipeline8616 and (
+        admission.seal is None
+        or not _native_retained_entry_current_8616(boundary, entry, project)
+        or not _native_attachment_seal_current_8616(boundary, admission.seal)
+    ):
+        raise PipelineHardError(
+            "native call Semantics premise changed during reauthentication",
+            layer="semantics",
+        )
+    if admission.restore:
+        _attach_semantic_artifacts_8616(boundary, existing_projection)
+        _record_function_info_8616(
+            function,
+            existing_projection.outputs,
+            existing_projection.effects,
+            existing_projection.function_ssa,
+        )
+    return True
 
 
 def _published_function_ssa_8616(
@@ -346,6 +648,12 @@ def _published_function_ssa_8616(
     """Publish the SSA artifact to the project registry when unrefused."""
     if outputs.function.refusals:
         return function_ssa
+    if (
+        function_ssa.source_revision is None
+        and outputs.function.source_revision is not None
+    ):
+        function_ssa = replace(function_ssa, source_revision=outputs.function.source_revision)
+    _record_semantic_output_attestation_8616(project, outputs, function_ssa)
     publication = publish_function_ssa_artifact_8616(
         project,
         function_ssa,

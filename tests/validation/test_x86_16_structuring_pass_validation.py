@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from angr.analyses.decompiler.structured_codegen.c import CStatements, CWhileLoop
 
 import inertia.lowering.real_mode_linear as real_mode_linear
 import inertia.lowering.segment_global_materialization as segment_global_materialization
@@ -29,6 +31,61 @@ from inertia.validation.tail_validation import (
     X86_16TailValidationSummary,
     loop_exit_return_guard_repair_delta_8616,
 )
+
+
+def test_loop_free_canonical_pass_needs_no_validation_baseline(monkeypatch):
+    """A proven inapplicable pass executes neither a transform nor its proof."""
+    codegen = SimpleNamespace(next_ident=lambda name: name, next_node_idx=iter(range(10)).__next__)
+    codegen.cfunc = SimpleNamespace(statements=CStatements([], codegen=codegen))
+    project = SimpleNamespace()
+    spec = next(
+        spec for spec in stage.DECOMPILER_STRUCTURING_PASSES
+        if spec.name == "_canonical_for_loop_recovery_8616"
+    )
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("loop-free pass constructed validation or executed its body")
+
+    monkeypatch.setattr(stage, "_maybe_validate_structuring_pass_8616", unexpected)
+    run = stage._StructuringCodegenRun8616(project, codegen, 0x4010, ())
+    assert not run._run_pass_body(replace(spec, func=unexpected))
+    stats = codegen._inertia_canonical_for_loop_recovery_stats_8616
+    assert stats.raw_fact_count == stats.materialized_count == stats.failure_count == 0
+
+
+@pytest.mark.parametrize("with_loop,force_all", [(True, False), (False, False), (False, True)])
+def test_applicable_and_default_passes_keep_validation(monkeypatch, with_loop, force_all):
+    """Real loop candidates and arbitrary passes keep before/body/after ordering."""
+    events = []
+    codegen = SimpleNamespace(next_ident=lambda name: name, next_node_idx=iter(range(10)).__next__)
+    root = CStatements([], codegen=codegen)
+    if with_loop:
+        root.statements.append(CWhileLoop(None, CStatements([], codegen=codegen), codegen=codegen))
+    codegen.cfunc = SimpleNamespace(statements=root)
+    project = SimpleNamespace()
+    if force_all:
+        monkeypatch.setenv("INERTIA_VALIDATE_ALL_STRUCTURING_PASSES", "1")
+
+    def body(_codegen):
+        events.append("body")
+        return True
+
+    def baseline(*_args):
+        events.append("before")
+        return lambda changed: events.append(("after", changed))
+
+    if with_loop or force_all:
+        spec = next(
+            spec for spec in stage.DECOMPILER_STRUCTURING_PASSES
+            if spec.name == "_canonical_for_loop_recovery_8616"
+        )
+        spec = replace(spec, func=body)
+    else:
+        spec = stage.DecompilerStructuringPassSpec("ordinary", body, False)
+    monkeypatch.setattr(stage, "_maybe_validate_structuring_pass_8616", baseline)
+    run = stage._StructuringCodegenRun8616(project, codegen, 0x4010, ())
+    assert run._run_pass_body(spec)
+    assert events == ["before", "body", ("after", True)]
 
 
 def _recorded_stub_8616(
@@ -258,7 +315,7 @@ def test_structuring_unresolved_exit_goto_owner_records_pass(monkeypatch):
 def test_structuring_stable_stack_semantics_owner_records_pass(monkeypatch):
     calls: list[str] = []
     project = SimpleNamespace()
-    codegen = SimpleNamespace(_inertia_semantic_stack_materialized_count=0)
+    codegen = SimpleNamespace(cfunc=None, _inertia_semantic_stack_materialized_count=0)
 
     def _transfer(_project, _codegen):
         calls.append("transfer")
@@ -330,7 +387,7 @@ def test_structuring_stable_stack_semantics_owner_records_pass(monkeypatch):
 def test_structuring_stable_stack_semantics_prefers_memory_ssa_lowering(monkeypatch):
     calls: list[str] = []
     project = SimpleNamespace()
-    codegen = SimpleNamespace(_inertia_semantic_stack_materialized_count=0)
+    codegen = SimpleNamespace(cfunc=None, _inertia_semantic_stack_materialized_count=0)
 
     monkeypatch.setattr(
         stage._vex_ir,
@@ -649,7 +706,7 @@ def test_final_structuring_callsite_closure_replays_published_inventory(monkeypa
 def test_structuring_callsite_stack_arguments_owner_records_pass(monkeypatch):
     calls: list[str] = []
     project = SimpleNamespace()
-    codegen = SimpleNamespace()
+    codegen = SimpleNamespace(cfunc=None)
 
     def stack_args(_project, _codegen):
         assert _project is project
@@ -1929,6 +1986,12 @@ def test_structuring_direct_stack_materialization_records_owner_run_flag(monkeyp
     codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x4010))
     function = object()
 
+    def transfer_conditions(owner, address, target):
+        assert owner is project and address == 0x4010 and target is codegen
+        calls.append("conditions")
+
+    monkeypatch.setattr(stage, "transfer_typed_conditions_to_codegen_8616", transfer_conditions)
+
     def stack_mov(_codegen, *, project=None, function=None, allow_stack_slot_fallback=True, source_kinds=None):
         del project, function, allow_stack_slot_fallback, source_kinds
         calls.append("mov")
@@ -1970,6 +2033,7 @@ def test_structuring_direct_stack_materialization_records_owner_run_flag(monkeyp
 
     assert stage._apply_structuring_direct_stack_materialization_8616(project, codegen) is True
     assert calls == [
+        "conditions",
         "callee_saved",
         "mov",
         "incdec",
@@ -1987,6 +2051,12 @@ def test_structuring_direct_stack_materialization_does_not_repeat_callback_owner
     project = SimpleNamespace()
     codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x4010))
     function = object()
+
+    def transfer_conditions(owner, address, target):
+        assert owner is project and address == 0x4010 and target is codegen
+        calls.append("conditions")
+
+    monkeypatch.setattr(stage, "transfer_typed_conditions_to_codegen_8616", transfer_conditions)
 
     def stack_mov(_codegen, **_kwargs):
         calls.append("mov")
@@ -2010,6 +2080,7 @@ def test_structuring_direct_stack_materialization_does_not_repeat_callback_owner
 
     assert stage._apply_structuring_direct_stack_materialization_8616(project, codegen) is True
     assert calls == [
+        "conditions",
         "callee_saved",
         "mov",
         "branch",

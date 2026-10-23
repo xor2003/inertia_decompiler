@@ -15,7 +15,11 @@ from tools.dosunit.tests.test_macro_step_proof import CANDIDATE32, ORACLE32
 
 @pytest.mark.parametrize("driver", ["msc8", "bc5"])
 def test_unequal_step_retry_proves_with_retained_attempts(driver: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Production retry reaches macro proof without mutable adapter installation."""
+    """Exercise the macro fallback even when an earlier engine now proves it."""
+    monkeypatch.setattr(
+        "tools.dosunit.compare.flat32_proof_retry._retry_call_loop",
+        lambda *args, **kwargs: {"status": "refused", "reason": "test_require_macro_lane"},
+    )
     obase, cbase = 0x12345000, 0x23456000
     with _driver_lane(driver) as lane:
         def forbidden(*args: object, **kwargs: object) -> None:
@@ -33,7 +37,8 @@ def test_unequal_step_retry_proves_with_retained_attempts(driver: str, monkeypat
         assert result["status"] is lane.verdict.Status.PASSED
         assert result["proof_method"] == "closed_macro_step_induction"
         assert result["proof_scope"] is ProofScope.CUTPOINT_SIMULATION
-        assert set(result["additional_proof_attempts"]) == {"calls", "reblocked_cfg", "macro_step"}
+        assert set(result["additional_proof_attempts"]) == {"calls", "reblocked_cfg", "call_loop", "macro_step"}
+        assert result["additional_proof_attempts"]["call_loop"]["status"] == "refused"
 
 
 def _unused_context() -> ProofContext:
@@ -53,7 +58,7 @@ def test_return_flag_mutation_cannot_be_promoted_by_retry(driver: str) -> None:
         result = retry_function_proof(
             "loop", {"status": lane.verdict.Status.REFUSED, "reason": "cfg_not_bijective"},
             (oracle, candidate, {"loop": (obase, len(ORACLE32))}, {"loop": (cbase, len(changed))}),
-            lane.adapter.OUTPUT_REGS, 15000,
+            (*lane.adapter.OUTPUT_REGS, "cc_op", "cc_dep1", "cc_dep2", "cc_ndep"), 15000,
         )
         assert result["status"] is not lane.verdict.Status.PASSED
 
@@ -86,7 +91,9 @@ def test_actual_pe_images_prove_through_automatic_retry(driver: str, tmp_path: P
             lane.adapter.OUTPUT_REGS, 15000,
         )
         assert result["status"] is lane.verdict.Status.PASSED
-        assert result["proof_method"] == "closed_macro_step_induction"
+        assert result["proof_method"] in {"closed_macro_step_induction", "closed_call_loop_induction"}
+        assert result["environment_coverage"]["oracle"]
+        assert result["environment_coverage"]["candidate"]
         assert result["proof_scope"] is ProofScope.CUTPOINT_SIMULATION
 
 
@@ -217,3 +224,23 @@ def test_call_retry_environment_coverage_includes_unselected_callee(driver: str)
             addresses = {int(part["entry"]["linear"], 0) for part in coverage[side]}
             assert addresses == {0x1000, 0x1005, 0x1006}
         assert checked_cfg_environment_verdict(result, original, context)["status"] == "passed"
+
+
+@pytest.mark.parametrize("driver", ["msc8", "bc5"])
+@pytest.mark.parametrize("changed", [False, True])
+def test_macro_internal_loop_cut_preserves_hoisted_entry_load(driver: str, changed: bool) -> None:
+    """Entry paths join an internal loop cut; the early exit remains observed."""
+    from tools.dosunit.compare.flat32_macro_proof import compare_macro_cfg
+
+    original = bytes.fromhex("85c97409be010000004975fdc3be01000000c3")
+    candidate = bytes.fromhex("be" + ("02000000" if changed else "01000000") + "85c974034975fdc3")
+    obase, cbase = 0x12345000, 0x23456000
+    projects = (angr.load_shellcode(original, arch="x86", load_address=obase),
+                angr.load_shellcode(candidate, arch="x86", load_address=cbase))
+    with _driver_lane(driver) as lane:
+        result = compare_macro_cfg(projects, (obase, len(original)), (cbase, len(candidate)),
+                                   lane.adapter.OUTPUT_REGS, 10000)
+    assert (result["status"] == "passed") is (not changed), result
+    if not changed:
+        attempt = next(a for a in result["macro"]["attempts"] if a["status"] == "proved")
+        assert len(attempt["coverage"]) == 4

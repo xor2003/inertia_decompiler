@@ -12,11 +12,17 @@ import sys
 from collections.abc import Iterable
 from typing import Protocol, cast
 
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
+from inertia.ir.function_readiness_contracts import (
+    FunctionSourceScope8616,
+    observed_function_source_revision_8616,
+)
+
 from .cache import _cache_runtime_environment, _cache_source_digest
 from .cache_runtime_contract import cache_runtime_contract_8616
 from .cache_source_manifest import FUNCTION_IR_SSA_CACHE_SOURCE_FILES
 
-_FUNCTION_IR_SSA_CACHE_SCHEMA_8616: int = 2
+_FUNCTION_IR_SSA_CACHE_SCHEMA_8616: int = 3
 
 
 class _MemorySurface8616(Protocol):
@@ -107,7 +113,7 @@ def _block_byte_identities_8616(
 
 
 def _block_edge_identities_8616(
-    raw_edges: tuple[object, ...],
+    raw_edges: tuple[tuple[object, object], ...],
     nodes: dict[int, tuple[int, str]],
 ) -> set[tuple[int, int]]:
     """Return exact CFG edges whose endpoints both materialized blocks."""
@@ -124,6 +130,34 @@ def _block_edge_identities_8616(
     return edges
 
 
+def _function_block_identities_8616(
+    project: object,
+    function: object,
+) -> tuple[dict[int, tuple[int, str]], set[tuple[int, int]]] | None:
+    """Read exact native range inventory or the existing graph-backed identity."""
+    if isinstance(function, ExactFunctionRangeBoundary8616):
+        revision = observed_function_source_revision_8616(
+            project, function.addr, boundary=function,
+        )
+        if revision is None:
+            return None
+        return (
+            {block.addr: (block.size, block.sha256) for block in revision.blocks},
+            set(revision.edges),
+        )
+    surface = cast(_FunctionSurface8616, function)
+    try:
+        expected = tuple(sorted(surface.block_addrs_set))
+        raw_nodes = tuple(surface.graph.nodes)
+        raw_edges = tuple(surface.graph.edges)
+    except (AttributeError, TypeError):
+        return None
+    nodes = _block_byte_identities_8616(cast(_ProjectSurface8616, project), raw_nodes, expected)
+    if nodes is None:
+        return None
+    return nodes, _block_edge_identities_8616(raw_edges, nodes)
+
+
 def function_ir_ssa_cache_key_8616(
     project: object,
     function: object,
@@ -135,17 +169,10 @@ def function_ir_ssa_cache_key_8616(
     if function_addr < 0:
         return None
     project_surface = cast(_ProjectSurface8616, project)
-    function_surface = cast(_FunctionSurface8616, function)
-    try:
-        expected_addrs = tuple(sorted(function_surface.block_addrs_set))
-        raw_nodes = tuple(function_surface.graph.nodes)
-        raw_edges = tuple(function_surface.graph.edges)
-    except (AttributeError, TypeError):
+    identities = _function_block_identities_8616(project, function)
+    if identities is None:
         return None
-    nodes = _block_byte_identities_8616(project_surface, raw_nodes, expected_addrs)
-    if nodes is None:
-        return None
-    edges = _block_edge_identities_8616(raw_edges, nodes)
+    nodes, edges = identities
     try:
         arch = project_surface.arch
         arch_identity = {
@@ -158,6 +185,11 @@ def function_ir_ssa_cache_key_8616(
     return {
         "schema": _FUNCTION_IR_SSA_CACHE_SCHEMA_8616,
         "function_addr": function_addr,
+        "source_scope": (
+            {"kind": FunctionSourceScope8616.EXACT_RANGE.value, "end": function.addr + function.size}
+            if isinstance(function, ExactFunctionRangeBoundary8616)
+            else {"kind": FunctionSourceScope8616.CURRENT_FUNCTION.value}
+        ),
         "blocks": [
             {"addr": addr, "size": nodes[addr][0], "sha256": nodes[addr][1]}
             for addr in sorted(nodes)

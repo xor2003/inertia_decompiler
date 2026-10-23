@@ -130,6 +130,33 @@ def _abi_terms_equal(
     return equal
 
 
+def _merge_common_store(
+    condition: dict[str, Any], left: dict[str, Any], right: dict[str, Any],
+    eq_cache: dict[tuple[int, int], bool], compose_stats: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Factor equal-address stores over identical memory, keeping both values.
+
+    Exact structural equality is sufficient even for aliased symbolic addresses.
+    Different arrays, endian operators or stored widths keep the original ITE.
+    """
+    if left.get("op") not in {"storele", "storebe"} or left.get("op") != right.get("op"):
+        return None
+    if left.get("width") != 0 or right.get("width") != 0:
+        return None
+    a, b = left.get("args"), right.get("args")
+    if not isinstance(a, list) or not isinstance(b, list) or len(a) != 3 or len(b) != 3:
+        return None
+    if not all(isinstance(arg, dict) for arg in (*a, *b)):
+        return None
+    width = a[2].get("width")
+    if type(width) is not int or width <= 0 or width % 8 or width != b[2].get("width"):
+        return None
+    if not all(_abi_terms_equal(a[i], b[i], eq_cache, compose_stats=compose_stats) for i in (0, 1)):
+        return None
+    value = {"op": "ite", "width": width, "args": [condition, a[2], b[2]]}
+    return {**left, "args": [a[0], a[1], value]}
+
+
 def merge_states(
     condition: dict[str, Any],
     true_state: dict[str, dict[str, Any]],
@@ -168,7 +195,10 @@ def merge_states(
         if equal:
             merged[key] = left
             continue
-        merged[key] = {"op": "ite", "width": _term_width(left), "args": [condition, left, right]}
+        factored = _merge_common_store(condition, left, right,
+                                       eq_cache if eq_cache is not None else {}, compose_stats)
+        merged[key] = (factored if factored is not None else
+                       {"op": "ite", "width": _term_width(left), "args": [condition, left, right]})
     return merged
 
 
@@ -202,6 +232,61 @@ def _inline_ssa_json_term(
             if isinstance(arg, dict)
         ]
     return copied
+
+
+_ADD_BALANCE_VISITS = 511
+
+
+def _same_width_add(term: dict[str, Any], width: int) -> bool:
+    """Recognize pure binary modular addition without erasing metadata."""
+    if set(term) != {"op", "width", "args"}:
+        return False
+    args = term["args"]
+    return (term["op"] == "add" and term["width"] == width
+            and isinstance(args, list) and len(args) == 2
+            and all(isinstance(arg, dict) and arg.get("width") == width for arg in args))
+
+
+def _balance_add(term: dict[str, Any]) -> dict[str, Any]:
+    """Reassociate bounded modular sums, preserving every ordered leaf.
+
+    No constant is evaluated: later relocation normalization therefore retains
+    its original meaning. Mixed-width additions remain atomic. The visit cap
+    also bounds repeated shared diamonds and malformed cycles. Existing pairs
+    are reused so successive loop increments retain shared subtrees.
+    """
+    width = term.get("width")
+    if width not in (8, 16, 32, 64) or not _same_width_add(term, width):
+        return term
+    pending = [term]
+    leaves: list[dict[str, Any]] = []
+    pairs: dict[tuple[int, int], dict[str, Any]] = {}
+    for _ in range(_ADD_BALANCE_VISITS):
+        if not pending:
+            break
+        node = pending.pop()
+        if _same_width_add(node, width):
+            left, right = node["args"]
+            pairs[(id(left), id(right))] = node
+            pending.extend((right, left))
+        else:
+            leaves.append(node)
+    if pending or len(leaves) < 3:
+        return term
+    while len(leaves) > 1:
+        level: list[dict[str, Any]] = []
+        for index in range(0, len(leaves) - 1, 2):
+            left, right = leaves[index:index + 2]
+            key = (id(left), id(right))
+            pair = pairs.get(key)
+            if pair is None:
+                pair = {"op": "add", "width": width, "args": [left, right]}
+                pairs[key] = pair
+            level.append(pair)
+        if len(leaves) % 2:
+            level.append(leaves[-1])
+        leaves = level
+    return leaves[0]
 
 
 def substitute_inputs(
@@ -240,5 +325,7 @@ def substitute_inputs(
         copied["args"] = [
             substitute_inputs(arg, state, cache=cache) for arg in term["args"] if isinstance(arg, dict)
         ]
-    return copied
+    result = _balance_add(copied)
+    cache[key] = result
+    return result
 

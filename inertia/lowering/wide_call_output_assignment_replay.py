@@ -38,7 +38,9 @@ from .wide_call_output_assignment_ast import (
 from .wide_call_output_assignment_contracts import (
     WideCallOutputAssignmentArtifact8616,
     WideCallOutputAssignmentFact8616,
+    WideCallOutputAssignmentResolution8616,
     WideCallOutputAssignmentVerdict8616,
+    wide_call_output_pair_authenticated_8616,
 )
 
 _EVIDENCE_TAG_8616 = "inertia_x86_16_wide_call_output_assignment"
@@ -61,6 +63,7 @@ class WideCallOutputReplayFailure8616(StrEnum):
     CANONICAL_CALL_AMBIGUOUS = "canonical_call_ambiguous"
     DUPLICATE_EFFECT_AMBIGUOUS = "duplicate_effect_ambiguous"
     DUPLICATE_PROVENANCE_MIXED = "duplicate_provenance_mixed"
+    PAIR_LEGALITY_UNPROVEN = "pair_legality_unproven"
     SUMMARY_MISSING = "summary_missing"
     TARGET_CONFLICT = "target_conflict"
     UNOWNED_CALL_OCCURRENCE = "unowned_call_occurrence"
@@ -185,13 +188,16 @@ def classify_authoritative_wide_call_output_projection_8616(
         and resolution.fact.call_output.target_addr in targets
         and replace(resolution.fact, call_output=replace(
             resolution.fact.call_output, target_addr=expected.call_output.target_addr,
-        )) == expected
+        ), pair=None) == expected
     )
     if not matches:
         status = WideCallOutputAuthoritativeOwnershipStatus8616.FACT_ABSENT
     elif len(matches) != 1:
         status = WideCallOutputAuthoritativeOwnershipStatus8616.AMBIGUOUS
-    elif matches[0].verdict is WideCallOutputAssignmentVerdict8616.MATERIALIZED:
+    elif (
+        matches[0].verdict is WideCallOutputAssignmentVerdict8616.MATERIALIZED
+        and _authenticated_materialized_8616(matches[0], project)
+    ):
         status = WideCallOutputAuthoritativeOwnershipStatus8616.MATERIALIZED
     else:
         status = WideCallOutputAuthoritativeOwnershipStatus8616.REFUSED
@@ -261,6 +267,57 @@ def _duplicate_summary_failure_8616(
     return None
 
 
+def _fact_combine_authorized_8616(fact: WideCallOutputAssignmentFact8616) -> bool:
+    """Return whether the fact's retained pair still authorizes this combine."""
+    pair = fact.pair
+    return (
+        pair is not None
+        and pair.combine_authorized
+        and fact.kind is pair.kind
+    )
+
+
+def _authenticated_materialized_8616(
+    resolution: WideCallOutputAssignmentResolution8616,
+    project: object,
+) -> bool:
+    """Authenticate a matched fact's retained pair against its owned source."""
+    fact = resolution.fact
+    source = resolution.source
+    if fact is None or not wide_call_output_pair_authenticated_8616(source, fact):
+        return False
+    call_output = source.value.lhs_call_output
+    if call_output is None:
+        return False
+    provenance = call_output.provenance
+    if (
+        fact.call_output.callsite_addr != provenance.callsite_addr
+        or fact.call_output.shape is not provenance.shape
+    ):
+        return False
+    return fact.call_output.target_addr in _call_target_variants_8616(
+        provenance.target_addr, project
+    )
+
+
+def _duplicate_owner_failure_8616(
+    owner: WideCallOutputCallSite8616,
+    required: frozenset[int],
+) -> WideCallOutputReplayFailure8616 | None:
+    """Return the typed reason one duplicate statement may not be pruned."""
+    statement_calls = tuple(
+        node
+        for node in _iter_c_nodes_deep_8616(owner.statement)
+        if isinstance(node, CFunctionCall)
+    )
+    if len(statement_calls) != 1:
+        return WideCallOutputReplayFailure8616.DUPLICATE_EFFECT_AMBIGUOUS
+    addresses = c_node_instruction_addrs_8616(owner.statement)
+    if not addresses or not addresses <= required:
+        return WideCallOutputReplayFailure8616.DUPLICATE_PROVENANCE_MIXED
+    return None
+
+
 def reconcile_materialized_wide_call_output_assignment_8616(
     codegen: object,
     root: object,
@@ -270,6 +327,10 @@ def reconcile_materialized_wide_call_output_assignment_8616(
     canonical = _canonical_assignments_8616(root, fact)
     if not canonical:
         return WideCallOutputReplayResult8616(WideCallOutputReplayStatus8616.ABSENT)
+    if not _fact_combine_authorized_8616(fact):
+        return _refused_replay_8616(
+            WideCallOutputReplayFailure8616.PAIR_LEGALITY_UNPROVEN
+        )
     if len(canonical) != 1:
         return _refused_replay_8616(
             WideCallOutputReplayFailure8616.CANONICAL_ASSIGNMENT_AMBIGUOUS
@@ -311,22 +372,9 @@ def reconcile_materialized_wide_call_output_assignment_8616(
         return _refused_replay_8616(failure, len(duplicates))
     required = frozenset(fact.carrier_ins_addrs)
     for owner in duplicates:
-        statement_calls = tuple(
-            node
-            for node in _iter_c_nodes_deep_8616(owner.statement)
-            if isinstance(node, CFunctionCall)
-        )
-        addresses = c_node_instruction_addrs_8616(owner.statement)
-        if len(statement_calls) != 1:
-            return _refused_replay_8616(
-                WideCallOutputReplayFailure8616.DUPLICATE_EFFECT_AMBIGUOUS,
-                len(duplicates),
-            )
-        if not addresses or not addresses <= required:
-            return _refused_replay_8616(
-                WideCallOutputReplayFailure8616.DUPLICATE_PROVENANCE_MIXED,
-                len(duplicates),
-            )
+        failure = _duplicate_owner_failure_8616(owner, required)
+        if failure is not None:
+            return _refused_replay_8616(failure, len(duplicates))
     if not duplicates:
         return WideCallOutputReplayResult8616(WideCallOutputReplayStatus8616.STABLE)
     _delete_statement_owners_8616(duplicates)

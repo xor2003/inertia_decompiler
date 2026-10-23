@@ -21,6 +21,22 @@ def scalar_document(value: int, width: int) -> dict:
     }]}
 
 
+@pytest.mark.parametrize('skip_binary_equal', [False, True])
+@pytest.mark.parametrize('side', ['oracle', 'candidate', 'both'])
+@pytest.mark.parametrize('predicate', ['0x0', '0x1'])
+def test_identity_defers_nonempty_domain_obligations(skip_binary_equal, side, predicate):
+    from tools.dosunit.ssa.identity import quick_compare
+
+    oracle = scalar_document(7, 32)['functions'][0]
+    oracle['source'].update(function_machine_code_sha256='matching-code', function_machine_code_size=1)
+    candidate = deepcopy(oracle)
+    for name, document in (('oracle', oracle), ('candidate', candidate)):
+        if side in (name, 'both'):
+            document['obligations'] = [{'kind': 'x87_pending_check',
+                                        'predicate': {'op': 'const', 'width': 1, 'value': predicate}}]
+    assert quick_compare(oracle, candidate, skip_binary_equal=skip_binary_equal) is None
+
+
 @pytest.mark.parametrize("width", [16, 32])
 @pytest.mark.parametrize("skip_binary_equal", [False, True])
 def test_explicit_policy_rejects_raw_identity_with_changed_constant(width, skip_binary_equal):
@@ -112,7 +128,9 @@ for family in ('msc8', 'bc5'):
     path = root / 'artifacts' / (family + '-z3cmp32') / 'flat32_adapter.py'
     spec = importlib.util.spec_from_file_location(family + '_adapter', path)
     adapter = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = adapter
     spec.loader.exec_module(adapter)
+    adapter = sys.modules[spec.name]
     for region in (False, True):
         with adapter.installed(region=region):
             assert engine._prepare_layout_normalized_functions is layout

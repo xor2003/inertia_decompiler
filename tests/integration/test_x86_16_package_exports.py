@@ -883,6 +883,7 @@ def test_x86_16_bootstrap_module_exports():
 
 def test_x86_16_bootstrap_module_description():
     assert bootstrap.describe_x86_16_bootstrap() == (
+        "apply_pyvex_runtime_compatibility",
         "apply_x86_16_calling_convention_compatibility",
         "apply_x86_16_compatibility",
         "register_native_direct_jump_resolver_8616",

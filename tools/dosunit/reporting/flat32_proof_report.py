@@ -67,14 +67,15 @@ def _auxiliary_input_bindings(args: argparse.Namespace) -> dict[str, dict[str, s
     Older third-party driver namespaces omit this opt-in field. Its absence
     preserves the existing binary-only contract; a supplied path must exist.
     """
-    # Dynamic third-party argparse boundary: older driver namespaces omit this opt-in field.
-    supplied = getattr(args, 'candidate_link_map', None)
-    if supplied is None:
-        return {}
-    path = Path(supplied).resolve()
-    return {'candidate_link_map': {
-        'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-    }}
+    bindings: dict[str, dict[str, str]] = {}
+    for name in ('candidate_link_map', 'candidate_code_map', 'abi_observation_catalog',
+                 'table_check_catalog', 'global_alias_source', 'concrete_counterexample_vectors'):
+        # Dynamic third-party argparse boundary: older driver namespaces omit these opt-in fields.
+        supplied = getattr(args, name, None)
+        if supplied is not None:
+            path = Path(supplied).resolve()
+            bindings[name] = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+    return bindings
 
 
 def _verify_auxiliary_inputs(

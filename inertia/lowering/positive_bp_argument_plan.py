@@ -37,13 +37,23 @@ class PositiveBpArgumentPlanDecision8616(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PositiveBpArgumentPlanEntry8616:
-    """One proposed argument slot and its optional existing C variable."""
+    """Physical ABI slot plus an optional narrower, already typed value view.
+
+    ``width`` advances the physical stack cursor. ``value_width`` preserves a
+    body-owned value inside that slot; ABI padding is not part of the value.
+    """
 
     bp_offset: int
     width: int
     name: str
     argument_type: SimType
     cvar: CVariable | None = field(default=None, compare=False)
+    value_width: int | None = None
+
+    @property
+    def materialized_width(self) -> int:
+        """Return the value size without changing the physical slot stride."""
+        return self.width if self.value_width is None else self.value_width
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +104,7 @@ def complete_positive_bp_body_word_access_plan_8616(
         elif cursor in wide_accesses:
             if entry.width not in {_WORD_BYTES, _WIDE_BYTES}:
                 break
-            entry = replace(entry, width=_WIDE_BYTES)
+            entry = replace(entry, width=_WIDE_BYTES, value_width=None)
         if entry.width < _WORD_BYTES or entry.width % _WORD_BYTES:
             break
         completed.append(entry)
@@ -144,6 +154,10 @@ def complete_positive_bp_argument_plan_8616(
     Unused trailing arguments are materialized only from the exact remaining
     slots in a closed logical-width layout.
     """
+    if any(not 0 < entry.materialized_width <= entry.width for entry in body_entries):
+        return PositiveBpArgumentPlan8616(
+            PositiveBpArgumentPlanDecision8616.REFUSE, body_entries, evidence,
+        )
     if not body_entries or evidence.raw_fact_count == 0:
         return PositiveBpArgumentPlan8616(
             PositiveBpArgumentPlanDecision8616.BODY_ONLY,

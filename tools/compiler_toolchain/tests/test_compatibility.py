@@ -1,6 +1,8 @@
-"""Legacy paths share the canonical compiler-tool identities."""
+"""Compiler tools retain one canonical import identity and repository owner."""
 
+import sys
 from importlib import import_module
+from pathlib import Path
 
 import pytest
 
@@ -16,19 +18,24 @@ import pytest
     "msc6_toolchain_lock", "generated_c_contracts",
     "generated_c_indexed_argument_contract",
 ])
-def test_legacy_module_is_canonical_owner(name):
-    assert import_module("scripts." + name) is import_module("tools.compiler_toolchain." + name)
+def test_module_uses_canonical_identity_and_owner(name: str) -> None:
+    """Canonical imports must not redirect to a historical forwarding module."""
+    qualified_name = "tools.compiler_toolchain." + name
+    module = import_module(qualified_name)
+    assert module.__name__ == qualified_name
+    assert sys.modules[qualified_name] is module
+    assert Path(module.__file__).resolve().parent == Path(__file__).resolve().parents[1]
+    assert module.__spec__ is not None
+    assert module.__spec__.name == qualified_name
 
 
 def test_profile_registry_stays_repository_relative():
-    from pathlib import Path
-
     from tools.compiler_toolchain.compiler_profile import DEFAULT_PROFILE_REGISTRY
 
     assert Path(__file__).resolve().parents[3] / "examples/compiler_coverage/toolchains.json" == DEFAULT_PROFILE_REGISTRY
 
 
-def test_process_measurements_share_legacy_identity():
+def test_process_measurements_share_the_dev_owner():
     import tools.dev.process_metrics as pytest_process_metrics
     from tools.dev import process_metrics
 

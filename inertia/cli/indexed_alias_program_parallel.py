@@ -175,7 +175,7 @@ def _run_parallel_bundles_8616(
     by_addr: dict[int, IndexedAliasFunctionSelection8616],
 ) -> dict[int, _IndexedAliasFunctionBundle8616] | None:
     """Run the bounded worker pool; return per-address bundles or None."""
-    jobs = [
+    jobs: list[tuple[object, object]] = [
         (selection.function_addr, selection.function_addr)
         for selection in sorted(
             ordered,

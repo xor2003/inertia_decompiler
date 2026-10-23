@@ -114,7 +114,10 @@ def _caller_return_use_fact_from_record_8616(record: object) -> CallerReturnUseF
     if not isinstance(record, dict):
         raise ValueError("caller-return fact must be an object")
     try:
-        verdict = CallerReturnUseVerdict8616(record.get("verdict"))
+        raw_verdict = record.get("verdict")
+        if raw_verdict is None:
+            raise ValueError("caller-return fact is missing verdict")
+        verdict = CallerReturnUseVerdict8616(raw_verdict)
         raw_kind = record.get("kind")
         kind = None if raw_kind is None else CallsiteReturnUseKind8616(raw_kind)
         raw_extension = record.get("byte_extension")
@@ -219,7 +222,10 @@ def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnU
         raise ValueError("caller-return evidence entry must be an object")
     target_addr = _nonnegative_int_8616(record.get("target_addr"))
     try:
-        verdict = CallerReturnUseVerdict8616(record.get("verdict"))
+        raw_verdict = record.get("verdict")
+        if raw_verdict is None:
+            raise ValueError("caller-return evidence is missing verdict")
+        verdict = CallerReturnUseVerdict8616(raw_verdict)
     except (TypeError, ValueError) as ex:
         raise ValueError("caller-return evidence has an invalid verdict") from ex
     count_names = (

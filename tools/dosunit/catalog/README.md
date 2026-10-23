@@ -4,6 +4,12 @@
 `flat32_catalog_admission.py` checks declared function extents against executable
 sections. Their existing interfaces and proof-status rules are unchanged.
 
+Linker-map consumers may explicitly request `include_statics=True`; private
+symbols then use the same bounded parser and header binding as publics, while
+remaining a separate catalog. Data relocation still consumes only publics.
+Code-dependency consumers additionally validate segment coordinates against
+the loaded executable sections before scanning any helper body.
+
 The standalone linker-map tests live in `../tests/`. Admission tests that use
 the shared comparator-driver fixtures remain with that integration cohort.
 Historical imports from `tools.dosunit` alias these modules.

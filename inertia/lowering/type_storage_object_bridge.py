@@ -17,8 +17,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
-from inertia.cli.cli_access_profiles import build_access_trait_evidence_profiles
-from inertia.cli.cli_storage_objects import (
+from inertia.lowering.access_profiles import build_access_trait_evidence_profiles
+from inertia.lowering.object_lowering import BaseKey, _build_stable_access_object_hints
+from inertia.lowering.storage_objects import (
     EvidenceProfiles,
     StableHints,
     StorageObjectArtifact,
@@ -26,7 +27,6 @@ from inertia.cli.cli_storage_objects import (
     StorageObjectRefusal,
     build_storage_object_artifact,
 )
-from inertia.lowering.object_lowering import BaseKey, _build_stable_access_object_hints
 
 __all__ = (
     "SegmentedStorageFact",

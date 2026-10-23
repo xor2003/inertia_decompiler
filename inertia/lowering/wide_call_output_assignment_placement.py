@@ -25,6 +25,9 @@ from angr.sim_variable import SimStackVariable, SimVariable
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.semantics.carry_borrow_contracts import CarryBorrowKind8616
 from inertia.widening.carry_borrow_storage import WideCarryBorrowStorage8616
+from inertia.widening.pair_type_contracts import (
+    WidePairEvidence8616,
+)
 
 from .stack_frame_projection import (
     entry_sp_offset_for_machine_bp_range_8616 as _entry_sp_offset_for_bp_8616,
@@ -50,8 +53,10 @@ from .wide_call_output_assignment_contracts import (
     WideCallOutputAssignmentResolution8616,
     WideCallOutputAssignmentVerdict8616,
     refused_wide_call_output_assignment_8616,
+    wide_call_output_pair_authenticated_8616,
 )
 from .wide_call_output_assignment_replay import (
+    WideCallOutputReplayFailure8616,
     WideCallOutputReplayStatus8616,
     reconcile_materialized_wide_call_output_assignment_8616,
 )
@@ -244,6 +249,60 @@ def _carrier_placement_8616(
     )
 
 
+def _pair_legality_refusal_8616(
+    source: WideCarryBorrowStorage8616,
+    fact: WideCallOutputAssignmentFact8616,
+) -> WideCallOutputAssignmentResolution8616 | None:
+    """Refuse facts whose retained pair cannot authorize this combine."""
+    call_output = source.value.lhs_call_output
+    if (
+        not wide_call_output_pair_authenticated_8616(source, fact)
+        or call_output is None
+        or fact.call_output != call_output.provenance
+    ):
+        return refused_wide_call_output_assignment_8616(
+            source,
+            WideCallOutputAssignmentFailure8616.PAIR_LEGALITY_UNPROVEN,
+            fact=fact,
+        )
+    return None
+
+
+def _source_stack_cvar_8616(
+    codegen: object,
+    boundary: _CFunctionBoundary8616,
+    fact: WideCallOutputAssignmentFact8616,
+    pair: WidePairEvidence8616,
+) -> CVariable | None:
+    """Return or materialize the exact retained-width source stack variable."""
+    source_cvar = _exact_stack_cvar_8616(
+        codegen,
+        boundary,
+        fact.source_offset,
+        pair.type.total_size,
+    )
+    if source_cvar is None:
+        entry_sp_offset = _entry_sp_offset_for_bp_8616(
+            codegen,
+            fact.source_offset,
+            pair.type.total_size,
+        )
+        if entry_sp_offset is not None:
+            materialize_stack_cvar_at_offset_from_facts_8616(
+                codegen,
+                entry_sp_offset,
+                pair.type.total_size,
+                machine_bp_offset=fact.source_offset,
+            )
+        source_cvar = _exact_stack_cvar_8616(
+            codegen,
+            boundary,
+            fact.source_offset,
+            pair.type.total_size,
+        )
+    return source_cvar
+
+
 def materialize_wide_call_output_assignment_8616(
     codegen: object,
     cfunc: object,
@@ -253,6 +312,9 @@ def materialize_wide_call_output_assignment_8616(
     """Materialize one exact assignment and retire only its owned carriers."""
     boundary = cast(_CFunctionBoundary8616, cfunc)
     root = boundary.statements
+    pair_refusal = _pair_legality_refusal_8616(source, fact)
+    if pair_refusal is not None:
+        return pair_refusal
     replay = reconcile_materialized_wide_call_output_assignment_8616(
         codegen,
         root,
@@ -261,7 +323,9 @@ def materialize_wide_call_output_assignment_8616(
     if replay.status is WideCallOutputReplayStatus8616.REFUSED:
         return refused_wide_call_output_assignment_8616(
             source,
-            WideCallOutputAssignmentFailure8616.MIXED_STATEMENT_OWNERSHIP,
+            WideCallOutputAssignmentFailure8616.PAIR_LEGALITY_UNPROVEN
+            if replay.failure is WideCallOutputReplayFailure8616.PAIR_LEGALITY_UNPROVEN
+            else WideCallOutputAssignmentFailure8616.MIXED_STATEMENT_OWNERSHIP,
             fact=fact,
             placement_classified=True,
         )
@@ -274,11 +338,13 @@ def materialize_wide_call_output_assignment_8616(
             changed=replay.changed,
             already_materialized=True,
         )
+    pair = fact.pair
+    assert isinstance(pair, WidePairEvidence8616)
     destination = _exact_stack_cvar_8616(
         codegen,
         boundary,
         fact.destination_offset,
-        4,
+        pair.type.total_size,
     )
     if destination is None:
         return refused_wide_call_output_assignment_8616(
@@ -296,21 +362,7 @@ def materialize_wide_call_output_assignment_8616(
         )
         return refused_wide_call_output_assignment_8616(source, failure, fact=fact)
     call_site = call_sites[0]
-    source_cvar = _exact_stack_cvar_8616(codegen, boundary, fact.source_offset, 4)
-    if source_cvar is None:
-        entry_sp_offset = _entry_sp_offset_for_bp_8616(
-            codegen,
-            fact.source_offset,
-            4,
-        )
-        if entry_sp_offset is not None:
-            materialize_stack_cvar_at_offset_from_facts_8616(
-                codegen,
-                entry_sp_offset,
-                4,
-                machine_bp_offset=fact.source_offset,
-            )
-        source_cvar = _exact_stack_cvar_8616(codegen, boundary, fact.source_offset, 4)
+    source_cvar = _source_stack_cvar_8616(codegen, boundary, fact, pair)
     if source_cvar is None:
         return refused_wide_call_output_assignment_8616(
             source,

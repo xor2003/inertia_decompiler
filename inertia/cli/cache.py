@@ -146,7 +146,7 @@ BASE_DECOMPILATION_CACHE_SOURCE_FILES: tuple[Path, ...] = (
     _ROOT / "inertia" / "pipeline" / "invariants.py",
     _ROOT / "inertia" / "validation" / "validation_summary.py",
     _ROOT / "inertia" / "lowering" / "object_lowering.py",
-    _ROOT / "inertia" / "cli" / "cli_access_profiles.py",
+    _ROOT / "inertia" / "lowering" / "access_profiles.py",
     _ROOT / "inertia" / "cli" / "cli_access_traits.py",
 )
 

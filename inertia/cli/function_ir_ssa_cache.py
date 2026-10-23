@@ -13,11 +13,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.ir.function_ir_registry import (
     FunctionIRArtifactResolution8616,
     FunctionIRArtifactVerdict8616,
     publish_function_ir_artifact_8616,
     registered_function_ir_artifact_8616,
+)
+from inertia.ir.function_readiness_contracts import (
+    function_artifact_body_digest_8616,
+    observed_function_source_revision_8616,
+    record_function_build_attestation_8616,
+    requires_function_source_observation_8616,
 )
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactResolution8616,
@@ -57,6 +64,7 @@ class FunctionIRSSACacheFailure8616(StrEnum):
     ENTRY_NOT_FOUND = "entry_not_found"
     MALFORMED_ENTRY = "malformed_entry"
     INCOHERENT_ARTIFACTS = "incoherent_artifacts"
+    RESTORATION_UNVERIFIED = "restoration_unverified"
     ARTIFACT_NOT_REGISTERED = "artifact_not_registered"
     REGISTRY_CONFLICT = "registry_conflict"
 
@@ -191,6 +199,60 @@ def _catalog_result_8616(
     )
 
 
+def _restore_bundle_authority_8616(
+    project: object,
+    function: object,
+    bundle: FunctionIRSSABundle8616,
+) -> bool:
+    """Reacquire canonical authority for one persisted pair at restoration.
+
+    The persisted bundle proves itself only when its exact restored bodies
+    carry builder-attested revisions equal to the generation observable now —
+    which binds the same boundary bytes, architecture and producer scope —
+    and the SSA body still names the restored IR body as its parent. When all
+    bindings verify against the consumer's actual requested scope, the
+    restoration boundary records build attestations for
+    the exact bodies so publication sees owned-build evidence, not copied
+    metadata. Anything else is a typed refusal.
+    """
+    if bundle.ir.function_addr != bundle.ssa.function_addr:
+        return False
+    function_addr = bundle.ir.function_addr
+    ir_digest = function_artifact_body_digest_8616(bundle.ir)
+    ssa_digest = function_artifact_body_digest_8616(bundle.ssa)
+    if ir_digest is None or ssa_digest is None or bundle.ssa.parent_digest != ir_digest:
+        return False
+    ir_revision = bundle.ir.source_revision
+    observed = observed_function_source_revision_8616(
+        project, function_addr,
+        boundary=function if isinstance(function, ExactFunctionRangeBoundary8616) else None,
+    )
+    if observed is None:
+        # Independent models may restore unbound evidence. Native projects
+        # require the retained source scope to remain observable at restoration.
+        return not requires_function_source_observation_8616(project)
+    ssa_revision = bundle.ssa.source_revision
+    if (
+        ir_revision is None
+        or ir_revision != observed
+        or ssa_revision is None
+        or ssa_revision != observed
+    ):
+        return False
+    record_function_build_attestation_8616(
+        project, function_addr, ir_digest, observed, "function_ir_ssa_cache_restore"
+    )
+    record_function_build_attestation_8616(
+        project,
+        function_addr,
+        ssa_digest,
+        observed,
+        "function_ir_ssa_cache_restore",
+        inputs=(ir_digest,),
+    )
+    return True
+
+
 def hydrate_function_ir_ssa_catalog_8616(
     project: object,
     functions: Sequence[object],
@@ -212,6 +274,15 @@ def hydrate_function_ir_ssa_catalog_8616(
         loaded = load_function_ir_ssa_cache_8616(cache_key, function_addr)
         if loaded.bundle is None:
             results.append(loaded)
+            continue
+        if not _restore_bundle_authority_8616(project, function, loaded.bundle):
+            results.append(
+                FunctionIRSSACacheResult8616(
+                    function_addr,
+                    FunctionIRSSACacheVerdict8616.REFUSED,
+                    failure=FunctionIRSSACacheFailure8616.RESTORATION_UNVERIFIED,
+                )
+            )
             continue
         ir_result = publish_function_ir_artifact_8616(project, loaded.bundle.ir)
         ssa_result = publish_function_ssa_artifact_8616(
@@ -273,7 +344,9 @@ def store_function_ir_ssa_catalog_8616(
         ir_result = registered_function_ir_artifact_8616(project, function_addr)
         ssa_result = registered_function_ssa_artifact_8616(project, function_addr)
         hydrated = hydrated_hits.get(function_addr)
-        if _hydrated_hit_matches_8616(hydrated, ir_result, ssa_result):
+        if hydrated is not None and _hydrated_hit_matches_8616(
+            hydrated, ir_result, ssa_result
+        ):
             results.append(hydrated)
             continue
         cache_key = function_ir_ssa_cache_key_8616(project, function)

@@ -62,14 +62,13 @@ def _parameter_storage_8616(
     if not isinstance(identity, tuple) or len(identity) != 3:
         return None
     kind, offset, width = identity
-    bp_word_slot = (
-        kind == CallsitePushSourceKind8616.BP_VALUE.value
-        and isinstance(offset, int)
-        and not isinstance(offset, bool)
-        and offset >= 4
-        and width == 2
-    )
-    if not bp_word_slot:
+    if (
+        kind != CallsitePushSourceKind8616.BP_VALUE.value
+        or not isinstance(offset, int)
+        or isinstance(offset, bool)
+        or offset < 4
+        or width != 2
+    ):
         return None
     return IRAddress(
         MemSpace.SS,

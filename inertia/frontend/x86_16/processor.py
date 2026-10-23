@@ -528,6 +528,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
             value = self.constant(value, TYPES[type(n)])
         if isinstance(value, VexValue):
             value = value.rdt
+        assert self.lifter_instruction is not None
         self.lifter_instruction._append_stmt(Put(cast(Any, value), offset))
         if flags_value is not None:
             self._sync_lifted_direction_step(flags_value)

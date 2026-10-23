@@ -291,3 +291,46 @@ def test_failed_callsite_recovery_does_not_publish_partial_alias_context(
     assert "_inertia_project_bounded_global_object_ranges_8616" not in vars(
         target_project
     )
+def test_recovered_catalog_retains_actual_function_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Functions survive the temporary discovery CFG without changing default KB."""
+    import gc
+    import weakref
+
+    import angr
+    from angr.codenode import BlockNode
+
+    from inertia.cli import indexed_alias_program_recovery as recovery
+    from inertia.cli.function_ir_ssa_cache import FunctionIRSSACacheStats8616, FunctionIRSSACatalogResult8616
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+    from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+    from tests.cli.test_x86_16_cod_samples import _project_from_bytes
+
+    apply_x86_16_bootstrap()
+    project = _project_from_bytes(bytes.fromhex("c3"))
+    knowledge = angr.KnowledgeBase(project)
+    function = knowledge.functions.function(addr=0x1000, create=True)
+    function._register_node(True, BlockNode(0x1000, 1))
+    assert function.project is project
+    manager_ref = weakref.ref(knowledge.functions)
+    batches = [[(SimpleNamespace(kb=knowledge), function)]]
+    del knowledge
+
+    def recover_once(*_args: object, **_kwargs: object) -> list[tuple[object, object]]:
+        """Hand over the only strong discovery-context references exactly once."""
+        return batches.pop()
+
+    monkeypatch.setattr(recovery, "isolated_discovery_evidence_project_8616", lambda _project: project)
+    monkeypatch.setattr(recovery, "_recover_fast_exe_catalog", recover_once)
+    monkeypatch.setattr(recovery, "_source_region_catalog_evidence_8616", lambda _project: SimpleNamespace(complete=True))
+    monkeypatch.setattr(
+        recovery, "hydrate_function_ir_ssa_catalog_8616",
+        lambda *_args: FunctionIRSSACatalogResult8616((), FunctionIRSSACacheStats8616()),
+    )
+    catalog = recovery.recover_direct_indexed_alias_catalog_8616(project, timeout=1, window=1)
+    assert catalog is not None and not batches
+    gc.collect()
+    assert manager_ref() is not None
+    assert catalog.functions == (function,)
+    artifact = build_x86_16_ir_function_artifact(catalog.evidence_project, function)
+    assert artifact.blocks and artifact.source_revision is not None
+    assert project.kb.functions.function(addr=0x1000, create=False) is None

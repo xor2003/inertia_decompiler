@@ -7,6 +7,7 @@ import pyvex
 
 import inertia.ir.vex_import as vex_import
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401 -- register native lifter
 from inertia.ir.constant_flow import IRConstantFlow8616
 from inertia.ir.vex_condition_demand import (
     VexConditionDemand8616,

@@ -39,6 +39,7 @@ _SIGNATURE_MATCH_CACHE_COMPONENTS = (
     Path(__file__).resolve(),
     Path(__file__).resolve().with_name("omf_pat.py"),
     Path(__file__).resolve().with_name("pat_literal_filter.py"),
+    Path(__file__).resolve().with_name("pickle_cache.py"),
     Path(__file__).resolve().parents[2] / "inertia/frontend/x86_16/relative_control_edge.py",
     Path(__file__).resolve().parents[2] / "inertia/frontend/x86_16/arch_86_16.py",
 )

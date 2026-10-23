@@ -10,6 +10,7 @@ from angr.sim_variable import SimStackVariable
 
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.lowering.codegen_return_origin import (
+    _ail_value_origin,
     apply_codegen_return_origin_8616,
     return_value_origin_8616,
 )
@@ -19,6 +20,33 @@ _RETURN_ADDR = 0x1200
 _FIRST_DEFINITION = 0x1008
 _SECOND_DEFINITION = 0x1108
 _WORD_BITS = 16
+
+
+@pytest.fixture(autouse=True)
+def _install_return_origin_adapter() -> None:
+    """Make standalone controls independent of other modules' bootstrap order."""
+    apply_codegen_return_origin_8616()
+
+
+def test_return_site_is_independent_of_propagated_expression_origin():
+    """A folded value's ADD origin must not become the source RET identity."""
+    statement = _statement(_FIRST_DEFINITION, 0x1000)
+    statement.tags["vex_block_addr"] = 0x1100
+    origin = _ail_value_origin(statement)
+    assert origin is not None
+    assert (origin.instruction_addr, origin.block_addr) == (_FIRST_DEFINITION, 0x1000)
+    assert (origin.return_instruction_addr, origin.return_block_addr) == (_RETURN_ADDR, 0x1100)
+
+
+@pytest.mark.parametrize("coordinate", [None, True, -1, "0x1200"])
+def test_missing_or_malformed_return_site_is_not_inferred(coordinate):
+    """Value metadata alone cannot supply proof of a return's machine site."""
+    statement = _statement(_FIRST_DEFINITION, 0x1000)
+    statement.tags["ins_addr"] = coordinate
+    origin = _ail_value_origin(statement)
+    assert origin is not None
+    assert origin.return_instruction_addr is None
+    assert origin.return_block_addr is None
 
 
 def _fixture():

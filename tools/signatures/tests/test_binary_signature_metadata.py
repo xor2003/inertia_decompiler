@@ -48,7 +48,7 @@ def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypat
     project = SimpleNamespace()
     args = SimpleNamespace(
         binary=tmp_path / "APP.EXE", proc=None, declared_call_effects=(),
-        blob=False, base_addr=0x1000,
+        blob=False, base_addr=0x1000, real16_declared_input=None,
         entry_point=0x1000, c_target="portable-flat", trace_c_stages=False,
         dump_layers=False, dump_layer_dir=None, dump_layer_filter=None,
         ignore_local_sidecar_hints=True, pat_backend="python_regex",

@@ -67,6 +67,15 @@ class _RegisterNameProvider8616(Protocol):
         ...
 
 
+class _DecodedCmpGuardLike8616(Protocol):
+    """Decoded cmp/jcc guard fields consumed from the postprocess boundary."""
+
+    lhs: object
+    rhs: object
+    op: str
+    expr: object | None
+
+
 def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic angr/codegen/capstone compatibility boundary for optional attributes."""
     return getattr(obj, name, default)
@@ -217,8 +226,9 @@ def _decoded_condition_fingerprint_tail_8616(
     direct_cmp_fingerprint: str | None,
 ) -> str | None:
     """Return the decoded-condition fingerprint or a refused None."""
-    lhs = _expr_fingerprint(decoded.lhs, project)
-    rhs = _expr_fingerprint(decoded.rhs, project)
+    guard = cast(_DecodedCmpGuardLike8616, decoded)
+    lhs = _expr_fingerprint(guard.lhs, project)
+    rhs = _expr_fingerprint(guard.rhs, project)
     if direct_cmp_fingerprint is None and (
         _fingerprint_contains_raw_register_8616(lhs) or _fingerprint_contains_raw_register_8616(rhs)
     ):
@@ -228,7 +238,7 @@ def _decoded_condition_fingerprint_tail_8616(
                 f"lhs={lhs} rhs={rhs}"
             )
         return None
-    decoded_fingerprint = f"{decoded.op}({lhs},{rhs})"
+    decoded_fingerprint = f"{guard.op}({lhs},{rhs})"
     if direct_cmp_fingerprint is not None and direct_cmp_fingerprint != decoded_fingerprint:
         if codegen is not None:
             typing.cast(typing.Any, codegen)._inertia_tail_validation_direct_cmp_jcc_overrides_8616 = (
@@ -251,10 +261,10 @@ def _decoded_condition_fingerprint_tail_8616(
     if _tv_condition_debug_enabled_8616():
         _tv_debug_8616(
             f"[tv-condition-context] decoded block={block_addr:#x} ins={ins_addr:#x} "
-            f"op={decoded.op} lhs={lhs} rhs={rhs} "
-            f"rhs_node={type(decoded.rhs).__module__}.{type(decoded.rhs).__name__}:"
-            f"{_dynamic_attr_8616(decoded.rhs, 'op', None)!r} "
-            f"expr={type(decoded.expr).__name__ if decoded.expr is not None else 'None'}"
+            f"op={guard.op} lhs={lhs} rhs={rhs} "
+            f"rhs_node={type(guard.rhs).__module__}.{type(guard.rhs).__name__}:"
+            f"{_dynamic_attr_8616(guard.rhs, 'op', None)!r} "
+            f"expr={type(guard.expr).__name__ if guard.expr is not None else 'None'}"
         )
     if lhs == rhs:
         return None

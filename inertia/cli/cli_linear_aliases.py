@@ -62,9 +62,9 @@ def _count_variable_ids_8616(
         )
     for attr in ("args", "operands", "statements"):
         items = _safe_child_attr_8616(expr, attr)
-        if items is _ATTR_MISSING_8616:
+        if items is _ATTR_MISSING_8616 or not isinstance(items, Iterable):
             continue
-        for item in items or ():
+        for item in items:
             if structured_codegen_node(item):
                 _count_variable_ids_8616(
                     unwrap_c_casts, structured_codegen_node, item, counts

@@ -13,10 +13,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from inertia.frontend.x86_16.declared_external_call_evidence import (
-    DeclaredCallEffectConsumption8616,
-    declared_external_call_registry_8616,
-)
 import inertia.cli.cli_core as cli_core
 import inertia.cli.direct_request_fast_path as direct_request_fast_path
 from inertia.cli.declared_call_transport import (
@@ -30,6 +26,10 @@ from inertia.cli.serial_worker_cache import (
     load_serial_worker_cache_8616,
 )
 from inertia.cli.work_items import WorkItemStatus
+from inertia.frontend.x86_16.declared_external_call_evidence import (
+    DeclaredCallEffectConsumption8616,
+    declared_external_call_registry_8616,
+)
 from tests.fixtures.x86_16_declared_call_fixture import BASE, world
 
 
@@ -175,7 +175,8 @@ def test_declared_receipt_gate_preserves_prior_failure(
     function = SimpleNamespace(addr=0x1000)
     run = SimpleNamespace(
         cfg=None, func=function, status=status.value, payload="", direct_debug_output="",
-        partial_payload=None, direct_timeout_stage="native_budget", direct_tail_validation_snapshot={"status": "unknown"},
+        partial_payload="retained partial C", direct_timeout_stage="native_budget", direct_terminal_failure=None,
+        direct_tail_validation_snapshot={"status": "unknown"},
         _elapsed=20.0, _block_count=1, _byte_count=4, direct_segment_program_evidence=None,
         direct_project=SimpleNamespace(), args=SimpleNamespace(declared_call_effects=("contract.json",)),
     )
@@ -186,3 +187,5 @@ def test_declared_receipt_gate_preserves_prior_failure(
     assert run.direct_result.failure_stage == (
         "declared_call_dependency" if status is WorkItemStatus.OK else "native_budget"
     )
+    assert run.direct_result.skip_heavy_fallbacks is (status is WorkItemStatus.TIMEOUT)
+    assert run.direct_result.partial_payload == "retained partial C"

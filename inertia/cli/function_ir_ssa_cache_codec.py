@@ -14,16 +14,18 @@ import importlib
 import io
 import pickle
 from collections.abc import Mapping
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass, is_dataclass, replace
 from enum import Enum
 
 from inertia.ir.function_artifact import IRFunctionArtifact
+from inertia.ir.function_lifecycle import FunctionLifecycle8616
+from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
 from inertia.ir.ssa_function import (
     SSAFunctionArtifact,
     build_x86_16_function_ssa,
 )
 
-_FUNCTION_IR_SSA_CACHE_SCHEMA_8616: int = 4
+_FUNCTION_IR_SSA_CACHE_SCHEMA_8616: int = 5
 _MAX_PICKLE_BYTES_8616: int = 64 * 1024 * 1024
 _ALLOWED_IR_MODULE_PREFIXES_8616: tuple[str, ...] = (
     "inertia.ir.",
@@ -81,10 +83,13 @@ class _RestrictedIRUnpickler8616(pickle.Unpickler):
 def function_ir_ssa_bundle_record_8616(
     bundle: FunctionIRSSABundle8616,
 ) -> dict[str, object]:
-    """Encode one coherent bundle with payload and projection digests."""
+    """Persist coherent raw IR without live publications or cached maturity."""
     if not bundle.coherent:
         raise ValueError("cannot persist incoherent function IR/SSA artifacts")
-    payload = pickle.dumps(bundle.ir, protocol=5)
+    persisted_ir = replace(
+        bundle.ir, lifecycle=FunctionLifecycle8616(), lifecycle_stage=FunctionLifecycleStage8616.IR,
+    )
+    payload = pickle.dumps(persisted_ir, protocol=5)
     if len(payload) > _MAX_PICKLE_BYTES_8616:
         raise ValueError("function IR/SSA cache payload is oversized")
     return {
@@ -99,7 +104,7 @@ def function_ir_ssa_bundle_from_record_8616(
     record: object,
     function_addr: int,
 ) -> FunctionIRSSABundle8616:
-    """Decode one record after all ownership and integrity checks pass."""
+    """Decode checked raw IR, discard runtime claims and rebuild a shared SSA view."""
     if (
         not isinstance(record, Mapping)
         or record.get("schema") != _FUNCTION_IR_SSA_CACHE_SCHEMA_8616
@@ -116,6 +121,8 @@ def function_ir_ssa_bundle_from_record_8616(
     ir = _RestrictedIRUnpickler8616(io.BytesIO(payload)).load()
     if not isinstance(ir, IRFunctionArtifact):
         raise ValueError("function IR/SSA cache payload is not raw IR")
+    # Serialized observations cannot restore live producer authority.
+    ir = replace(ir, lifecycle=FunctionLifecycle8616(), lifecycle_stage=FunctionLifecycleStage8616.IR)
     try:
         ssa = build_x86_16_function_ssa(ir)
     except (AttributeError, KeyError, TypeError, ValueError) as ex:

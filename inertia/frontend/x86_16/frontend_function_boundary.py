@@ -12,7 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, cast
 
-from .frontend_instruction_reachability import collect_instruction_reachability_8616
+from .frontend_instruction_reachability import (
+    ConditionalIndirectEdge8616,
+    collect_instruction_reachability_8616,
+)
 from .frontend_near_return_continuation import (
     NearCallFramePremise8616,
     NearReturnContinuationArtifact8616,
@@ -29,7 +32,11 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class ExactFunctionRangeBoundary8616:
-    """One closed binary-framed function boundary for IR import."""
+    """One binary-framed inventory; conditional edges retain IR proof obligations.
+
+    ``conditional_edges`` authorizes decoding only. Raw IR must retain their
+    pending markers until an invocation-bound semantic owner discharges them.
+    """
 
     project: object = field(compare=False, repr=False)
     addr: int
@@ -44,6 +51,7 @@ class ExactFunctionRangeBoundary8616:
     )
 
     decode_lower_bound: int | None = None
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = ()
 
     @property
     def decode_start(self) -> int:
@@ -123,6 +131,7 @@ def _bounded_entry_function_boundary_8616(
     lower: int,
     end: int,
     premise: NearCallFramePremise8616 | None,
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Close the entry census within independently supplied decoding bounds.
 
@@ -135,9 +144,10 @@ def _bounded_entry_function_boundary_8616(
         entry=entry,
         region_start=lower,
         region_end=end,
+        conditional_edges=conditional_edges,
     )
     continuations: NearReturnContinuationArtifact8616 | None = None
-    if not reachability.complete and reachability.blocks:
+    if not reachability.inventory_complete and reachability.blocks:
         continuations = prove_near_return_continuations_8616(
             reachability.blocks,
             reachability.successor_edges,
@@ -151,8 +161,9 @@ def _bounded_entry_function_boundary_8616(
                 region_start=lower,
                 region_end=end,
                 proven_return_block_addrs=continuations.proven_block_addrs,
+                conditional_edges=conditional_edges,
             )
-    if not reachability.complete or not reachability.reachable_block_addrs:
+    if not reachability.inventory_complete or not reachability.reachable_block_addrs:
         return None
     return ExactFunctionRangeBoundary8616(
         project=project,
@@ -164,6 +175,7 @@ def _bounded_entry_function_boundary_8616(
         blocks=reachability.blocks,
         near_return_continuations=continuations,
         decode_lower_bound=lower,
+        conditional_edges=conditional_edges,
     )
 
 
@@ -193,6 +205,7 @@ def mapped_entry_function_boundary_8616(
     entry: int,
     *,
     premise: NearCallFramePremise8616 | None = None,
+    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Close reachable binary instructions without optional function catalogs.
 
@@ -203,6 +216,8 @@ def mapped_entry_function_boundary_8616(
     open paths and targets outside that image still refuse.
     ``premise`` is the caller's independently proven source-bound
     entry-frame premise; it is forwarded verbatim and never invented here.
+    ``conditional_edges`` supplies decoding assumptions, never unconditional
+    control evidence. They remain on the boundary for pending raw IR import.
     """
     if type(entry) is not int or entry < 0:
         return None
@@ -217,5 +232,5 @@ def mapped_entry_function_boundary_8616(
     if type(lower) is not int or type(upper) is not int or not lower <= entry <= upper:
         return None
     return _bounded_entry_function_boundary_8616(
-        project, entry, lower, upper + 1, premise
+        project, entry, lower, upper + 1, premise, conditional_edges
     )

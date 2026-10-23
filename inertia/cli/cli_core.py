@@ -33,6 +33,7 @@ import angr
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from inertia.cli.accepted_payload_integrity import (
+    AcceptedPayloadIntegrity8616,
     AcceptedPayloadIntegrityVerdict8616,
     verify_function_work_result_payload_integrity_8616,
 )
@@ -44,7 +45,9 @@ from inertia.cli.architecture_runtime_guard import (
 from inertia.cli.binary_signature_metadata import load_binary_signature_metadata
 from inertia.cli.c_text_cleanup import normalize_unresolved_c_text
 from inertia.cli.cache import (
+    DECOMPILATION_CACHE_SOURCE_FILES,
     _cache_key_lock,
+    _cache_source_digest,
     _load_cache_json,
     _store_cache_json,
 )
@@ -69,6 +72,11 @@ from inertia.cli.cod_module_caller_evidence import record_cod_module_caller_retu
 from inertia.cli.declared_call_transport import (
     declared_call_diagnostic_lines_8616,
     declared_call_receipts_current_8616,
+)
+from inertia.cli.declared_function_discovery import (
+    DeclaredDiscoveryStatus8616,
+    DeclaredFunctionDiscovery8616,
+    discover_declared_function_closure_8616,
 )
 from inertia.cli.decompilation_quality import assess_decompiled_c_text, assess_final_generated_c_text
 from inertia.cli.decompile_file_summary import emit_file_decompilation_summary
@@ -102,6 +110,7 @@ from inertia.cli.function_cache_context import function_decompilation_cache_key_
 from inertia.cli.function_worker_policy import (
     FunctionWorkerMode8616,
     clean_process_override_8616,
+    dependency_ordered_function_work_8616,
     prioritize_clean_function_work_8616,
     requires_isolated_function_decompilation,
     select_function_worker_policy_8616,
@@ -259,6 +268,7 @@ from inertia.cli.work_items import (
     FunctionWorkExecutionOrigin8616,
     FunctionWorkItem,
     FunctionWorkResult,
+    TerminalDecompileFailure8616,
     WorkItemStatus,
 )
 from inertia.cli.work_items import (
@@ -296,6 +306,12 @@ from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_syntheti
 from inertia.lowering.analysis_helpers import collect_neighbor_call_targets
 from inertia.lowering.annotations import annotate_function
 from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
+from inertia.lowering.scalar_interface_transport import (
+    ScalarInterface8616,
+    attach_scalar_interface_8616,
+    scalar_interface_for_result_8616,
+    scalar_interface_from_record_8616,
+)
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
@@ -407,6 +423,7 @@ type _DirectDecompileJobResult8616 = tuple[
     SegmentProgramFunctionEvidence8616 | None,
     FailureFamilyState,
     str,
+    tuple[ScalarInterface8616 | None, str],
 ]
 __all__ = [
     "_argument_was_explicit",
@@ -1571,6 +1588,7 @@ def _run_function_work_item_uncached(
             elapsed,
             block_count,
             byte_count,
+            terminal_failure,
         ), decompile_project, decompile_cfg, decompile_function = lane
         if cache_bypass_debug:
             debug_output = f"{cache_bypass_debug}{debug_output}"
@@ -1590,6 +1608,7 @@ def _run_function_work_item_uncached(
             cache_key=cache_key,
             tail_validation_enabled=tail_validation_enabled,
             expected_validation_stages=tuple(expected_validation_stages),
+            terminal_failure=terminal_failure,
         )
 
     with span(
@@ -1621,7 +1640,9 @@ class _WorkRunCtx8616:
     failure_family_state: FailureFamilyState
 
 
-_DecompileRunTuple8616 = tuple[str, str, str | None, str, dict[str, object] | None, float, int, int]
+_DecompileRunTuple8616 = tuple[
+    str, str, str | None, str, dict[str, object] | None, float, int, int, TerminalDecompileFailure8616 | None
+]
 
 
 def _maybe_return_known_helper_result_8616(
@@ -1788,6 +1809,7 @@ def _finalize_work_result_8616(
     cache_key: dict[str, object] | None,
     tail_validation_enabled: bool,
     expected_validation_stages: Sequence[str],
+    terminal_failure: TerminalDecompileFailure8616 | None = None,
 ) -> FunctionWorkResult:
     """Apply acceptance, recovery, and cache policy, then build the result."""
     acceptance = _validated_generated_c_acceptance_8616(
@@ -1849,6 +1871,9 @@ def _finalize_work_result_8616(
         elapsed=elapsed,
         block_count=block_count,
         byte_count=byte_count,
+        skip_heavy_fallbacks=(
+            terminal_failure is not None or _work_item_status_8616(status) is WorkItemStatus.TIMEOUT
+        ),
         same_family_retry_stops=ctx.failure_family_state.same_family_retry_stops,
         fallback_family_labels=ctx.failure_family_state.fallback_family_labels,
         validated_payload_hash=acceptance_validated_hash,
@@ -1926,7 +1951,7 @@ def _run_local_work_8616(
                 call_site_count=local_callsite_count,
             )
         with _temporary_clinic_policy_8616(project_obj, local_clinic_policy):
-            status, payload, partial_payload, block_count, byte_count, elapsed = _decompile_function_with_stats(
+            status, payload, partial_payload, block_count, byte_count, elapsed, terminal_failure = _decompile_function_with_stats(
                 project_obj,
                 cfg_obj,
                 function_obj,
@@ -1965,6 +1990,7 @@ def _run_local_work_8616(
         elapsed,
         block_count,
         byte_count,
+        terminal_failure,
     )
 
 
@@ -1987,6 +2013,7 @@ def _isolated_project_lane_8616(
             str(ctx.binary_path),
             force_blob=False,
             base_addr=linked_base,
+            base_addr_is_linear=True,
             entry_point=getattr(item_function.project, "entry", linked_base),
             real16_declared_input=declared_input_path_8616(item_function.project),
         )
@@ -2113,14 +2140,48 @@ def _decompile_for_work_item_8616(
     return run_tuple, decompile_project, decompile_cfg, decompile_function
 
 
+def _with_scalar_interface_8616(result: FunctionWorkResult, project: object) -> FunctionWorkResult:
+    """Export a scalar interface only alongside the exact accepted payload."""
+    digest = hashlib.sha256(result.payload.encode()).hexdigest()
+    if (result.status != WorkItemStatus.OK.value
+        or result.validated_payload_hash != digest or result.gcc_checked_payload_hash != digest):
+        return replace(result, scalar_interface=None, scalar_interface_generation=None)
+    if result.scalar_interface is not None:
+        _import_scalar_interface_8616(result, project)
+        return result
+    if result.function is None:
+        return replace(result, scalar_interface=None, scalar_interface_generation=None)
+    if result.function is not None:
+        project = result.function.project
+    return replace(
+        result,
+        scalar_interface=scalar_interface_for_result_8616(project, function_original_addr(result.function), result.payload, function=result.function),
+        scalar_interface_generation=_cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES),
+    )
+
+
+def _import_scalar_interface_8616(result: FunctionWorkResult, project: object) -> None:
+    """Import only a current producer's interface for its accepted result bytes."""
+    interface = result.scalar_interface
+    if interface is None:
+        return
+    digest = hashlib.sha256(result.payload.encode()).hexdigest()
+    if (result.status != WorkItemStatus.OK.value or result.validated_payload_hash != digest
+        or result.gcc_checked_payload_hash != digest or interface.payload_sha256 != digest
+        or result.scalar_interface_generation != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES)):
+        raise ValueError("unaccepted or stale scalar interface result")
+    attach_scalar_interface_8616(project, interface)
+
+
 def _function_work_result_for_fork_ipc(result: FunctionWorkResult) -> FunctionWorkResult:
-    # angr Function/CFG objects are not reliable pickle payloads. The parent still owns
-    # canonical references for emission and fallback attribution.
+    """Retain scalar evidence before stripping non-pickleable angr surfaces."""
+    if result.function is not None:
+        result = _with_scalar_interface_8616(result, result.function.project)
     return replace(result, function=None, function_cfg=None)
 
 
 _SERIAL_CLEAN_WORKER_RESULT_ENV_8616 = "INERTIA_SERIAL_CLEAN_WORKER_RESULT"
-_SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616 = 4
+_SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616 = 5
 
 
 def _report_declared_call_consumptions_8616(result: FunctionWorkResult) -> None:
@@ -2159,17 +2220,22 @@ def _write_serial_clean_worker_result_8616(
     result: FunctionWorkResult,
     *,
     project: object | None = None,
+    result_path: Path | None = None,
 ) -> None:
-    """Write a direct-address result for its serial clean-process parent."""
-    result_path_text = os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616)
-    if not result_path_text:
-        return
+    """Write existing worker evidence to an explicit or parent-requested path."""
+    if result_path is None:
+        result_path_text = os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616)
+        if not result_path_text:
+            return
+        result_path = Path(result_path_text)
     if project is not None:
         result = with_segment_program_function_evidence_8616(result, project)
-    result_path = Path(result_path_text)
+        result = _with_scalar_interface_8616(result, project)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     record: dict[str, object] = {
         "schema": _SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616,
+        "scalar_interface": None if result.scalar_interface is None else result.scalar_interface.to_record(),
+        "scalar_interface_generation": result.scalar_interface_generation,
         "status": result.status,
         "payload": result.payload,
         "partial_payload": result.partial_payload,
@@ -2195,6 +2261,24 @@ def _write_serial_clean_worker_result_8616(
     temporary_path = result_path.with_suffix(result_path.suffix + ".tmp")
     temporary_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
     os.replace(temporary_path, result_path)
+
+
+def _worker_scalar_interface_8616(
+    record: dict[str, object], item: FunctionWorkItem, payload: str, status: str,
+) -> ScalarInterface8616 | None:
+    """Admit matching accepted worker type evidence before parent publication."""
+    raw_interface = record.get("scalar_interface")
+    interface = None if raw_interface is None else scalar_interface_from_record_8616(raw_interface)
+    if interface is not None:
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        if (status != WorkItemStatus.OK.value or interface.target != function_original_addr(item.function)
+            or interface.payload_sha256 != digest or record.get("validated_payload_hash") != digest
+            or record.get("gcc_checked_payload_hash") != digest):
+            raise ValueError("unaccepted or mismatched scalar interface result")
+        if record.get("scalar_interface_generation") != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES):
+            raise ValueError("stale scalar interface producer generation")
+        attach_scalar_interface_8616(item.function.project, interface)
+    return interface
 
 
 def _read_serial_clean_worker_result_8616(
@@ -2242,6 +2326,7 @@ def _read_serial_clean_worker_result_8616(
         item,
     ):
         raise ValueError("serial clean-worker segment evidence belongs to a different function")
+    interface = _worker_scalar_interface_8616(record, item, payload, status)
     return FunctionWorkResult(
         index=item.index,
         status=status,
@@ -2268,6 +2353,8 @@ def _read_serial_clean_worker_result_8616(
             else None
         ),
         segment_program_function_evidence=segment_evidence,
+        scalar_interface=interface,
+        scalar_interface_generation=record.get("scalar_interface_generation"),
     )
 
 
@@ -3137,7 +3224,7 @@ def _seeded_supplement_needed_8616(
     """Check whether seeded/ranked supplements are needed to reach the cap."""
     if args.max_functions <= 0 or not ranked_binary_offsets or not function_cfg_pairs:
         return False
-    return cast(bool, len(function_cfg_pairs) < args.max_functions)
+    return len(function_cfg_pairs) < args.max_functions
 
 
 def _catalog_address_cache_storable_8616(project: angr.Project) -> bool:
@@ -3171,15 +3258,12 @@ def _retry_gate_allows_candidate_8616(
         return False
     if getattr(project.arch, "name", "") != "86_16" or result.failure_stage == "sweep_budget":
         return False
-    return cast(
-        bool,
-        result.retry_may_change_evidence(
-            sidecar_available=lst_metadata is not None or cod_metadata is not None
-        ),
+    return result.retry_may_change_evidence(
+        sidecar_available=lst_metadata is not None or cod_metadata is not None
     )
 
 
-def _cacheable_direct_result_8616(result: FunctionWorkResult, integrity: AcceptedPayloadIntegrityVerdict8616) -> bool:
+def _cacheable_direct_result_8616(result: FunctionWorkResult, integrity: AcceptedPayloadIntegrity8616) -> bool:
     """Check whether a direct result carries complete cacheable provenance."""
     if result.status != WorkItemStatus.OK.value or not isinstance(result.tail_validation, dict):
         return False
@@ -3280,6 +3364,7 @@ def _accept_function_work_result_for_emission_8616(
         project=project,
     )
     if acceptance.status in (WorkItemStatus.OK, WorkItemStatus.CONDITIONAL) and acceptance.blocker is None:
+        _import_scalar_interface_8616(result, project)
         return replace(
             result,
             status=acceptance.status.value,
@@ -3829,6 +3914,7 @@ def _fresh_sidecar_retry_work_item_8616(
         binary_path,
         force_blob=False,
         base_addr=linked_base,
+        base_addr_is_linear=True,
         entry_point=getattr(project, "entry", linked_base),
         real16_declared_input=declared_input_path_8616(project),
     )
@@ -4128,10 +4214,30 @@ def _emit_conditional_result_8616(result: FunctionWorkResult, *, args: CliArgume
 
 def _retain_emission_result_8616(
     results: dict[int, FunctionWorkResult] | None, index: int, result: FunctionWorkResult,
+    *, expected: FunctionWorkResult | None = None,
 ) -> None:
     """Retain checked work status so aggregation cannot lose conditional evidence."""
-    if results is not None:
+    if results is not None and (expected is None or results.get(index) is expected):
         results[index] = result
+
+
+def _emission_result_state_8616(
+    results: dict[int, FunctionWorkResult] | None,
+) -> dict[int, FunctionWorkResult]:
+    """Keep caller aggregation or create operation-local final-result ownership."""
+    return {} if results is None else results
+
+
+def _write_final_function_result_8616(
+    item: FunctionWorkItem, result: FunctionWorkResult, *,
+    project: object, output_dir: Path | None,
+) -> None:
+    """Persist owned final status, without promoting legacy stdout-only fallbacks."""
+    if output_dir is not None:
+        _write_serial_clean_worker_result_8616(
+            result, project=project,
+            result_path=Path(output_dir) / f"{function_original_addr(item.function):08x}.result.json",
+        )
 
 
 def _emit_function_result(
@@ -4151,6 +4257,9 @@ def _emit_function_result(
     result_state_by_index: dict[int, FunctionWorkResult] | None = None,
     timeout_was_explicit: bool = False,
 ) -> tuple[int, int]:
+    """Emit one result and retain its final owned evidence beside generated C."""
+    result_state_by_index = _emission_result_state_8616(result_state_by_index)
+
     def _impl() -> tuple[int, int]:
         nonlocal result
         result = _accept_function_work_result_for_emission_8616(result, project=project)
@@ -4215,6 +4324,9 @@ def _emit_function_result(
                 fallback_tail_validation_by_index=fallback_tail_validation_by_index,
                 result_state_by_index=result_state_by_index,
             )
+            _retain_emission_result_8616(
+                result_state_by_index, item.index, ok_outcome.result, expected=result,
+            )
             if ok_outcome.early_counters is not None:
                 return ok_outcome.early_counters
             result = ok_outcome.result
@@ -4245,7 +4357,11 @@ def _emit_function_result(
             emit_timeout_delay_line=_emit_timeout_delay_line,
         )
 
-    return _impl()
+    counters = _impl()
+    _write_final_function_result_8616(
+        item, result_state_by_index[item.index], project=project, output_dir=args.output_c_dir,
+    )
+    return counters
 
 
 def _try_emit_retry_recovered_candidate_8616(
@@ -5083,14 +5199,11 @@ def _string_intrinsic_candidate_8616(
 ) -> str | None:
     """Emit a string-intrinsic C candidate for a function's code window."""
     if sidecar_region is not None:
-        return cast(
-            str | None,
-            _try_emit_string_intrinsic_c(
-                project, start=sidecar_region[0], end=sidecar_region[1], name=function.name
-            ),
+        return _try_emit_string_intrinsic_c(
+            project, start=sidecar_region[0], end=sidecar_region[1], name=function.name
         )
     start, end = _infer_linear_disassembly_window(project, function.addr)
-    return cast(str | None, _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name))
+    return _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name)
 
 
 def _accept_string_fallback_8616(
@@ -5441,7 +5554,8 @@ def _proc_linked_binary_lane_8616(
     if linked_proc_addr is not None:
         if cod_path is not None:
             try:
-                cod_metadata = extract_cod_proc_metadata(cod_path, args.proc, args.proc_kind)
+                # linked_proc_addr is non-None only when proc_name was a str.
+                cod_metadata = extract_cod_proc_metadata(cod_path, cast(str, args.proc), args.proc_kind)
             except Exception as exc:
                 print(f"[dbg] failed to parse COD metadata for {args.proc}: {exc}", file=sys.stderr)
         _apply_binary_specific_annotations(
@@ -5481,8 +5595,10 @@ def _proc_cod_image_lane_8616(
     """Build the COD-image project lane when the linked binary lookup failed."""
     if cod_path is None:
         raise ValueError(f"--proc mode requires sibling COD listing: not found for {binary_path}")
-    entries = extract_cod_function_entries(cod_path, args.proc, args.proc_kind)
-    cod_metadata = extract_cod_proc_metadata(cod_path, args.proc, args.proc_kind)
+    # This lane is only entered from the proc-mode branch where args.proc is set.
+    proc_name = cast(str, args.proc)
+    entries = extract_cod_function_entries(cod_path, proc_name, args.proc_kind)
+    cod_metadata = extract_cod_proc_metadata(cod_path, proc_name, args.proc_kind)
     selected_entries = extract_small_two_arg_cod_logic_entries(entries)
     if selected_entries is None:
         selected_entries = extract_simple_cod_logic_entries(entries)
@@ -5589,6 +5705,19 @@ def _direct_request_cache_artifact_for_result_8616(
         startup_diagnostic_lines.extend(
             declared_call_diagnostic_lines_8616(evidence.declared_call_consumptions)
         )
+    # _cacheable_direct_result_8616 already verified these payload fields carry
+    # non-optional provenance; narrow them locally for the artifact contract.
+    tail_validation = result.tail_validation
+    validated_payload_hash = result.validated_payload_hash
+    gcc_checked_payload_hash = result.gcc_checked_payload_hash
+    failure_family_snapshot = result.failure_family_snapshot
+    if (
+        not isinstance(tail_validation, dict)
+        or not isinstance(validated_payload_hash, str)
+        or not isinstance(gcc_checked_payload_hash, str)
+        or failure_family_snapshot is None
+    ):
+        return None
     return DirectRequestCacheArtifact8616(
         function_addr=function_addr,
         function_name=function_name,
@@ -5597,13 +5726,13 @@ def _direct_request_cache_artifact_for_result_8616(
         runtime_header=render_c_runtime_header_8616(context.args.c_target),
         startup_diagnostic_lines=tuple(startup_diagnostic_lines),
         payload=result.payload,
-        tail_validation=copy.deepcopy(result.tail_validation),
+        tail_validation=copy.deepcopy(tail_validation),
         elapsed=result.elapsed,
         block_count=result.block_count,
         byte_count=result.byte_count,
-        validated_payload_hash=result.validated_payload_hash,
-        gcc_checked_payload_hash=result.gcc_checked_payload_hash,
-        failure_family_snapshot=result.failure_family_snapshot,
+        validated_payload_hash=validated_payload_hash,
+        gcc_checked_payload_hash=gcc_checked_payload_hash,
+        failure_family_snapshot=failure_family_snapshot,
         diagnostic_output=(
             result.debug_output
             if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
@@ -5777,6 +5906,8 @@ class _DirectAddrCliRun8616:
     direct_failure_family_state: Any = None
     direct_item: Any = None
     direct_job_result: Any = None
+    direct_scalar_interface: ScalarInterface8616 | None = None
+    direct_scalar_generation: str | None = None
     direct_nonoptimized_verdict: Any = None
     direct_payload: Any = None
     direct_project: Any = None
@@ -5790,6 +5921,7 @@ class _DirectAddrCliRun8616:
     direct_tail_validation_snapshot: Any = None
     direct_timeout_payload: Any = None
     direct_timeout_stage: Any = None
+    direct_terminal_failure: TerminalDecompileFailure8616 | None = None
     end: Any = None
     evidence_acceptance: Any = None
     evidence_payload: Any = None
@@ -6155,6 +6287,10 @@ class _DirectAddrCliRun8616:
                 repeat_detected=self.direct_failure_family_state.repeat_detected,
             ),
             self.debug_output,
+            (
+                scalar_interface_for_result_8616(self.direct_project, self.func.addr, self.result[1], function=self.func),
+                _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES),
+            ),
         )
     def _candidate_text_for_rank(self, result: FunctionWorkResult) -> str:
         """Hoisted nested function (callable via `self`)."""
@@ -6930,6 +7066,7 @@ class _DirectAddrCliRun8616:
         self.direct_sidecar_verdict = "not_attempted"
         self.direct_nonoptimized_verdict = "not_attempted"
         self.direct_timeout_stage: str | None = None
+        self.direct_terminal_failure: TerminalDecompileFailure8616 | None = None
         self.direct_debug_output = ""
         self._block_count, self._byte_count = _function_complexity(self.func)
         self._elapsed = 0.0
@@ -7032,6 +7169,10 @@ class _DirectAddrCliRun8616:
             function_cfg=self.cfg,
             partial_payload=self.partial_payload,
             failure_stage=self.direct_timeout_stage,
+            skip_heavy_fallbacks=(
+                self.direct_terminal_failure is not None
+                or _work_item_status_8616(self.status) is WorkItemStatus.TIMEOUT
+            ),
             tail_validation=self.direct_tail_validation_snapshot
             or _tail_validation_snapshot_for_function_run(self.direct_project, self.func),
             elapsed=self._elapsed,
@@ -7075,6 +7216,8 @@ class _DirectAddrCliRun8616:
             status=self.direct_status,
             payload=self.direct_blocker if self.direct_blocker is not None else self.direct_payload,
             partial_payload=self.preserved_candidate if self.direct_blocker is not None else self.direct_result.partial_payload,
+            scalar_interface=self.direct_scalar_interface,
+            scalar_interface_generation=self.direct_scalar_generation,
             validated_payload_hash=(self.direct_acceptance.validated_payload_hash if self.direct_blocker is None else None),
             gcc_checked_payload_hash=(self.direct_acceptance.gcc_checked_payload_hash if self.direct_blocker is None else None),
         )
@@ -7658,10 +7801,17 @@ class _DirectAddrCliRun8616:
             annotate_current_span(status=self.status)
             for _extra_lp8616 in self.direct_extra:
                 self.extra = _extra_lp8616
-                if isinstance(_extra_lp8616, dict):
+                if isinstance(_extra_lp8616, TerminalDecompileFailure8616):
+                    self.direct_terminal_failure = _extra_lp8616
+                elif isinstance(_extra_lp8616, dict):
                     self.direct_tail_validation_snapshot = dict(_extra_lp8616)
                 elif isinstance(_extra_lp8616, SegmentProgramFunctionEvidence8616):
                     self.direct_segment_program_evidence = _extra_lp8616
+                elif isinstance(_extra_lp8616, tuple) and len(_extra_lp8616) == 2 and isinstance(_extra_lp8616[0], ScalarInterface8616):
+                    if _extra_lp8616[1] != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES):
+                        raise ValueError("stale direct-worker scalar interface generation")
+                    self.direct_scalar_interface = _extra_lp8616[0]
+                    self.direct_scalar_generation = _extra_lp8616[1]
                 elif isinstance(_extra_lp8616, FailureFamilyState):
                     self.direct_failure_family_state.previous_snapshot = _extra_lp8616.previous_snapshot
                     self.direct_failure_family_state.candidate_snapshot = _extra_lp8616.candidate_snapshot
@@ -7704,7 +7854,11 @@ class _DirectAddrCliRun8616:
         )
         # Cap heavy fallback fan-out per function to keep direct-addr mode
         # deterministic and prevent minute-long retry storms.
-        if self.fast_direct_probe or self.skip_heavy_validation_fallbacks:
+        if (
+            self.fast_direct_probe
+            or self.skip_heavy_validation_fallbacks
+            or self.direct_result.skip_heavy_fallbacks
+        ):
             self.heavy_fallback_budget = 0
         elif self.timeout_was_explicit and isinstance(self.args.timeout, int):
             self.heavy_fallback_budget = 1
@@ -7764,17 +7918,22 @@ class _DirectAddrCliRun8616:
         return None
     def _phase_direct_emit_batch_8616_part0_8616_b3(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
-        if (
+        sidecar_retry_permitted = (
             not self.fast_direct_probe
             and self.direct_result.status != "ok"
+            and not self.direct_result.skip_heavy_fallbacks
+        )
+        sidecar_retry_timed_out = (
+            self.timeout_was_explicit
+            and isinstance(self.args.timeout, int)
+            and self.args.timeout <= 6
+            and self.direct_result.status == "timeout"
+        )
+        if (
+            sidecar_retry_permitted
             and self.precise_sidecar_regions
             and self.lst_metadata is not None
-            and not (
-                self.timeout_was_explicit
-                and isinstance(self.args.timeout, int)
-                and self.args.timeout <= 6
-                and self.direct_result.status == "timeout"
-            )
+            and not sidecar_retry_timed_out
         ):
             _rc = self._phase_direct_emit_batch_8616_part0_8616_b3_zb0()
             if _rc is not None:
@@ -7908,7 +8067,7 @@ class _DirectAddrCliRun8616:
         self.exact_retry_blocked = (
             self.direct_failure_family_state.repeat_detected and not self.direct_failure_family_state.new_proof_seen
         )
-        if self.direct_result.status == "validation_failed":
+        if self.direct_result.status == "validation_failed" and not self.direct_result.skip_heavy_fallbacks:
             # Validation-failed direct lane is frequently under-recovered
             # semantics. Allow exact sidecar retry even when the failure
             # family repeats so richer bounded slices can be considered.
@@ -8660,6 +8819,7 @@ class _BatchCliContext8616:
     sweep_deadline: float | None
     shown_total: int
     skipped_signature_labels: int
+    declared_caller_targets: tuple[tuple[int, tuple[int, ...]], ...] = ()
 
     def force_isolated_project_for(self, work_item: FunctionWorkItem) -> bool:
         """Return whether a work item needs a fresh project for stable recovery."""
@@ -9365,7 +9525,8 @@ def _serial_missing_result_lane_8616(
         adaptive_timeout_model,
         allow_isolated_retry_in_function_tasks,
     )
-    context.result_map[item.index] = result
+    if result is not None:
+        context.result_map[item.index] = result
     if result is not None and item.index not in emitted_indexes:
         d, f = _serial_emit_result_8616(context, item, result)
         decompiled += d
@@ -9587,7 +9748,9 @@ def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> int:
             and include_library_functions
             and project.arch.name == "86_16"
         )
-    for item in function_tasks:
+    for item in dependency_ordered_function_work_8616(
+        function_tasks, caller_targets=dict(context.declared_caller_targets),
+    ):
         if _sweep_budget_exhausted():
             remaining = sum(1 for pending_item in function_tasks if pending_item.index not in result_map)
             print(
@@ -9684,6 +9847,7 @@ class _MainCliRun8616:
     function_cfg: Any = None
     function_cfg_pairs: Any = None
     function_label: Any = None
+    declared_discovery: DeclaredFunctionDiscovery8616 | None = None
     function_tasks: Any = None
     function_timeout: Any = None
     functions: Any = None
@@ -9773,7 +9937,7 @@ class _MainCliRun8616:
             self._phase_seed_rank_dispatch_8616,
             self._phase_seed_inputs_8616,
             self._phase_build_pairs_dispatch_8616,
-            self._phase_configure_display_8616,
+            self._phase_configure_display_dispatch_8616,
             self._phase_build_tasks_dispatch_8616,
             self._phase_configure_execution_8616,
             self._phase_serial_fork_batch_dispatch_8616,
@@ -9924,6 +10088,19 @@ class _MainCliRun8616:
                         if isinstance(self.rz_name, str) and self.rz_name:
                             _func_lp8616.name = self.rz_name
         return None
+    def _phase_configure_display_dispatch_8616(self) -> int | None:
+        """Keep explicit declared-closure selection separate from hybrid catalogs."""
+        if self.declared_discovery is not None:
+            print(f"/* explicitly declared native call closure: {self.total_functions} heads; "
+                  "not whole-program discovery */")
+            self.uncapped_function_cfg_pairs = []
+            self.source_catalog = None
+            self.function_tasks = []
+            self.result_map = {}
+            self.fallback_tail_validation_by_index = {}
+            return None
+        return self._phase_configure_display_8616()
+
     def _phase_configure_display_8616(self) -> int | None:
         """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
         self.sidecar_preview_limit = None
@@ -10269,7 +10446,7 @@ class _MainCliRun8616:
                 os.environ.get("INERTIA_ENABLE_SERIAL_FORK_PER_FUNCTION")
             ),
         )
-        self.workers = self.worker_policy.workers
+        self.workers = 1 if self.declared_discovery is not None else self.worker_policy.workers
         self.use_serial_fork_per_function = self.worker_policy.mode is FunctionWorkerMode8616.CLEAN_PROCESS
         if self.use_serial_fork_per_function and self.workers > 1:
             print(f"/* parallel function decompilation: {self.workers} clean processes, one function per process */")
@@ -10339,6 +10516,8 @@ class _MainCliRun8616:
             sweep_deadline=self.sweep_deadline,
             shown_total=self.shown_total,
             skipped_signature_labels=self.skipped_signature_labels,
+            declared_caller_targets=(() if self.declared_discovery is None
+                                     else self.declared_discovery.caller_targets),
         )
         if self.workers <= 1:
             return _run_serial_batch_cli_8616(self.batch_context)
@@ -11196,16 +11375,40 @@ class _MainCliRun8616:
 
     def _phase_seed_rank_dispatch_8616(self) -> int | None:
         """Dispatch the seed-ranking phase between catalog and non-catalog lanes."""
+        self.declared_discovery = discover_declared_function_closure_8616(self.project)
+        if self.declared_discovery is not None:
+            if self.declared_discovery.status is not DeclaredDiscoveryStatus8616.CLOSED:
+                print(f"/* declared call closure {self.declared_discovery.status.value}: "
+                      f"pending heads={self.declared_discovery.pending_heads}; "
+                      f"unknown callsites={self.declared_discovery.unresolved_callsites} */")
+                return 5
+            self.total_functions = len(self.declared_discovery.heads)
+            self.ranked_binary_offsets = list(self.declared_discovery.heads)
+            self.shown_total = self.total_functions
+            return None
         return (self._phase_seed_rank_8616() if self._catalog_ready_8616()
                 else self._phase_seed_rank_8616_else_8616())
 
     def _phase_build_pairs_dispatch_8616(self) -> int | None:
         """Dispatch the pair-building phase between catalog and non-catalog lanes."""
+        if self.declared_discovery is not None:
+            return None
         return (self._phase_build_pairs_8616() if self._catalog_ready_8616()
                 else self._phase_build_pairs_8616_else_8616())
 
     def _phase_build_tasks_dispatch_8616(self) -> int | None:
         """Dispatch the task-building phase between catalog and non-catalog lanes."""
+        if self.declared_discovery is not None:
+            heads = self.declared_discovery.heads
+            if self.args.max_functions > 0:
+                heads = heads[:self.args.max_functions]
+            self.function_tasks = [FunctionWorkItem(
+                index=index, function_cfg=None,
+                function=_make_placeholder_function(self.project, head, f"sub_{head:x}"),
+                recovery_addr=head,
+            ) for index, head in enumerate(heads, start=1)]
+            self.shown_total = len(self.function_tasks)
+            return None
         return (self._phase_build_tasks_8616() if self._catalog_ready_8616()
                 else self._phase_build_tasks_8616_else_8616())
 

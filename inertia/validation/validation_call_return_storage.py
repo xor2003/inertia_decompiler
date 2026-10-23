@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
+    CITE,
     CBinaryOp,
     CConstant,
     CFunctionCall,
@@ -189,6 +190,57 @@ def _direct_return_fact_8616(
     ) else None
 
 
+def _boolean_arms_inverted_8616(condition: CITE) -> bool | None:
+    """Read complementary literal Boolean arms, refusing other effects/values."""
+    if not isinstance(condition.iftrue, CConstant) or not isinstance(condition.iffalse, CConstant):
+        return None
+    arms = condition.iftrue.value, condition.iffalse.value
+    if type(arms[0]) is not int or type(arms[1]) is not int or arms not in ((0, 1), (1, 0)):
+        return None
+    return arms == (0, 1)
+
+
+def _zero_comparison_operand_8616(condition: object) -> tuple[object, bool] | None:
+    """Extract the nonzero operand and orientation of an explicit zero test."""
+    if not isinstance(condition, CBinaryOp) or condition.op not in {"CmpEQ", "CmpNE"}:
+        return None
+    for value, zero in ((condition.lhs, condition.rhs), (condition.rhs, condition.lhs)):
+        if isinstance(zero, CConstant) and type(zero.value) is int and zero.value == 0:
+            return value, condition.op == "CmpEQ"
+    return None
+
+
+def _direct_zero_predicate_8616(
+    condition: object, depth: int = 0,
+) -> tuple[object, bool] | None:
+    """Read bounded Boolean wrappers without modifying the structured tree.
+
+    The Boolean marks equality with zero. Only complementary literal 0/1
+    ternary arms are transparent; arbitrary values and side effects refuse.
+    This helper supplies no call identity or register authority.
+    """
+    if depth >= 16:
+        return None
+    if isinstance(condition, (CFunctionCall, CVariable)):
+        return condition, False
+    if isinstance(condition, CUnaryOp) and condition.op == "Not":
+        inner = _direct_zero_predicate_8616(condition.operand, depth + 1)
+        return None if inner is None else (inner[0], not inner[1])
+    if isinstance(condition, CITE):
+        inverted = _boolean_arms_inverted_8616(condition)
+        if inverted is None:
+            return None
+        inner = _direct_zero_predicate_8616(condition.cond, depth + 1)
+        if inner is None:
+            return None
+        return (inner[0], not inner[1]) if inverted else inner
+    compared = _zero_comparison_operand_8616(condition)
+    if compared is None:
+        return None
+    inner = _direct_zero_predicate_8616(compared[0], depth + 1)
+    return None if inner is None else (inner[0], inner[1] != compared[1])
+
+
 def _direct_structured_comparison_8616(
     project: _StoredReturnProject8616,
     codegen: _DirectReturnCodegen8616,
@@ -196,22 +248,10 @@ def _direct_structured_comparison_8616(
     summary: CallsiteSummary8616,
 ) -> StoredCallReturnComparison8616 | None:
     """Validate and preserve one structured direct-call zero-test orientation."""
-    node = condition
-    inverted = False
-    while isinstance(node, CUnaryOp) and node.op == "Not":
-        inverted = not inverted
-        node = node.operand
-    if not isinstance(node, CBinaryOp) or node.op not in {"CmpEQ", "CmpNE"}:
+    predicate = _direct_zero_predicate_8616(condition)
+    if predicate is None or summary.return_register is None:
         return None
-    zeroes = tuple(
-        operand
-        for operand in (node.lhs, node.rhs)
-        if isinstance(operand, CConstant) and operand.value == 0
-    )
-    values = tuple(operand for operand in (node.lhs, node.rhs) if operand not in zeroes)
-    if len(zeroes) != 1 or len(values) != 1 or summary.return_register is None:
-        return None
-    value = values[0]
+    value, equal = predicate
     storage_matches = False
     if isinstance(value, CVariable) and isinstance(value.variable, SimRegisterVariable):
         register = project.arch.registers.get(summary.return_register.lower())
@@ -230,9 +270,6 @@ def _direct_structured_comparison_8616(
         )
     if not storage_matches:
         return None
-    equal = node.op == "CmpEQ"
-    if inverted:
-        equal = not equal
     return (
         StoredCallReturnComparison8616.EQUAL_ZERO
         if equal

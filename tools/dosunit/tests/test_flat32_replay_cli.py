@@ -30,6 +30,7 @@ def test_public_replay_command_executes_binary_and_rejects_corruption(tmp_path: 
     assert result['summary'] == {'total': 1, 'agreed': 0, 'mismatched': 1, 'incomplete': 0}
     assert result['proof_status'] == 'not_established_by_execution'
     assert result['results'][0]['oracle']['status'] == 'returned'
+    assert result['results'][0]['differences']['registers'] == [{'name': 'eax', 'oracle': 7, 'candidate': 8}]
     assert result['inputs']['oracle']['sha256'] != result['inputs']['candidate']['sha256']
     candidate.write_bytes(original.read_bytes())
     assert main(args) == 0
@@ -84,3 +85,78 @@ def test_public_explicit_scratch_is_separate_from_observations(tmp_path: Path) -
     vector['mappings'][0]['access'] = ['execute']
     vectors.write_text(json.dumps({'vectors': [vector]}))
     assert main(args) == 2
+
+
+def test_public_replay_loads_pe_header_beyond_autodetection_window(tmp_path: Path) -> None:
+    from tools.dosunit.tests.test_flat32_loaded_byte_boundaries import pe32_bytes
+
+    images = []
+    for value in (7, 8):
+        source = pe32_bytes(b"\xb8" + struct.pack("<I", value) + b"\xc3")
+        raw = bytearray(source[:0x80].ljust(0x1100, b"\0") +
+                        source[0x80:0x200].ljust(0x300, b"\0") + source[0x200:])
+        struct.pack_into("<I", raw, 0x3c, 0x1100)
+        optional = 0x1118
+        for offset, number in ((16, 0x2000), (20, 0x2000), (56, 0x3000), (60, 0x1400)):
+            struct.pack_into("<I", raw, optional + offset, number)
+        section = optional + 0xe0
+        struct.pack_into("<I", raw, section + 12, 0x2000)
+        struct.pack_into("<I", raw, section + 20, 0x1400)
+        path = tmp_path / f"late-{value}.exe"
+        path.write_bytes(raw)
+        images.append(path)
+    vectors = tmp_path / "vectors.json"
+    vectors.write_text(json.dumps({"vectors": [{"id": "late-header", "oracle_entry": "0x402000",
+        "candidate_entry": "0x402000", "registers": {"esp": "0x80000"}}]}))
+    output = tmp_path / "result.json"
+    assert main(["replay-flat32", "--oracle-exe", str(images[0]), "--candidate-exe", str(images[1]),
+                 "--vectors", str(vectors), "--out", str(output)]) == 1
+    row, = json.loads(output.read_text())["results"]
+    assert row["oracle"]["status"] == row["candidate"]["status"] == "returned"
+    assert row["oracle"]["registers"]["eax"] == 7
+    assert row["candidate"]["registers"]["eax"] == 8
+
+
+def test_public_replay_separates_observed_and_written_memory(tmp_path: Path) -> None:
+    """Different stores can leave equal memory; changed bytes must stay visible."""
+    original = tmp_path / "original.elf"
+    candidate = tmp_path / "candidate.elf"
+    # Original writes one word; candidate writes the same two bytes separately.
+    original.write_bytes(_elf32(bytes.fromhex("66 c7 05 00004000 1122 c3")))
+    candidate.write_bytes(_elf32(bytes.fromhex("c6 05 00004000 11 c6 05 01004000 22 c3")))
+    vectors = tmp_path / "vectors.json"
+    vectors.write_text(json.dumps({"vectors": [{"id": "stores", "oracle_entry": "0x10000",
+        "candidate_entry": "0x10000", "registers": {"esp": "0x28000"},
+        "observations": [{"address": "0x400000", "size": 2}],
+        "mappings": [{"address": "0x400000", "size": 2, "access": ["read", "write"]}]}]}))
+    out = tmp_path / "result.json"
+    args = ["replay-flat32", "--oracle-exe", str(original), "--candidate-exe", str(candidate),
+            "--vectors", str(vectors), "--out", str(out)]
+    assert main(args) == 0
+    row, = json.loads(out.read_text())["results"]
+    assert row["differences"] == {"registers": [], "observed_memory": [], "written_memory": False}
+    # Repeating a write preserves both final observation and written-byte evidence.
+    candidate.write_bytes(_elf32(bytes.fromhex("c6 05 00004000 11 c6 05 01004000 22 c6 05 00004000 11 c3")))
+    assert main(args) == 0  # Repeated identical writes are not an ordered trace.
+    candidate.write_bytes(_elf32(bytes.fromhex("c6 05 00004000 11 c6 05 01004000 23 c3")))
+    assert main(args) == 1
+    row, = json.loads(out.read_text())["results"]
+    assert row["differences"] == {"registers": [],
+        "observed_memory": [{"address": "0x400000", "size": 2,
+                             "oracle_bytes": "1122", "candidate_bytes": "1123"}],
+        "written_memory": True}
+
+
+def test_public_replay_incomplete_has_no_comparison_diagnostics(tmp_path: Path) -> None:
+    """A fault cannot publish apparently complete memory-difference evidence."""
+    image = tmp_path / "fault.elf"
+    image.write_bytes(_elf32(bytes.fromhex("a3 00004000 c3")))
+    vectors = tmp_path / "vectors.json"
+    vectors.write_text(json.dumps({"vectors": [{"id": "fault", "oracle_entry": "0x10000",
+        "candidate_entry": "0x10000", "registers": {"esp": "0x28000"},
+        "observations": [{"address": "0x400000", "size": 4}]}]}))
+    out = tmp_path / "result.json"
+    assert main(["replay-flat32", "--oracle-exe", str(image), "--candidate-exe", str(image),
+                 "--vectors", str(vectors), "--out", str(out)]) == 2
+    row, = json.loads(out.read_text())["results"]
+    assert row["differences"] is None

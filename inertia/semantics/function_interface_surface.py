@@ -219,8 +219,11 @@ def apply_x86_16_function_interface_surface(project: _ProjectSurface, codegen: _
     def _render_text_with_interface(_cfunc: object) -> object:
         # Runtime contract: facts produced must be consumed before C emission.
         from inertia.pipeline.contracts import assert_pipeline_contracts_8616
+        from inertia.pipeline.function_readiness import function_render_required_stage_8616
 
-        assert_pipeline_contracts_8616(codegen)
+        assert_pipeline_contracts_8616(
+            codegen, required_stage=function_render_required_stage_8616(project, codegen),
+        )
 
         rendered = original(_cfunc)
         if not isinstance(rendered, str):

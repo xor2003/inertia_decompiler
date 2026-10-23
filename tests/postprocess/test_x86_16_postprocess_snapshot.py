@@ -704,7 +704,7 @@ def test_destructive_discard_runs_evidenced_salvage_and_stable_dce_before_identi
     monkeypatch.setattr(post_stage, "_invalidate_tail_validation_derived_caches_8616", lambda _codegen: None)
     monkeypatch.setattr(
         post_stage,
-        "_collect_tail_validation_summary_with_baseline_canonicalization_8616",
+        "_collect_direct_tail_summary_8616",
         lambda *_args, **_kwargs: {"stack_writes": ["changed"]},
     )
     monkeypatch.setattr(
@@ -760,7 +760,7 @@ def test_destructive_callsite_discard_skips_unrelated_direct_stack_salvage(monke
     monkeypatch.setattr(post_stage, "_invalidate_tail_validation_derived_caches_8616", lambda _codegen: None)
     monkeypatch.setattr(
         post_stage,
-        "_collect_tail_validation_summary_with_baseline_canonicalization_8616",
+        "_collect_direct_tail_summary_8616",
         lambda *_args, **_kwargs: {"stack_writes": ["changed"]},
     )
     monkeypatch.setattr(
@@ -829,7 +829,7 @@ def test_failed_structuring_skips_all_postprocess_salvage_after_discard(monkeypa
     monkeypatch.setattr(post_stage, "_invalidate_tail_validation_derived_caches_8616", lambda _codegen: None)
     monkeypatch.setattr(
         post_stage,
-        "_collect_tail_validation_summary_with_baseline_canonicalization_8616",
+        "_collect_direct_tail_summary_8616",
         lambda *_args, **_kwargs: {"stack_writes": ["baseline"]},
     )
     monkeypatch.setattr(

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.dosunit.contracts.model import DosUnitError, load_json, write_json
+from tools.dosunit.runtime.flat32_replay_model import DEFAULT_OBSERVABLES, ReplayAgreement
 
 if TYPE_CHECKING:
     from tools.dosunit.runtime.flat32_memory_permissions import DeclaredRegion
@@ -86,7 +87,7 @@ def _scratch_mappings(raw: object) -> tuple[DeclaredRegion, ...]:
     return tuple(result)
 
 
-def _vector(raw: dict[str, object]) -> ReplayVector:
+def parse_replay_vector(raw: dict[str, object]) -> ReplayVector:
     """Convert one checked JSON vector to the owned execution contract."""
     from tools.dosunit.runtime.flat32_replay import MemoryRange, ReplayVector
 
@@ -109,13 +110,13 @@ def _vector(raw: dict[str, object]) -> ReplayVector:
 
 def _image(path: Path) -> ReplayImage:
     """Load an actual linked executable through CLE and snapshot its bytes."""
-    import angr
     from cle.errors import CLEError
 
+    from tools.dosunit.architectures.flat32_loader import load_flat32_project
     from tools.dosunit.runtime.flat32_replay import image_from_project
 
     try:
-        project = angr.Project(str(path), auto_load_libs=False)
+        project = load_flat32_project(path)
         return image_from_project(project)
     except (CLEError, OSError, ValueError) as error:
         raise DosUnitError(f'flat32 replay cannot load {path}: {error}') from error
@@ -134,6 +135,31 @@ def _result_document(result: ReplayResult) -> dict[str, object]:
         'pages': [{'address': hex(page.address), 'access': int(page.access),
                    'origins': [origin.value for origin in page.origins]} for page in result.pages],
         'writes': [{'address': hex(address), 'bytes': data.hex()} for address, data in result.writes],
+    }
+
+
+def _differences(
+    left: ReplayResult, right: ReplayResult, agreement: ReplayAgreement,
+) -> dict[str, object] | None:
+    """Explain complete comparisons without treating incomplete evidence as equal.
+
+    The comparator has already checked unique registers and matching, complete
+    observation ranges. Written memory is the backend's coalesced final bytes,
+    not an ordered store trace or an inferred ABI projection.
+    """
+    if agreement is ReplayAgreement.INCOMPLETE:
+        return None
+    lregs, rregs = dict(left.registers), dict(right.registers)
+    rmemory = {(item.address, item.size): item for item in right.observations}
+    return {
+        "registers": [{"name": name, "oracle": lregs[name], "candidate": rregs[name]}
+                      for name in DEFAULT_OBSERVABLES if lregs[name] != rregs[name]],
+        "observed_memory": [
+            {"address": hex(item.address), "size": item.size, "oracle_bytes": item.data.hex(),
+             "candidate_bytes": rmemory[item.address, item.size].data.hex()}
+            for item in left.observations if item.data != rmemory[item.address, item.size].data
+        ],
+        "written_memory": left.writes != right.writes,
     }
 
 
@@ -168,7 +194,7 @@ def cmd_replay_flat32(args: argparse.Namespace) -> int:
     images = tuple(_image(path) for path in paths)
     rows: list[dict[str, object]] = []
     for item in vectors:
-        vector = _vector(item)
+        vector = parse_replay_vector(item)
         try:
             left = replay(images[0], _u32(item.get('oracle_entry'), 'oracle_entry'), vector,
                           instruction_limit=args.instruction_limit)
@@ -178,7 +204,8 @@ def cmd_replay_flat32(args: argparse.Namespace) -> int:
             raise DosUnitError(f'vector {item["id"]}: {error}') from error
         agreement = compare_replays(left, right)
         rows.append({'id': item['id'], 'status': agreement.value,
-                     'oracle': _result_document(left), 'candidate': _result_document(right)})
+                     'oracle': _result_document(left), 'candidate': _result_document(right),
+                     'differences': _differences(left, right, agreement)})
     if any(hashlib.sha256(path.read_bytes()).hexdigest() != digest for path, digest in zip(paths, digests, strict=True)):
         raise DosUnitError('binary changed during flat32 replay')
     counts = Counter(row['status'] for row in rows)

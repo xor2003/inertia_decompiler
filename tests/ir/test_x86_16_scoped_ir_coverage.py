@@ -27,6 +27,7 @@ import inertia.ir.entry_jump_domain as ejd
 import inertia.ir.ir_boundary_cfg as cov_mod
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.scoped_function_ir_view as view_mod
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
@@ -69,6 +70,49 @@ def _jmp_pending(head: int, encoding: bytes, block_addr: int = FUNC) -> object:
     return ejd.PendingTerminalJump8616(block_addr=block_addr, decoded=decoded)
 
 
+# call near +0 (-> CALLER_ADDR + 3); ret — four exact bytes that relift
+# cleanly under Arch86_16 so the universal native census can bind the
+# retained decoded block to current loader bytes.
+_CALLER_CODE = bytes.fromhex("e80000c3")
+_CALLER_EXTENTS = ((CALLER_ADDR, 3), (CALLER_ADDR + 3, 1))
+
+
+def _load_native(addr: int, size: int) -> bytes:
+    """Serve the retained caller bytes for the bound loader-memory seam."""
+    if addr >= CALLER_ADDR and addr + size <= CALLER_ADDR + len(_CALLER_CODE):
+        return _CALLER_CODE[addr - CALLER_ADDR: addr - CALLER_ADDR + size]
+    return b""
+
+
+def _project() -> SimpleNamespace:
+    """Build the mock project carrying the bound native surface.
+
+    The universal native census authenticates decoded extents, exact
+    native bytes, and an exact-byte relift, so a bare ``SimpleNamespace``
+    can no longer certify coverage: it needs a real ``Arch86_16``
+    architecture and live loader bytes.
+    """
+    return SimpleNamespace(
+        arch=Arch86_16(),
+        loader=SimpleNamespace(memory=SimpleNamespace(load=_load_native)),
+    )
+
+
+def _caller_block() -> object:
+    """Return the retained decoded block backing the caller boundary."""
+    return SimpleNamespace(
+        addr=CALLER_ADDR,
+        size=len(_CALLER_CODE),
+        bytes=_CALLER_CODE,
+        capstone=SimpleNamespace(
+            insns=tuple(
+                SimpleNamespace(address=head, size=extent)
+                for head, extent in _CALLER_EXTENTS
+            )
+        ),
+    )
+
+
 def _caller_surface(
     project: object,
 ) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616, object]:
@@ -98,6 +142,7 @@ def _caller_surface(
         frozenset({CALLER_ADDR}),
         frozenset({CALLER_ADDR, CALLER_ADDR + 3}),
         (),
+        blocks=(_caller_block(),),
     )
     coverage = cov_mod.prove_ir_boundary_coverage_8616(
         project, boundary, caller
@@ -420,7 +465,7 @@ def _shifted_view(
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """One conditional scoped world: pending JMP plus a source-bound CALL."""
-    project = SimpleNamespace()
+    project = _project()
     boot = object()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True)
@@ -630,7 +675,7 @@ def test_residual_pending_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pending hole on the effective surface is not closed coverage."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, _instrs = _source(call=False, second_pending=True)
     boundary = _boundary(
@@ -671,7 +716,7 @@ def test_unrelated_residual_refusal_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A refused view is typed non-evidence, never carried as coverage."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True, alien_refusal=True)
     boundary = _boundary(project, source, ((FUNC, ISLAND),))
@@ -700,10 +745,17 @@ def test_unrelated_residual_refusal_refuses(
 
 
 @pytest.mark.parametrize(
-    "mutation", ["provenance", "opcode", "dropped_instr", "none"],
+    ("mutation", "expected_failure"),
+    [
+        ("provenance", F.SCOPED_NATIVE_MISMATCH),
+        ("opcode", F.SCOPED_NATIVE_MISMATCH),
+        ("dropped_instr", F.SCOPED_CENSUS_MISMATCH),
+        ("none", F.SCOPED_NATIVE_MISMATCH),
+    ],
 )
 def test_native_surface_mutation_refuses(
     world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, mutation: str,
+    expected_failure: F,
 ) -> None:
     """Changed native bytes or IR metadata make the rederived surface stale."""
     if mutation == "none":
@@ -751,7 +803,8 @@ def test_native_surface_mutation_refuses(
             )
         _native_seam(monkeypatch, lambda: mutated)
     result = _coverage(world.project, world.boundary, world.source, world.view)
-    assert result.failure is F.SCOPED_NATIVE_MISMATCH, result.failure
+    # A missing native instruction fails the census before surface equality.
+    assert result.failure is expected_failure, result.failure
     assert not result.complete_for(world.scope)
 
 
@@ -759,7 +812,7 @@ def test_fabricated_no_effect_instruction_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A bare ``NOP`` claim cannot satisfy the bound native census."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True, nop=True)
     boundary = _boundary(project, source, ((FUNC, ISLAND),))

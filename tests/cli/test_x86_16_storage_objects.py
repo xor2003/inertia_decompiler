@@ -1,15 +1,15 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from inertia.cli.cli_access_profiles import build_access_trait_evidence_profiles
-from inertia.cli.cli_storage_objects import (
-    build_storage_object_artifact,
-    build_storage_object_records_from_hints,
-    storage_object_record_for_key,
-)
+from inertia.lowering.access_profiles import build_access_trait_evidence_profiles
 from inertia.lowering.object_lowering import (
     AccessTraitObjectHint,
     _build_stable_access_object_hints,
+)
+from inertia.lowering.storage_objects import (
+    build_storage_object_artifact,
+    build_storage_object_records_from_hints,
+    storage_object_record_for_key,
 )
 from inertia.lowering.type_storage_object_bridge import load_storage_object_bridge
 

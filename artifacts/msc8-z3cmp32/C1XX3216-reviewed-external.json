@@ -1,0 +1,22 @@
+{
+  "schema": "dosunit.flat32_external_calls.v1",
+  "functions": {
+    "sub_794D0": [
+      {
+        "dll": "kernel32.dll",
+        "name": "HeapAlloc",
+        "argument_count": 3,
+        "cleanup": "callee",
+        "preserve_import_bindings": true,
+        "memory_access": "returned_region",
+        "write_size_argument": 2,
+        "preserved_memory_ranges": [
+          [
+            1879048164,
+            1879052295
+          ]
+        ]
+      }
+    ]
+  }
+}

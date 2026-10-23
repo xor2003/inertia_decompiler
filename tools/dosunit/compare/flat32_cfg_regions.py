@@ -11,13 +11,15 @@ outside this slice.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from tools.comparator.services import proof_owners
-from tools.dosunit.architectures.flat32 import flat32_register_architecture
-from tools.dosunit.architectures.flat32_control import finish_flat32_control
+from tools.dosunit.architectures.flat32 import X87_REGISTER_NAMES, X87_STATE_REGISTERS, flat32_register_architecture
+from tools.dosunit.architectures.flat32_cfg_summary import lower_cfg_block
+from tools.dosunit.architectures.flat32_control_word import bind_x87_obligations
+from tools.dosunit.compare import straightline_ssa as S
 from tools.dosunit.compare.flat32_environment_coverage import environment_parts
 from tools.dosunit.compare.flat32_invariant_proof import record_invariant_proof
 from tools.dosunit.compare.flat32_invariant_retry import retry_entry_invariants
@@ -59,8 +61,44 @@ type _Superblock = CollapsedRegion
 def _initial_state(adapter: Any) -> dict[str, dict[str, Any]]:  # noqa: ANN401
     """Full symbolic machine state: every flat32 register plus whole memory."""
     state = {name: {"op": "input", "name": name, "width": width} for name, width in adapter.REG32.values()}
+    state.update({name: {"op": "input", "name": name, "width": width}
+                  for name, width in X87_STATE_REGISTERS})
     state["memory"] = {"op": "mem_input", "name": "mem", "addr_width": 32, "value_width": 8}
     return state
+
+
+def _record_x87_premises(
+    result: dict[str, Any], verdict: Any,  # noqa: ANN401
+    ossa: dict[str, Any], cssa: dict[str, Any],
+) -> None:
+    """Publish declared x87 premises and downgrade assumed CFG proofs.
+
+    Checking x87 instructions only execute their modeled continuation when
+    no unmasked exception is pending, and CPU-specific policies are declared
+    contracts. A passed induction is published CONDITIONAL with the premise
+    records; failed/refused verdicts are left untouched.
+    """
+    records: dict[str, dict[str, Any]] = {}
+    for summary in (ossa, cssa):
+        for premise in summary.get("x87_premises", ()):
+            records.setdefault(json.dumps(premise, sort_keys=True), premise)
+    obligations = [
+        {"side": side, **obligation}
+        for side, summary in (("oracle", ossa), ("candidate", cssa))
+        for function in summary.get("functions", ())
+        for obligation in function.get("obligations", ())
+    ]
+    if not records and not obligations:
+        return
+    assumption = {
+        "kind": "declared_x87_premises",
+        "premises": list(records.values()),
+        "obligations": obligations,
+    }
+    result["x87_assumptions"] = assumption
+    if result["status"] is verdict.Status.PASSED:
+        result.update(status=verdict.Status.CONDITIONAL,
+                      reason="declared_x87_premises", assumptions=assumption)
 
 
 def _check_composition_inputs(
@@ -97,11 +135,15 @@ def _compose_superblock(
         if invariant is not None:
             state = invariant.apply(state)
         state = relation.candidate_inputs(state)
+    bound_obligations: list[dict[str, Any]] = []
     for index, member in enumerate(member_docs):
         member_outputs = member.get("outputs", {})
         if member.get("trap_exits") or "io" in member_outputs:
             raise refusal("unsupported_effect_in_superblock")
+        incoming = state
         state = adapter.S._compose_block_outputs(member, member_outputs, state)
+        bound_obligations.extend(bind_x87_obligations(
+            member, incoming, site={"address": superblock.members[index]}))
         if index < len(internal_tokens):
             control = constant_bitvector(state['eip'])
             if control != (internal_tokens[index], 32):
@@ -111,7 +153,9 @@ def _compose_superblock(
         record_invariant_proof(invariant, state, invariant_proofs, adapter=adapter,
                                refusal=refusal, deadline=deadline, is_entry=is_entry,
                                reenters_entry=reenters_entry)
-    observed = outputs if superblock.kind is RegionExitKind.RETURN else tuple(name for name, _ in adapter.REG32.values())
+    observed = (outputs if superblock.kind is RegionExitKind.RETURN
+                else tuple(name for name, _ in adapter.REG32.values()))
+    observed = tuple(dict.fromkeys((*observed, *X87_REGISTER_NAMES)))
     terms: dict[str, Any] = {"memory": state["memory"]}
     for reg in observed:
         if reg not in state:
@@ -132,9 +176,13 @@ def _compose_superblock(
         "entry": entry,
         "function_entry": entry,
         "source": {"jumpkind": superblock.kind.value, "reblocked_members": len(superblock.members)},
-        "inputs": adapter.S._term_input_items(materialized.values(), assignments),
+        "inputs": adapter.S._term_input_items(
+            list(materialized.values()) + [o.get("predicate") for o in bound_obligations],
+            assignments,
+        ),
         "outputs": materialized,
         "assignments": assignments,
+        "obligations": bound_obligations,
     }
 
 
@@ -159,19 +207,22 @@ def _lower_superblocks(
     tokens = {superblocks[index].members[0]: pair_index[index] for index in ordered}
     for address in sorted(set(blocks) - set(tokens)):
         tokens[address] = len(tokens)
-    full_state = tuple(name for name, _ in adapter.REG32.values())
+    full_state = tuple(name for name, _ in flat32_register_architecture().registers)
     functions: list[dict[str, Any]] = []
+    premises: dict[str, dict[str, Any]] = {}
     for index, sb_index in enumerate(ordered):
         member_docs: list[dict[str, Any]] = []
         for address in superblocks[sb_index].members:
-            body = adapter.S._lower_irsb(
-                blocks[address].irsb, output_regs=full_state, max_assignments_per_function=4096,
-                architecture=flat32_register_architecture(),
-                block_finisher=partial(finish_flat32_control, control_targets=tokens)
+            body = lower_cfg_block(
+                blocks[address].irsb, output_regs=full_state, control_targets=tokens,
+                repeat_instructions=blocks[address].repeat_instructions,
+                control_word_instruction=blocks[address].control_word_instruction,
             )
-            if isinstance(body, adapter.S.LowerFailure):
+            if isinstance(body, S.LowerFailure):
                 raise refusal(f"{body.reason}: {body.message}")
             member_docs.append(body)
+            for premise in body.get("summary", {}).get("premises", ()):
+                premises.setdefault(str(premise.get("kind", "x87_premise")), premise)
         functions.append(
             _compose_superblock(
                 superblocks[sb_index],
@@ -187,7 +238,7 @@ def _lower_superblocks(
                 invariant=invariant, invariant_proofs=invariant_proofs, deadline=deadline,
             )
         )
-    return {"functions": functions}
+    return {"functions": functions, "x87_premises": list(premises.values())}
 
 
 def compare_reblocked_cfg(
@@ -315,6 +366,7 @@ def compare_reblocked_cfg(
         "block_compare": compared,
         "block_verdicts": verdicts,
     }
+    _record_x87_premises(result, verdict, ossa, cssa)
     return retry_entry_invariants(
         result, original, selected.memory if isinstance(selected, CutpointStateRelation) else MemoryPermutation(),
         explicit=invariant, deadline=deadline,

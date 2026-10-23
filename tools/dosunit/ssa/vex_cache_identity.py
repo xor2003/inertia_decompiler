@@ -13,7 +13,7 @@ import os
 import sys
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from tools.dosunit.contracts.model import stable_id
 from tools.dosunit.reporting import ssa_provenance
@@ -120,7 +120,7 @@ def vex_cache_identity(project: angr.Project) -> str:
             else item
             for item in arch.lifting_semantics_key_8616()
         ]
-    return cast(str, stable_id("vex-model", {
+    return stable_id("vex-model", {
         "schema": 1,
         "sources": ssa_provenance._semantic_hash(),
         "loaded_image": loaded_image_identity(project),
@@ -140,4 +140,4 @@ def vex_cache_identity(project: angr.Project) -> str:
         "packages": {name: version(name) for name in ("angr", "cle", "archinfo", "pyvex", "capstone")},
         "python_abi": sys.implementation.cache_tag,
         "environment": {key: value for key, value in os.environ.items() if key.startswith("INERTIA_")},
-    }))
+    })

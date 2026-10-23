@@ -61,7 +61,7 @@ import re
 import sys
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
 from copy import copy
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -86,6 +86,10 @@ from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVa
 from inertia.cli.telemetry import span
 from inertia.frontend.x86_16.cod_extract import extract_cod_proc_metadata
 from inertia.frontend.x86_16.frontend_block_inventory import decoded_function_callsite_addresses_8616
+from inertia.frontend.x86_16.render_compat import (
+    repair_cfunctioncall_render_target_8616,
+    set_cfunctioncall_render_name_8616,
+)
 from inertia.lowering.analysis_helpers import (
     CallTargetKind8616,
     CallTargetSeed,
@@ -1563,7 +1567,7 @@ def _source_floor_expected_names_8616(
         source_name for source_name in source_call_names if isinstance(source_name, str) and source_name
     ]
     expected_names.extend(tail_names)
-    summaries_by_name = None
+    summaries_by_name: dict[str, list[CallsiteSummary8616]] | None = None
     if len(callsite_summaries) == len(expected_names):
         summaries_by_name = {}
         for source_name, summary in zip(expected_names, callsite_summaries, strict=False):
@@ -2393,10 +2397,10 @@ def _lookup_callee_function_8616(
 
 
 def _first_rebased_sidecar_label_8616(
-    lookup_addrs: frozenset[int],
+    lookup_addrs: Set[int],
     target_addr: int,
-    resolve: Callable[[int], StructuredAstValue],
-) -> StructuredAstValue:
+    resolve: Callable[[int], str | None],
+) -> str | None:
     """Return the first non-None label resolved from the non-target lookup addresses."""
     for lookup_addr in sorted(lookup_addrs - {target_addr}):
         rebased = resolve(lookup_addr)
@@ -3318,7 +3322,7 @@ def _callee_expects_pointer_arg_8616(
 
 
 def _call_arg_semantic_kind_8616(
-    callee: str,
+    callee: str | None,
     arg_index: int,
     *,
     project: StructuredAstValue = None,
@@ -3329,7 +3333,7 @@ def _call_arg_semantic_kind_8616(
     return __call_arg_semantic_kind_8616___impl(arg_index=arg_index, callee=callee, project=project, prototype=prototype)
 
 
-def __call_arg_semantic_kind_8616___impl(*, arg_index: int, callee: str, project: StructuredAstValue, prototype: StructuredAstValue) -> CallArgSemanticKind8616:
+def __call_arg_semantic_kind_8616___impl(*, arg_index: int, callee: str | None, project: StructuredAstValue, prototype: StructuredAstValue) -> CallArgSemanticKind8616:
     normalized = normalize_callee_name_8616(callee)
     if not isinstance(normalized, str):
         return CallArgSemanticKind8616.UNKNOWN
@@ -3562,37 +3566,16 @@ def _rename_call_node_from_sidecar_8616(project: StructuredAstValue, node: Struc
     return renamed
 
 
-def _drop_detached_callee_func_8616(node: StructuredAstValue) -> bool:
-    callee_func = getattr(node, "callee_func", None)
-    if callee_func is None:
-        return False
+def _preserve_detached_callee_render_metadata_8616(node: StructuredAstValue) -> bool:
+    """Delegate renderer context repair without discarding the call's ABI or target.
 
-    # angr's renderer expects Function.project to be live. Exact-region and
-    # regenerated trees can retain detached Function objects; preserve the
-    # semantic target name and render through callee_target instead.
-    module = getattr(type(callee_func), "__module__", "")
-    if not isinstance(module, str) or "knowledge_plugins.functions" not in module:
+    Native C nodes and their codegen are a third-party boundary. The frontend
+    compatibility owner retains semantic fields even if no project is available;
+    formatting must never turn a typed call into a name-only default-int call.
+    """
+    if not isinstance(node, CFunctionCall):
         return False
-    try:
-        callee_project = getattr(callee_func, "project", None)
-    except AssertionError:
-        callee_project = None
-    except Exception:
-        callee_project = None
-    if callee_project is not None:
-        return False
-
-    replacement = normalize_callee_name_8616(getattr(callee_func, "name", None))
-    if not isinstance(replacement, str) or not replacement:
-        replacement = normalize_callee_name_8616(getattr(node, "callee_target", None))
-    changed = False
-    if isinstance(replacement, str) and replacement and getattr(node, "callee_target", None) != replacement:
-        node.callee_target = replacement
-        changed = True
-    if getattr(node, "callee_func", None) is not None:
-        node.callee_func = None
-        changed = True
-    return changed
+    return repair_cfunctioncall_render_target_8616(node.codegen.project, node)
 
 
 def _call_node_name_8616(node: StructuredAstValue) -> str | None:
@@ -4708,7 +4691,7 @@ def __normalize_single_call_target_node_8616___impl(*, allow_call_target_rewrite
     if node is None:
         return False
     changed = False
-    changed |= _drop_detached_callee_func_8616(node)
+    changed |= _preserve_detached_callee_render_metadata_8616(node)
     callee_target = getattr(node, "callee_target", None)
     normalized_target = normalize_callee_name_8616(callee_target)
     if isinstance(normalized_target, str) and normalized_target != callee_target:
@@ -4988,6 +4971,10 @@ def _bind_canonical_addr_target_8616(
     # an unproven third-party function name. Keep explicit source and
     # sidecar names above, otherwise render the stable address target.
     canonical_target = f"sub_{target_addr:x}"
+    if isinstance(node, CFunctionCall):
+        retained = set_cfunctioncall_render_name_8616(project, node, target_addr, canonical_target)
+        if retained is not None:
+            return retained
     changed = False
     if getattr(node, "callee_func", None) is not None:
         node.callee_func = None
@@ -6209,7 +6196,7 @@ def __ordered_callsite_pairs_8616___summary_immediate_args(summary: StructuredAs
 
 
 
-def __ordered_callsite_pairs_8616___target_name_for_callsite(callsite_addr: int, *, active_summary_inventory: dict[int, CallsiteSummary8616], function: StructuredAstValue, project: StructuredAstValue) -> str | None:
+def __ordered_callsite_pairs_8616___target_name_for_callsite(callsite_addr: int, *, active_summary_inventory: Mapping[int, CallsiteSummary8616], function: StructuredAstValue, project: StructuredAstValue) -> str | None:
     try:
         target_addr = getattr(function, "get_call_target", lambda _addr: None)(callsite_addr)
     except Exception:
@@ -6507,7 +6494,7 @@ def __apply_callsite_summary_to_node_8616___impl(*, allow_call_target_rewrites: 
     if node is None:
         return False
     changed = False
-    changed |= _drop_detached_callee_func_8616(node)
+    changed |= _preserve_detached_callee_render_metadata_8616(node)
     active_summary, probe_changed = _upgrade_to_source_proven_probe_summary_8616(
         codegen, node, summary, expected_source_name, stats
     )
@@ -7079,6 +7066,16 @@ def _direct_args_from_push_sources_8616(
     return tuple(direct_args), tuple(ordered_sources)
 
 
+def _instruction_bound_push_sources_8616(
+    sources: tuple[StructuredAstValue, ...], instructions: tuple[StructuredAstValue, ...],
+) -> bool:
+    """Consume existing complete source-to-instruction bindings for replacement."""
+    return bool(sources) and all(source is not None for source in sources) and (
+        len(instructions) == len(sources)
+        and all(isinstance(addr, int) and not isinstance(addr, bool) for addr in instructions)
+    )
+
+
 def _commit_seeded_call_args_8616(
     node: StructuredAstValue,
     seeded_args: tuple[StructuredAstValue, ...],
@@ -7087,12 +7084,18 @@ def _commit_seeded_call_args_8616(
     set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616],
     refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None],
 ) -> bool:
-    """Install seeded args on the call node and refresh the summary shape."""
+    """Install seeded args without overruling stronger values absent exact PUSH facts."""
+    exact_push_sources = (
+        summary is not None
+        and _instruction_bound_push_sources_8616(
+            summary.push_arg_sources, summary.push_arg_instruction_addrs,
+        )
+    )
     transaction = set_materialized_call_args_fn(
         node,
         seeded_args,
         call_name=call_name,
-        force_replace=True,
+        force_replace=exact_push_sources,
     )
     if transaction.arguments_accepted:
         refresh_summary_arg_shape_fn(node, summary)
@@ -8893,7 +8896,7 @@ class _CallsiteStackArgsMaterializer8616:
     ) -> bool:
         """Apply a proven call-result destination and consume its exact stale alias."""
         destination = summary.return_store_destination if summary is not None else None
-        if not _return_store_destination_applicable_8616(call, summary, destination):
+        if summary is None or destination is None or not _return_store_destination_applicable_8616(call, summary, destination):
             return False
         width_hint = summary.return_store_width
         if not isinstance(width_hint, int) or width_hint <= 0:
@@ -9068,7 +9071,7 @@ class _CallsiteStackArgsMaterializer8616:
                 type(stmt).__name__,
                 tuple(type(candidate).__name__ for candidate in following_statements),
             )
-        _drop_detached_callee_func_8616(call)
+        _preserve_detached_callee_render_metadata_8616(call)
         self.codegen._inertia_call_return_switch_selector_materialized_8616 = (
             int(getattr(self.codegen, "_inertia_call_return_switch_selector_materialized_8616", 0) or 0) + 1
         )
@@ -9313,12 +9316,6 @@ class _CallsiteStackArgsMaterializer8616:
             node = node.expr
         return isinstance(node, structured_c.CConstant)
 
-    def _constant_int_value_8616(self, expr: StructuredAstValue) -> int | None:
-        node = expr
-        while isinstance(node, CTypeCast):
-            node = node.expr
-        value = getattr(node, "value", None) if isinstance(node, structured_c.CConstant) else None
-        return int(value) & 0xFFFF if isinstance(value, int) else None
 
     def _symbol_name_8616(self, expr: StructuredAstValue) -> str | None:
         node = expr
@@ -9868,7 +9865,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-        stack_terms = []
+        stack_terms: list[StructuredAstValue] = []
         constant_total = 0
         for term, sign in self._flatten_add_sub(node):
             const_delta = self._fold_stack_plus_const_term_8616(term, stack_terms)
@@ -11751,6 +11748,8 @@ class _CallsiteStackArgsMaterializer8616:
                         self._debug_expr_8616(rhs_stmt),
                         self._assignment_lhs_writes_memory(lhs),
                     )
+        return None
+
     def _resolve_dirty_rhs_fallback_8616(
         self,
         rhs: StructuredAstValue,
@@ -11773,6 +11772,8 @@ class _CallsiteStackArgsMaterializer8616:
                     source_idx,
                 )
             return dirty_rhs
+        return None
+
     def _resolve_register_rhs_chain_8616(
         self,
         rhs: StructuredAstValue,
@@ -12258,7 +12259,7 @@ class _CallsiteStackArgsMaterializer8616:
     ) -> tuple[bool, bool]:
         if call is None or summary is None or bool(summary.stack_probe_helper):
             return False, False
-        changed = _drop_detached_callee_func_8616(call)
+        changed = _preserve_detached_callee_render_metadata_8616(call)
         target_addr = summary.target_addr
         if not isinstance(target_addr, int):
             return changed, False
@@ -13011,7 +13012,7 @@ class _CallsiteStackArgsMaterializer8616:
         remat_expr: bool,
         actual_keys: tuple[StructuredAstValue, ...],
         expected_keys: tuple[StructuredAstValue, ...],
-    ) -> tuple[bool, bool, bool, bool, StructuredAstValue] | None:
+    ) -> tuple[bool | None, bool, bool, bool, StructuredAstValue] | None:
         if actual_keys != expected_keys:
             actual_score = sum(
                 self._arg_semantic_quality_8616(semantic_name, idx, arg) for idx, arg in enumerate(args)
@@ -13056,6 +13057,7 @@ class _CallsiteStackArgsMaterializer8616:
                 )
             return True, expr_verified, push_align, remat_expr, expected_args
         return None, expr_verified, push_align, remat_expr, expected_args
+
     def _remat_derived_push_args_8616(
         self,
         call: StructuredAstValue,
@@ -13110,6 +13112,8 @@ class _CallsiteStackArgsMaterializer8616:
             if isinstance(offset, int) and offset <= 2:
                 self._remat_debug_8616(call, 'reason=small-stack-offset offset=%r',offset)
                 return True
+        return False
+
     def _remat_arith_source_verdict_8616(self,
         arg: StructuredAstValue,
         arg_index: int,
@@ -13183,6 +13187,8 @@ class _CallsiteStackArgsMaterializer8616:
             return True
         if isinstance(node, structured_c.CVariable):
             return self._remat_stack_variable_verdict_8616(node, call)
+        return False
+
     def _remat_per_arg_scan_8616(
         self,
         call: StructuredAstValue,
@@ -13465,8 +13471,8 @@ class _CallsiteStackArgsMaterializer8616:
             lhs_key = self._c_variable_identity_key_8616(lhs)
         if is_candidate:
             if lhs_key is None:
-                if lhs is not None and self._assignment_lhs_writes_memory(lhs):
-                    return True
+                # Argument consumption does not prove unaliased memory dead.
+                # Unknown storage identity must retain the physical definition.
                 live_identity_keys.update(self._statement_variable_identity_keys_8616(statement))
                 self.stats.live_setup_definition_preserved_count += 1
                 return False
@@ -13920,7 +13926,7 @@ class _CallsiteStackArgsMaterializer8616:
         first_callsite: StructuredAstValue,
         first_reg: str,
         result_read: StructuredAstValue,
-        call_name: str,
+        call_name: str | None,
     ) -> StructuredAstValue | None:
         """Handle the return-source arm when no standalone return call exists."""
         if result_read.verdict is RuntimeCallResultVerdict8616.UNKNOWN_REFUSE:
@@ -15384,7 +15390,7 @@ class _CallsiteStackArgsMaterializer8616:
         if not any(self._c_variable_identity_key_8616(arg) == lhs_key for arg in args):
             return ("lhs-not-call-arg")
         return True
-    def _setup_prune_refuse_8616(self, idx: int, reason: str) -> bool:
+    def _setup_prune_refuse_8616(self, idx: int, reason: object) -> bool:
         if os.environ.get("INERTIA_DEBUG_STACK_PROBE_ARTIFACTS_VERBOSE"):
             log.warning("[call-arg-setup-prune] refuse idx=%d reason=%s", idx, reason)
         return False
@@ -15432,6 +15438,13 @@ class _CallsiteStackArgsMaterializer8616:
         lhs, rhs = self._assignment_lhs_rhs(assignment)
         if lhs is None or rhs is None or self._statement_contains_call(rhs):
             return self._setup_prune_refuse_8616(idx, "missing-lhs-rhs-or-rhs-call")
+        # PUSH provenance identifies the argument value, not the lifetime of
+        # its stack bytes. No memory-liveness authority is consumed here.
+        storage_lhs = self._strip_casts(lhs)
+        if self._assignment_lhs_writes_memory(lhs) or (
+            isinstance(storage_lhs, structured_c.CVariable) and isinstance(storage_lhs.variable, SimStackVariable)
+        ):
+            return self._setup_prune_refuse_8616(idx, "memory-liveness-unproven")
 
 
 
@@ -15841,7 +15854,7 @@ class _CallsiteStackArgsMaterializer8616:
         helper_or_helper_zone_active: bool,
         stack_probe_seen: bool,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-        later_identity_keys_by_index: list[StructuredAstValue],
+        later_identity_keys_by_index: Sequence[frozenset[tuple[StructuredAstValue, ...]]],
         allow_setup_assignment_prune: bool,
     ) -> tuple[str, bool]:
         """Classify one statement's artifact verdict; returns (action, helper_zone_active)."""
@@ -17226,7 +17239,7 @@ class _CallsiteStackArgsMaterializer8616:
         summary_return_addr: StructuredAstValue,
         typed_stack_probe_fact: StructuredAstValue,
         typed_stack_probe_materialization: bool,
-    ) -> None:
+    ) -> int | None:
         """Apply strict push-source rematerialization for one call statement."""
         strict_arg_shape_applied = False
         if (
@@ -17370,6 +17383,7 @@ class _CallsiteStackArgsMaterializer8616:
                 summary=summary,
             )
             strict_arg_shape_applied = strict_arg_shape_applied or applied
+        return None
 
     def _remat_fallback_args_8616(self,
         *,
@@ -17884,7 +17898,7 @@ class _CallsiteStackArgsMaterializer8616:
             ):
                 self.changed = True
             self._append_call_statement_with_relocated_writes_8616(call=call, i=i, is_stack_probe_helper=is_stack_probe_helper, new_statements=new_statements, push_arg_sources=push_arg_sources, stack_probe_seen=stack_probe_seen, statements=statements, stmt=stmt, summary=summary, typed_stack_probe_fact=typed_stack_probe_fact)
-            return i + 1
+            return cast(int, i + 1)
         return None
 
 
@@ -18089,7 +18103,7 @@ class _CallsiteStackArgsMaterializer8616:
             self._append_call_statement_with_relocated_writes_8616(call=call, i=i, is_stack_probe_helper=is_stack_probe_helper, new_statements=new_statements, push_arg_sources=push_arg_sources, stack_probe_seen=stack_probe_seen, statements=statements, stmt=stmt, summary=summary, typed_stack_probe_fact=typed_stack_probe_fact)
         else:
             new_statements.append(stmt)
-        return i + 1
+        return cast(int, i + 1)
 
 
     def _collect_call_evidence_flags_8616(self,
@@ -18141,8 +18155,7 @@ class _CallsiteStackArgsMaterializer8616:
         )
         has_instruction_proven_direct_push_sources = (
             has_complete_exact_direct_push_sources
-            and len(push_arg_instruction_addrs) == len(push_arg_sources)
-            and all(isinstance(addr, int) for addr in push_arg_instruction_addrs)
+            and _instruction_bound_push_sources_8616(push_arg_sources, push_arg_instruction_addrs)
         )
         has_safe_non_stack_fallback = (
             isinstance(expected_arg_count, int)
@@ -20150,7 +20163,7 @@ class _CallsiteStackArgsMaterializer8616:
         post_rhs: StructuredAstValue,
     ) -> bool:
         if pre_rhs_key is not None and post_rhs_key is not None:
-            return pre_rhs_key == post_rhs_key
+            return cast(bool, pre_rhs_key == post_rhs_key)
         return _same_c_expression_8616(pre_rhs, post_rhs)
 
     def _clobber_copy_key_verdict_8616(self,
@@ -20383,6 +20396,8 @@ class _CallsiteStackArgsMaterializer8616:
             if not self._expr_matches_push_source_value_8616(candidate.rhs, source):
                 return None
             return sources_by_instruction
+        return None
+
     def _prune_consumed_direct_push_source_stores_8616(self,
         call: StructuredAstValue,
         push_sources: tuple[StructuredAstValue, ...],
@@ -20623,7 +20638,7 @@ class _CallsiteStackArgsMaterializer8616:
             return self._post_write_relocate_refuse_8616(call, "missing-bp-source-offsets")
 
         relocated_reversed: list[StructuredAstValue] = []
-        last_refusal = "no-suffix"
+        last_refusal: str | None = "no-suffix"
         last_debug_shape = ""
         while new_statements:
             candidate = new_statements[-1]
@@ -21144,7 +21159,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def materialize_assignment(self, stmt: StructuredAstValue, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None) -> bool:
+    def materialize_assignment(self, stmt: StructuredAstValue, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
         """Rewrite evidence-proven immediate stores in ``stmt`` to their symbols."""
         local_changed = False
         for offset in tuple(evidence):
@@ -21167,7 +21182,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _repair_branch_immediate_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None) -> bool:
+    def _repair_branch_immediate_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
         local_changed = False
         branch_nodes = [
             child
@@ -21302,7 +21317,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _materialize_empty_branch_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None) -> bool:
+    def _materialize_empty_branch_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
         condition_nodes = _boundary_tuple_8616(getattr(stmt, "condition_and_nodes", ()) or ())
         if len(condition_nodes) != 1:
             return False
@@ -21612,7 +21627,7 @@ class _CallsiteStackArgsMaterializer8616:
             return True
         return False
 
-    def _prune_stale_post_branch_fnptr_overwrites_8616(self, block: StructuredAstValue, *, bp_stack_store_counts: dict[int, int], evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None) -> bool:
+    def _prune_stale_post_branch_fnptr_overwrites_8616(self, block: StructuredAstValue, *, bp_stack_store_counts: dict[int, int], evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
         statements = getattr(block, "statements", None)
         if not isinstance(statements, (list, tuple)) or len(statements) < 2:
             return False
@@ -21785,15 +21800,6 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_safe_far_pointer_carrier_artifact_8616(self, rhs: StructuredAstValue) -> bool:
-        if self._statement_contains_call(rhs):
-            return False
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
-            if isinstance(node, CFunctionCall):
-                return False
-            if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
-                return False
-        return True
 
 
 
@@ -21819,14 +21825,6 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _call_has_dx_ax_destination_proof_8616(self, call: StructuredAstValue) -> bool:
-        summary = self.summary_map.get(id(call)) if call is not None else None
-        if summary is None or summary.return_used is not True or summary.return_register not in {None, "ax"}:
-            return False
-        return summary.return_shape == "dx_ax" or isinstance(
-            summary.return_store_destination,
-            tuple,
-        )
 
 
 
@@ -21990,7 +21988,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def symbol_for_immediate(self,
-        offset: int, imm: int | None, *, exclude_names: set[str] | None = None, evidence: dict[int, list[tuple[int, StructuredAstValue]]] | None
+        offset: int, imm: int | None, *, exclude_names: set[str] | None = None, evidence: dict[int, list[tuple[int, StructuredAstValue]]]
     ) -> StructuredAstValue:
         """Return a cloned evidence symbol for ``offset`` matching ``imm``, or None."""
         symbols = evidence.get(offset)

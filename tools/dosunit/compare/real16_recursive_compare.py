@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import capstone
 
@@ -304,8 +304,10 @@ def _entry_bootstrap(document: dict[str, Any], load: BoundReal16Load,
     outputs = found.get("outputs")
     if not isinstance(outputs, dict):
         raise _AdapterRefusal(RecursiveCompareReason.ENTRY, "entry block lacks full-state outputs")
-    return S._compose_block_outputs(found, outputs, initial_state(),
-                                    compose_stats={"deadline": limits.deadline})
+    # straightline_ssa re-exports the typed SSA composer through an
+    # unfollowed boundary; the owned composer already declares MachineState.
+    return cast(MachineState, S._compose_block_outputs(
+        found, outputs, initial_state(), compose_stats={"deadline": limits.deadline}))
 
 
 def _block_request(load: BoundReal16Load, address: int, state: MachineState) -> NativeBlockRequest:

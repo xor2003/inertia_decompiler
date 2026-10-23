@@ -342,3 +342,47 @@ def test_missing_ambiguous_and_conflicting_evidence_has_typed_closed_refusals() 
         )
 
         assert_closed_single_refusal(result, expected)
+
+
+def test_native_cs_load_retains_selector_and_path_memory_authority() -> None:
+    """Real CS-prefixed bytes retain their space without assuming table contents."""
+    from inertia.ir import IRAddress
+    from inertia.ir.real16_edge_feasibility8616 import _kb_store_span_8616
+    from inertia.ir.real16_initial_memory8616 import InvocationInitialMemory8616
+    from inertia.ir.real16_invocation_domain import _store_span_8616
+    from inertia.ir.real16_path_memory8616 import PathMemory8616, path_load_value_8616
+
+    artifact = lift_ir_artifact(bytes.fromhex("2e 8b 87 39 03 c3"))
+    loads = tuple(instr for block in artifact.blocks for instr in block.instrs
+                  if instr.op == "LOAD" and instr.addr == 0x1000)
+    assert loads
+    registers = {"cs": 0x1A2, "ds": 0x200, "ss": 0x300, "bx": 2}
+    initial = InvocationInitialMemory8616(((0x1D5B, b"\x1e\x03"),))
+    memory = PathMemory8616()
+    for load in loads:
+        address = load.args[0]
+        assert isinstance(address, IRAddress)
+        assert address.space is MemSpace.CS
+        tmps = {value.source_tmp: registers[value.name] for value in address.base_values}
+        known_tmps = {key: (0xFFFF, value) for key, value in tmps.items()}
+        span = _store_span_8616(load, address, registers, set(), tmps)
+        assert span is not None
+        assert 0x1D5B <= span[0] < 0x1D5D
+        assert _kb_store_span_8616(load, address,
+                                  {key: (0xFFFF, value) for key, value in registers.items()},
+                                  set(), known_tmps) == span
+        assert _store_span_8616(load, address, {"ds": 0x1A2, "bx": 2}, set(), tmps) is None
+        assert _store_span_8616(load, address, registers, {"cs"}, tmps) is None
+        assert _kb_store_span_8616(load, address, {"cs": (0xFF, 0xA2), "bx": (0xFFFF, 2)}, set(), known_tmps) is None
+        assert _kb_store_span_8616(load, address,
+                                  {key: (0xFFFF, value) for key, value in registers.items()},
+                                  {"cs"}, known_tmps) is None
+        expected = int.from_bytes(b"\x1e\x03"[span[0] - 0x1D5B:span[0] - 0x1D5B + span[1]], "little")
+        assert path_load_value_8616(load, span, memory, initial) == expected
+        changed = PathMemory8616()
+        changed.apply_write(span[0], span[1], None)
+        assert path_load_value_8616(load, span, changed, initial) is None
+        changed.apply_write(span[0], span[1], b"\x00" * span[1])
+        assert path_load_value_8616(load, span, changed, initial) == 0
+        assert path_load_value_8616(load, span, PathMemory8616(tainted=True), initial) is None
+        assert path_load_value_8616(load, span, memory, InvocationInitialMemory8616(())) is None

@@ -5,9 +5,10 @@ from types import SimpleNamespace
 
 from inertia.alias.indexed_address_program import (
     IndexedAliasFunctionSelection8616,
+    IndexedAliasProgramFailureKind8616,
     build_indexed_alias_program_evidence_8616,
 )
-from inertia.cli.cli_function_discovery import _recover_fast_exe_catalog
+from inertia.cli.cli_function_discovery import _recover_pre_entry_source_catalog_8616
 from inertia.cli.project_loading import _build_project
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.indexed_address_evidence import (
@@ -26,6 +27,7 @@ from inertia.ir.logical_memory_write_value import (
 )
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.ir.vex_terminal_jump import TerminalJumpRefusalReason8616
 from inertia.lowering.bounded_global_array_declarations import (
     materialize_project_bounded_global_arrays_8616,
 )
@@ -37,6 +39,7 @@ from inertia.widening.indexed_global_object_layout import (
     recover_global_object_layout_evidence_8616,
 )
 from inertia.widening.indexed_global_object_program_ranges import (
+    ProjectBoundedGlobalObjectRangeSourceStatus8616,
     recover_program_bounded_global_object_ranges_8616,
 )
 from tools.dev.check_sortd_sidecar_free import mz_executable_image
@@ -67,23 +70,27 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
         base_addr=0x10000,
         entry_point=0x1000,
     )
-    recovered = _recover_fast_exe_catalog(
+    # Exercise the real recovery owner without the CLI listing's per-seed budget.
+    recovered, recovery = _recover_pre_entry_source_catalog_8616(
         project,
+        source_seeds=(_INIT_BARS_ADDR,),
         timeout=120,
-        window=0x300,
-        low_memory=False,
-        limit=None,
+        per_function_timeout=30,
     )
-    function = next(
-        candidate
-        for _cfg, candidate in recovered
-        if candidate.addr == _INIT_BARS_ADDR
-    )
+    assert recovery.materialized_count == 1
+    assert recovery.failure_count == 0
+    assert len(recovered) == 1
+    function = recovered[0][1]
+    assert function.addr == _INIT_BARS_ADDR
 
     artifact = build_x86_16_ir_function_artifact(project, function)
     ssa = build_x86_16_function_ssa(artifact)
 
-    assert artifact.refusals == ()
+    # The isolated function has no caller selector premise. Relative calls and
+    # jumps can wrap at different CS values, so their pending proof stays visible.
+    assert {refusal.kind for refusal in artifact.refusals} == {
+        TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED,
+    }
     assert artifact.condition_evidence is not None
     assert artifact.condition_evidence.complete
     assert ssa.condition_evidence is artifact.condition_evidence
@@ -167,6 +174,11 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
         project,
         (IndexedAliasFunctionSelection8616(_INIT_BARS_ADDR, function),),
     )
+    assert program.closed
+    assert program.functions == ()
+    assert tuple(refusal.failure for refusal in program.refusals) == (
+        IndexedAliasProgramFailureKind8616.IR_BUILD_FAILED,
+    )
     layouts = recover_global_object_layout_evidence_8616(program)
     project_ranges = recover_program_bounded_global_object_ranges_8616(
         program,
@@ -174,7 +186,15 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
     )
     assert project_ranges.closed
     assert project_ranges.ranges == ()
-    assert project_ranges.refusals
+    assert project_ranges.refusals == ()
+    assert project_ranges.source.status is (
+        ProjectBoundedGlobalObjectRangeSourceStatus8616.FUNCTION_REFUSALS
+    )
+    assert (
+        project_ranges.source.selected_function_count,
+        project_ranges.source.materialized_function_count,
+        project_ranges.source.refused_function_count,
+    ) == (1, 0, 1)
     project._inertia_project_bounded_global_object_ranges_8616 = project_ranges
     codegen = SimpleNamespace(
         _inertia_global_declaration_specs_8616=(
@@ -194,6 +214,7 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
     )
     lowering = codegen._inertia_bounded_global_array_lowering_evidence_8616
     assert lowering.closed
+    assert lowering.source is project_ranges
     assert lowering.facts == ()
     assert lowering.upstream_refusals == project_ranges.refusals
     assert codegen._inertia_global_declaration_specs_8616 == declaration_before

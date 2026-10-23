@@ -112,6 +112,27 @@ Every semantic improvement needs closed evidence loop: `raw_fact_count`, `normal
 3. What corpus result improved? What might regress?
 4. Architectural or temporary rescue? If temporary, what replaces it?
 
+## Tool output limits (mandatory)
+
+- Limit the visible text returned by **every tool invocation**, including shell,
+  search, MCP and batched calls, to **20 lines and 2 KiB in total**. Apply the
+  limit before returning output to the conversation; a token limit alone is
+  insufficient. Use smaller limits when the result is simple.
+- Capture the full raw output, including stderr and overflow, in an ignored
+  file under `.cache/agent-tool-output/`. Reuse `latest.log` and **overwrite it
+  on each invocation**, rather than appending or accumulating routine logs.
+  Concurrent calls must use separate fixed `latest-<tool-or-task>.log` paths.
+- Return the exit status or typed result, a short actionable summary, and the
+  log path. Read additional details from the saved file in bounded chunks only
+  when needed. Preserve task-specific evidence logs when required for a
+  regression or acceptance claim; these are separate from routine output.
+- Prefer native tool limits and filters. If a tool cannot bound its response,
+  call it through an orchestration wrapper that saves the complete response
+  and returns only the bounded summary. This applies to structured results too.
+- Preserve the producer's real exit status and complete diagnostics. Never
+  pipe a running producer into `head` or otherwise truncate its execution;
+  limit the display after capture. Do not expose secrets in summaries or logs.
+
 ## Improving code
 
 - Fast iteration per coherent Python edit on explicit owned paths:
@@ -121,6 +142,12 @@ Every semantic improvement needs closed evidence loop: `raw_fact_count`, `normal
   [Linter cadence](reference/agent-execution.md#linter-cadence). Documentation-only edits need no Python lint.
 - Run Python/pytest at nice 10 with `PYTHON_JIT=1`; share at most six test workers; retain
   full logs and report scope, exit status, counts and actionable failures.
+- Bound every tool response to 20 lines and 2 KiB, including combined output from
+  batched commands. Save complete command logs before displaying a summary. When
+  raw output exceeds the display limit, overwrite
+  `.cache/agent-tool-output/latest.log` with the full raw output and report its
+  path; retain required test and acceptance logs separately. Follow the detailed
+  [output rules](reference/agent-execution.md#token-efficient-command-output).
 - Mandatory guidance: read and follow
   [reference/agent-execution.md](reference/agent-execution.md) at startup and after compaction
   (regression, performance, delegation, token-output, progress, compaction-handoff rules). This file

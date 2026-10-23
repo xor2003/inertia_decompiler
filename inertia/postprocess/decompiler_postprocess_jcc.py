@@ -50,7 +50,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, cast
@@ -1769,318 +1769,6 @@ def _decode_inc_dec_jcc_guard_8616(
     return _impl()
 
 
-def _decode_test_jcc_guard_8616(
-    project: Any,
-    codegen: Any,
-    test_insn: Any,
-    jcc_mnemonic: str,
-    reg_exprs: dict[tuple[int, str, int], object],
-    ds_var: Any,
-) -> _DecodedCmpGuard8616 | None:
-    def _impl() -> _DecodedCmpGuard8616 | None:
-        mnemonic = str(getattr(test_insn, "mnemonic", "")).lower()
-        if mnemonic not in {"test", "or", "and"}:
-            return None
-        if jcc_mnemonic not in {"je", "jz", "jne", "jnz"}:
-            return None
-        operands = tuple(getattr(test_insn, "operands", ()) or ())
-        if len(operands) != 2:
-            return None
-        reg_state: dict[str, object] = {}
-        lhs = _resolve_cmp_operand_expr_8616(
-            project,
-            codegen,
-            operands[0],
-            reg_state,
-            ds_var,
-            test_insn.reg_name,
-            reg_exprs,
-            int(test_insn.address),
-        )
-        rhs = _resolve_cmp_operand_expr_8616(
-            project,
-            codegen,
-            operands[1],
-            reg_state,
-            ds_var,
-            test_insn.reg_name,
-            reg_exprs,
-            int(test_insn.address),
-        )
-        if lhs is None or rhs is None:
-            return None
-        if _same_c_expression_8616(lhs, rhs):
-            tested = lhs
-        else:
-            tested_op = "Or" if mnemonic == "or" else "And"
-            tested = CBinaryOp(tested_op, lhs, rhs, codegen=codegen)
-        return _DecodedCmpGuard8616(
-            lhs=tested,
-            rhs=_const_8616(0, codegen),
-            op="CmpEQ" if jcc_mnemonic in {"je", "jz"} else "CmpNE",
-        )
-
-    return _impl()
-
-
-def _cmp_state_mov_load_8616(
-    project: Any,
-    codegen: Any,
-    insn_dynamic: Any,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
-    reg_exprs: dict[tuple[int, str, int], object],
-    ds_var: Any,
-) -> None:
-    """Track `mov reg, mem` through proven base or stack-slot evidence."""
-    dst_reg = insn_dynamic.reg_name(operands[0].reg).lower()
-    mem = operands[1].mem
-    key = (int(mem.disp), int(operands[0].size)) if insn_dynamic.reg_name(mem.base) == "bp" else None
-    expr = None
-    if key is not None:
-        expr = _bp_operand_stack_expr_8616(codegen, key[0], key[1]) or stack_slots.get(key)
-    elif mem.base:
-        base_expr = reg_state.get(insn_dynamic.reg_name(mem.base).lower())
-        if base_expr is not None:
-            expr = _memory_load_expr_8616(
-                project,
-                codegen,
-                ds_var,
-                base_expr,
-                int(mem.disp),
-                int(operands[0].size),
-            )
-    if expr is None:
-        expr = _lookup_register_expr_8616(reg_exprs, int(insn_dynamic.address), dst_reg, int(operands[0].size))
-    if dst_reg == "al" and expr is not None:
-        expr = _low_byte_expr_from_assignment_8616(expr)
-    elif expr is None and mem.base:
-        base_expr = reg_state.get(insn_dynamic.reg_name(mem.base).lower())
-        if base_expr is None:
-            return
-        expr = _memory_load_expr_8616(
-            project,
-            codegen,
-            ds_var,
-            base_expr,
-            int(mem.disp),
-            int(operands[0].size),
-        )
-    if expr is not None:
-        reg_state[dst_reg] = expr
-        if key is not None:
-            stack_slots.setdefault(key, expr)
-
-
-def _cmp_state_mov_store_8616(
-    codegen: Any,
-    insn_dynamic: Any,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
-) -> None:
-    """Track `mov [bp+disp], reg` into the known stack-slot table."""
-    mem = operands[0].mem
-    if insn_dynamic.reg_name(mem.base) != "bp":
-        return
-    src_reg = insn_dynamic.reg_name(operands[1].reg).lower()
-    size = int(operands[1].size)
-    slot_expr = _bp_operand_stack_expr_8616(codegen, int(mem.disp), size)
-    if slot_expr is not None:
-        stack_slots[(int(mem.disp), size)] = slot_expr
-    elif reg_state.get(src_reg) is not None:
-        stack_slots[(int(mem.disp), size)] = reg_state[src_reg]
-
-
-def _cmp_state_cbw_8616(codegen: Any, reg_state: dict[str, object]) -> None:
-    """Mirror `cbw`/`cwde` widening when the source byte value is known."""
-    al_expr = reg_state.get("al")
-    if al_expr is None:
-        reg_state.pop("ax", None)
-        reg_state.pop("eax", None)
-        return
-    reg_state["ax"] = al_expr
-    reg_state["eax"] = al_expr
-    codegen_dynamic = cast(Any, codegen)
-    codegen_dynamic._inertia_jcc_byte_extend_materialized_8616 = (
-        int(getattr(codegen, "_inertia_jcc_byte_extend_materialized_8616", 0) or 0) + 1
-    )
-
-
-def _cmp_state_shift_8616(
-    project: Any,
-    codegen: Any,
-    insn_dynamic: Any,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-) -> None:
-    """Apply a constant shift to the tracked register value, or drop it."""
-    reg_name = insn_dynamic.reg_name(operands[0].reg).lower()
-    reg_expr = reg_state.get(reg_name)
-    if reg_expr is None:
-        reg_state.pop(reg_name, None)
-        return
-    shifted = _try_build_arch_safe_binary_op_8616(
-        project, codegen, "Shl", reg_expr, _const_8616(int(operands[1].imm), codegen)
-    )
-    if shifted is None:
-        reg_state.pop(reg_name, None)
-        return
-    reg_state[reg_name] = shifted
-
-
-def _cmp_state_incdec_8616(
-    project: Any,
-    codegen: Any,
-    insn_dynamic: Any,
-    mnemonic: str,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-) -> None:
-    """Apply an inc/dec to the tracked register value, or drop it."""
-    reg_name = insn_dynamic.reg_name(operands[0].reg).lower()
-    reg_expr = reg_state.get(reg_name)
-    if reg_expr is None:
-        reg_state.pop(reg_name, None)
-        return
-    op = "Add" if mnemonic == "inc" else "Sub"
-    updated = _try_build_arch_safe_binary_op_8616(project, codegen, op, reg_expr, _const_8616(1, codegen))
-    if updated is None:
-        reg_state.pop(reg_name, None)
-        return
-    reg_state[reg_name] = updated
-
-
-def _cmp_state_addsub_8616(
-    project: Any,
-    codegen: Any,
-    insn_dynamic: Any,
-    mnemonic: str,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-    reg_exprs: dict[tuple[int, str, int], object],
-    ds_var: Any,
-) -> None:
-    """Apply an add/sub to the tracked register value, or drop it."""
-    reg_name = insn_dynamic.reg_name(operands[0].reg).lower()
-    reg_expr = reg_state.get(reg_name)
-    if reg_expr is None:
-        reg_state.pop(reg_name, None)
-        return
-    rhs = _resolve_cmp_operand_expr_8616(
-        project,
-        codegen,
-        operands[1],
-        reg_state,
-        ds_var,
-        insn_dynamic.reg_name,
-        reg_exprs,
-        int(insn_dynamic.address),
-    )
-    if rhs is None:
-        reg_state.pop(reg_name, None)
-        return
-    op = "Add" if mnemonic == "add" else "Sub"
-    updated = _try_build_arch_safe_binary_op_8616(project, codegen, op, reg_expr, rhs)
-    if updated is None:
-        reg_state.pop(reg_name, None)
-        return
-    reg_state[reg_name] = updated
-
-
-def _apply_cmp_state_update_8616(
-    project: object,
-    codegen: object,
-    insn: object,
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
-    reg_exprs: dict[tuple[int, str, int], object],
-    ds_var: object,
-) -> None:
-    def _impl() -> None:
-        insn_dynamic = cast(Any, insn)
-        mnemonic = str(getattr(insn_dynamic, "mnemonic", "")).lower()
-        operands = tuple(getattr(insn_dynamic, "operands", ()) or ())
-        if mnemonic == "mov" and len(operands) == 2 and operands[0].type == 1 and operands[1].type == 3:
-            _cmp_state_mov_load_8616(
-                project, codegen, insn_dynamic, operands, reg_state, stack_slots, reg_exprs, ds_var
-            )
-            return
-        if mnemonic == "mov" and len(operands) == 2 and operands[0].type == 3 and operands[1].type == 1:
-            _cmp_state_mov_store_8616(codegen, insn_dynamic, operands, reg_state, stack_slots)
-            return
-        if mnemonic in {"cbw", "cwde"}:
-            _cmp_state_cbw_8616(codegen, reg_state)
-            return
-        if (
-            mnemonic in {"shl", "sal"}
-            and len(operands) == 2
-            and operands[0].type == 1
-            and operands[1].type == 2
-        ):
-            _cmp_state_shift_8616(project, codegen, insn_dynamic, operands, reg_state)
-            return
-        if mnemonic in {"inc", "dec"} and len(operands) == 1 and operands[0].type == 1:
-            _cmp_state_incdec_8616(project, codegen, insn_dynamic, mnemonic, operands, reg_state)
-            return
-        if mnemonic in {"add", "sub"} and len(operands) == 2 and operands[0].type == 1:
-            _cmp_state_addsub_8616(
-                project, codegen, insn_dynamic, mnemonic, operands, reg_state, reg_exprs, ds_var
-            )
-            return
-
-    return _impl()
-
-
-def _bind_typed_condition_register_operand_8616(
-    project: Any,
-    codegen: Any,
-    operand: object,
-    expr: object,
-    reg_exprs: dict[tuple[int, str, int], object],
-    ds_var: Any,
-    producer_insn: int,
-) -> object:
-    if not isinstance(operand, IRValue) or operand.space.name != "REG" or not isinstance(operand.name, str):
-        return expr
-    if not _expr_is_register_8616(project, expr, operand.name):
-        return expr
-    bound = _stateful_register_expr_before_insn_8616(
-        project,
-        codegen,
-        producer_insn,
-        operand.name,
-        max(1, int(operand.size or 2)),
-        reg_exprs,
-        ds_var,
-    )
-    return bound if bound is not None else expr
-
-
-def _bind_typed_condition_expr_operands_8616(
-    project: object, codegen: object, cond: ConditionIR, expr: object
-) -> object:
-    if not isinstance(expr, CBinaryOp):
-        return expr
-    producer_insn = cond.producer_insn
-    if not isinstance(producer_insn, int):
-        return expr
-    reg_exprs = _register_exprs_by_ins_addr_8616(codegen, project)
-    ds_offset = _reg_offset_8616(project, "ds")
-    ds_var = CVariable(SimRegisterVariable(ds_offset, 2, name="ds"), codegen=codegen) if ds_offset is not None else None
-
-    lhs_operand = cond.lhs
-    rhs_operand = cond.rhs
-    expr.lhs = _bind_typed_condition_register_operand_8616(
-        project, codegen, lhs_operand, expr.lhs, reg_exprs, ds_var, producer_insn
-    )
-    expr.rhs = _bind_typed_condition_register_operand_8616(
-        project, codegen, rhs_operand, expr.rhs, reg_exprs, ds_var, producer_insn
-    )
-    return expr
-
-
 def _typed_condition_is_reg_const_jcc_bridge_8616(cond: ConditionIR) -> bool:
     lhs = cond.lhs
     rhs = cond.rhs
@@ -2191,22 +1879,10 @@ def _decode_cmp_operands_guard_8616(
     rhs = _resolve_cmp_operand_expr_8616(
         project, codegen, rhs_op, reg_state, ds_var, cmp_insn.reg_name, reg_exprs, int(cmp_insn.address)
     )
-    call_return_expr = _call_return_expr_before_insn_8616(project, codegen, int(cmp_insn.address))
-    if call_return_expr is not None:
-        lhs_reg = int(getattr(lhs_op, "type", -1)) == 1 and str(cmp_insn.reg_name(lhs_op.reg)).lower() in {
-            "ax",
-            "al",
-            "ah",
-        }
-        rhs_reg = int(getattr(rhs_op, "type", -1)) == 1 and str(cmp_insn.reg_name(rhs_op.reg)).lower() in {
-            "ax",
-            "al",
-            "ah",
-        }
-        if lhs_reg:
-            lhs = call_return_expr
-        elif rhs_reg:
-            rhs = call_return_expr
+    # Preserve resolved values. Rebuilding a preceding CALL here duplicates
+    # its execution while the original assignment remains in the AST.
+    # Structuring owns Alias-backed projection of a captured return value;
+    # absent operand evidence keeps this decode refused below.
 
     if lhs is None or rhs is None:
         if debug_jcc:
@@ -2345,7 +2021,7 @@ def _translate_cmp_jcc_guard_8616(
             project, codegen, block_addr, jcc_addr, jcc_mnemonic, insns, jcc_index, debug_jcc
         )
         if refused:
-            return gate_result
+            return cast(_DecodedCmpGuard8616 | None, gate_result)
         cmp_insn = gate_result
         reg_exprs, ds_var = _guard_reg_exprs_and_ds_8616(project, codegen)
         mid = _translate_guard_mid_8616(
@@ -3052,7 +2728,7 @@ class _CallReturnRebind8616:
                 self._walk_block(child)
 
 
-def _flatten_c_statements_8616(raw_stmts: object) -> tuple[object, ...]:
+def _flatten_c_statements_8616(raw_stmts: Iterable[object] | None) -> tuple[object, ...]:
     """Flatten nested CStatements wrappers from a statement sequence."""
     flattened: list[object] = []
     for stmt in tuple(raw_stmts or ()):
@@ -3175,7 +2851,7 @@ class _JccRewriteRun8616:
     project: object
     codegen: object
     codegen_dynamic: Any
-    cfunc: object
+    cfunc: Any
     project_dynamic: Any
     flags_offset: int
     changed: bool = False
@@ -3205,9 +2881,10 @@ class _JccRewriteRun8616:
         self.cfunc = getattr(self.codegen_dynamic, "cfunc", None)
         if self.cfunc is None:
             return False
-        self.flags_offset = _reg_offset_8616(self.project, "flags")
-        if self.flags_offset is None:
+        flags_offset = _reg_offset_8616(self.project, "flags")
+        if flags_offset is None:
             return False
+        self.flags_offset = flags_offset
         self.project_dynamic = cast(Any, self.project)
         self.changed = False
         self.materialized_count = 0
@@ -3264,7 +2941,7 @@ class _JccRewriteRun8616:
                         cast(Any, node).condition = new_cond
                         self.changed = True
 
-    def _rewrite_condition_pairs_8616(self, node: object, cond_pairs: object) -> None:
+    def _rewrite_condition_pairs_8616(self, node: object, cond_pairs: list[tuple[object, object]] | tuple[tuple[object, object], ...]) -> None:
         """Rewrite one node's condition_and_nodes pair list."""
         pair_changed = False
         new_pairs = []
@@ -3990,6 +3667,7 @@ class _JccRewriteRun8616:
         narrowed_key = key if key is not None else None
         if narrowed_key is None:
             return None
+        ins_addr, block_addr = narrowed_key
         if narrowed_key in self.key_conflicts:
             if debug_jcc:
                 _log.warning("[jcc-rewrite] key conflict detected key=%r skip", key)
@@ -4244,7 +3922,7 @@ class _JccRewriteRun8616:
             return _JccPolarityEvidence8616.JCC_TARGET_FOLLOWING_SIBLING
         return None
 
-    def _rewrite_sibling_ifelse_pairs_8616(self, stmt: object, following_siblings: tuple[object, ...]) -> bool:
+    def _rewrite_sibling_ifelse_pairs_8616(self, stmt: CIfElse, following_siblings: tuple[object, ...]) -> bool:
         """Rewrite one CIfElse condition pair list via following-sibling polarity evidence."""
         cond_pairs = stmt.condition_and_nodes
         else_node = stmt.else_node

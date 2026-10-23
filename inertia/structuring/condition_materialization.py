@@ -35,9 +35,11 @@ from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
+    CITE,
     CAssignment,
     CBinaryOp,
     CBreak,
+    CConstant,
     CContinue,
     CDirtyExpression,
     CDoWhileLoop,
@@ -46,21 +48,28 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CFunctionCall,
     CGoto,
     CIfElse,
+    CIndexedVariable,
     CLabel,
     CReturn,
     CStatement,
     CStatements,
+    CTypeCast,
     CUnaryOp,
     CVariable,
     CWhileLoop,
 )
-from angr.sim_variable import SimStackVariable
+from angr.sim_type import SimType
+from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
 from inertia.alias.condition_register_bindings import condition_operand_storage_binding_8616
 from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.function_ssa_registry import registered_function_ssa_artifact_8616
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.lowering.c_ast_utils import (
+    _iter_c_nodes_deep_8616,
+    _same_c_expression_8616,
+)
 from inertia.lowering.call_execution_frame_carriers import (
     CallExecutionFrameCarrierStats8616,
     prune_consumed_call_execution_frame_carriers_8616,
@@ -119,6 +128,7 @@ from .condition_lowering import (
     condition_op_to_structured_kind_8616,
     condition_origin_tags_8616,
     lower_ir_value_to_c_expr_8616,
+    materialize_reaching_register_projection_8616,
     materialize_same_block_register_projection_8616,
 )
 from .condition_ownership import select_composite_preheader_root_8616
@@ -129,6 +139,7 @@ from .condition_provenance import (
     structured_loop_segment_provenance_surface_8616,
 )
 from .condition_replay import (
+    StructuringConditionReplayFact8616,
     bind_condition_replay_identity_8616,
     condition_replay_facts_8616,
     record_condition_replay_fact_8616,
@@ -158,6 +169,7 @@ from .multi_arm_return_chains import (
 from .scalar_return_arm_ownership import select_scalar_return_arm_owners_8616
 from .scalar_return_evidence import materialize_complete_scalar_return_leaves_8616
 from .single_branch_return_orientation import (
+    StructuredBinaryArmOrientationEvidence8616,
     classify_cfg_binary_arm_orientation_8616,
     classify_direct_or_one_hop_target_orientation_8616,
     classify_single_branch_return_orientation_8616,
@@ -214,6 +226,14 @@ def materialize_condition_ir_expression_8616(
                 value, bound_condition, project, codegen, assignment_index=assignment_index,
             )
             projection_stats.append(projection.stats)
+            if not isinstance(projection.expression, CExpression):
+                # A cross-block reaching definition (e.g. a captured call
+                # result) may still prove this operand when no same-block
+                # candidate exists; the Alias join remains the sole arbiter.
+                projection = materialize_reaching_register_projection_8616(
+                    value, bound_condition, project, codegen, assignment_index=assignment_index,
+                )
+                projection_stats.append(projection.stats)
             if isinstance(projection.expression, CExpression):
                 projected_operands[id(value)] = projection.expression
 
@@ -590,7 +610,7 @@ def _project_binary_condition_node_8616(
     tags: dict[str, object],
     project: object,
     codegen: object,
-    assignment_index: object,
+    assignment_index: SameBlockRegisterAssignmentIndex8616 | None,
 ) -> _ProjectionNodeDelta8616:
     """Apply one matched condition's projections to a comparison node."""
     delta = _ProjectionNodeDelta8616()
@@ -966,7 +986,7 @@ class _CfgChainBuilder8616:
     successors: dict[int, tuple[int, ...]]
     true_target: int
     false_target: int
-    assignment_index: object
+    assignment_index: SameBlockRegisterAssignmentIndex8616 | None
     consumed_conditions: list[ConditionIR] = field(default_factory=list)
     materialized_by_address: dict[int, CExpression | bool] = field(default_factory=dict)
     active_addresses: set[int] = field(default_factory=set)
@@ -1121,7 +1141,7 @@ def _proven_call_chain_expression_8616(
     true_target: int,
     false_target: int,
     *,
-    condition_ssa: object,
+    condition_ssa: SSAFunctionArtifact | None,
     required_conditions: tuple[ConditionIR, ...],
 ) -> CExpression | None:
     """Build the proven wide-call predicate covering every required condition."""
@@ -1592,12 +1612,17 @@ def _single_return_proofs_8616(
     classify_return_exit = _return_exit_classifier_8616(exit_expressions)
     proofs: list[tuple[ConditionIR, CExpression]] = []
     for candidate_return in candidate_returns:
+
+        def classify_bound_exit_8616(target: int, candidate: CExpression = candidate_return) -> bool | None:
+            """Classify one target against the bound return candidate."""
+            return classify_return_exit(target, candidate)
+
         wide_result = recover_wide_stack_single_body_condition_8616(
             condition,
             conditions_by_block,
             successors,
             lambda high_value, low_value: _prove_wide_pair_8616(project, codegen, high_value, low_value),
-            lambda target, candidate=candidate_return: classify_return_exit(target, candidate),
+            classify_bound_exit_8616,
             required_root_outcome=root_orientation,
         )
         if wide_result.condition is not None:
@@ -1641,7 +1666,7 @@ def _proven_single_return_orientation_8616(
     codegen: object,
     condition: ConditionIR,
     structured_condition: CExpression,
-    body_return: object,
+    body_return: CReturn,
     expected_return: CExpression | None,
     conditions_by_block: dict[int, ConditionIR],
     successors: dict[int, tuple[int, ...]],
@@ -1762,7 +1787,7 @@ def _single_branch_goto_polarity_expr_8616(
     codegen: object,
     condition: ConditionIR,
     body: object,
-    artifact: object,
+    artifact: SSAFunctionArtifact | None,
     continuation: int | None,
     successors: dict[int, tuple[int, ...]],
 ) -> CExpression | None:
@@ -1781,7 +1806,7 @@ def _single_branch_region_expr_8616(
     codegen: object,
     condition: ConditionIR,
     body: object,
-    artifact: object,
+    artifact: SSAFunctionArtifact | None,
     continuation: int | None,
     conditions_by_block: dict[int, ConditionIR],
     successors: dict[int, tuple[int, ...]],
@@ -1848,6 +1873,179 @@ def _single_branch_body_chain_expr_8616(
     return None, None
 
 
+def _strict_sim_type_identity_8616(lhs: object, rhs: object) -> bool:
+    """Compare SimType width and signedness across the dynamic angr boundary."""
+    if lhs is rhs:
+        return True
+    if not isinstance(lhs, SimType) or not isinstance(rhs, SimType) or type(lhs) is not type(rhs):
+        return False
+    try:
+        left_size, right_size = lhs.size, rhs.size
+    except ValueError:
+        # angr cannot resolve architecture-dependent C widths before binding.
+        return False
+    return left_size is not None and left_size == right_size and lhs == rhs
+
+
+def _strict_guard_variable_identity_8616(lhs: CVariable, rhs: CVariable) -> bool:
+    """Require one captured value identity, not a physical-register spelling."""
+    if not _strict_sim_type_identity_8616(lhs.variable_type, rhs.variable_type):
+        return False
+    lvar = lhs.variable
+    rvar = rhs.variable
+    if type(lvar) is not type(rvar):
+        return False
+    # ``unified_variable`` is angr's dynamic codegen boundary; differing
+    # unification views cannot prove one captured definition.
+    if lhs.unified_variable is not rhs.unified_variable:
+        return False
+    if lvar is rvar:
+        return True
+    if isinstance(lvar, SimRegisterVariable):
+        rhs_register = cast(SimRegisterVariable, rvar)
+        return bool(
+            lvar.reg == rhs_register.reg
+            and lvar.size == rhs_register.size
+            and lvar.region == rhs_register.region
+            and lvar.ident is not None
+            and lvar.ident == rhs_register.ident
+        )
+    if isinstance(lvar, SimStackVariable):
+        rhs_stack = cast(SimStackVariable, rvar)
+        return bool(
+            lvar.offset == rhs_stack.offset and lvar.size == rhs_stack.size
+            and lvar.base == rhs_stack.base and lvar.region == rhs_stack.region
+            and lvar.ident is not None and lvar.ident == rhs_stack.ident
+        )
+    if isinstance(lvar, SimMemoryVariable):
+        rhs_memory = cast(SimMemoryVariable, rvar)
+        return bool(
+            lvar.addr == rhs_memory.addr and lvar.size == rhs_memory.size
+            and lvar.region == rhs_memory.region
+            and lvar.ident is not None and lvar.ident == rhs_memory.ident
+        )
+    return False
+
+
+def _strict_guard_expression_identity_8616(lhs: object, rhs: object) -> bool:
+    """Compare guard expressions with exact capture, cast and width identity."""
+    if type(lhs) is not type(rhs):
+        return False
+    if isinstance(lhs, CTypeCast):
+        rhs_cast = cast(CTypeCast, rhs)
+        return (
+            _strict_sim_type_identity_8616(lhs.src_type, rhs_cast.src_type)
+            and _strict_sim_type_identity_8616(lhs.dst_type, rhs_cast.dst_type)
+            and _strict_guard_expression_identity_8616(lhs.expr, rhs_cast.expr)
+        )
+    if isinstance(lhs, CUnaryOp):
+        rhs_unary = cast(CUnaryOp, rhs)
+        return lhs.op == rhs_unary.op and _strict_guard_expression_identity_8616(
+            lhs.operand, rhs_unary.operand
+        )
+    if isinstance(lhs, CBinaryOp):
+        rhs_binary = cast(CBinaryOp, rhs)
+        return (
+            lhs.op == rhs_binary.op
+            and _strict_guard_expression_identity_8616(lhs.lhs, rhs_binary.lhs)
+            and _strict_guard_expression_identity_8616(lhs.rhs, rhs_binary.rhs)
+        )
+    if isinstance(lhs, CITE):
+        rhs_ite = cast(CITE, rhs)
+        return (
+            _strict_guard_expression_identity_8616(lhs.cond, rhs_ite.cond)
+            and _strict_guard_expression_identity_8616(lhs.iftrue, rhs_ite.iftrue)
+            and _strict_guard_expression_identity_8616(lhs.iffalse, rhs_ite.iffalse)
+        )
+    if isinstance(lhs, CIndexedVariable):
+        rhs_indexed = cast(CIndexedVariable, rhs)
+        return _strict_guard_expression_identity_8616(
+            lhs.variable, rhs_indexed.variable
+        ) and _strict_guard_expression_identity_8616(lhs.index, rhs_indexed.index)
+    if isinstance(lhs, CVariable):
+        return _strict_guard_variable_identity_8616(lhs, cast(CVariable, rhs))
+    if isinstance(lhs, CConstant):
+        rhs_constant = cast(CConstant, rhs)
+        return lhs.value == rhs_constant.value and _strict_sim_type_identity_8616(
+            lhs.type, rhs_constant.type
+        )
+    # Distinct calls/dirty nodes can read different state despite equal syntax.
+    return lhs is rhs
+
+
+def _shared_guard_identity_orientation_8616(
+    project: object,
+    codegen: object,
+    condition: ConditionIR,
+    structured_condition: CExpression,
+    body: object,
+    conditions_by_block: dict[int, ConditionIR],
+    successors: dict[int, tuple[int, ...]],
+) -> bool | None:
+    """Orient one branch from strict guard identity and corroborated edges.
+
+    The normalized structured guard must carry the typed fact's exact captured
+    value identity (or its inversion), its owner tag must match the condition
+    source, the body's provenance must corroborate the claimed edge, and the
+    opposite continuation must exist. Any missing or contradictory evidence
+    yields ``None``: this certificate only adds orientation proof and never
+    vetoes evidence from other domains, since body tags can be stale. Guard
+    identity alone never claims exclusive ownership of a shared return target.
+    """
+    taken = condition.taken_target
+    fallthrough = condition.fallthrough_target
+    if (
+        not isinstance(taken, int)
+        or not isinstance(fallthrough, int)
+        or taken == fallthrough
+    ):
+        return None
+    # Deferred import: boolean_condition_ites already imports this module's
+    # inverter, so a module-level import would be circular.
+    from .boolean_condition_ites import _normalize_boolean_ite_8616
+
+    normalized, _disposition = _normalize_boolean_ite_8616(
+        structured_condition, codegen
+    )
+    owner_addr = _direct_tagged_ins_addr_8616(normalized)
+    if not isinstance(owner_addr, int) or owner_addr != condition.src_insn:
+        return None
+    root_expression = materialize_condition_ir_expression_8616(
+        project, codegen, condition
+    )
+    if root_expression is None:
+        return None
+    if _strict_guard_expression_identity_8616(normalized, root_expression):
+        claimed = True
+    elif _strict_guard_expression_identity_8616(
+        normalized, invert_structured_condition_8616(root_expression, codegen)
+    ):
+        claimed = False
+    else:
+        return None
+    true_target = taken if claimed else fallthrough
+    false_target = fallthrough if claimed else taken
+    body_targets = {
+        target
+        for target in (
+            _first_tagged_ins_addr_8616(body),
+            _first_tagged_block_addr_8616(body),
+        )
+        if target is not None
+    }
+    if (
+        not body_targets
+        or true_target not in body_targets
+        or false_target in body_targets
+        or (
+            false_target not in successors
+            and false_target not in conditions_by_block
+        )
+    ):
+        return None
+    return claimed
+
+
 def _materialize_cfg_single_branch_expr_8616(
     project: object,
     codegen: object,
@@ -1895,6 +2093,18 @@ def _materialize_cfg_single_branch_expr_8616(
         if proven_return_orientation is not None
         else body_orientation
     )
+    guard_orientation = _shared_guard_identity_orientation_8616(
+        project,
+        codegen,
+        condition,
+        structured_condition,
+        body,
+        conditions_by_block,
+        successors,
+    )
+    if guard_orientation is not None and orientation is not None and orientation != guard_orientation:
+        return None
+    orientation = guard_orientation if guard_orientation is not None else orientation
     if orientation is None:
         return None
     true_target = condition.taken_target if orientation else condition.fallthrough_target
@@ -2192,7 +2402,9 @@ def _materialize_existing_wide_call_return_conditions_8616(
             failure_count += delta.failure
             pair_changed |= delta.changed
             changed |= delta.changed
-            replacement_pairs.append(delta.pair)
+            replacement_pairs.append(
+                cast(tuple[CExpression, CStatement | None], delta.pair)
+            )
         if pair_changed:
             node.condition_and_nodes = replacement_pairs
     seen_frame_calls: set[int] = set()
@@ -2258,14 +2470,14 @@ class _ConditionChainRun8616:
 
     project: object
     codegen: object
-    metadata_codegen: object
-    cfunc: object
+    metadata_codegen: _ConditionMaterializationCodegen8616
+    cfunc: _ConditionMaterializationCFunction8616
     targeted: tuple[ConditionIR, ...]
     successors: dict[int, tuple[int, ...]]
     conditions_by_src: dict[int, ConditionIR]
     conditions_by_block: dict[int, ConditionIR]
     condition_blocks: frozenset[int]
-    tag_session: object
+    tag_session: StructuredSubtreeEntryTagQuerySession8616
     local_continuations: dict[int, int]
     typed_surface_ids_by_key: dict[tuple[int, int], set[int]]
     raw_count: int = 0
@@ -2572,7 +2784,7 @@ class _ConditionChainRun8616:
         """Recover a wide-return chain spanning the ladder's else arm."""
         multi_arm = recover_structured_multi_arm_wide_return_chain_8616(
             self.codegen,
-            cast(tuple[tuple[CExpression, object], ...], condition_and_nodes),
+            condition_and_nodes,
             proven_facts,
             node.else_node,
             _first_tagged_ins_addr_8616,
@@ -3000,7 +3212,7 @@ class _ConditionChainRun8616:
 
     def _else_arm_polarity_8616(
         self, arm: _SingleArm8616
-    ) -> tuple[object, bool | None, bool | None, bool]:
+    ) -> tuple[StructuredBinaryArmOrientationEvidence8616, bool | None, tuple[int | None, int | None], bool]:
         """Resolve arm orientation evidence and proven taken polarity."""
         root_fact = arm.root_fact
         assert root_fact is not None
@@ -3033,7 +3245,7 @@ class _ConditionChainRun8616:
     def _else_arm_replacement_8616(
         self,
         arm: _SingleArm8616,
-        replay: object,
+        replay: StructuringConditionReplayFact8616 | None,
         assignment_replay_required: bool,
     ) -> _ArmReplacement8616:
         """Materialize the replacement for a two-arm structured branch."""

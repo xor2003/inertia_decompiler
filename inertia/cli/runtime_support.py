@@ -22,12 +22,14 @@ import time
 import traceback
 import typing
 import weakref
-from collections.abc import Callable, Iterator, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FuturesTimeoutError
 from concurrent.futures.thread import _threads_queues, _worker
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from inertia.ir.condition_ir import ConditionEdgeEvidence
 
 from .analysis_timeout import AnalysisTimeout as AnalysisTimeout
 from .analysis_timeout import analysis_timeout as analysis_timeout
@@ -59,6 +61,14 @@ PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT: int = 96
 type DynamicRecord = dict[str, typing.Any]
 type AngrProjectSurface = typing.Any
 type AngrPatchSurface = typing.Any
+
+
+class _PeepholeBlockBoundary8616(typing.Protocol):
+    """Dynamic angr block surface consumed by the bounded fast-peephole lane."""
+
+    def copy(self, statements: object = None) -> _PeepholeBlockBoundary8616:
+        """Return a copy of the block with replaced statements."""
+        ...
 
 
 def _dynamic_record(value: object) -> DynamicRecord:
@@ -1676,9 +1686,10 @@ def _build_grouped_switch_artifacts_from_source_graph_8616(
             try:
                 from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
 
-                module_cache, pending_sources = cache_snapshot
-                Instruction_ANY._inertia_module_condition_cache = module_cache
-                Instruction_ANY._inertia_pending_condition_sources_by_addr = pending_sources
+                saved_module_cache, saved_pending_sources = cache_snapshot
+                if isinstance(saved_module_cache, dict) and isinstance(saved_pending_sources, dict):
+                    Instruction_ANY._inertia_module_condition_cache = saved_module_cache
+                    Instruction_ANY._inertia_pending_condition_sources_by_addr = saved_pending_sources
             except Exception:
                 pass
 
@@ -2046,7 +2057,7 @@ def _pre_codegen_condition_evidence_8616(
     target_project: AngrProjectSurface,
     func_addr: int,
     summary: DynamicRecord,
-) -> object:
+) -> list[ConditionEdgeEvidence]:
     """Collect typed-condition artifacts for a pre-codegen seqnode probe."""
     try:
         from inertia.lowering.condition_transfer import (
@@ -2081,7 +2092,7 @@ def _pre_codegen_grouped_switch_artifacts_8616(
     func_addr: int,
     func: object,
     ail_graph: object,
-    edge_evidence: object,
+    edge_evidence: Iterable[ConditionEdgeEvidence],
     summary: DynamicRecord,
 ) -> tuple[DynamicRecord, ...]:
     """Rebuild grouped-region switch artifacts for the probe summary."""
@@ -2213,7 +2224,7 @@ def _record_pre_codegen_seqnode_probe_8616(
     self: object,
     func: object,
     sequence: object,
-    kwargs: dict[object, object],
+    kwargs: Mapping[str, object],
 ) -> None:
     """Record the pre-codegen seqnode probe summary for ``func``."""
     target_project = project if project is not None else getattr(self, "project", None)
@@ -2512,6 +2523,46 @@ def _clinic_stage_guard_8616(
     return _guarded
 
 
+def _converged_recover_variables_8616(
+    project: AngrProjectSurface,
+    orig_recover: Callable[..., object],
+) -> Callable[..., object]:
+    """Drive the native recover-variables stage through allocation convergence.
+
+    The Lowering-owned session decides run/skip/exhaustion; the Frontend adapter
+    snapshots and resets native manager/link state transactionally.
+    """
+
+    from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+
+    if not isinstance(project.arch, Arch86_16):
+        return orig_recover
+
+    def _driven(self: AngrPatchSurface, *args: typing.Any, **kwargs: typing.Any) -> object:
+        from inertia.cli.native_allocation_runtime import run_recovery_stage_8616
+        from inertia.lowering.allocation_convergence import AllocationConvergenceRefusal
+        from inertia.pipeline.errors import PipelineHardError
+
+        try:
+            return run_recovery_stage_8616(
+                project,
+                self,
+                lambda: orig_recover(self, *args, **kwargs),
+            )
+        except AllocationConvergenceRefusal as refusal:
+            raise PipelineHardError(
+                f"allocation convergence refused: {refusal.detail}",
+                layer="cli.native_allocation",
+                function_addr=refusal.function_addr,
+                details={
+                    "verdict": refusal.verdict,
+                    "detail": refusal.detail,
+                },
+            ) from refusal
+
+    return _driven
+
+
 def _guarded_simplify_block_8616(
     state: _ClinicGuardState8616,
     project: AngrProjectSurface,
@@ -2608,9 +2659,9 @@ def _clinic_peephole_capped_8616(project: AngrProjectSurface, block: object) -> 
 
 def _fast_block_peephole_8616(
     self: AngrPatchSurface,
-    block: object,
-    peephole_optimize_stmts: Callable[..., object],
-    peephole_optimize_multistmts: Callable[..., object],
+    block: _PeepholeBlockBoundary8616,
+    peephole_optimize_stmts: Callable[..., tuple[object, bool]],
+    peephole_optimize_multistmts: Callable[..., tuple[object, bool]],
 ) -> tuple[object, bool, bool]:
     """Run the stmt/multistmt peephole passes on a block directly."""
     statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
@@ -2644,8 +2695,8 @@ def _guarded_peephole_optimize_8616(
     state: _ClinicGuardState8616,
     project: AngrProjectSurface,
     orig_peephole_optimize: Callable[..., object],
-    peephole_optimize_stmts: Callable[..., object],
-    peephole_optimize_multistmts: Callable[..., object],
+    peephole_optimize_stmts: Callable[..., tuple[object, bool]],
+    peephole_optimize_multistmts: Callable[..., tuple[object, bool]],
     self: AngrPatchSurface,
     args: tuple[typing.Any, ...],
     kwargs: dict[str, typing.Any],
@@ -2857,7 +2908,7 @@ def guard_angr_clinic_stage_markers(project: AngrProjectSurface) -> Iterator[Non
     clinic_cls._stage_recover_variables = _clinic_stage_guard_8616(
         state,
         project,
-        orig_stage_recover_vars,
+        _converged_recover_variables_8616(project, orig_stage_recover_vars),
         "clinic:recover_vars",
         "core:clinic:recover_variables",
     )
@@ -3241,9 +3292,12 @@ def prefer_low_memory_path() -> bool:
 
 
 def lower_process_priority() -> None:
-    """Lower process scheduling priority on hosts that support ``nice``."""
+    """Ensure niceness is at least10 without repeatedly lowering child priority."""
     with contextlib.suppress(AttributeError, OSError):
-        os.nice(10)
+        # nice() is relative; child startup must not turn inherited10 into19.
+        current = os.nice(0)
+        if current < 10:
+            os.nice(10 - current)
 
 
 def choose_function_parallelism(function_count: int) -> int:
@@ -3347,8 +3401,11 @@ def guard_angr_tail_validation_collection_timing() -> Iterator[None]:
 
     import inertia.structuring.decompiler_structuring_stage as _ds_mod
 
-    orig_fingerprint = _ds_mod.fingerprint_x86_16_tail_validation_boundary
-    orig_collect = _ds_mod.collect_x86_16_tail_validation_summary
+    # Dynamic patch boundary: the re-exported tail-validation helpers are
+    # installed on a foreign module surface for the timing window.
+    ds_mod_dynamic = typing.cast(typing.Any, _ds_mod)
+    orig_fingerprint = ds_mod_dynamic.fingerprint_x86_16_tail_validation_boundary
+    orig_collect = ds_mod_dynamic.collect_x86_16_tail_validation_summary
 
     def _timed_fingerprint(project: object, codegen: object, *, mode: str) -> object:
         _t0 = _time.perf_counter()
@@ -3384,29 +3441,32 @@ def guard_angr_tail_validation_collection_timing() -> Iterator[None]:
             sys.stderr.flush()
 
     # Patch the module that _decompile_structuring_8616 imports from.
-    _ds_mod.fingerprint_x86_16_tail_validation_boundary = _timed_fingerprint
-    _ds_mod.collect_x86_16_tail_validation_summary = _timed_collect
+    ds_mod_dynamic.fingerprint_x86_16_tail_validation_boundary = _timed_fingerprint
+    ds_mod_dynamic.collect_x86_16_tail_validation_summary = _timed_collect
     try:
         yield
     finally:
-        _ds_mod.fingerprint_x86_16_tail_validation_boundary = orig_fingerprint
-        _ds_mod.collect_x86_16_tail_validation_summary = orig_collect
+        ds_mod_dynamic.fingerprint_x86_16_tail_validation_boundary = orig_fingerprint
+        ds_mod_dynamic.collect_x86_16_tail_validation_summary = orig_collect
 
 
-def _timed_stage_guard_8616(
-    orig: Callable[..., object],
+def _timed_stage_guard_8616[**StageParameters8616, StageResult8616](
+    orig: Callable[StageParameters8616, StageResult8616],
     label: str,
     emit_timing: bool,
-) -> Callable[..., object]:
-    """Build a stage wrapper that emits start/done timing lines."""
+) -> Callable[StageParameters8616, StageResult8616]:
+    """Emit start/done timing while preserving the stage signature and result."""
 
-    def _timed(codegen: object, *args: typing.Any, **kwargs: typing.Any) -> object:
+    def _timed(
+        *args: StageParameters8616.args, **kwargs: StageParameters8616.kwargs
+    ) -> StageResult8616:
+        """Forward the wrapped stage's original arguments and return value."""
         t0 = time.perf_counter()
         if emit_timing:
             print(f"[dbg] stage-time: x86_16:{label} start")
             sys.stderr.flush()
         try:
-            return orig(codegen, *args, **kwargs)
+            return orig(*args, **kwargs)
         finally:
             if emit_timing:
                 elapsed = time.perf_counter() - t0
@@ -3456,15 +3516,15 @@ def _bounded_stage_guard_8616(
     return _timed
 
 
-def _install_bounded_lowering_guards_8616(emit_timing: bool) -> tuple[object, object]:
+def _install_bounded_lowering_guards_8616(emit_timing: bool) -> tuple[AngrPatchSurface, AngrPatchSurface]:
     """Patch stable-ss-linear lowering entry points with bounded-stage guards.
 
     Returns the ``stack_lowering_from_facts`` module and its original symbol so
     the caller can restore it; the ss-linear guard intentionally stays patched
     for the remaining fork budget.
     """
-    slf_mod: object = None
-    orig_slf: object = None
+    slf_mod: AngrPatchSurface = None
+    orig_slf: AngrPatchSurface = None
     try:
         import inertia.lowering.real_mode_linear as _rml_module
 

@@ -23,11 +23,18 @@ _ORIGIN_TAG = "inertia_x86_16_return_value_origin"
 
 @dataclass(frozen=True, slots=True)
 class ReturnValueOrigin8616:
-    """Original AIL value location and width for one C return use."""
+    """Value origin and independently observed return site for one C use.
+
+    A propagated expression can retain an earlier instruction's location.
+    Optional statement coordinates identify the actual return and must never
+    be inferred from that expression location.
+    """
 
     instruction_addr: int
     block_addr: int
     width_bits: int
+    return_instruction_addr: int | None = None
+    return_block_addr: int | None = None
 
 
 class _ValueSurface8616(Protocol):
@@ -57,7 +64,11 @@ def _ail_value_origin(statement: ailment.Stmt.Return) -> ReturnValueOrigin8616 |
         return None
     if instruction is None or block is None or width is None or width == 0:
         return None
-    return ReturnValueOrigin8616(instruction, block, width)
+    return ReturnValueOrigin8616(
+        instruction, block, width,
+        _nonnegative_integer(statement.tags.get("ins_addr")),
+        _nonnegative_integer(statement.tags.get("vex_block_addr")),
+    )
 
 
 def return_value_origin_8616(statement: CReturn) -> ReturnValueOrigin8616 | None:

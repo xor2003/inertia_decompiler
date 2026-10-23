@@ -838,6 +838,7 @@ class _CallReturnConditionRun8616:
         node: CIfElse,
         expression: CExpression,
         body: object,
+        condition: ConditionIR,
         summary: CallsiteSummary8616,
         register_slice: tuple[int, int],
         target_addr: int,
@@ -880,6 +881,9 @@ class _CallReturnConditionRun8616:
             self.failed += 1
             return
         self.register_assignment_index = None
+        replacement = materialize_bound_call_condition_8616(
+            replacement, existing_call, condition, self.codegen,
+        )
         node.condition_and_nodes = [(replacement, body)]
         bind_structured_callsite_identity_8616(existing_call, summary)
         self.summary_map[id(existing_call)] = summary
@@ -938,6 +942,7 @@ class _CallReturnConditionRun8616:
         node: CIfElse,
         expression: CExpression,
         body: object,
+        condition: ConditionIR,
         summary: CallsiteSummary8616,
         register_slice: tuple[int, int],
         target_addr: int,
@@ -956,6 +961,9 @@ class _CallReturnConditionRun8616:
             call = self._bind_new_call(summary, callee)
             replacement = replace_exact_expression_8616(
                 expression, target_calls[0], call,
+            )
+            replacement = materialize_bound_call_condition_8616(
+                replacement, call, condition, self.codegen,
             )
             node.condition_and_nodes = [(replacement, body)]
             self.classified += 1
@@ -985,6 +993,9 @@ class _CallReturnConditionRun8616:
                 codegen=self.codegen,
                 tags=original_tags,
             )
+        replacement = materialize_bound_call_condition_8616(
+            replacement, call, condition, self.codegen,
+        )
         node.condition_and_nodes = [(replacement, body)]
         self.materialized += 1
         self.changed = True
@@ -1043,7 +1054,7 @@ class _CallReturnConditionRun8616:
         )
         if placement is not None and placement.verdict is CallReturnRegisterPlacementVerdict8616.EXACT:
             self._exact_placement_arm(
-                node, expression, body, summary, register_slice, target_addr,
+                node, expression, body, condition, summary, register_slice, target_addr,
                 existing_count, placement,
             )
             return
@@ -1059,7 +1070,7 @@ class _CallReturnConditionRun8616:
             self.failed += 1
             return
         self._unbound_callsite_arm(
-            node, expression, body, summary, register_slice, target_addr,
+            node, expression, body, condition, summary, register_slice, target_addr,
         )
 
     def _build_assignment_index(self) -> CallReturnRegisterIndex8616:

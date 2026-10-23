@@ -35,6 +35,9 @@ They do not relax its architecture or function-fix acceptance contract.
   processes, as Make already does; an unset seed correctly prevents semantic
   cache reuse. Changing the variable inside a running interpreter does not
   establish a deterministic interpreter for integration acceptance.
+  `nice -n 10` is a relative adjustment: a worker already running at nice10
+  must invoke Python/pytest directly to preserve10. Check inherited niceness
+  with `nice`; do not stack prefixes and accidentally run tests at nice19.
   Run pytest with up to six
   workers, short tracebacks, and duration reporting so the slowest tests are
   visible on every run. The user-authorized aggregate test limit is independent
@@ -153,6 +156,12 @@ in logs; report scope, exit status, counts and actionable failures only.
 
 ### Measured Performance Work
 
+- When a proof or fast path binds producer identities, do not profile it by
+  replacing those functions with counting wrappers. That can deliberately
+  disable the path being measured. Prefer `sys.monitoring` events and verify
+  that the producer identities remain unchanged. Confirm results with an
+  ordinary uninstrumented run; label measurements from altered producers as
+  diagnostic-only, not representative timing or coverage.
 - Optimize code or tests on demand when measurements show a meaningful execution
   or development bottleneck. Correctness remains first; optimization need not
   wait for every other plan step to finish.
@@ -236,6 +245,16 @@ in logs; report scope, exit status, counts and actionable failures only.
 
 ### Token-Efficient Command Output
 
+- Default tool-response budget: at most 20 lines and 2 KiB per command.
+  The root `AGENTS.md` also applies this limit to the combined response from
+  batched commands. If raw output exceeds it, overwrite
+  `.cache/agent-tool-output/latest.log` with that full raw output; keep required
+  test and acceptance logs separately.
+  Summarize before returning output; a token cap alone only truncates noise.
+  Save full logs, report exit status/counts/new actionable failures and the log
+  path, then read exact needed ranges. Avoid full dirty-tree inventories,
+  metadata catalogs, repeated guidance and bulk document dumps. Expand only
+  when the specific diagnostic requires it; preserve complete raw evidence.
 - View saved logs with `rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python tools/dev/compact_paths.py --legend < run.log`. One pass abbreviates all supported paths: `X16/`, `TEST/`, `DU/`, `REF/`, `SCRIPTS/`, and repository-root `./`. These are display aliases, not filesystem paths. Keep full raw logs and use canonical paths in commands, links and proof receipts; never feed compact output into machine validation.
 
 - Keep Make's quiet recipe mode enabled; use `make Q=` only when the expanded command itself is needed for diagnosis.
@@ -244,6 +263,12 @@ in logs; report scope, exit status, counts and actionable failures only.
 - For broad gates, retain complete stdout/stderr in a temporary log and report only the exit status, pass/fail/skip counts, failure tracebacks, and slowest tests.
 - Capture both streams with `set -o pipefail; tool 2>&1 | tee file.log | tail -n 40`, or redirect both to the log and inspect it afterward. Preserve the producer's exit status. Do not pipe a required long-running command into `head`: its early exit can terminate the producer through SIGPIPE. Use `head` only on an already saved log. Inspect existing logs instead of rerunning a command merely to recover omitted output.
 - On success, do not load the full log. On failure, search or tail only the relevant failure section before widening the read. Parse JSON/JSONL reports for the required fields rather than dumping large profile records.
+- Repeated `WARNING` records belong in the full raw log, not tool responses.
+  Summarize them before returning output: count per logger/message category,
+  one representative message per category, and the raw-log path. Address-only
+  variants may share a display category; retain every original address in the
+  raw log. Surface new categories, errors, tracebacks and final status. Do not
+  disable warning collection or use this display grouping as proof evidence.
 - Prefer scoped `git diff --stat`, changed-path filters, and narrow file ranges over dumping the shared worktree or large inventories.
 - Output reduction must never suppress diagnostics, skip checks, weaken gates, or replace exact test evidence. Optimize noisy test/tool output when encountered without concealing actionable information.
 - For fail-fast batched checks, report which batches actually ran; the first failing batch's count is not a repository total. Use `CI=1 make pyright-all PYRIGHT_WATCH=0` for the configured whole-scope audit, state its scope, and separate static diagnostics from failing pytest counts.

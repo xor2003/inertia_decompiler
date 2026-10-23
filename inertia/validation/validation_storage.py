@@ -1144,10 +1144,10 @@ class _StorageValidationRun8616:
     """Shared context and issue counters for storage-identity validation."""
 
     codegen: object
-    nodes: object
+    nodes: tuple[object, ...]
     root_variables: tuple[CVariable, ...]
     declaration_variables: tuple[CVariable, ...]
-    named_global_facts: tuple[object, ...]
+    named_global_facts: tuple[NamedGlobalAggregateTypeFact8616, ...]
     issues: list[StorageValidationIssue8616] = field(default_factory=list)
     classified_fact_count: int = 0
     materialized_count: int = 0

@@ -14,12 +14,19 @@ from angr.analyses.cfg.indirect_jump_resolvers.default_resolvers import DEFAULT_
 from inertia.alias.register_reaching_source import RegisterReachingSourceVerdict8616
 from inertia.cli.project_loading import _build_project_from_bytes
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
 from inertia.frontend.x86_16.frontend_cfg_direct_jobs import register_native_direct_job_adapter_8616
 from inertia.frontend.x86_16.frontend_cfg_direct_jump import (
     NativeDirectJumpResolver8616,
     register_native_direct_jump_resolver_8616,
 )
 from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _initialize_native_frontend() -> None:
+    """Register the calling convention and native adapters for isolated runs."""
+    apply_x86_16_bootstrap()
 
 
 def test_forward_jump_discovers_native_condition_block() -> None:

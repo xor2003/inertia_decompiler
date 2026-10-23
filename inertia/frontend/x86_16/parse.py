@@ -80,7 +80,7 @@ _PREFIX_CHSZ_BY_CODE_8616: dict[int, int] = {
     0x67: CHSZ_AD,
 }
 
-_PREFIX_REPEAT_BY_CODE_8616: dict[int, object] = {
+_PREFIX_REPEAT_BY_CODE_8616: dict[int, int] = {
     0xF2: REPNZ,
     0xF3: REPZ,
 }

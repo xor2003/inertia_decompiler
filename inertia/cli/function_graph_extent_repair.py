@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import angr
+import networkx as nx
 from angr.codenode import BlockNode
 from angr.knowledge_plugins.functions.function import Function
 
@@ -192,7 +193,7 @@ def _materialize_replacements_8616(
         raise
 
 
-def _out_of_block_ins_addrs_8616(graph: object) -> dict[BlockNode, set[int]]:
+def _out_of_block_ins_addrs_8616(graph: nx.DiGraph) -> dict[BlockNode, set[int]]:
     """Collect edge ins_addrs that fall outside their source block extent."""
     raw_facts: list[tuple[BlockNode, int]] = []
     for source, _target, edge_data in tuple(graph.edges(data=True)):
@@ -213,7 +214,7 @@ def _out_of_block_ins_addrs_8616(graph: object) -> dict[BlockNode, set[int]]:
 def _extent_repair_plan_8616(
     project: angr.Project,
     function: Function,
-    graph: object,
+    graph: nx.DiGraph,
     source: BlockNode,
     edge_ins_addrs: tuple[int, ...],
     exact_region: tuple[int, int] | None,

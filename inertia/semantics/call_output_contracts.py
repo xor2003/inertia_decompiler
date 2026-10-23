@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.ir.core import IRCallOutputShape8616 as CallOutputShape8616
-from inertia.ir.core import IRValue
+from inertia.ir.core import IRValue, MemSpace
 
 
 class CallOutputVerdict8616(StrEnum):
@@ -31,6 +31,9 @@ class CallOutputFailure8616(StrEnum):
     CALL_NOT_TERMINAL = "call_not_terminal"
     DUPLICATE_CALL_ADDRESS = "duplicate_call_address"
     FRAME_KIND_UNKNOWN = "frame_kind_unknown"
+    OUTPUT_PROVENANCE_MISMATCH = "output_provenance_mismatch"
+    OUTPUT_SHAPE_MISMATCH = "output_shape_mismatch"
+    OUTPUT_WIDTH_MISMATCH = "output_width_mismatch"
     RETURN_BLOCK_HAS_OTHER_PREDECESSOR = "return_block_has_other_predecessor"
     RETURN_BLOCK_MISSING = "return_block_missing"
     RETURN_EDGE_MISMATCH = "return_edge_mismatch"
@@ -91,10 +94,76 @@ class CallOutputStats8616:
         }
 
 
+CALL_OUTPUT_SHAPE_REGISTERS_8616: dict[CallOutputShape8616, tuple[tuple[str, int], ...]] = {
+    CallOutputShape8616.AX: (("ax", 2),),
+    CallOutputShape8616.DX_AX: (("ax", 2), ("dx", 2)),
+}
+"""Canonical (register name, byte width) layout each proven shape must carry."""
+
+
+def validate_call_output_fact_8616(
+    fact: CallOutputFact8616,
+) -> tuple[CallOutputFailure8616, ...]:
+    """Authenticate one retained output fact's inner provenance and shape.
+
+    An empty tuple means the fact is internally consistent. Refused facts and
+    proven no-output observations (``return_used is False``) are valid; a
+    proven shaped fact must carry exactly the canonical register layout, with
+    every value's ``IRCallOutputProvenance8616``, architecture width and
+    cardinality matching the outer fact identity.
+    """
+    if fact.verdict is not CallOutputVerdict8616.PROVEN:
+        return ()
+    if fact.shape is None:
+        return () if not fact.outputs else (CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH,)
+    expected = CALL_OUTPUT_SHAPE_REGISTERS_8616.get(fact.shape)
+    if expected is None:
+        return (CallOutputFailure8616.RETURN_SHAPE_UNKNOWN,)
+    expected_widths = dict(expected)
+    failures: set[CallOutputFailure8616] = set()
+    names: list[str] = []
+    for output in fact.outputs:
+        # IRValue.name is optional at the proof boundary; an unnamed value
+        # can never satisfy the canonical register layout.
+        if output.name is None:
+            failures.add(CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH)
+        else:
+            names.append(output.name)
+    if sorted(names) != sorted(expected_widths):
+        failures.add(CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH)
+    failures |= _output_value_failures_8616(fact, expected_widths)
+    return tuple(sorted(failures, key=lambda failure: failure.value))
+
+
+def _output_value_failures_8616(
+    fact: CallOutputFact8616,
+    expected_widths: dict[str, int],
+) -> set[CallOutputFailure8616]:
+    """Check each output's space, architecture width and inner provenance."""
+    failures: set[CallOutputFailure8616] = set()
+    for output in fact.outputs:
+        if output.space is not MemSpace.REG or output.name is None:
+            failures.add(CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH)
+            continue
+        if output.size != expected_widths.get(output.name, -1):
+            failures.add(CallOutputFailure8616.OUTPUT_WIDTH_MISMATCH)
+        provenance = output.call_output
+        if (
+            provenance is None
+            or provenance.callsite_addr != fact.callsite_addr
+            or provenance.target_addr != fact.target_addr
+            or provenance.shape is not fact.shape
+        ):
+            failures.add(CallOutputFailure8616.OUTPUT_PROVENANCE_MISMATCH)
+    return failures
+
+
 __all__ = [
+    "CALL_OUTPUT_SHAPE_REGISTERS_8616",
     "CallOutputFact8616",
     "CallOutputFailure8616",
     "CallOutputShape8616",
     "CallOutputStats8616",
     "CallOutputVerdict8616",
+    "validate_call_output_fact_8616",
 ]

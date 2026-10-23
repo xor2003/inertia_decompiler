@@ -6,7 +6,7 @@ for the X86_16 platform surface. The historical ``inertia.frontend.x86_16.public
 package remains a thin facade re-exporting this surface.
 """
 
-from __future__ import annotations
+from __future__ import annotations as _future_annotations
 
 from .lifter_backend_selection import VEX_BACKEND
 
@@ -145,6 +145,7 @@ __all__ = [
     "x86_16_tail_validation_snapshot_passed",
 ]
 
+import inertia.lowering.annotations as annotations
 from inertia.alias import alias_model
 from inertia.alias import domains as alias_domains
 from inertia.alias import state as alias_state
@@ -187,7 +188,6 @@ from inertia.cli.recovery_manifest import (
     describe_x86_16_recovery_layers,
 )
 from inertia.ir import address_ir_8616 as address_ir
-from inertia.lowering import annotations
 from inertia.lowering.analysis_helpers import (
     describe_x86_16_interrupt_api_surface,
     describe_x86_16_interrupt_core_surface,

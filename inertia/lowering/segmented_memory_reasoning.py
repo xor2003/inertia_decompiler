@@ -603,8 +603,8 @@ def _apply_ss_stack_slot_recovery_8616(codegen: object, analyzer: SegmentAssocia
     return changed
 
 
-def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
-    """Run the segmented-memory association pass; may raise (caller catches)."""
+def _collect_segmented_memory_analysis_8616(codegen: object) -> SegmentAssociationAnalyzer:
+    """Publish the full pass metadata without traversing or rewriting the C AST."""
     # Dynamic codegen boundary: pass status is optional metadata on angr codegen.
     typing.cast(typing.Any, codegen)._inertia_segmented_memory_applied = True
     # Dynamic codegen boundary: pass counters are optional metadata on angr codegen.
@@ -642,6 +642,12 @@ def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
             {},
         )
 
+    return analyzer
+
+
+def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
+    """Run segment association analysis and stage-appropriate AST transformations."""
+    analyzer = _collect_segmented_memory_analysis_8616(codegen)
     changed = False
     # Dynamic codegen boundary: angr codegen exposes ``project`` only when fully initialized.
     project = getattr(codegen, "project", None)
@@ -683,11 +689,29 @@ def apply_x86_16_segmented_memory_reasoning(codegen: object) -> bool:
         Phase 3 establishes conservative association reasoning before
         later phases attempt pointer lowering or object recovery.
     """
+    return _run_segmented_memory_pass_8616(codegen, analysis_only=False)
+
+
+def analyze_x86_16_segmented_memory(codegen: object) -> bool:
+    """Publish association metadata only; never transform the structured C AST.
+
+    Structuring uses this explicit analysis-only entry regardless of the ambient
+    project stage. Counters, empty evidence, and failures match the full pass.
+    Final function validation remains responsible for generated-code semantics.
+    """
+    return _run_segmented_memory_pass_8616(codegen, analysis_only=True)
+
+
+def _run_segmented_memory_pass_8616(codegen: object, *, analysis_only: bool) -> bool:
+    """Preserve the full pass entry and diagnostic contract for either execution mode."""
     # Dynamic codegen boundary: angr codegen exposes ``cfunc`` only after structuring produces a C function.
     if getattr(codegen, "cfunc", None) is None:
         return False
 
     try:
+        if analysis_only:
+            _collect_segmented_memory_analysis_8616(codegen)
+            return False
         return _apply_segmented_memory_reasoning_8616(codegen)
     except Exception as ex:
         if os.environ.get("INERTIA_DEBUG_SEGMENTED_MEMORY") == "1":

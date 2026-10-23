@@ -321,7 +321,7 @@ class ResolvedMemoryOperand:
                 layer="addressing",
             )
 
-    def _segment_address_fields(self) -> tuple[object, bool, bool, tuple[str, ...], int, object]:
+    def _segment_address_fields(self) -> tuple[MemSpace, bool, bool, tuple[str, ...], int, SegmentOrigin]:
         """Compute space, stability, base, size, and segment origin for this access."""
         space_map = {
             sgreg_t.SS: MemSpace.SS,

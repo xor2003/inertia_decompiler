@@ -3593,17 +3593,24 @@ class Lifter86_16(GymratLifter):  # type: ignore[misc]  # dynamic pyvex base
 
     @cython.locals(instructions=list)
     def decode(self) -> list[Any]:
-        """Decode a pyvex block into 16-bit instruction objects."""
+        """Decode only the requested instruction window for lifting and lookahead.
+
+        Gymrat passes the entire decoded suffix to each instruction even when
+        lifting is bounded by ``max_inst``. Keep that suffix inside the same
+        window so outside instructions cannot authorize flag-write deletion.
+        """
 
         try:
             self.create_bitstrm()
-            instructions = []
+            instructions: list[Any] = []
             addr = self.irsb.addr
             bitstrm = cast(bitstring.ConstBitStream, self.bitstrm)
             decode_next = self._decode_next_instruction
             bytepos = bitstrm.bytepos
 
             while not _bitstream_is_empty(bitstrm):
+                if self.max_inst is not None and len(instructions) >= self.max_inst:
+                    break
                 instr = decode_next(addr)
                 if not instr:
                     break

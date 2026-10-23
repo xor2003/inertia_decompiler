@@ -3,8 +3,9 @@
 Layer: dosunit SSA semantics.
 Responsibility: own arithmetic-thunk admission and Z3 branch predicates together,
 preserving modular widths and incoming carry while refusing unmodeled thunks.
-Only condition predicates and CF projections are modeled; undefined auxiliary flags, shifts,
-rotations and multiplication are not newly admitted by this owner.
+Condition predicates, CF and defined complete arithmetic flags are modeled.
+Dword shift CF is also exact. Complete shift flags, undefined logical AF,
+rotations and multiplication remain unmodeled.
 """
 
 from __future__ import annotations
@@ -49,6 +50,8 @@ class LazyArithmetic(Enum):
     LOGIC = "logic"
     INCREMENT = "increment"
     DECREMENT = "decrement"
+    SHIFT_LEFT = "shift_left"
+    SHIFT_RIGHT = "shift_right"
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +153,8 @@ def _branch_flags(kind: X86ConditionContract, dep1: z3.BitVecRef,
     """Interpret result dependencies and the saved carry exactly for each family."""
     import z3
 
+    if kind.arithmetic in {LazyArithmetic.SHIFT_LEFT, LazyArithmetic.SHIFT_RIGHT}:
+        raise ValueError("shift contracts admit only carry materialization")
     if kind.arithmetic is LazyArithmetic.COPY:
         return _BranchFlags(*(_set_bit(_low_width(dep1, 32), bit) for bit in (0, 2, 6, 7, 11)))
     left = _low_width(dep1, kind.operand_width)
@@ -181,9 +186,12 @@ def exact_condition(kind: X86ConditionContract, dep1: z3.BitVecRef,
 def carry_contract(cc_op: int | None) -> X86ConditionContract | None:
     """Admit the architectural CF projection of the same exact arithmetic owner.
 
-    The BELOW predicate is exactly CF. This admits no new arithmetic thunk,
-    auxiliary flag or complete EFLAGS interpretation.
+    The BELOW predicate is exactly CF. Dword shifts additionally admit only CF;
+    narrower shifts can have undefined carry for large masked counts.
     """
+    if type(cc_op) is int and cc_op in (24, 27):
+        arithmetic = LazyArithmetic.SHIFT_LEFT if cc_op == 24 else LazyArithmetic.SHIFT_RIGHT
+        return X86ConditionContract(X86Condition.BELOW, arithmetic, 32)
     return condition_contract(X86Condition.BELOW.value, cc_op)
 
 
@@ -192,4 +200,68 @@ def exact_carry(kind: X86ConditionContract, dep1: z3.BitVecRef,
     """Materialize only a validated CF contract as a zero-or-one bitvector."""
     if kind.condition is not X86Condition.BELOW:
         raise ValueError("carry materialization requires the BELOW/CF contract")
+    if kind.arithmetic in {LazyArithmetic.SHIFT_LEFT, LazyArithmetic.SHIFT_RIGHT}:
+        import z3
+
+        position = 31 if kind.arithmetic is LazyArithmetic.SHIFT_LEFT else 0
+        predicate = _set_bit(_low_width(dep2, 32), position)
+        return cast("z3.BitVecRef", z3.If(predicate, z3.BitVecVal(1, output_width), z3.BitVecVal(0, output_width)))
     return exact_condition(kind, dep1, dep2, ndep, output_width=output_width)
+
+
+def condition_dependency_bits(kind: X86ConditionContract) -> tuple[int, int, int]:
+    """Bound low bits of dep1/dep2/ndep needed by this exact predicate.
+
+    These bounds follow the same arithmetic interpretations as exact_condition.
+    Unknown selectors must never use them. INC/DEC preserve CF in ndep, but
+    their other conditions inspect only the result; ADC/SBB consume old CF.
+    """
+    if kind.arithmetic in {LazyArithmetic.SHIFT_LEFT, LazyArithmetic.SHIFT_RIGHT}:
+        return 0, (32 if kind.arithmetic is LazyArithmetic.SHIFT_LEFT else 1), 0
+    pair = kind.condition.value // 2
+    if kind.arithmetic is LazyArithmetic.COPY:
+        return (12, 1, 7, 7, 8, 3, 12, 12)[pair], 0, 0
+    width = kind.operand_width
+    if kind.arithmetic is LazyArithmetic.LOGIC:
+        return (0 if pair in (0, 1) else width), 0, 0
+    if kind.arithmetic in {LazyArithmetic.INCREMENT, LazyArithmetic.DECREMENT}:
+        return (0 if pair == 1 else width), 0, (1 if pair in (1, 3) else 0)
+    carry_bits = int(kind.arithmetic in {LazyArithmetic.ADD_CARRY, LazyArithmetic.SUBTRACT_BORROW})
+    return width, width, carry_bits
+
+
+def all_flags_contract(cc_op: int | None) -> X86ConditionContract | None:
+    """Admit complete arithmetic flags only when AF is architecturally defined."""
+    kind = condition_contract(X86Condition.BELOW.value, cc_op)
+    return None if kind is None or kind.arithmetic is LazyArithmetic.LOGIC else kind
+
+
+def exact_all_flags(kind: X86ConditionContract, dep1: z3.BitVecRef,
+                    dep2: z3.BitVecRef, ndep: z3.BitVecRef, *, output_width: int) -> z3.BitVecRef:
+    """Pack CF/PF/AF/ZF/SF/OF using the existing arithmetic dependency contract."""
+    import z3
+
+    if kind.condition is not X86Condition.BELOW or kind.arithmetic is LazyArithmetic.LOGIC:
+        raise ValueError("complete flags require a defined arithmetic/CF contract")
+    if kind.arithmetic is LazyArithmetic.COPY:
+        return _low_width(_low_width(dep1, 32) & 0x8d5, output_width)
+    flags = _branch_flags(kind, dep1, dep2, ndep)
+    left = _low_width(dep1, kind.operand_width)
+    if kind.arithmetic in {LazyArithmetic.INCREMENT, LazyArithmetic.DECREMENT}:
+        result = left
+        left = result - 1 if kind.arithmetic is LazyArithmetic.INCREMENT else result + 1
+        right = z3.BitVecVal(1, kind.operand_width)
+    else:
+        uses_carry = kind.arithmetic in {LazyArithmetic.ADD_CARRY, LazyArithmetic.SUBTRACT_BORROW}
+        carry = _low_width(ndep, kind.operand_width) & 1 if uses_carry else z3.BitVecVal(0, kind.operand_width)
+        right = _low_width(dep2, kind.operand_width)
+        if uses_carry:
+            right = right ^ carry
+        subtract = kind.arithmetic in {LazyArithmetic.SUBTRACT, LazyArithmetic.SUBTRACT_BORROW}
+        result = left - right - carry if subtract else left + right + carry
+    auxiliary = _set_bit(left ^ right ^ result, 4)
+    packed = z3.BitVecVal(0, output_width)
+    for bit, predicate in ((0, flags.carry), (2, flags.parity), (4, auxiliary),
+                           (6, flags.zero), (7, flags.sign), (11, flags.overflow)):
+        packed = packed | z3.If(predicate, z3.BitVecVal(1 << bit, output_width), z3.BitVecVal(0, output_width))
+    return packed

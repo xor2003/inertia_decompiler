@@ -443,7 +443,7 @@ def _alias_owned_stack_copy_leaf_8616(codegen: object, leaf: structured_c.CVaria
             or projection.cvar.variable is not leaf.variable
             or projection.cvar.unified_variable is not leaf.unified_variable):
         return False
-    return alias_proves_stack_range_8616(codegen, projection.bp_offset, 2)
+    return bool(alias_proves_stack_range_8616(codegen, projection.bp_offset, 2))
 
 
 def _coherent_word_copy_types_8616(

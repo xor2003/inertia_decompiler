@@ -110,3 +110,47 @@ def test_project_transport_reuses_closed_global_object_widening() -> None:
     assert result.bounded_global_range_artifact_count == 1
     assert destination._inertia_project_global_object_layout_evidence_8616 is evidence
     assert destination._inertia_project_bounded_global_object_ranges_8616 is ranges
+
+
+def test_project_transport_preserves_accepted_scalar_interface(tmp_path) -> None:
+    from inertia.lowering.scalar_interface_transport import (
+        attach_scalar_interface_8616,
+        current_scalar_interface_8616,
+        scalar_interface_for_result_8616,
+    )
+    from tests.lowering.test_scalar_interface_transport import _world
+
+    source, function, _ = _world(tmp_path)
+    receipt = scalar_interface_for_result_8616(source, function.addr, "accepted-payload")
+    assert receipt is not None
+    attach_scalar_interface_8616(source, receipt)
+    destination = SimpleNamespace(arch=source.arch, loader=source.loader)
+
+    result = transfer_project_evidence_8616(source, destination)
+
+    assert current_scalar_interface_8616(destination, function.addr) == receipt
+    assert result.scalar_interface_count == 1
+
+
+def test_project_transport_rejects_changed_scalar_destination(tmp_path) -> None:
+    import pytest
+
+    from inertia.lowering.scalar_interface_transport import (
+        attach_scalar_interface_8616,
+        scalar_interface_for_result_8616,
+    )
+    from tests.lowering.test_scalar_interface_transport import _world
+
+    source, function, _ = _world(tmp_path)
+    receipt = scalar_interface_for_result_8616(source, function.addr, "accepted-payload")
+    assert receipt is not None
+    attach_scalar_interface_8616(source, receipt)
+    for loader in (
+        SimpleNamespace(main_object=source.loader.main_object,
+                        memory=SimpleNamespace(load=lambda addr, size: b"\xcc")),
+        SimpleNamespace(main_object=SimpleNamespace(binary=source.loader.main_object.binary, mapped_base=16),
+                        memory=source.loader.memory),
+    ):
+        destination = SimpleNamespace(arch=source.arch, loader=loader)
+        with pytest.raises(ValueError, match="stale scalar interface"):
+            transfer_project_evidence_8616(source, destination)

@@ -94,11 +94,30 @@ def _unique_sources_8616(
 class _ClosedEvidence8616(Protocol):
     """Common closed-evidence counter shape shared by merge and join records."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    @property
+    def raw_fact_count(self) -> int:
+        """Raw predecessor trace count observed before normalization."""
+        ...
+
+    @property
+    def normalized_fact_count(self) -> int:
+        """Trace count surviving normalization."""
+        ...
+
+    @property
+    def classified_fact_count(self) -> int:
+        """Count of joins classified as materializable."""
+        ...
+
+    @property
+    def materialized_count(self) -> int:
+        """Count of materialized join outputs."""
+        ...
+
+    @property
+    def failure_count(self) -> int:
+        """Count of evidence failures."""
+        ...
 
 
 def _closed_evidence_counts_8616(evidence: _ClosedEvidence8616, trace_count: int) -> bool:

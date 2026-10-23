@@ -1260,8 +1260,8 @@ class _CascadeScan8616:
 
     def record_guard_span(
         self,
-        addrs: list[int],
-        keys: list[tuple[str, int, int]],
+        addrs: Iterable[int],
+        keys: Iterable[tuple[str, int, int]],
     ) -> None:
         """Record one condition region's guard statement span."""
         if addrs:

@@ -253,3 +253,25 @@ def test_bodyless_stack_cleanup_refuses_inaccessible_decode() -> None:
     assert evidence.complete is False
     assert evidence.raw_fact_count == evidence.failure_count == 1
     assert evidence.consistent_cleanup is None
+
+
+def test_registered_synthetic_stub_never_certifies_physical_cleanup() -> None:
+    """Placeholder bytes lose physical RET proof once the stub is registered."""
+    from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
+        record_synthetic_call_stubs_8616,
+    )
+
+    for body in (_ret(0x2000, 0), _ret(0x2000, 4)):
+        factory = _Factory(
+            {0x2000: SimpleNamespace(capstone=SimpleNamespace(insns=(body,)))}
+        )
+        project = SimpleNamespace(factory=factory)
+
+        real = terminal_stack_cleanup_at_address_8616(project, 0x2000)
+        assert real.complete is True
+
+        record_synthetic_call_stubs_8616(project, frozenset({0x2000}))
+        marked = terminal_stack_cleanup_at_address_8616(project, 0x2000)
+        assert marked.complete is False
+        assert marked.consistent_cleanup is None
+        assert marked.failure_count == 1

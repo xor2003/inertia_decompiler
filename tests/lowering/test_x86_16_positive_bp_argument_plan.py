@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypePointer, SimTypeShort
@@ -31,6 +32,31 @@ from inertia.lowering.positive_bp_arguments import (
     _merge_existing_and_body_argument_type_8616,
     materialize_positive_bp_arguments_8616,
 )
+
+
+@pytest.mark.parametrize("value_width", [0, 3])
+def test_argument_plan_refuses_value_outside_physical_slot(value_width: int) -> None:
+    """A value view must fit its physical slot even without caller evidence."""
+    entry = PositiveBpArgumentPlanEntry8616(
+        4, 2, "arg_4", SimTypeChar(True), value_width=value_width,
+    )
+    evidence = CalleeArgumentWidthEvidence8616(0x1000, CalleeArgumentWidthVerdict8616.UNKNOWN)
+    plan = complete_positive_bp_argument_plan_8616(
+        (entry,), evidence, default_argument_type=SimTypeShort(False),
+    )
+    assert plan.decision is PositiveBpArgumentPlanDecision8616.REFUSE
+
+
+def test_proven_wide_body_access_replaces_narrow_value_view() -> None:
+    """Explicit wide-access proof supersedes a previously narrow body view."""
+    entries = (
+        PositiveBpArgumentPlanEntry8616(4, 2, "arg_4", SimTypeChar(True), value_width=1),
+        PositiveBpArgumentPlanEntry8616(8, 2, "arg_8", SimTypeShort(False)),
+    )
+    completed = complete_positive_bp_body_word_access_plan_8616(
+        entries, {4, 6, 8}, wide_access_offsets={4}, default_argument_type=SimTypeShort(False),
+    )
+    assert tuple((entry.bp_offset, entry.materialized_width) for entry in completed) == ((4, 4), (8, 2))
 from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_projection_8616,
@@ -158,7 +184,8 @@ def test_positive_bp_plan_completes_unused_caller_proven_tail() -> None:
 
     arguments = tuple(codegen.cfunc.arg_list)
     assert tuple(argument.variable.offset for argument in arguments) == (4, 6, 8)
-    assert tuple(argument.variable.size for argument in arguments) == (2, 2, 2)
+    # The first value is a typed byte; its ABI slot still advances by two.
+    assert tuple(argument.variable.size for argument in arguments) == (1, 2, 2)
     assert tuple(argument.variable.name for argument in arguments) == ("arg", "arg_6", "arg_8")
     assert arguments[:2] == (argc, argv)
     assert arguments[1].variable_type == argv.variable_type

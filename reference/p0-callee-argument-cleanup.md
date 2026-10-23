@@ -1,5 +1,21 @@
 # Callee Argument Cleanup At The Native Call Boundary
 
+## Decoded Cleanup Byte Counts
+
+The Semantics terminal-return collector accepts the complete unsigned imm16
+byte-count domain, including odd counts and values above 128. Cleanup is a
+machine stack effect independent of C argument count, argument width or calling
+convention. Consumers must not infer word-sized arguments from this fact alone.
+The former even-only, 128-byte ceiling incorrectly withheld otherwise complete
+binary cleanup evidence from native stack tracking and scalar SP projection.
+
+`tests/semantics/test_x86_16_callee_cleanup_compat.py` covers near-return cleanup
+of 3, 129, 130, 65534 and 65535 bytes, narrow scalar projection, and invalid
+decoded operand refusals. Exact far-return evidence remains distinct from the
+near-only scalar consumer: this change does not admit far or wide call frames.
+Conflicting or incomplete terminal evidence still refuses. These focused
+contracts do not establish whole-function or executable-roundtrip acceptance.
+
 Subsequent closure: [direction-bit projection](p0-direction-bit-projection.md)
 removes the remaining false SP/BP liveness and passes InitMenu acceptance in
 both tested metadata modes. The observations below retain the earlier checkpoint.

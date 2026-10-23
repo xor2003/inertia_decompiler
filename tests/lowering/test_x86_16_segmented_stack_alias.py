@@ -21,17 +21,20 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimVariable
+from capstone.x86_const import X86_OP_MEM, X86_REG_BP, X86_REG_SI
+
+import decompile
 import inertia.postprocess.decompiler_postprocess_stage as _postprocess_stage
 import inertia.structuring.decompiler_structuring_stage as _structuring_stage
 from inertia.alias.alias_model import _stack_storage_facts_for_segmented_address_8616
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.analysis.stack_frame_ir import (
     BPFrameCoordinateEvidence8616,
     FrameAccessArtifact,
     FrameCoordinateStats8616,
     FrameCoordinateStatus8616,
 )
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.semantics.callsite_summary import CallsiteSummary8616
+from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFallbackDecision8616,
     StackCarrierDeltaSource8616,
@@ -55,6 +58,11 @@ from inertia.lowering.segmented_memory_lowering import (
     apply_runtime_segment_lowering_8616,
     lower_runtime_ss_segment_helpers_to_stack_8616,
 )
+from inertia.lowering.segmented_memory_reasoning import (
+    SegmentAssignment,
+    SegmentRegister,
+    apply_x86_16_segmented_memory_reasoning,
+)
 from inertia.lowering.stack_c_ast_matching import (
     _match_bp_stack_dereference_8616,
     _stack_bp_displacement_8616,
@@ -68,15 +76,7 @@ from inertia.lowering.stack_variable_binding import StackBaseBpBiasEvidence8616
 from inertia.lowering.stack_variable_coordinates import (
     stack_variable_coordinate_registry_8616,
 )
-from inertia.lowering.segmented_memory_reasoning import (
-    SegmentAssignment,
-    SegmentRegister,
-    apply_x86_16_segmented_memory_reasoning,
-)
-from capstone.x86_const import X86_OP_MEM, X86_REG_BP, X86_REG_SI
-
-import decompile
-from inertia.lowering.annotations import ANNOTATION_KEY
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.validation.tail_validation import (
     collect_x86_16_tail_validation_summary,
     compare_x86_16_tail_validation_summaries,
@@ -99,7 +99,10 @@ class _DummyCodegen:
 
 
 def _project():
-    return SimpleNamespace(arch=Arch86_16())
+    return SimpleNamespace(
+        arch=Arch86_16(),
+        kb=SimpleNamespace(functions=SimpleNamespace(function=lambda **kwargs: None)),
+    )
 
 
 def _codegen(statements, *, standard_bp_coordinate=False):
@@ -2765,3 +2768,57 @@ def test_missing_terminal_ax_return_replaces_return_value_without_dropping_state
     assert changed is True
     assert list(root.statements) == [setup_stmt, return_stmt]
     assert return_stmt.retval is new_retval
+
+
+def test_saved_byte_pop_high_read_projects_existing_adjacent_stack_store() -> None:
+    """A byte read through SS plus an owned local address retains its lane."""
+    from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+    from inertia.lowering.real_mode_linear import stack_cvar_for_stable_ss_linear_access_8616
+    from inertia.lowering.semantic_cast import CSemanticCast8616
+
+    project, codegen = _codegen([])
+    low = CVariable(SimStackVariable(-4, 1, base="bp", region=0x4010),
+                    variable_type=SimTypeChar(False), codegen=codegen)
+    high = CVariable(SimStackVariable(-3, 1, base="bp", region=0x4010),
+                     variable_type=SimTypeChar(False), codegen=codegen)
+    codegen.cfunc.variables_in_use.update({low.variable: low, high.variable: high})
+    reference = CUnaryOp("Reference", low, codegen=codegen,
+                         tags={"inertia_native_entry_sp_anchor_8616": -4})
+    deref = CUnaryOp("Dereference", CBinaryOp("Add",
+        CBinaryOp("Shl", _reg(project, "ss", codegen), _const(4, codegen), codegen=codegen),
+        CBinaryOp("Add", reference, _const(1, codegen), codegen=codegen), codegen=codegen), codegen=codegen)
+    codegen.cfunc.statements.statements[:] = [CAssignment(low, _const(9, codegen), codegen=codegen),
+        CAssignment(high, _const(0, codegen), codegen=codegen)]
+    codegen._inertia_ss_lowering_refusal_log = []
+    access = match_stable_ss_linear_stack_access_8616(deref, project, codegen)
+    assert access is not None, codegen._inertia_ss_lowering_refusal_log
+    assert (access.displacement, access.width) == (-3, 1)
+    value = stack_cvar_for_stable_ss_linear_access_8616(codegen, access)
+    assert isinstance(value, CVariable)
+    assert (value.variable.offset, value.variable.size) == (-3, 1)
+    assert value.variable is high.variable
+    word = SimTypeShort(False)
+    expression = CBinaryOp("Or", low, CSemanticCast8616(None, word,
+        CBinaryOp("Shl", CSemanticCast8616(None, word, deref, codegen=codegen),
+                  _const(8, codegen), codegen=codegen), codegen=codegen), codegen=codegen)
+    read = CAssignment(_reg(project, "cx", codegen), expression, codegen=codegen)
+    codegen.cfunc.statements.statements.append(read)
+    lower_stable_ss_linear_stack_dereferences_8616(codegen, project)
+    assert not any(isinstance(node, CUnaryOp) and node.op == "Dereference"
+                   for node in _iter_c_nodes_deep_8616(read.rhs))
+    assert any(isinstance(node, CVariable) and node.variable is high.variable
+               for node in _iter_c_nodes_deep_8616(read.rhs))
+
+
+def test_ss_linear_traversal_refuses_foreign_expression_container() -> None:
+    """Foreign objects exposing AST-like fields are not structured constructs."""
+    from inertia.lowering.real_mode_linear import _SSLinearLowerRun8616
+    from inertia.pipeline.contracts import SemanticLaneState
+
+    project, codegen = _codegen([])
+    root = SimpleNamespace(rhs=_ss_stack_deref(project, -4, 1, codegen))
+    original = root.rhs
+    run = _SSLinearLowerRun8616(codegen, project, SemanticLaneState(name="test"))
+    assert run.replace_children(root) is False
+    assert root.rhs is original
+    assert run.candidate_count == 0

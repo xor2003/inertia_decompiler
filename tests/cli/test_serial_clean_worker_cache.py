@@ -458,7 +458,7 @@ def test_emission_terminal_skip_blocks_preemission_retry(monkeypatch, skip, side
     metadata = object()
     outcome = cli_core._emit_function_result(
         item, result, project=project,
-        args=SimpleNamespace(addr=None, show_asm=False, timeout=60),
+        args=SimpleNamespace(addr=None, show_asm=False, timeout=60, output_c_dir=None),
         lst_metadata=metadata if sidecar == "lst" else None,
         cod_metadata=metadata if sidecar == "cod" else None,
         synthetic_globals=None, precise_sidecar_regions=False,

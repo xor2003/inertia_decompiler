@@ -12,6 +12,7 @@ from inertia.alias.carry_borrow_projection import (
     CarryBorrowAliasFailure8616,
     project_carry_borrow_aliases_8616,
 )
+from inertia.alias.domains import DomainKey
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
 from inertia.ir import IRInstr, IRValue, MemSpace
@@ -33,6 +34,10 @@ from inertia.widening.carry_borrow_values import (
     WideCarryBorrowFailure8616,
     WideValueSignedness8616,
     widen_carry_borrow_values_8616,
+)
+from inertia.widening.pair_type_contracts import (
+    WidePairState8616,
+    wide_pair_value_consistent_8616,
 )
 
 
@@ -118,6 +123,14 @@ def test_real_lifter_carry_borrow_links_widen_exact_register_pairs(
     assert value.address_space is None
     assert (value.low.result.name, value.high.result.name) == ("ax", "dx")
     assert (value.low.rhs.value.name, value.high.rhs.value.name) == ("bx", "cx")
+    pair = value.pair
+    assert pair.state is WidePairState8616.PAIRED
+    assert pair.combine_authorized and pair.split_authorized
+    assert pair.kind is kind
+    assert pair.type.signedness is WideValueSignedness8616.UNKNOWN
+    assert pair.type.total_size == value.size == 4
+    assert pair.low.slice is value.low and pair.high.slice is value.high
+    assert wide_pair_value_consistent_8616(value) is None
 
 
 def test_semantics_retains_exact_segmented_memory_word_loads() -> None:
@@ -177,6 +190,8 @@ def test_semantics_retains_exact_segmented_memory_word_loads() -> None:
     assert value.source_memory == fact.source_memory
     assert value.low.rhs_memory == fact.low_rhs.memory
     assert value.high.rhs_memory == fact.high_rhs.memory
+    assert value.pair.address_space is MemSpace.DS
+    assert wide_pair_value_consistent_8616(value) is None
 
 
 @pytest.mark.parametrize(
@@ -300,6 +315,71 @@ def test_widening_refuses_incoherent_alias_projection() -> None:
     changed_fact = replace(
         resolution.fact,
         low_result_domain=resolution.fact.high_result_domain,
+    )
+    changed = replace(aliases, resolutions=(replace(resolution, fact=changed_fact),))
+
+    refused = widen_carry_borrow_values_8616(changed)
+
+    assert refused.complete
+    assert refused.resolutions[0].failure is WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH
+
+
+def test_widening_refuses_result_domains_unbound_to_result_registers() -> None:
+    """Claimed result domains must be the canonical domains of the link registers."""
+    aliases = project_carry_borrow_aliases_8616(_positive_evidence())
+    resolution = aliases.resolutions[0]
+    fact = resolution.fact
+    assert fact is not None
+    assert (fact.low_result_domain, fact.high_result_domain) == (
+        DomainKey("reg", "AX"),
+        DomainKey("reg", "DX"),
+    )
+    changed_fact = replace(
+        fact,
+        low_result_domain=fact.high_result_domain,
+        high_result_domain=fact.low_result_domain,
+        low_lhs=replace(fact.low_lhs, register_domain=fact.high_result_domain),
+        high_lhs=replace(fact.high_lhs, register_domain=fact.low_result_domain),
+    )
+    changed = replace(aliases, resolutions=(replace(resolution, fact=changed_fact),))
+
+    refused = widen_carry_borrow_values_8616(changed)
+
+    assert refused.complete
+    assert refused.resolutions[0].failure is WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH
+
+
+def test_widening_refuses_rhs_domain_unbound_to_its_source() -> None:
+    """A claimed operand register domain must be the domain of its proven source."""
+    aliases = project_carry_borrow_aliases_8616(_positive_evidence())
+    resolution = aliases.resolutions[0]
+    fact = resolution.fact
+    assert fact is not None
+    assert fact.low_rhs.source.name == "bx"
+    changed_fact = replace(
+        fact,
+        low_rhs=replace(fact.low_rhs, register_domain=DomainKey("reg", "SI")),
+    )
+    changed = replace(aliases, resolutions=(replace(resolution, fact=changed_fact),))
+
+    refused = widen_carry_borrow_values_8616(changed)
+
+    assert refused.complete
+    assert refused.resolutions[0].failure is WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH
+
+
+def test_widening_refuses_operand_with_overclaimed_carrier_identities() -> None:
+    """An operand claiming register plus constant carriers is a mismatched pair."""
+    aliases = project_carry_borrow_aliases_8616(_positive_evidence())
+    resolution = aliases.resolutions[0]
+    fact = resolution.fact
+    assert fact is not None
+    changed_fact = replace(
+        fact,
+        low_lhs=replace(
+            fact.low_lhs,
+            constant=IRValue(MemSpace.CONST, const=7, size=2),
+        ),
     )
     changed = replace(aliases, resolutions=(replace(resolution, fact=changed_fact),))
 

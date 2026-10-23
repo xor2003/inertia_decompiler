@@ -24,12 +24,17 @@ from inertia.alias.alias_model_impl import AliasStorageFacts
 from inertia.frontend.x86_16.decoded_memory_width import decoded_memory_operand_width_8616
 from inertia.ir.core import MemSpace
 from inertia.lowering.runtime_segment_access import (
+    RuntimeSegmentAccessContext8616,
     build_runtime_segment_access_context_8616,
     runtime_segment_access_offset_expr_8616,
 )
 from inertia.lowering.segment_access_policy import instruction_addrs_from_node_8616
 from inertia.lowering.segmented_lowering import _SegmentedAccess
-from inertia.structuring.simple_loop_recovery import _function_instruction_summaries_8616
+from inertia.structuring.simple_loop_recovery import (
+    InsnSummary8616,
+    _CapstoneInsnLike8616,
+    _function_instruction_summaries_8616,
+)
 
 from .segmented_load_identity import segmented_load_identity_8616, segmented_load_tags_8616
 from .segmented_load_widening import join_adjacent_segmented_load_identities_8616
@@ -96,7 +101,7 @@ def run_typed_widening_pass_8616(
     return changed
 
 
-def _insn_summary_bp_widths_8616(insn: object, widths: dict[int, int]) -> None:
+def _insn_summary_bp_widths_8616(insn: InsnSummary8616, widths: dict[int, int]) -> None:
     """Merge BP-mem operand widths from one decoded instruction summary."""
     for operand_kind, operand_value, operand_size in (
         (insn.op0_kind, insn.op0_value, insn.op0_size),
@@ -111,7 +116,7 @@ def _insn_summary_bp_widths_8616(insn: object, widths: dict[int, int]) -> None:
 
 
 def _capstone_operand_bp_width_8616(
-    insn: object,
+    insn: _CapstoneInsnLike8616,
     operands: tuple[object, ...],
     operand_index: int,
     operand: object,
@@ -143,7 +148,7 @@ def _capstone_operand_bp_width_8616(
     widths[disp] = max(widths.get(disp, 0), size)
 
 
-def _capstone_insn_bp_widths_8616(insn: object, widths: dict[int, int]) -> None:
+def _capstone_insn_bp_widths_8616(insn: _CapstoneInsnLike8616, widths: dict[int, int]) -> None:
     """Merge BP-mem widths from one capstone instruction."""
     if str(_dynamic_attr_8616(insn, "mnemonic", "")).lower() == "lea":
         return
@@ -290,7 +295,9 @@ def _visit_structured_children_8616(node: object, visit_fn: Callable[[object], N
     return False
 
 
-def _ss_local_pair_lhs_8616(ctx: _DirectSSLocalCtx8616, stmt: object, next_stmt: object) -> object | None:
+def _ss_local_pair_lhs_8616(
+    ctx: _DirectSSLocalCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
+) -> object | None:
     """Return ``stmt.lhs`` when the pair is a ``SS:local+1`` high-byte join."""
     if not isinstance(stmt.lhs, structured_c.CVariable):
         return None
@@ -308,10 +315,12 @@ def _ss_local_pair_lhs_8616(ctx: _DirectSSLocalCtx8616, stmt: object, next_stmt:
         and ctx.same_c_expression(ctx.unwrap_c_casts(high_expr), ctx.unwrap_c_casts(stmt.rhs))
     ):
         return None
-    return stmt.lhs
+    return cast(object, stmt.lhs)
 
 
-def _byte_store_pair_lhs_8616(ctx: _DirectSSLocalCtx8616, stmt: object, next_stmt: object) -> object | None:
+def _byte_store_pair_lhs_8616(
+    ctx: _DirectSSLocalCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
+) -> object | None:
     """Resolve a word lvalue for adjacent byte-store address expressions."""
     low_addr_expr = ctx.match_byte_store_addr_expr(stmt.lhs)
     high_addr_expr = ctx.match_byte_store_addr_expr(next_stmt.lhs)
@@ -352,7 +361,7 @@ def _direct_ss_pair_step_8616(
     return structured_c.CAssignment(replacement_lhs, stmt.rhs, codegen=ctx.codegen), 2
 
 
-def _direct_ss_local_seq_8616(node: object, ctx: _DirectSSLocalCtx8616) -> None:
+def _direct_ss_local_seq_8616(node: structured_c.CStatements, ctx: _DirectSSLocalCtx8616) -> None:
     """Coalesce adjacent byte assignments in one ``CStatements`` sequence."""
     new_statements = []
     i = 0
@@ -448,7 +457,7 @@ class _WordStoreCoalesceCtx8616:
     codegen: object
     target_type: object
     debug_widening: bool
-    runtime_access_context: object
+    runtime_access_context: RuntimeSegmentAccessContext8616
     match_ss_local_plus_const: Callable[..., object]
     match_word_rhs_from_byte_pair: Callable[..., object]
     promote_direct_stack_cvariable: Callable[..., object]
@@ -952,16 +961,20 @@ def _word_store_quad_step_8616(
     )
 
 
-def _wstore_runtime_pair_8616(ctx: _WordStoreCoalesceCtx8616, stmt: object, next_stmt: object) -> object | None:
+def _wstore_runtime_pair_8616(
+    ctx: _WordStoreCoalesceCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
+) -> object | None:
     """Word assignment for a runtime segment-helper byte pair."""
     runtime_word_lhs = _runtime_word_store_lvalue_8616(ctx, stmt.lhs, next_stmt.lhs)
     runtime_word_rhs = ctx.match_word_rhs_from_byte_pair(stmt.rhs, next_stmt.rhs, ctx.codegen, ctx.project)
     if runtime_word_lhs is None or runtime_word_rhs is None:
         return None
-    return structured_c.CAssignment(runtime_word_lhs, runtime_word_rhs, codegen=ctx.codegen)
+    return cast(object, structured_c.CAssignment(runtime_word_lhs, runtime_word_rhs, codegen=ctx.codegen))
 
 
-def _wstore_ss_local_pair_8616(ctx: _WordStoreCoalesceCtx8616, stmt: object, next_stmt: object) -> object | None:
+def _wstore_ss_local_pair_8616(
+    ctx: _WordStoreCoalesceCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
+) -> object | None:
     """Word assignment for an ``SS:local + 1`` high-byte store pair."""
     if not isinstance(stmt.lhs, structured_c.CVariable):
         return None
@@ -982,7 +995,7 @@ def _wstore_ss_local_pair_8616(ctx: _WordStoreCoalesceCtx8616, stmt: object, nex
     rhs_word = ctx.canonicalize_stack_cvar_expr(rhs_word, ctx.codegen)
     if ctx.promote_direct_stack_cvariable(ctx.codegen, replacement_lhs, 2, ctx.target_type):
         ctx.changed = True
-    return structured_c.CAssignment(replacement_lhs, rhs_word, codegen=ctx.codegen)
+    return cast(object, structured_c.CAssignment(replacement_lhs, rhs_word, codegen=ctx.codegen))
 
 
 def _wstore_alias_pair_unjoinable_8616(
@@ -1003,7 +1016,9 @@ def _wstore_alias_pair_unjoinable_8616(
     )
 
 
-def _wstore_alias_pair_8616(ctx: _WordStoreCoalesceCtx8616, stmt: object, next_stmt: object) -> object | None:
+def _wstore_alias_pair_8616(
+    ctx: _WordStoreCoalesceCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
+) -> object | None:
     """Word assignment for an adjacent byte-store alias pair."""
     low_addr_expr = ctx.match_byte_store_addr_expr(stmt.lhs)
     high_addr_expr = ctx.match_byte_store_addr_expr(next_stmt.lhs)
@@ -1035,15 +1050,15 @@ def _wstore_alias_pair_8616(ctx: _WordStoreCoalesceCtx8616, stmt: object, next_s
         rhs_word = ctx.canonicalize_stack_cvar_expr(rhs_word, ctx.codegen)
         if ctx.promote_direct_stack_cvariable(ctx.codegen, replacement_lhs, 2, ctx.target_type):
             ctx.changed = True
-        return structured_c.CAssignment(replacement_lhs, rhs_word, codegen=ctx.codegen)
+        return cast(object, structured_c.CAssignment(replacement_lhs, rhs_word, codegen=ctx.codegen))
     resolved_lhs = ctx.resolve_stack_cvar_from_addr_expr(ctx.project, ctx.codegen, low_addr_expr)
-    return structured_c.CAssignment(
+    return cast(object, structured_c.CAssignment(
         resolved_lhs
         if resolved_lhs is not None
         else ctx.make_word_dereference_from_addr_expr(ctx.codegen, ctx.project, low_addr_expr),
         rhs_word,
         codegen=ctx.codegen,
-    )
+    ))
 
 
 def _word_store_pair_step_8616(
@@ -1064,7 +1079,7 @@ def _word_store_pair_step_8616(
     return replacement, 2
 
 
-def _coalesce_word_store_seq_8616(node: object, ctx: _WordStoreCoalesceCtx8616) -> None:
+def _coalesce_word_store_seq_8616(node: structured_c.CStatements, ctx: _WordStoreCoalesceCtx8616) -> None:
     """Coalesce adjacent byte statements in one ``CStatements`` sequence."""
     new_statements = []
     i = 0

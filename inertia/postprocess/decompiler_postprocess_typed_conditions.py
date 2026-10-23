@@ -191,7 +191,7 @@ def _assignment_lhs_register_info_8616(project: object, lhs: object) -> tuple[in
 
 def _register_exprs_from_assignment_8616(
     project: object,
-    node: object,
+    node: CAssignment,
     ins_addr: int,
     reg_exprs: dict[tuple[int, str, int], object],
 ) -> None:
@@ -319,12 +319,14 @@ def _clone_stack_expr_with_condition_signedness_8616(expr: object, cond: Conditi
 
 def _reg_operand_expr_8616(
     project: object,
-    operand: object,
+    operand: IRValue,
     codegen: object,
     cond: ConditionIR | None,
     apply_condition_value_view: bool,
 ) -> object | None:
     """Bind a ``MemSpace.REG`` operand to its reaching-definition expression."""
+    if not isinstance(operand.name, str) or not operand.name:
+        return None
     bind_addr = cond.operand_bind_insn if cond is not None else None
     if not isinstance(bind_addr, int):
         bind_addr = cond.producer_insn if cond is not None else None
@@ -351,7 +353,7 @@ def _reg_operand_expr_8616(
 
 def _ir_value_operand_expr_8616(
     project: object,
-    operand: object,
+    operand: IRValue,
     codegen: object,
     cond: ConditionIR | None,
     apply_condition_value_view: bool,
@@ -916,9 +918,12 @@ def _rebuild_args_from_arg_list_8616(
             arg_type = old_args[index] if index < len(old_args) else SimTypeShort(signed=False)
         args.append(cast(SimType, arg_type))
         arg_names.append(
-            _dynamic_typed_condition_getattr_8616(variable, "name", None)
-            or _dynamic_typed_condition_getattr_8616(arg, "name", None)
-            or (old_names[index] if index < len(old_names) and isinstance(old_names[index], str) else f"arg_{index}")
+            cast(
+                str,
+                _dynamic_typed_condition_getattr_8616(variable, "name", None)
+                or _dynamic_typed_condition_getattr_8616(arg, "name", None)
+                or (old_names[index] if index < len(old_names) and isinstance(old_names[index], str) else f"arg_{index}"),
+            )
         )
         if isinstance(offset, int) and offset in signed_offsets:
             signed_type = _bind_type_to_arch_8616(project, _signed_type_for_operand_size_8616(signed_offsets[offset]))
@@ -940,7 +945,7 @@ def _rebuild_args_from_old_prototype_8616(
 ) -> tuple[list[SimType], list[str], bool]:
     """Rebuild prototype args by BP-offset cursor when no ``arg_list`` exists."""
     args = [cast(SimType, arg_type) for arg_type in old_args]
-    arg_names = list(old_names)
+    arg_names: list[str] = [cast(str, name) for name in old_names]
     changed = False
     cursor = 4
     for index, arg_type in enumerate(args):
@@ -977,9 +982,9 @@ def _publish_signed_arg_prototype_8616(
         variadic=_dynamic_typed_condition_getattr_8616(prototype, "variadic", False) if prototype is not None else False,
     )
     new_prototype = _bind_type_to_arch_8616(project, new_prototype)
-    cfunc.functy = new_prototype
+    typing.cast(typing.Any, cfunc).functy = new_prototype
     with contextlib.suppress(Exception):
-        cfunc.prototype = new_prototype
+        typing.cast(typing.Any, cfunc).prototype = new_prototype
     func_addr = _dynamic_typed_condition_getattr_8616(cfunc, "addr", None)
     functions = _dynamic_typed_condition_getattr_8616(_dynamic_typed_condition_getattr_8616(project, "kb", None), "functions", None)
     if isinstance(func_addr, int) and functions is not None:
@@ -1396,15 +1401,15 @@ class _TypedConditionApplyCtx8616:
 
     project: object
     codegen: object
-    condition_index: object
+    condition_index: dict[tuple[Any, ...], ConditionIR]
     matched_condition_keys: set[tuple[Any, ...]]
     visited_nodes: set[int]
     changed: bool = False
 
 
 def _resolve_typed_condition_for_key_8616(
-    project: object, condition_index: object, key: tuple[Any, ...], cond: object
-) -> object | None:
+    project: object, condition_index: dict[tuple[Any, ...], ConditionIR], key: tuple[Any, ...], cond: object
+) -> ConditionIR | None:
     """Resolve the ConditionIR for ``key``; log unresolved keys in debug mode."""
     typed_cond = _resolve_condition_by_tag_with_delta(project, condition_index, key)
     if typed_cond is not None:
@@ -1616,7 +1621,7 @@ def _publish_condition_lane_counts_8616(
         matched_count = len(matched_condition_keys)
         lane.classified = max(lane.classified, matched_count)
         lane.materialized = matched_count
-    codegen._inertia_semantic_condition_materialized_count = len(matched_condition_keys)
+    typing.cast(typing.Any, codegen)._inertia_semantic_condition_materialized_count = len(matched_condition_keys)
 
 
 def _apply_typed_conditions_to_codegen_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:

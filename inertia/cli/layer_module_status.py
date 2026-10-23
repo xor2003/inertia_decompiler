@@ -86,9 +86,9 @@ LAYER_MODULE_RECORDS: tuple[LayerModuleRecord, ...] = (
     ),
     LayerModuleRecord(
         "inertia.cli.acceptance_scorecard",
-        LayerModuleAdmission.COMPATIBILITY_WRAPPER,
+        LayerModuleAdmission.PRODUCTION_WIRED,
         "diagnostics",
-        "Historical quality exports; implementation lives in inertia.cli.acceptance_scorecard.",
+        "Canonical quality reporting consumed by compiler builds and quality benchmarks.",
     ),
     LayerModuleRecord(
         "inertia.postprocess.cleanup",

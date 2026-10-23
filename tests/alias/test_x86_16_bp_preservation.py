@@ -116,14 +116,12 @@ def test_saved_byte_lifetime_keeps_instruction_order_and_backedges(backedge: boo
 @pytest.mark.parametrize("clobber", (False, True))
 def test_bp_preservation_closes_both_return_paths(clobber: bool) -> None:
     """A single clobbering exit rejects an otherwise preserving branch."""
-    write = IRInstr("MOV", IRValue(MemSpace.REG, name="bp", size=2),
-                    (IRValue(MemSpace.CONST, const=42, size=2),), size=2, addr=0x1020)
-    artifact = IRFunctionArtifact(0x1000, (
-        IRBlock(0x1000, instrs=(_identity_effect(0x1000),), successor_addrs=(0x1010, 0x1020)),
-        IRBlock(0x1010, instrs=(IRInstr("RET", None, (), addr=0x1010),)),
-        IRBlock(0x1020, instrs=((write,) if clobber else ()) + (IRInstr("RET", None, (), addr=0x1021),)),
-    ))
-    result = prove_bp_preservation_8616(_coverage(artifact))
+    # TEST AX,AX; JZ second; RET; second: [MOV BP,42 | NOP]; RET.
+    code = bytes.fromhex("85c0 7401 c3 " + ("bd2a00" if clobber else "90") + " c3")
+    coverage = _binary_coverage(code)
+    assert coverage.complete
+    assert sum(instruction.op == "RET" for block in coverage.artifact.blocks for instruction in block.instrs) == 2
+    result = prove_bp_preservation_8616(coverage)
     assert result.complete is (not clobber)
 
 
@@ -151,16 +149,12 @@ def test_same_instruction_clobber_cannot_borrow_a_restore_fact() -> None:
 @pytest.mark.parametrize("clobber", (False, True))
 def test_bp_preservation_propagates_clobber_through_loop(clobber: bool) -> None:
     """A stable loop preserves incoming BP; a backedge clobber reaches its exit."""
-    instruction = _identity_effect(0x1010)
-    if clobber:
-        instruction = IRInstr("MOV", IRValue(MemSpace.REG, name="bp", size=2),
-                              (IRValue(MemSpace.CONST, const=42, size=2),), size=2, addr=0x1010)
-    artifact = IRFunctionArtifact(0x1000, (
-        IRBlock(0x1000, instrs=(_identity_effect(0x1000),), successor_addrs=(0x1010,)),
-        IRBlock(0x1010, instrs=(instruction,), successor_addrs=(0x1010, 0x1020)),
-        IRBlock(0x1020, instrs=(IRInstr("RET", None, (), addr=0x1020),)),
-    ))
-    assert prove_bp_preservation_8616(_coverage(artifact)).complete is (not clobber)
+    # MOV CX,2; loop: DEC CX; [MOV BP,42 | NOP]; JNZ loop; RET.
+    body = "bd2a00 75fa" if clobber else "90 75fc"
+    coverage = _binary_coverage(bytes.fromhex("b90200 49 " + body + " c3"))
+    assert coverage.complete
+    assert any(block.addr in block.successor_addrs for block in coverage.artifact.blocks)
+    assert prove_bp_preservation_8616(coverage).complete is (not clobber)
 
 
 def test_binary_loop_proof_requires_complete_real_frontend_census() -> None:

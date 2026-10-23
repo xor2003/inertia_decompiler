@@ -9,7 +9,7 @@ undergo control relocation or layout normalization.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from tools.dosunit.compare import straightline_ssa as S
 from tools.dosunit.compare.paired_region_graph import CollapsedRegion, RegionExitKind, RegionNode
@@ -61,7 +61,7 @@ def region_nodes(ctx: FunctionCtx, session: ComposeSession) -> dict[int, RegionN
         session.bump()
         source = block_source(block)
         try:
-            kind = RegionExitKind(source.get("jumpkind"))
+            kind = RegionExitKind(cast(str, source.get("jumpkind")))
         except ValueError as error:
             raise Real16CallRefusal("unsupported_exit", {"delta": delta}) from error
         if kind is RegionExitKind.RETURN:

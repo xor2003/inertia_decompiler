@@ -16,14 +16,17 @@ move this work to postprocess or infer it from rendered C or assembly text.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616, _replace_c_children_8616
 from inertia.pipeline.errors import PipelineHardError
-
-from .stack_subview_expression import (
+from inertia.widening.stack_memory_objects_contracts import (
+    StackMemoryObjectWideningArtifact8616,
+)
+from inertia.widening.stack_subview_expression import (
     StackSubviewRhsEffect8616,
     StackSubviewRhsEffectKind8616,
     classify_subview_rhs_8616,
@@ -31,8 +34,7 @@ from .stack_subview_expression import (
     make_scalar_subview_write_assignment_8616,
     scalar_subview_proof_8616,
 )
-from .stack_subview_proof import (
-    StackMemoryObjectWideningArtifact8616,
+from inertia.widening.stack_subview_proof import (
     StackObjectViewProof8616,
     StackObjectViewResolution8616,
     StackObjectViewResolutionKind8616,
@@ -134,37 +136,49 @@ def _increment_codegen_counter_8616(codegen: object, name: str, amount: int) -> 
     setattr(cast(Any, codegen), name, current_value + amount)
 
 
-def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
-    """Project proven word-owned byte views from the current Widening decision."""
-    cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
-    root = _dynamic_attr_8616(cfunc, "statements", None)
-    if root is None:
+class _StackSubviewPlanKind8616(Enum):
+    """Which owned constructor materializes one proven subview plan."""
+
+    WRITE_ASSIGNMENT = "write_assignment"
+    PROJECTION = "projection"
+    READ = "read"
+
+
+@dataclass(frozen=True, slots=True)
+class _StackSubviewPlan8616:
+    """One proven materialization deferred until the pass commits a write."""
+
+    kind: _StackSubviewPlanKind8616
+    proof: StackObjectViewProof8616
+
+
+@dataclass(frozen=True, slots=True)
+class SubviewApplicabilityProbe8616:
+    """Read-only evidence that subview materialization is a proven no-op.
+
+    ``stats`` is ``None`` when the pass would exit before publishing
+    diagnostics (missing ``cfunc.statements``), and otherwise carries the same
+    counters an executed no-op run would publish.
+    """
+
+    stats: StackSubviewProjectionStats8616 | None
+
+
+def _subview_child_policy_8616(parent: object, attr: str) -> bool:
+    """Keep assignment lvalues and address operands outside value projection."""
+    if isinstance(parent, structured_c.CAssignment) and attr == "lhs":
         return False
-    artifact = current_stack_object_widening_8616(codegen)
+    return not (
+        isinstance(parent, structured_c.CUnaryOp)
+        and parent.op in {"Reference", "AddressOf"}
+        and attr == "operand"
+    )
 
-    stats = StackSubviewProjectionStats8616()
 
-    def transform(node: object) -> object:
-        """Materialize one proven recomposition, direct read, or direct write."""
-        result = _write_assignment_subview_8616(codegen, cfunc, artifact, stats, node)
-        if result is not None:
-            return result
-        result = _projection_candidate_subview_8616(codegen, cfunc, artifact, stats, node)
-        if result is not None:
-            return result
-        return _read_subview_8616(codegen, cfunc, artifact, stats, node)
-
-    def should_process_child(parent: object, attr: str) -> bool:
-        """Keep assignment lvalues and address operands outside value projection."""
-        if isinstance(parent, structured_c.CAssignment) and attr == "lhs":
-            return False
-        return not (
-            isinstance(parent, structured_c.CUnaryOp)
-            and parent.op in {"Reference", "AddressOf"}
-            and attr == "operand"
-        )
-
-    changed = _replace_c_children_8616(root, transform, should_process_child=should_process_child)
+def _finish_stack_subview_stats_8616(
+    codegen: object, stats: StackSubviewProjectionStats8616
+) -> None:
+    """Publish subview diagnostics and enforce the closed evidence loop."""
     for counter, value in (
         ("_inertia_stack_subview_raw_fact_count", stats.raw_fact_count),
         ("_inertia_stack_subview_normalized_fact_count", stats.normalized_fact_count),
@@ -179,17 +193,118 @@ def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
             "classified contained stack subview was not materialized",
             layer="widening",
         )
+
+
+def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
+    """Project proven word-owned byte views from the current Widening decision."""
+    cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
+    root = _dynamic_attr_8616(cfunc, "statements", None)
+    if root is None:
+        return False
+    artifact = current_stack_object_widening_8616(codegen)
+
+    stats = StackSubviewProjectionStats8616()
+
+    def transform(node: object) -> object:
+        """Materialize one proven recomposition, direct read, or direct write."""
+        plan = _subview_materialization_plan_8616(codegen, cfunc, artifact, stats, node)
+        if plan is None:
+            return node
+        return _materialize_subview_plan_8616(codegen, node, plan)
+
+    changed = _replace_c_children_8616(
+        root, transform, should_process_child=_subview_child_policy_8616
+    )
+    _finish_stack_subview_stats_8616(codegen, stats)
     return bool(changed and stats.materialized_count > 0)
 
 
-def _write_assignment_subview_8616(
+def stack_subview_projection_probe_8616(codegen: object) -> SubviewApplicabilityProbe8616 | None:
+    """Prove whether subview materialization can change the current C AST.
+
+    Runs the exact materialization decision of
+    :func:`materialize_contained_stack_subviews_8616` over the same child
+    traversal and child policy, but never invokes a ``make_*`` constructor and
+    never writes to the AST. Every decided materialization increments
+    ``stats.materialized_count`` before a node is built, so a probe that
+    finishes with ``materialized_count == 0`` proves the real pass cannot
+    change the AST.
+
+    Returns ``None`` when the pass may change the AST or when the decision
+    surface is unknown; the caller must keep the pass applicable. On a proven
+    no-op it returns the probe evidence: ``stats`` is ``None`` when the real
+    pass would return before publishing diagnostics, otherwise the accumulated
+    counters an executed no-op run would have published. Boundary exceptions
+    raised by the real decision path (``PipelineHardError``, traversal
+    contract errors) propagate identically; unexpected boundary type failures
+    are treated as unknown.
+    """
+    cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
+    root = _dynamic_attr_8616(cfunc, "statements", None)
+    if root is None:
+        return SubviewApplicabilityProbe8616(stats=None)
+    artifact = current_stack_object_widening_8616(codegen)
+    stats = StackSubviewProjectionStats8616()
+
+    def probe_transform(node: object) -> object:
+        """Evaluate one node's plan without constructing or writing it."""
+        if stats.materialized_count:
+            return node
+        _subview_materialization_plan_8616(codegen, cfunc, artifact, stats, node)
+        return node
+
+    try:
+        _replace_c_children_8616(
+            root, probe_transform, should_process_child=_subview_child_policy_8616
+        )
+    except (AttributeError, TypeError):
+        return None
+    if stats.classified_fact_count > 0 or stats.materialized_count > 0:
+        return None
+    return SubviewApplicabilityProbe8616(stats=stats)
+
+
+def _subview_materialization_plan_8616(
     codegen: object,
     cfunc: object,
     artifact: StackMemoryObjectWideningArtifact8616 | None,
     stats: StackSubviewProjectionStats8616,
     node: object,
-) -> object | None:
-    """Materialize a proven scalar-subview write assignment, or None."""
+) -> _StackSubviewPlan8616 | None:
+    """Decide one node's materialization; shared by transform and probe."""
+    plan = _write_assignment_subview_plan_8616(codegen, cfunc, artifact, stats, node)
+    if plan is not None:
+        return plan
+    plan = _projection_candidate_subview_plan_8616(codegen, cfunc, artifact, stats, node)
+    if plan is not None:
+        return plan
+    return _read_subview_plan_8616(codegen, cfunc, artifact, stats, node)
+
+
+def _materialize_subview_plan_8616(
+    codegen: object, node: object, plan: _StackSubviewPlan8616
+) -> object:
+    """Build the replacement node for one proven materialization plan."""
+    if plan.kind is _StackSubviewPlanKind8616.WRITE_ASSIGNMENT:
+        return cast(
+            object,
+            make_scalar_subview_write_assignment_8616(
+                codegen, cast(structured_c.CAssignment, node), plan.proof
+            ),
+        )
+    if plan.kind is _StackSubviewPlanKind8616.PROJECTION:
+        return _clone_c_ast_tree_8616(plan.proof.owner)
+    return make_scalar_subview_read_expr_8616(codegen, plan.proof)
+
+
+def _write_assignment_subview_plan_8616(
+    codegen: object,
+    cfunc: object,
+    artifact: StackMemoryObjectWideningArtifact8616 | None,
+    stats: StackSubviewProjectionStats8616,
+    node: object,
+) -> _StackSubviewPlan8616 | None:
+    """Plan a proven scalar-subview write assignment, or None."""
     if not (
         isinstance(node, structured_c.CAssignment) and isinstance(node.lhs, structured_c.CVariable)
     ):
@@ -207,11 +322,12 @@ def _write_assignment_subview_8616(
     rhs_effect = classify_subview_rhs_8616(node.rhs)
     if not _write_rhs_supported_8616(resolution, proof, node.rhs, rhs_effect):
         stats.failure_count += 1
-        return cast(object, node)
+        return None
+    assert proof is not None
     stats.normalized_fact_count += 1
     stats.classified_fact_count += 1
     stats.materialized_count += 1
-    return cast(object, make_scalar_subview_write_assignment_8616(codegen, node, proof))
+    return _StackSubviewPlan8616(_StackSubviewPlanKind8616.WRITE_ASSIGNMENT, proof)
 
 
 def _write_rhs_supported_8616(
@@ -241,14 +357,14 @@ def _rhs_effect_supported_8616(
     )
 
 
-def _projection_candidate_subview_8616(
+def _projection_candidate_subview_plan_8616(
     codegen: object,
     cfunc: object,
     artifact: StackMemoryObjectWideningArtifact8616 | None,
     stats: StackSubviewProjectionStats8616,
     node: object,
-) -> object | None:
-    """Materialize a proven contained byte projection, or None."""
+) -> _StackSubviewPlan8616 | None:
+    """Plan a proven contained byte projection, or None."""
     candidate = _stack_subview_candidate_8616(node)
     if candidate is None:
         return None
@@ -266,7 +382,7 @@ def _projection_candidate_subview_8616(
     stats.normalized_fact_count += 1
     stats.classified_fact_count += 1
     stats.materialized_count += 1
-    return cast(object, _clone_c_ast_tree_8616(proof.owner))
+    return _StackSubviewPlan8616(_StackSubviewPlanKind8616.PROJECTION, proof)
 
 
 def _candidate_projection_proven_8616(
@@ -301,16 +417,16 @@ def _owner_range_matches_8616(
     return container_range in {(owner_range[0], 1), owner_range}
 
 
-def _read_subview_8616(
+def _read_subview_plan_8616(
     codegen: object,
     cfunc: object,
     artifact: StackMemoryObjectWideningArtifact8616 | None,
     stats: StackSubviewProjectionStats8616,
     node: object,
-) -> object:
-    """Materialize a proven scalar-subview read of a stack variable."""
+) -> _StackSubviewPlan8616 | None:
+    """Plan a proven scalar-subview read of a stack variable, or None."""
     if not isinstance(node, structured_c.CVariable):
-        return node
+        return None
     resolution = resolve_stack_object_view_8616(codegen, cfunc, artifact, node)
     if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
         resolution = resolve_widened_stack_object_read_8616(
@@ -320,19 +436,21 @@ def _read_subview_8616(
             node,
         )
     if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
-        return node
+        return None
     stats.raw_fact_count += 1
     proof = scalar_subview_proof_8616(resolution.proof)
     if resolution.kind is not StackObjectViewResolutionKind8616.ACCEPTED or proof is None:
         stats.failure_count += 1
-        return node
+        return None
     stats.normalized_fact_count += 1
     stats.classified_fact_count += 1
     stats.materialized_count += 1
-    return make_scalar_subview_read_expr_8616(codegen, proof)
+    return _StackSubviewPlan8616(_StackSubviewPlanKind8616.READ, proof)
 
 
 __all__ = [
     "StackSubviewProjectionStats8616",
+    "SubviewApplicabilityProbe8616",
     "materialize_contained_stack_subviews_8616",
+    "stack_subview_projection_probe_8616",
 ]

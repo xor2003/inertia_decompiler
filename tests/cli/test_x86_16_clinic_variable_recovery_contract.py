@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from angr.analyses.decompiler.clinic import Clinic
+from archinfo import ArchAMD64
 
 from inertia.cli.cli_core import DirectClinicPolicy8616, _temporary_clinic_policy_8616
 from inertia.cli.runtime_support import guard_angr_clinic_stage_markers
@@ -25,6 +26,7 @@ def test_clinic_stage_guard_ignores_legacy_variable_recovery_skip_flag(monkeypat
 
     monkeypatch.setattr(Clinic, "_stage_recover_variables", recover_variables)
     project = SimpleNamespace(
+        arch=ArchAMD64(),
         _inertia_skip_clinic_recover_variables_full=True,
         _inertia_recover_variables_seed_empty=True,
     )

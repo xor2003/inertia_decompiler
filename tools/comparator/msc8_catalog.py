@@ -14,7 +14,7 @@ import angr
 
 from tools.comparator.catalog import catalog as catalog
 from tools.comparator.catalog import mapping as mapping
-from tools.dosunit.catalog.pe32_link_map import Pe32LinkMap
+from tools.dosunit.catalog.pe32_link_map import MapPublic, Pe32LinkMap
 
 
 class ListingEndKind(StrEnum):
@@ -88,16 +88,47 @@ def nm_symbols(path: Path) -> dict[str, Symbol]:
 
 
 def lst_data_symbols(path: Path) -> dict[str, int]:
-    """Read exact original data-symbol labels as relocation correspondence evidence."""
+    """Read data labels as correspondence evidence, rejecting ambiguous names.
+
+    Ordinary named labels require a data-definition directive in a data
+    section. This is symbol metadata only, not type or extent recovery.
+    """
     symbols: dict[str, int] = {}
     with path.open(errors="replace") as stream:
         for line in stream:
             match = re.match(
                 r"\.(?:data|rdata|bss):([0-9A-Fa-f]+)\s+((?:byte|word|dword|qword|off|unk)_[0-9A-Fa-f]+)\s", line
             )
+            if match is None:
+                match = re.match(
+                    r"\.(?:data|rdata|bss):([0-9A-Fa-f]+)\s+([A-Za-z_][A-Za-z_0-9]*)\s+(?:db|dw|dd|dq|dt)\b", line
+                )
             if match:
-                symbols[match[2]] = int(match[1], 16)
+                name, address = match[2], int(match[1], 16)
+                if name in symbols and symbols[name] != address:
+                    raise ValueError(f"conflicting original data labels for {name}")
+                symbols[name] = address
     return symbols
+
+
+def lst_data_rows(path: Path) -> dict[int, str]:
+    """Map every data-directive row address to its directive, anonymous included.
+
+    Anonymous ``db``/``dw``/``dd``/``dq``/``dt`` rows carry no listing label,
+    yet they are still declared data cells; named rows are covered too so the
+    result is a complete row-index, not a symbol table.  Rows outside
+    ``.data``/``.rdata``/``.bss`` are never recorded, so a claimed address that
+    is actually code (``.text``) can never satisfy this evidence class.
+    """
+    rows: dict[int, str] = {}
+    with path.open(errors="replace") as stream:
+        for line in stream:
+            match = re.match(
+                r"\.(?:data|rdata|bss):([0-9A-Fa-f]+)\s+(?:(\S+)\s+)?(db|dw|dd|dq|dt)\b", line
+            )
+            if match:
+                rows[int(match.group(1), 16)] = match.group(3)
+    return rows
 
 
 def global_map(
@@ -126,27 +157,60 @@ def _mapped_data_section(project: angr.Project, address: int) -> bool:
     return section is not None and not section.is_executable
 
 
+def _public_data_pair(public: MapPublic, oracle_symbols: dict[str, int]) -> tuple[str, int] | None:
+    """Propose an address alias or an exactly C-decorated original data name."""
+    alias = public.data_alias()
+    if alias is not None:
+        return alias
+    if not public.name.startswith("_") or public.name[1:] not in oracle_symbols:
+        return None
+    canonical = public.name[1:]
+    return canonical, oracle_symbols[canonical]
+
+
+def _oracle_data_evidence(
+    canonical: str, original: int, oracle_symbols: dict[str, int], oracle_rows: dict[int, str]
+) -> bool:
+    """True when oracle listing evidence places claimed VA ``original`` in data.
+
+    A listing label bound to the claimed VA is the ordinary evidence.  When the
+    label is absent, only a declared data-directive row at the same VA can
+    satisfy the claim, because anonymous rows carry no label.  A label bound
+    to a *different* VA contradicts the claim and can never be displaced by an
+    anonymous row.
+    """
+    label = oracle_symbols.get(canonical)
+    if label is not None:
+        return label == original
+    return original in oracle_rows
+
+
 def link_map_global_map(
     link_map: Pe32LinkMap,
     candidate: angr.Project,
     oracle: angr.Project,
     oracle_symbols: dict[str, int],
+    oracle_rows: dict[int, str] | None = None,
 ) -> dict[int, int]:
-    """Match verified LINK-map data aliases against oracle listing labels.
+    """Match verified LINK-map data publics against oracle listing labels.
 
     Every ``_(byte|word|dword|qword|off|unk)_<va>`` public is a claimed data
     correspondence: its map segment must be DATA class, its ``Rva+Base`` must
-    land in mapped non-executable candidate data, and an oracle listing label
-    must encode the same original VA in mapped non-executable oracle data.
-    Missing oracle evidence skips the pair; contradictory claims — a code
-    segment, an unmapped or executable counterpart, or two aliases disagreeing
-    on an address — refuse instead of guessing.
+    land in mapped non-executable candidate data, and oracle evidence must
+    place the same original VA in mapped non-executable oracle data.  The
+    oracle side is satisfied by a listing label encoding the claimed VA, or —
+    for address-encoded claims only — by a declared data-directive row at that
+    VA, because anonymous rows carry no label.  Missing oracle evidence skips
+    the pair; contradictory claims — a code segment, an unmapped or
+    executable counterpart, or two aliases disagreeing on an address — refuse
+    instead of guessing.
     """
+    rows = oracle_rows or {}
     delta = candidate.loader.main_object.mapped_base - candidate.loader.main_object.linked_base
     normalization: dict[int, int] = {}
     claimed: dict[str, int] = {}
     for public in link_map.publics:
-        alias = public.data_alias()
+        alias = _public_data_pair(public, oracle_symbols)
         if alias is None:
             continue
         canonical, original = alias
@@ -161,7 +225,7 @@ def link_map_global_map(
             raise ValueError(f"{canonical}: data alias in CODE segment is contradictory")
         if not _mapped_data_section(candidate, mapped):
             raise ValueError(f"{canonical}: {mapped:#x} is not mapped non-executable data")
-        if oracle_symbols.get(canonical) != original:
+        if not _oracle_data_evidence(canonical, original, oracle_symbols, rows):
             continue
         if not _mapped_data_section(oracle, original):
             raise ValueError(f"{canonical}: oracle {original:#x} is not mapped non-executable data")

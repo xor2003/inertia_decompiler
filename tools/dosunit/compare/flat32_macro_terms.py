@@ -25,6 +25,7 @@ from tools.dosunit.compare.real16_call_contracts import prove_terms_equal, term_
 from tools.dosunit.contracts.proof_contracts import ProofStatus
 from tools.dosunit.ssa import region_path_terms as T
 from tools.dosunit.ssa.ssa_constant_terms import constant_bitvector
+from tools.dosunit.ssa.x86_flag_dependencies import project_flag_dependencies
 
 
 class _Flat32Refusal(Exception):
@@ -42,6 +43,20 @@ def remaining_ms32(deadline: float) -> int:
     if remaining <= 0:
         raise _Flat32Refusal(MacroStepReason.MACRO_DEADLINE)
     return remaining
+
+
+def prove_guard_equal32(left: T.Term, right: T.Term, deadline: float) -> ProofStatus:
+    """Compare native guards after exact flag-demand projection, within budget.
+
+    No input or relocation premise is used. Zero-demand arguments alone are
+    removed; carry-sensitive predicates keep their original dependencies.
+    """
+    remaining_ms32(deadline)
+    projected_left = project_flag_dependencies(left)
+    projected_right = project_flag_dependencies(right)
+    result = prove_terms_equal(projected_left, projected_right, remaining_ms32(deadline))
+    remaining_ms32(deadline)
+    return result
 
 
 def compose_region32(
@@ -169,15 +184,13 @@ def coverage32(
     covered = T.guard_false()
     for guard in guards:
         covered = T.guard_or(covered, guard)
-    remaining = remaining_ms32(deadline)
-    completeness = prove_terms_equal(covered, T.guard_true(), remaining)
+    completeness = prove_guard_equal32(covered, T.guard_true(), deadline)
     facts += 1
     disjoint_pairs = disjoint_failures = 0
     for left_index, left_guard in enumerate(guards):
         for right_guard in guards[left_index + 1:]:
-            remaining = remaining_ms32(deadline)
-            status = prove_terms_equal(
-                T.guard_and(left_guard, right_guard), T.guard_false(), remaining,
+            status = prove_guard_equal32(
+                T.guard_and(left_guard, right_guard), T.guard_false(), deadline,
             )
             disjoint_pairs += 1
             facts += 1

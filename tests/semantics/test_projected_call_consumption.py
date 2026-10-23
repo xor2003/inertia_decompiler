@@ -7,13 +7,14 @@ from types import SimpleNamespace
 
 import angr
 import pytest
+
+from inertia.cli.segment_program_layout_reporting import segment_program_function_evidence_for_project_8616
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.declared_external_call_evidence import admit_declared_external_call_files_8616
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.ir.core import IRInstr
 from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
-from inertia.ir.function_ssa_registry import (
-    FunctionSSAArtifactStage8616,
-    publish_function_ssa_artifact_8616,
-)
 from inertia.ir.segment_contract import apply_x86_16_segment_function_contract
 from inertia.ir.segment_state import (
     apply_x86_16_segment_state_artifact,
@@ -22,20 +23,16 @@ from inertia.ir.segment_state import (
 from inertia.ir.segment_state_transfer import declared_call_effect_at_instruction_8616
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
-from inertia.semantics.segment_function_summary import apply_x86_16_segment_function_summary
-
-from inertia.frontend.x86_16.declared_external_call_evidence import admit_declared_external_call_files_8616
-from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
 from inertia.semantics.call_outputs import materialize_call_outputs_8616
 from inertia.semantics.call_stack_effect_pipeline import (
     CallSemanticProjection8616,
     _publish_semantic_artifacts_8616,
+    _published_function_ssa_8616,
     build_semantic_function_ssa_8616,
 )
 from inertia.semantics.call_stack_effects import materialize_call_stack_effects_8616
 from inertia.semantics.call_target_evidence_8616 import publish_call_semantic_projection_8616
-from inertia.cli.segment_program_layout_reporting import segment_program_function_evidence_for_project_8616
+from inertia.semantics.segment_function_summary import apply_x86_16_segment_function_summary
 from tests.fixtures.x86_16_declared_call_fixture import NativeConsumption, world
 
 
@@ -73,9 +70,7 @@ def test_loadprogram_semantic_pipeline_publishes_consumption() -> None:
     boundary = exact_function_range_boundary_8616(project, admission.caller_addr, admission.caller_end)
     assert boundary is not None
     effects, outputs, ssa = build_semantic_function_ssa_8616(project, boundary, ir_artifact=raw)
-    assert publish_function_ssa_artifact_8616(
-        project, ssa, stage=FunctionSSAArtifactStage8616.SEMANTIC
-    ).artifact is ssa
+    assert _published_function_ssa_8616(project, ssa, outputs, raw.function_addr) is ssa
     codegen = SimpleNamespace()
     _publish_semantic_artifacts_8616(project, codegen, raw, effects, outputs, ssa)
     apply_x86_16_segment_state_artifact(project, codegen)
@@ -116,10 +111,7 @@ def test_native_projected_declaration_consumption(native_world: NativeConsumptio
     effects = materialize_call_stack_effects_8616(raw, {}, project=project)
     outputs = materialize_call_outputs_8616(effects.function, {})
     ssa = build_x86_16_function_ssa(outputs.function)
-    registered = publish_function_ssa_artifact_8616(
-        project, ssa, stage=FunctionSSAArtifactStage8616.SEMANTIC
-    )
-    assert registered.artifact is ssa
+    assert _published_function_ssa_8616(project, ssa, outputs, raw.function_addr) is ssa
     projection = CallSemanticProjection8616(raw, effects, outputs, ssa)
     assert publish_call_semantic_projection_8616(project, projection).complete
     projected = outputs.function

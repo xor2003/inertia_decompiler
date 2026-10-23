@@ -11,8 +11,28 @@ import angr
 import pyvex
 
 from tools.dosunit.architectures.flat32 import flat32_register_architecture
+from tools.dosunit.architectures.flat32_control_word import _x87_opcode_byte
 from tools.dosunit.compare import straightline_ssa as S
 from tools.dosunit.contracts.model import stable_id
+
+
+def _flat32_leaf_x87_reason(project: angr.Project, irsb: pyvex.IRSB) -> str | None:
+    """Refuse leaf blocks containing x87 effects the leaf engine cannot model.
+
+    The leaf lane lowers one VEX block wholesale; it has no per-instruction
+    native boundary, so any x87-family instruction must refuse rather than inherit VEX's erased or narrowed
+    projection. Callers lowering a raw IRSB directly must run this scan
+    themselves when they can reach the instruction bytes.
+    """
+    for mark in (stmt for stmt in irsb.statements if isinstance(stmt, pyvex.stmt.IMark)):
+        if mark.delta != 0 or mark.len <= 0:
+            continue
+        raw = bytes(project.loader.memory.load(mark.addr, mark.len))
+        if raw.startswith(b"\x9b"):
+            return "x87_pending_exception_unmodeled"
+        if _x87_opcode_byte(raw) is not None:
+            return "x87_status_update_unmodeled"
+    return None
 
 
 def lower_flat32_leaf_block(
@@ -44,6 +64,9 @@ def lower_flat32_leaf_function(
     start = linked_base + int(function["entry"]["offset"], 0)
     size = min(function["size"], scan_limit)
     block = project.factory.block(start, size=size, opt_level=0)
+    x87_reason = _flat32_leaf_x87_reason(project, block.vex)
+    if x87_reason is not None:
+        return [], [S._refusal(function, x87_reason, "leaf blocks cannot model x87 state updates")], 1
     lowered = lower_flat32_leaf_block(
         block.vex, output_regs=output_regs, max_assignments_per_function=max_assignments_per_function
     )

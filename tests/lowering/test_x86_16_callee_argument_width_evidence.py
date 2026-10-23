@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
-from inertia.semantics.callsite_summary import CallsiteSummary8616
-from inertia.ir import AddressStatus, MemSpace
 import inertia.lowering.callee_argument_width_evidence as width_module
+from inertia.ir import AddressStatus, MemSpace
 from inertia.lowering.callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     CalleeArgumentCountVerdict8616,
@@ -14,6 +13,7 @@ from inertia.lowering.callee_argument_width_evidence import (
     CalleeArgumentWidthVerdict8616,
     collect_callee_argument_width_evidence_8616,
 )
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 
 def _summary(
@@ -55,6 +55,13 @@ def _count_evidence(
     )
 
 
+def _project_without_decoded_body() -> SimpleNamespace:
+    """Supply the decoder boundary while withholding all binary body evidence."""
+    return SimpleNamespace(factory=SimpleNamespace(
+        block=lambda *_args, **_kwargs: SimpleNamespace(capstone=SimpleNamespace(insns=())),
+    ))
+
+
 def test_width_contract_maps_source_order_to_exact_ss_bp_storage(monkeypatch) -> None:
     count_evidence = _count_evidence(
         (_summary(0x110, widths_in_push_order=(2, 4)),),
@@ -66,7 +73,7 @@ def test_width_contract_maps_source_order_to_exact_ss_bp_storage(monkeypatch) ->
         lambda _project, _target: count_evidence,
     )
 
-    evidence = collect_callee_argument_width_evidence_8616(SimpleNamespace(), 0x200)
+    evidence = collect_callee_argument_width_evidence_8616(_project_without_decoded_body(), 0x200)
 
     assert evidence.verdict is CalleeArgumentWidthVerdict8616.CONSISTENT
     assert evidence.closes_census is True
@@ -92,7 +99,7 @@ def test_width_contract_consumes_explicit_logical_widths_over_physical_pushes(mo
         lambda _project, _target: count_evidence,
     )
 
-    evidence = collect_callee_argument_width_evidence_8616(SimpleNamespace(), 0x200)
+    evidence = collect_callee_argument_width_evidence_8616(_project_without_decoded_body(), 0x200)
 
     assert evidence.closes_census is True
     assert evidence.argument_widths == (4,)

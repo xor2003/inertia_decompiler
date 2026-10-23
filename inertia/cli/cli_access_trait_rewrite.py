@@ -45,15 +45,6 @@ def _should_attach_access_trait_names(
     return has_access_rewrite_artifact(codegen)
 
 
-
-def _should_attach_access_trait_names(
-    codegen: object,
-    *,
-    has_access_rewrite_artifact: Callable[[object], bool],
-) -> bool:
-    return has_access_rewrite_artifact(codegen)
-
-
 def _is_generic_stack_name_8616(name: object) -> bool:
     """Return whether a rendered name is a generic temp/field placeholder."""
     return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
@@ -197,10 +188,7 @@ class _PointerMemberRename8616:
             return ()
         if hint.kind not in {"member", "array", "induction"}:
             return ()
-        return typing.cast(
-            tuple[str, ...],
-            hint.candidate_field_names(access_trait_field_name=self.access_trait_field_name),
-        )
+        return hint.candidate_field_names(access_trait_field_name=self.access_trait_field_name)
 
     def assign_member_name(self, base_key: BaseKey) -> str | None:
         """Return the next unused candidate name for one base key."""
@@ -268,7 +256,7 @@ class _PointerMemberRename8616:
         renamed_cvar = typing.cast(object, cvar)
         return renamed_cvar
 
-    def _apply_member_name(self, variable: object, cvar: structured_c.CVariable, field_name: str) -> None:
+    def _apply_member_name(self, variable: SimRegisterVariable | SimStackVariable | SimMemoryVariable, cvar: structured_c.CVariable, field_name: str) -> None:
         """Write the member name onto the variable and rendered CVariable."""
         if variable.name != field_name:
             variable.name = field_name

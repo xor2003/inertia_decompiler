@@ -28,7 +28,7 @@ def test_standalone_stack_semantics_always_prepares_once(monkeypatch):
 
 
 @pytest.mark.parametrize('mutation', [None, 'source', 'ir', 'ssa', 'effects', 'outputs', 'projection',
-                                     'indexed_ir', 'indexed_alias', 'stack_alias', 'context'])
+                                     'indexed_ir', 'indexed_alias', 'stack_alias', 'numeric_returns', 'context'])
 def test_local_prefix_reuse_requires_unchanged_native_projections(installed_leaf, monkeypatch, mutation):
     """A genuine native prefix can be reused only until an owned input changes."""
     project, codegen, _ = installed_leaf
@@ -45,6 +45,7 @@ def test_local_prefix_reuse_requires_unchanged_native_projections(installed_leaf
         'indexed_ir': '_inertia_indexed_address_evidence_8616',
         'indexed_alias': '_inertia_indexed_address_alias_evidence_8616',
         'stack_alias': '_inertia_stack_memory_ssa_alias_artifact',
+        'numeric_returns': '_inertia_numeric_stack_pointer_returns_8616',
         'context': '_inertia_declared_entry_pipeline_8616',
     }
     if mutation is not None:
@@ -411,3 +412,44 @@ def test_return_closure_replays_segment_owner_only_after_mutation(
         )
         is expected
     )
+
+
+def test_word_projection_widening_precedes_first_condition_ownership(monkeypatch):
+    """Required byte casts become one word before shared-return orientation."""
+    from angr.analyses.decompiler.structured_codegen.c import CVariable
+
+    from inertia.lowering import real_mode_linear
+    from tests.widening.test_word_cast_recomposition import _fixture
+
+    codegen, assignment, _ = _fixture()
+    codegen.cfunc.addr = 0x4010
+    codegen._inertia_typed_conditions_transferred = True
+    calls = []
+    for owner, name in (
+        (stage, '_prepare_structuring_stack_semantics_8616'),
+        (stage, '_continue_structuring_stack_semantics_8616'),
+        (stage._segment_stack_restore, 'apply_x86_16_segment_stack_restore_artifact'),
+        (stage._segment_stack_restore, 'apply_x86_16_stack_register_restore_artifact_8616'),
+        (stage, 'prune_proven_segment_stack_restore_carriers_8616'),
+        (stage, 'apply_pipeline_segment_state_8616'),
+        (stage._segment_contract, 'apply_x86_16_segment_function_contract'),
+        (stage._segment_function_summary, 'apply_x86_16_segment_function_summary'),
+        (stage, '_apply_structuring_direct_stack_materialization_8616'),
+        (stage, '_prime_structuring_segment_global_semantics_8616'),
+        (real_mode_linear, 'lower_stable_ds_es_linear_global_dereferences_8616'),
+    ):
+        monkeypatch.setattr(owner, name, lambda *args, **kwargs: False)
+    monkeypatch.setattr(stage._segmented_mem, 'apply_x86_16_segmented_memory_reasoning',
+                        lambda *args: calls.append('alias-lowering'))
+
+    class ReachedCondition(Exception):
+        pass
+
+    def first_condition(*args):
+        assert calls == ['alias-lowering']
+        assert isinstance(assignment.rhs, CVariable)
+        raise ReachedCondition
+
+    monkeypatch.setattr(stage, '_materialize_structuring_wide_stack_return_predicate_8616', first_condition)
+    with pytest.raises(ReachedCondition):
+        stage._prime_validation_pipeline_prefix_8616(codegen.project, codegen)

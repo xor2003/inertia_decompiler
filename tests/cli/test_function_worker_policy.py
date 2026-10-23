@@ -7,6 +7,7 @@ from inertia.cli.function_worker_policy import (
     CleanProcessOverride8616,
     FunctionWorkerMode8616,
     clean_process_override_8616,
+    dependency_ordered_function_work_8616,
     prioritize_clean_function_work_8616,
     select_function_worker_policy_8616,
 )
@@ -105,3 +106,56 @@ def test_clean_function_work_prioritizes_complexity_and_stable_index() -> None:
     )
 
     assert tuple(item.index for item in scheduled) == (1, 2, 3, 4)
+
+
+@dataclass(frozen=True)
+class _CallFunction:
+    """Already recovered direct calls; no discovery work is permitted."""
+
+    addr: int
+    targets: tuple[int | None, ...] = ()
+
+    def get_call_sites(self) -> tuple[int, ...]:
+        return tuple(range(len(self.targets)))
+
+    def get_call_target(self, callsite: int) -> int | None:
+        return self.targets[callsite]
+
+
+def test_dependency_order_preserves_items_and_input_order() -> None:
+    caller = _WorkItem(1, _CallFunction(100, (200, 300)))
+    middle = _WorkItem(2, _CallFunction(200, (300,)))
+    leaf = _WorkItem(3, _CallFunction(300))
+    items = [caller, middle, leaf]
+    ordered = dependency_ordered_function_work_8616(items)
+    assert ordered == (leaf, middle, caller)
+    assert items == [caller, middle, leaf]
+    assert all(actual is expected for actual, expected in zip(ordered, (leaf, middle, caller), strict=True))
+
+
+def test_dependency_order_stable_recursive_components() -> None:
+    items = (_WorkItem(4, _CallFunction(400, (400,))),
+             _WorkItem(2, _CallFunction(200, (300,))),
+             _WorkItem(1, _CallFunction(100, (200,))),
+             _WorkItem(3, _CallFunction(300, (200,))))
+    assert tuple(item.index for item in dependency_ordered_function_work_8616(items)) == (2, 3, 1, 4)
+
+
+def test_dependency_order_unknown_ambiguous_and_placeholder_targets() -> None:
+    items = (_WorkItem(1, _CallFunction(100, (None, 999, 200))),
+             _WorkItem(3, _CallFunction(200)),
+             _WorkItem(2, _CallFunction(200)),
+             _WorkItem(4, object()))
+    assert tuple(item.index for item in dependency_ordered_function_work_8616(items)) == (1, 2, 3, 4)
+    assert dependency_ordered_function_work_8616(()) == ()
+
+
+def test_dependency_order_uses_explicit_native_hints_for_placeholders() -> None:
+    from types import SimpleNamespace
+
+    items = (_WorkItem(1, SimpleNamespace(addr=100)),
+             _WorkItem(2, SimpleNamespace(addr=200)),
+             _WorkItem(3, SimpleNamespace(addr=300)))
+    ordered = dependency_ordered_function_work_8616(items, caller_targets={100: (200, 300)})
+    assert tuple(item.index for item in ordered) == (2, 3, 1)
+    assert tuple(item.index for item in items) == (1, 2, 3)

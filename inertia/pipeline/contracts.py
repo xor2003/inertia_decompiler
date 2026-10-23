@@ -34,6 +34,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from inertia.ir.function_readiness_contracts import (
+    FUNCTION_LIFECYCLE_STAGES_8616,
+    FunctionLifecycleStage8616,
+)
+
 from .errors import PipelineHardError
 
 __all__ = [
@@ -42,13 +47,10 @@ __all__ = [
     "assert_pipeline_contracts_8616",
 ]
 
-CORE_DECOMPILER_PIPELINE_ORDER_8616: tuple[str, ...] = (
-    "IR",
-    "Alias",
-    "Widening",
-    "Types",
-    "Structuring",
-    "Rewrite",
+# The public ordering projection derives from the canonical typed lifecycle
+# owner so the two descriptions can never drift apart.
+CORE_DECOMPILER_PIPELINE_ORDER_8616: tuple[str, ...] = tuple(
+    stage.value for stage in FUNCTION_LIFECYCLE_STAGES_8616
 )
 
 
@@ -328,13 +330,54 @@ def _assert_extra_semantic_lanes_8616(
         lane.assert_closed_loop(layer=f"pipeline_contract:{lane_name}")
 
 
-def assert_pipeline_contracts_8616(codegen: object) -> None:
-    """Hard gate: assert every owned semantic lane is closed before codegen.
+def _assert_function_source_readiness_8616(
+    codegen: object, required_stage: FunctionLifecycleStage8616,
+) -> None:
+    """Require current requested-stage evidence and the actual consumer AST.
 
-    Call this after all lowering passes and before code emission.
-    Raises PipelineHardError if any lane has un-materialized facts.
+    Native consumers require every prerequisite producer. In-flight Structuring
+    and Rewrite checks request their completed input stage; final emission uses
+    Rewrite. A live source, output or consumer mismatch refuses consumption.
     """
     contract = cast(_PipelineCodegenContract, codegen)
+    try:
+        project = contract.project
+        cfunc = contract.cfunc
+    except AttributeError:
+        return
+    if project is None or cfunc is None:
+        return
+    try:
+        function_addr = cast(_CFunctionAddressLike, cfunc).addr
+    except AttributeError:
+        return
+    if not isinstance(function_addr, int):
+        return
+    from .function_readiness import assert_function_ast_consumer_ready_8616
+
+    assert_function_ast_consumer_ready_8616(
+        project,
+        function_addr,
+        required_stage,
+        codegen,
+        layer="pipeline_contract:function_readiness",
+    )
+
+
+def assert_pipeline_contracts_8616(
+    codegen: object,
+    *,
+    required_stage: FunctionLifecycleStage8616 = FunctionLifecycleStage8616.REWRITE,
+) -> None:
+    """Hard gate: assert every owned semantic lane is closed before codegen.
+
+    The default requires completed Rewrite before emission. Producers explicitly
+    request their completed prerequisite stage while they are still running.
+    Raises PipelineHardError if any lane has un-materialized facts or any
+    recorded stage evidence was invalidated by changed inputs.
+    """
+    contract = cast(_PipelineCodegenContract, codegen)
+    _assert_function_source_readiness_8616(codegen, required_stage)
     stack_lane, condition_lane = _primary_semantic_lanes_8616(contract)
 
     _assert_semantic_lane_type_8616(stack_lane, "stack lane", "stack_lane")

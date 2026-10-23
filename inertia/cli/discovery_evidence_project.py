@@ -66,6 +66,7 @@ def isolated_discovery_evidence_project_8616(project: angr.Project) -> angr.Proj
             str(binary),
             force_blob=False,
             base_addr=linked_base,
+            base_addr_is_linear=True,
             entry_point=entry_point,
             real16_declared_input=declared_input_path_8616(project),
         )

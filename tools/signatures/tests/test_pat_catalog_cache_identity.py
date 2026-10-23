@@ -6,6 +6,7 @@ import pytest
 
 import tools.signatures.omf_pat as omf_pat
 import tools.signatures.pat_literal_filter as pat_literal_filter
+import tools.signatures.pickle_cache as pickle_cache
 import tools.signatures.signature_catalog as signature_catalog
 
 
@@ -16,6 +17,7 @@ def test_catalog_match_identity_covers_existing_parser_and_literal_owners():
         Path(signature_catalog.__file__).resolve(),
         Path(omf_pat.__file__).resolve(),
         Path(pat_literal_filter.__file__).resolve(),
+        Path(pickle_cache.__file__).resolve(),
         Path(signature_catalog.__file__).resolve().parents[2] / "inertia/frontend/x86_16/relative_control_edge.py",
         Path(signature_catalog.__file__).resolve().parents[2] / "inertia/frontend/x86_16/arch_86_16.py",
     )
@@ -63,10 +65,13 @@ def test_catalog_specs_reused_across_binary_artifact_directories(tmp_path, monke
     assert seen[-1] == explicit
 
 
-def test_pattern_cache_identity_includes_literal_implementation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("dependency", ["pat_literal_filter.py", "pickle_cache.py"])
+def test_pattern_cache_identity_includes_literal_implementation(tmp_path, monkeypatch, dependency):
     tool = tmp_path / "omf_pat.py"
-    helper = tmp_path / "pat_literal_filter.py"
+    helper = tmp_path / dependency
     tool.write_text("# pattern implementation\n")
+    (tmp_path / "pat_literal_filter.py").write_text("# literal implementation\n")
+    (tmp_path / "pickle_cache.py").write_text("# cache decoder implementation\n")
     helper.write_text("# original literal implementation\n")
     monkeypatch.setattr(omf_pat, "__file__", str(tool))
     omf_pat._omf_pat_tool_cache_fingerprint.cache_clear()

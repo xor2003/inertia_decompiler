@@ -11,13 +11,13 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from .core import AddressStatus, IRInstr, IRValue, MemSpace
+from .core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
 from .logical_memory_value_trace import trace_logical_word_load_8616
 from .scalar_definitions import ScalarDefinitionIndex8616
 
 
-def _stable_stack_word_source_8616(source: IRValue) -> bool:
+def _stable_stack_word_source_8616(source: IRAddress) -> bool:
     """Return whether the source is one stable SS word."""
     return (
         source.space is MemSpace.SS

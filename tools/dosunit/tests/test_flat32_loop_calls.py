@@ -206,7 +206,7 @@ def test_unproved_callee_refuses(
 
 
 def test_indirect_call_refuses(lane: DriverLane) -> None:
-    """An indirect call in the loop is never admitted as a transition."""
+    """An unconstrained indirect call cannot supply a proved transition."""
     code = CALLER_INDIRECT
     result = _compare_loop_calls(
         lane,
@@ -216,7 +216,7 @@ def test_indirect_call_refuses(lane: DriverLane) -> None:
         candidate_functions={BASE: INDIRECT_SIZE},
     )
     assert result["status"] is lane.verdict.Status.REFUSED, result
-    assert result["reason"] == "call_indirect_target", result
+    assert result["reason"] == "call_indirect_target_unconstrained", result
 
 
 def test_undeclared_callee_refuses(lane: DriverLane) -> None:
@@ -301,3 +301,79 @@ def test_call_loop_replay_execution_controls(lane: DriverLane, trips: int) -> No
     assert dict(second.registers)["ebx"] == 7 + trips, second
     assert dict(second.registers)["ecx"] == 0, second
     assert compare_replays(first, second).value == "agreed", (first, second)
+
+
+@pytest.mark.parametrize(
+    ("callee", "expected"),
+    [(CALLEE_EQUIVALENT, "passed"), (CALLEE_EFFECT, "refused"),
+     (CALLEE_STORE, "refused"), (CALLEE_RET_CORRUPT, "refused")],
+)
+def test_loop_resolved_indirect_call(lane: DriverLane, callee: str, expected: str) -> None:
+    """A loop-local constant target proves actual callee effects and its return."""
+    caller = "85c9 740c b811001000 eb00 ffd0 49 ebf0 c3"
+    size = len(bytes.fromhex(caller))
+    result = _compare_loop_calls(
+        lane, f"{caller} {CALLEE}", f"{caller} {callee}",
+        oracle_functions={BASE: size, BASE + size: len(bytes.fromhex(CALLEE))},
+        candidate_functions={BASE: size, BASE + size: len(bytes.fromhex(callee))},
+    )
+    assert result["status"].value == expected, result
+    if callee in {CALLEE_EFFECT, CALLEE_STORE}:
+        assert result["reason"] == "call_loop_transitions_unproved", result
+        assert any(row["status"] is lane.verdict.Status.FAILED
+                   for row in result["block_verdicts"]), result
+    if callee == CALLEE_RET_CORRUPT:
+        assert result["reason"] == "call_return_target_mismatch", result
+
+
+@pytest.mark.parametrize(
+    ("limit", "reason"),
+    [
+        (CallCompositionLimits(max_inline_depth=0), "call_inline_depth_limit"),
+        (CallCompositionLimits(max_inlined_calls=0), "call_inline_budget"),
+        (CallCompositionLimits(max_indirect_call_targets=0), "call_indirect_target_limit"),
+    ],
+)
+def test_loop_indirect_limits(
+    lane: DriverLane, limit: CallCompositionLimits, reason: str
+) -> None:
+    """Finite-target loop calls retain every shared admission budget."""
+    caller = "85c9 740c b811001000 eb00 ffd0 49 ebf0 c3"
+    size = len(bytes.fromhex(caller))
+    functions = {BASE: size, BASE + size: len(bytes.fromhex(CALLEE))}
+    result = _compare_loop_calls(
+        lane, f"{caller} {CALLEE}", f"{caller} {CALLEE}",
+        oracle_functions=functions, candidate_functions=functions, limits=limit,
+    )
+    assert result["status"] is lane.verdict.Status.REFUSED, result
+    assert result["reason"] == reason, result
+
+
+@pytest.mark.parametrize("known,changed,budget,expected", [
+    (True, False, None, "passed"), (True, True, None, "refused"),
+    (False, False, None, "refused"), (True, False, 1, "refused"),
+])
+def test_loop_nested_callback_uses_transition_state(
+    lane: DriverLane, known: bool, changed: bool, budget: int | None, expected: str,
+) -> None:
+    """Each iteration supplies its actual callback, preserving leaf effects."""
+    target = "b8" + (BASE + 21).to_bytes(4, "little").hex() if known else "9090909090"
+    caller = "85c9740d" + target + "e80400000049ebefc3"
+    original = caller + "ffd0c3" + "43c3"
+    candidate = caller + "ffd0c3" + ("4bc3" if changed else "43c3")
+    functions = {BASE: 18, BASE + 18: 3, BASE + 21: 2}
+    result = _compare_loop_calls(
+        lane, original, candidate, oracle_functions=functions,
+        candidate_functions=functions,
+        limits=CallCompositionLimits(max_inlined_calls=budget) if budget is not None else None,
+    )
+    assert result["status"].value == expected, result
+    if expected == "passed":
+        assert all(any(site.get("transition_context") for site in sites)
+                   for sites in result["call_sites"].values())
+    if budget is not None:
+        assert result["reason"] == "call_inline_budget", result
+    elif changed:
+        assert result["reason"] == "call_loop_transitions_unproved", result
+    elif not known:
+        assert result["reason"] == "call_indirect_target_unconstrained", result

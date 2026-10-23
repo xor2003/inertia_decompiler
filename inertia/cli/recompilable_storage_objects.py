@@ -16,10 +16,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from inertia.lowering.access_profiles import build_access_trait_evidence_profiles
 from inertia.lowering.object_lowering import BaseKey, _build_stable_access_object_hints
-
-from .cli_access_profiles import build_access_trait_evidence_profiles
-from .cli_storage_objects import (
+from inertia.lowering.storage_objects import (
     StorageObjectArtifact,
     build_storage_object_artifact,
 )

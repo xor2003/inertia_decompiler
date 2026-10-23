@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import angr
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "artifacts" / "msc8-z3cmp32"))
@@ -223,13 +224,20 @@ def test_tail_undeclared_target_refuses() -> None:
     assert result["reason"] == "edge_outside_declared_function:0x100030"
 
 
-def test_tail_indirect_target_refuses() -> None:
+@pytest.mark.parametrize("side", ["oracle", "candidate"])
+def test_tail_indirect_target_refuses(side: str) -> None:
     """An indirect terminal jump is never a tail transfer."""
     indirect = "8b442404 e804000000 83c002 c3 ffe0"
     functions = {BASE: 0x0D, BASE + 0x0D: 2}
-    result = _compare(indirect, indirect, oracle_functions=functions, candidate_functions=functions)
+    direct = "8b442404 e804000000 83c002 c3 c390"
+    result = _compare(indirect if side == "oracle" else direct, indirect,
+                      oracle_functions=functions, candidate_functions=functions)
     assert result["status"] == "refused"
     assert result["reason"] == "indirect_jump"
+    assert result["refusal_location"] == {
+        "function_entry": hex(BASE + 0x0D), "block_address": hex(BASE + 0x0D),
+        "instruction_address": hex(BASE + 0x0D), "side": side, "root_entry": hex(BASE),
+    }
 
 
 def test_tail_register_constant_target_admitted() -> None:
@@ -334,15 +342,14 @@ def test_tail_cycle_refuses() -> None:
     assert result["reason"] == "recursive_tail_transfer:0x10000d"
 
 
-def test_tail_depth_limit_refuses() -> None:
-    """A tail transfer consumes the shared inline-depth budget."""
+def test_tail_depth_limit_reuses_completed_summary() -> None:
+    """A completed generic target crosses depth one without raising the cap."""
     result = _compare(
         TAIL_CODE,
         TAIL_CODE,
         limits=CallCompositionLimits(max_inline_depth=1),
     )
-    assert result["status"] == "refused"
-    assert result["reason"] == "tail_inline_depth_limit"
+    assert result["status"] == "passed", result
 
 
 def test_tail_budget_refuses() -> None:
@@ -381,6 +388,7 @@ def test_tail_deterministic_summary() -> None:
             "target": hex(TAIL_CALLEE),
             "depth": 2,
             "callee": "",
+            "cached_summary_depth_exemption": False,
         }
     ]
 

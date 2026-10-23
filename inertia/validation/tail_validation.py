@@ -26,6 +26,7 @@ from typing import Any, cast
 
 from angr.ailment.expression import VirtualVariableCategory
 from angr.analyses.decompiler.structured_codegen.c import (
+    CITE,
     CAssignment,
     CBinaryOp,
     CBreak,
@@ -143,6 +144,7 @@ from .validation_call_multiplicity import (
     CallsiteMultiplicityValidationReport8616,
     validate_required_callsite_multiplicity_8616,
 )
+from .validation_call_stack_inputs import CallStackInputValidation8616, validate_call_stack_inputs_8616
 from .validation_calls import (
     CallArgumentClassValidationReport8616,
     CallInterfaceValidationReport8616,
@@ -4389,13 +4391,18 @@ def _record_expr_locations(
     node: TailValidationValue, project: TailValidationValue, observed_locations: StackObservedLocations8616
 ) -> None:
     """Retain direct address exposure separately from ordinary value reads."""
-    if node is None:
-        return
     if isinstance(node, CVariable):
         observed_locations.add(_location_fingerprint(node, project))
         return
     if isinstance(node, CTypeCast):
         _record_expr_locations(node.expr, project, observed_locations)
+        return
+    if isinstance(node, CITE):
+        # Both value arms are potentially observed; condition simplification
+        # must not expose a storage read that the baseline collector omitted.
+        _record_expr_locations(node.cond, project, observed_locations)
+        _record_expr_locations(node.iftrue, project, observed_locations)
+        _record_expr_locations(node.iffalse, project, observed_locations)
         return
     if isinstance(node, CUnaryOp):
         observed_locations.add(_location_fingerprint(node, project))
@@ -6280,6 +6287,7 @@ def _summary_validation_reports_8616(
     root: TailValidationValue,
     query_index: TailValidationValue,
     required_call_surface: TailValidationValue,
+    architectural_inputs: CallStackInputValidation8616 | None = None,
 ) -> _SummaryValidationReports8616:
     """Run the nine validation passes over one structured root."""
 
@@ -6319,6 +6327,7 @@ def _summary_validation_reports_8616(
             root,
             query_index=query_index,
             surface=required_call_surface,
+            architectural_inputs=architectural_inputs,
         ),
         call_argument_class_report=validate_call_argument_classes_8616(
             codegen,
@@ -6662,6 +6671,8 @@ def collect_x86_16_tail_validation_summary(
     # but semantic guards depend on that detail. Include their current
     # results in cache identity so a rewritten definition or callsite cannot
     # reuse a stale failure/success from an observably equivalent tree.
+    architectural_inputs = validate_call_stack_inputs_8616(codegen, root)
+    root = architectural_inputs.root
     query_index = StructuredAstQueryIndex8616.build(root)
     required_call_surface = build_required_call_validation_surface_8616(
         codegen,
@@ -6669,7 +6680,7 @@ def collect_x86_16_tail_validation_summary(
         query_index=query_index,
     )
     reports = _summary_validation_reports_8616(
-        project, codegen, root, query_index, required_call_surface
+        project, codegen, root, query_index, required_call_surface, architectural_inputs
     )
     descriptor = build_x86_16_validation_cache_descriptor(
         "tail_validation.summary",

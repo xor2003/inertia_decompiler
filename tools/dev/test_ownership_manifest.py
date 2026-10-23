@@ -79,6 +79,40 @@ def _component_ownership_rules() -> tuple[TestOwnershipRule, ...]:
 TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     *_component_ownership_rules(),
     TestOwnershipRule(
+        owner="recursive-control-model-identity",
+        paths=("tools/dosunit/recursive_proofs/recursive_joint_identity.py",),
+        tests=("tools/dosunit/tests/test_control_view_model_hash.py",),
+        reason="control-view fingerprints must bind every canonical proof owner and reject stale or missing sources",
+    ),
+    TestOwnershipRule(
+        owner="stack-pointer-alias-proof",
+        paths=(
+            "inertia/alias/stack_pointer_alias_map.py",
+            "inertia/lowering/stack_lowering_impl.py",
+            "inertia/validation/tail_validation_fingerprint.py",
+        ),
+        tests=(
+            "tests/alias/test_stack_pointer_alias_map.py",
+            "tests/lowering/test_x86_16_stack_lowering.py",
+            "tests/validation/test_x86_16_tail_validation_fingerprint.py",
+        ),
+        reason="shared alias proofs must preserve lowering and validation identity and refusal behavior",
+    ),
+    TestOwnershipRule(
+        owner="cleanup-optimization-rule-runtime",
+        paths=(
+            "inertia/postprocess/optimization/rule_runtime.py",
+            "inertia/postprocess/optimization/pass_driver.py",
+            "inertia/postprocess/decompiler_postprocess_stage.py",
+        ),
+        tests=(
+            "tests/postprocess/test_optimization_rule_runtime.py",
+            "tests/postprocess/test_x86_16_postprocess_snapshot.py::"
+            "test_optimization_runner_applies_validation_step_per_subpass",
+        ),
+        reason="named rule controls must keep guarded execution, recursion refusal and failure audit coherent",
+    ),
+    TestOwnershipRule(
         owner="local-call-frame-evidence",
         paths=(
             "inertia/frontend/x86_16/frontend_local_call_evidence.py",
@@ -650,7 +684,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="access-trait-runtime-factory",
         paths=(
             "inertia/cli/cli_c_ast_rewrites.py",
-            "inertia/cli/cli_access_profiles.py",
+            "inertia/lowering/access_profiles.py",
             "inertia/cli/cli_access_traits.py",
         ),
         tests=("tests/cli/test_access_trait_runtime_factory.py",),
@@ -823,6 +857,23 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="optimization-quality-diagnostics",
         paths=("tools/dev/benchmark_optimization_quality_guard.py",),
         tests=("tests/cli/test_optimization_quality_guard_diagnostics.py",),
+    ),
+    TestOwnershipRule(
+        owner="conditional-case-composition",
+        paths=("tools/compiler_toolchain/conditional_case_composition.py",
+               "tools/compiler_toolchain/conditional_case_request.py",
+               "tools/compiler_toolchain/conditional_case_inventory.py",
+               "tools/compiler_toolchain/conditional_function_receipt.py"),
+        tests=("tests/integration/test_conditional_case_composition.py",
+               "tests/integration/test_conditional_case_inventory.py",
+               "tests/integration/test_conditional_case_request.py",
+               "tests/integration/test_build_msc6_examples.py"),
+    ),
+    TestOwnershipRule(
+        owner="declared-final-sweep-records",
+        paths=("inertia/cli/declared_function_discovery.py", "inertia/cli/cli_core.py"),
+        tests=("tests/cli/test_declared_function_discovery.py",
+               "tests/cli/test_final_function_result_artifacts.py"),
     ),
     TestOwnershipRule(
         owner="msc6-fixture-entrypoint",
@@ -1489,7 +1540,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "inertia/ir/vex_terminal_jump.py",
             "inertia/ir/vex_import.py",
         ),
-        tests=("tests/ir/test_x86_16_entry_jump_domain.py",),
+        tests=("tests/ir/test_x86_16_entry_jump_domain.py",
+               "tests/ir/test_selector_fixpoint_proposal.py"),
     ),
     TestOwnershipRule(
         owner="x86-16-real16-invocation-domain",
@@ -1507,6 +1559,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "tests/frontend/test_x86_16_encoded_entry_transport.py",
             "tests/frontend/test_x86_16_caller_native_intake.py",
             "tests/ir/test_x86_16_premise_collection_budget.py",
+            "tests/ir/test_entry_collection_sibling_freshness.py",
+            "tests/ir/test_native_feasibility_map_binding.py",
             "tests/ir/test_x86_16_invocation_domain_boundaries.py",
             "tests/ir/test_x86_16_invocation_partition_census.py",
             "tests/integration/test_x86_16_boot_call_prefix.py",
@@ -1521,7 +1575,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-declared-entry-pipeline",
         paths=("inertia/ir/declared_entry_pipeline.py",),
-        tests=("tests/ir/test_declared_entry_pipeline_attach.py",),
+        tests=("tests/ir/test_declared_entry_pipeline_attach.py",
+               "tests/frontend/test_declared_control_target_transport.py"),
     ),
     TestOwnershipRule(
         owner="x86-16-prefix-transcript",
@@ -1652,6 +1707,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "tests/ir/test_x86_16_vex_memory_access_fidelity.py",
             "tests/ir/test_x86_16_vex_logical_memory_accesses.py",
         ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-invocation-indirect-target",
+        paths=("inertia/ir/invocation_indirect_target.py", "inertia/ir/vex_import.py"),
+        tests=("tests/ir/test_pending_indirect_terminal.py", "tests/ir/test_invocation_indirect_target.py"),
     ),
     TestOwnershipRule(owner="x86-16-semantics-stack-frame-recovery",
         paths=("inertia/semantics/stack_frame_recovery.py",),
@@ -2042,6 +2102,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "tests/ir/test_x86_16_segment_call_preservation.py",
+            "tests/ir/test_census_work_configuration.py",
             "tests/ir/test_x86_16_segment_effect_closure.py",
             "tests/ir/test_segment_nonleaf_contracts.py",
             "tests/integration/test_segment_nonleaf_budgets.py",
@@ -2058,6 +2119,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "inertia/ir/real16_invocation_domain.py",
         ),
         tests=(
+            "tests/ir/test_scoped_native_snapshot_rebind.py",
             "tests/ir/test_nop_census_8616.py",
             "tests/frontend/test_nop_native_binding.py",
             "tests/ir/test_nop_cache_cost.py",
@@ -3389,6 +3451,9 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-call-semantics",
         paths=(
+            "inertia/alias/call_register_roles.py",
+            "inertia/semantics/call_register_role_contracts.py",
+            "inertia/semantics/call_register_roles.py",
             "inertia/alias/partial_register_address_break.py",
             "inertia/lowering/call_argument_carrier_liveness.py",
             "inertia/lowering/call_return_frame.py",
@@ -3414,6 +3479,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "inertia/frontend/x86_16/synthetic_call_stub_evidence.py",
         ),
         tests=(
+            "tests/semantics/test_call_register_roles.py",
+            "tests/alias/test_call_register_roles.py",
             "tests/lowering/test_x86_16_call_argument_carrier_liveness.py",
             "tests/alias/test_x86_16_callsite_return_use_zero_idiom.py",
             "tests/semantics/test_x86_16_call_return_frame_effects.py",
@@ -3522,6 +3589,86 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
     ),
     TestOwnershipRule(
+        owner="native-variable-allocation-convergence",
+        paths=(
+            "inertia/lowering/allocation_convergence.py",
+            "inertia/frontend/x86_16/variable_allocation_convergence.py",
+            "inertia/frontend/x86_16/allocation_publication.py",
+            "inertia/cli/native_allocation_runtime.py",
+            "inertia/cli/runtime_support.py",
+        ),
+        tests=(
+            "tests/frontend/test_native_variable_allocation_restart.py",
+            "tests/lowering/test_allocation_convergence.py",
+            "tests/cli/test_x86_16_clinic_variable_recovery_contract.py",
+            "tests/cli/test_pipeline_hard_failure.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-call-stack-input-authority",
+        paths=(
+            "inertia/lowering/call_stack_inputs.py",
+            "inertia/lowering/call_stack_input_contracts.py",
+            "inertia/lowering/entry_stack_pointer_capture.py",
+            "inertia/lowering/call_stack_input_replay.py",
+            "inertia/validation/validation_call_stack_inputs.py",
+        ),
+        tests=(
+            "tests/lowering/test_call_stack_inputs.py",
+            "tests/lowering/test_scoped_call_stack_inputs.py",
+            "tests/lowering/test_entry_stack_pointer_capture.py",
+            "tests/lowering/test_call_stack_input_replay.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-call-stack-coordinates",
+        paths=(
+            "inertia/ir/call_stack_coordinates.py",
+            "inertia/ir/scoped_call_stack_coordinates.py",
+            "inertia/semantics/call_stack_coordinates.py",
+            "inertia/semantics/call_stack_coordinate_source.py",
+            "inertia/semantics/callee_stack_effects.py",
+            "inertia/semantics/scoped_callee_stack_effects.py",
+            "inertia/semantics/scoped_call_stack_coordinates.py",
+            "tests/support/scoped_stack_fixture.py",
+            "inertia/alias/callee_stack_pointer.py",
+            "inertia/alias/scoped_callee_stack_pointer.py",
+            "inertia/alias/scoped_call_stack_context.py",
+            "inertia/alias/scoped_call_stack_positions.py",
+        ),
+        tests=(
+            "tests/semantics/test_call_stack_coordinates.py",
+            "tests/semantics/test_callee_stack_effects.py",
+            "tests/semantics/test_scoped_callee_stack_effects.py",
+            "tests/semantics/test_scoped_call_stack_coordinates.py",
+            "tests/alias/test_scoped_callee_stack_pointer.py",
+            "tests/alias/test_scoped_call_stack_positions.py",
+            "tests/ir/test_call_stack_coordinate_transport.py",
+            "tests/ir/test_scoped_call_stack_coordinate_transport.py",
+            "tests/semantics/test_x86_16_terminal_stack_cleanup.py",
+            "tests/semantics/test_x86_16_synthetic_frame_call_effects.py",
+            "tests/alias/test_x86_16_segment_stack_restore.py",
+            "tests/ir/test_source_graph_binding.py",
+            "tests/ir/test_native_copy_memo.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-canonical-ir-patterns",
+        paths=(
+            "inertia/ir/canonical_patterns.py",
+            "inertia/ir/select_normalization.py",
+            "inertia/ir/dead_temporary_surface_normalization.py",
+            "inertia/ir/native_import_surface_cache.py",
+        ),
+        tests=(
+            "tests/ir/test_canonical_patterns.py",
+            "tests/ir/test_select_normalization.py",
+            "tests/ir/test_dead_temporary_surface_normalization.py",
+            "tests/ir/test_native_import_surface_cache.py",
+            "tests/ir/test_native_surface_copy.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="x86-16-carry-borrow-widening",
         paths=(
             "inertia/alias/carry_borrow_contracts.py",
@@ -3550,8 +3697,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "inertia/widening/carry_borrow_pipeline.py",
             "inertia/widening/carry_borrow_storage.py",
             "inertia/widening/carry_borrow_values.py",
+            "inertia/widening/pair_type_contracts.py",
         ),
         tests=(
+            "tests/widening/test_pair_type_contracts.py",
             "tests/semantics/test_x86_16_carry_borrow_call_output.py",
             "tests/lowering/test_x86_16_wide_call_output_assignments.py",
             "tests/semantics/test_x86_16_carry_borrow_cfg.py",
@@ -3655,6 +3804,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "inertia/widening/word_projection_recomposition.py",
         ),
         tests=(
+            "tests/widening/test_word_cast_recomposition.py",
             "tests/widening/test_x86_16_widening_rules.py",
             "tests/lowering/test_x86_16_runtime_store_scope.py",
             "tests/integration/test_x86_16_far_load_access_width.py",
@@ -3859,6 +4009,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="tail-validation",
         paths=("inertia/validation/tail_validation.py",),
         tests=(
+            "tests/validation/test_cite_observed_locations.py",
             "tests/validation/test_x86_16_validation_dataflow.py::"
             "test_tail_validation_refuses_def_use_failure_even_when_baseline_already_lost_definition",
             "tests/validation/test_x86_16_validation_control_flow.py::"
@@ -3929,7 +4080,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::"
             "test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores",
             "tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::"
-            "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
+            "test_materialize_callsite_stack_arguments_keeps_unknown_memory_even_with_exact_push_evidence",
         ),
     ),
     TestOwnershipRule(

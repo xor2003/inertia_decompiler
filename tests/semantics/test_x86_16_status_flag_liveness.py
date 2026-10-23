@@ -102,8 +102,8 @@ def test_capstone_boundary_adapter_keeps_immediate_shift_count() -> None:
 @pytest.mark.parametrize(
     ("mnemonic", "expected"),
     (
-        ("rep stosw", DecodedStatusFlagInstruction8616("stosw", None)),
-        ("repne scasb", DecodedStatusFlagInstruction8616("scasb", None)),
+        ("rep stosw", DecodedStatusFlagInstruction8616("stosw", None, repeat_prefix=True)),
+        ("repne scasb", DecodedStatusFlagInstruction8616("scasb", None, repeat_prefix=True)),
     ),
 )
 def test_capstone_boundary_adapter_normalizes_semantic_instruction_prefixes(
@@ -119,10 +119,8 @@ def test_capstone_boundary_adapter_normalizes_semantic_instruction_prefixes(
     assert decoded is not None
     effect = status_flag_effect_8616(decoded)
     assert effect is not None
-    if expected.mnemonic == "stosw":
-        assert effect.overwrites == StatusFlag8616.NONE
-    else:
-        assert effect.overwrites == STATUS_FLAGS_8616
+    # REP comparisons can execute zero iterations, just as REP stores can.
+    assert effect.overwrites == StatusFlag8616.NONE
 
 
 def test_simple_lifter_suppresses_add_flags_before_later_cmp() -> None:
@@ -215,3 +213,36 @@ def test_lifter_max_inst_excludes_decoded_suffix_from_flag_liveness() -> None:
     flags_offset = arch.get_register_offset("flags")
 
     assert any(isinstance(statement, Put) and statement.offset == flags_offset for statement in irsb.statements)
+
+
+@pytest.mark.parametrize("code", ["f2ae", "f3af", "f3a6", "f2a7"])
+def test_repeated_compare_keeps_incoming_flags_for_zero_count(code: str) -> None:
+    """A byte-decoded repeated comparison can execute zero flag writes."""
+    from capstone import CS_ARCH_X86, CS_MODE_16, Cs
+
+    decoder = Cs(CS_ARCH_X86, CS_MODE_16)
+    decoder.detail = True
+    native = next(decoder.disasm(bytes.fromhex(code), 0x1000))
+    instruction = decoded_status_flag_instruction_8616(SimpleNamespace(cs=native))
+    assert instruction is not None
+    effect = status_flag_effect_8616(instruction)
+    assert effect is not None
+    assert effect.overwrites is StatusFlag8616.NONE
+    assert not status_flags_dead_before_use_8616(
+        STATUS_FLAGS_8616, (instruction, _instruction("jz")),
+    )
+
+
+@pytest.mark.parametrize("code", ["ae", "af", "a6", "a7"])
+def test_nonrepeated_compare_definitely_overwrites_status_flags(code: str) -> None:
+    """Ordinary SCAS/CMPS still perform their unconditional flag definition."""
+    from capstone import CS_ARCH_X86, CS_MODE_16, Cs
+
+    decoder = Cs(CS_ARCH_X86, CS_MODE_16)
+    decoder.detail = True
+    native = next(decoder.disasm(bytes.fromhex(code), 0x1000))
+    instruction = decoded_status_flag_instruction_8616(SimpleNamespace(cs=native))
+    assert instruction is not None
+    effect = status_flag_effect_8616(instruction)
+    assert effect is not None
+    assert effect.overwrites == STATUS_FLAGS_8616

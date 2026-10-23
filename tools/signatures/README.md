@@ -21,18 +21,19 @@ is the installed console command; `scripts/build_signature_catalog.py` remains
 a compatibility command. Input compiler assets remain external. Output catalogs
 and caches belong in explicit output roots, not the package.
 
-Generic cache storage currently remains in `inertia_decompiler.cache`;
-extract that boundary during core/cache migration rather than copying it here.
 Do not introduce proof or argument-recovery semantics into this tool.
 
 ```sh
 rtk proxy nice -n 10 env PYTHON_JIT=1 .venv/bin/python -m pytest tools/signatures/tests tests/integration/test_signature_matching_policy.py -q --tb=short
 ```
 
-Legacy root `omf_pat`, `signature_catalog`, `pat_literal_filter` and CLI
-configuration imports alias these exact modules, preserving shared state and monkeypatches. Remove
-aliases only after existing consumers migrate. Catalog and sidecar fingerprints
-include canonical configuration sources so their changes invalidate cached data.
+`pickle_cache` owns the local cache decoding boundary. It maps historical
+`omf_pat` serialized globals to `tools.signatures.omf_pat` without restoring
+root import aliases. Both the PAT cache and compiler catalog bundle reader use
+that boundary. Missing files are cache misses; known IO, malformed-pickle and
+class-lookup failures produce diagnostics and allow rebuilding from PAT input.
+Unexpected reconstruction errors propagate with their original cause. Cache
+fingerprints include the decoder alongside the parser and literal filter.
 
 Positive example: an explicit Flair root is returned unchanged. Negative example:
 a signature match must never turn a refused semantic comparison into a proof.
@@ -40,5 +41,3 @@ Component metadata: [signatures.json](../../reference/components/signatures.json
 
 Private parser/catalog tests live in `tests/`. Cross-tool ADA/decompiler tests
 live in `tests/integration/` and retain their multiple component labels.
-Old pickle globals resolve through the root aliases; cache fingerprints use the
-canonical parser sources rather than compatibility wrappers.

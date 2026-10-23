@@ -11,8 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from inertia.lowering.object_lowering import AccessTraitObjectHint, BaseKey
-
-from .cli_storage_objects import (
+from inertia.lowering.storage_objects import (
     EvidenceProfiles,
     StableHints,
     StorageObjectArtifact,

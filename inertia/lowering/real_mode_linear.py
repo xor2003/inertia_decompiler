@@ -96,7 +96,11 @@ from inertia.alias.stack_memory_ssa_contracts import StackMemoryAliasFactKind861
 from inertia.ir.core import MemSpace
 from inertia.lowering.analysis_helpers import canonicalize_x86_16_padding_call_target_8616
 from inertia.lowering.annotations import ANNOTATION_KEY
-from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _iter_c_statement_nodes_8616
+from inertia.lowering.c_ast_utils import (
+    _iter_c_nodes_deep_8616,
+    _iter_c_statement_nodes_8616,
+    _structured_codegen_node_8616,
+)
 from inertia.lowering.structured_tags import copy_structured_tags_8616
 from inertia.pipeline.contracts import SemanticLaneState
 from inertia.pipeline.errors import PipelineHardError
@@ -13431,6 +13435,15 @@ class _PushCarrierClassifier8616:
         materialized_args: StructuredAstValue,
     ) -> bool:
         """Return whether the assignment's LHS is a proven consumed carrier."""
+        from .consumed_push_stack_liveness import (
+            PushStackReadVerdict8616,
+            consumed_push_stack_read_verdict_8616,
+        )
+
+        stack_read = consumed_push_stack_read_verdict_8616(self.root, statement, codegen=self.codegen)
+        if stack_read in {PushStackReadVerdict8616.OBSERVED, PushStackReadVerdict8616.UNKNOWN_REFUSE}:
+            self.liveness_refusal_count += 1
+            return False
         runtime_verdict = classify_runtime_push_carrier_8616(
             self.root,
             statement,
@@ -21189,7 +21202,7 @@ class _SSLinearLowerRun8616:
 
     def replace_children(self, node: StructuredAstValue) -> bool:
         """Visit expression-bearing fields, including loads returned directly."""
-        if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+        if not _structured_codegen_node_8616(node):
             return False
         self.node_count_cell += 1
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and self.node_count_cell % 500 == 0:
@@ -21282,12 +21295,12 @@ class _SSLinearLowerRun8616:
             for cond, body in condition_and_nodes:
                 new_cond = (
                     self.transform(cond)
-                    if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
+                    if _structured_codegen_node_8616(cond)
                     else cond
                 )
                 new_body = (
                     self.transform(body)
-                    if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
+                    if _structured_codegen_node_8616(body)
                     else body
                 )
                 if new_cond is not cond:

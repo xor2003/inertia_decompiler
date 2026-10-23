@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import typing
 from collections.abc import Iterable, Iterator
+from copy import copy
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+from angr.knowledge_plugins.functions.function import Function
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
-__all__ = ["install_structured_codegen_sort_compat_8616", "repair_cfunctioncall_render_targets_8616"]
+__all__ = ["install_structured_codegen_sort_compat_8616", "repair_cfunctioncall_render_target_8616", "repair_cfunctioncall_render_targets_8616", "set_cfunctioncall_render_name_8616"]
 
 
 def _stable_ident_key_8616(value: object | None) -> tuple[int, str, str]:
@@ -129,16 +131,83 @@ def _iter_c_nodes_8616(root: object) -> Iterator[object]:
 
 
 def _kb_function_for_addr_8616(project: object, addr: int) -> object | None:
-    """Resolve functions across the dynamic third-party angr project boundary."""
+    """Find an existing function without discovery or mutating the native KB."""
     kb_functions = getattr(getattr(project, "kb", None), "functions", None)
     if kb_functions is None:
         return None
-    for create in (False, True):
-        try:
-            return typing.cast(object, kb_functions.function(addr=addr, create=create))
-        except Exception:
-            continue
-    return None
+    try:
+        return typing.cast(object, kb_functions.function(addr=addr, create=False))
+    except KeyError:
+        return None
+
+
+def _copy_function_render_context_8616(function: Function, context: Function) -> Function:
+    """Keep a native declaration while restoring only foreign render back-references."""
+    restored = copy(function)
+    # Native Function serialization omits its project and manager. Retain all
+    # selected semantic fields, with independent containers for mutable names
+    # and the info object's native owner relationship.
+    restored._project = context.project
+    restored._function_manager = context._function_manager
+    restored._info = function.info.copy(restored)
+    restored.previous_names = list(function.previous_names)
+    return restored
+
+
+def repair_cfunctioncall_render_target_8616(project: object | None, call: structured_c.CFunctionCall) -> bool:
+    """Restore native render context while preserving the call's selected ABI.
+
+    Native Function copies can lose their project. Replacing their declaration
+    with the KB default changes the prototype and therefore the call's type.
+    Copy the selected declaration instead, restoring only the native project's
+    back-reference from an existing function in that same project. Without a
+    resolvable project, retain all semantic metadata and disable name ambiguity
+    rendering. This does not prove an unresolved target for any semantic owner.
+    """
+    callee = call.callee_func
+    if callee is None or callee.project is not None:
+        return False
+    if isinstance(callee, Function) and project is not None:
+        canonical = _kb_function_for_addr_8616(project, callee.addr)
+        if isinstance(canonical, Function) and canonical.project is project:
+            call.callee_func = _copy_function_render_context_8616(callee, canonical)
+            return True
+    if call.show_disambiguated_name:
+        call.show_disambiguated_name = False
+        return True
+    return False
+
+
+def set_cfunctioncall_render_name_8616(
+    project: object | None, call: structured_c.CFunctionCall, target_addr: int, identifier: str,
+) -> bool | None:
+    """Choose a C label for an existing native target without deleting its ABI.
+
+    Return None when the existing declaration cannot be associated with this
+    exact native address and project. Names supply no identity evidence. A
+    renamed native copy retains the selected prototype and provenance; the
+    source declaration and KB stay unchanged. Repeated formatting is stable.
+    """
+    function = call.callee_func
+    if not isinstance(function, Function) or function.addr != target_addr or project is None:
+        return None
+    changed = repair_cfunctioncall_render_target_8616(project, call)
+    function = call.callee_func
+    if not isinstance(function, Function) or function.project is not project:
+        return None
+    if function.name != identifier:
+        named = _copy_function_render_context_8616(function, function)
+        named.name = identifier
+        call.callee_func = named
+        changed = True
+    if call.callee_target != identifier:
+        call.callee_target = identifier
+        changed = True
+    if call.show_demangled_name or call.show_disambiguated_name:
+        call.show_demangled_name = False
+        call.show_disambiguated_name = False
+        changed = True
+    return changed
 
 
 def repair_cfunctioncall_render_targets_8616(codegen: object) -> int:
@@ -147,8 +216,8 @@ def repair_cfunctioncall_render_targets_8616(codegen: object) -> int:
     angr's ``CFunctionCall`` renderer checks callee-name ambiguity through
     ``callee_func.binary``. Validation snapshots and copied ASTs may preserve
     the callee address/name but lose the ``Function.project`` back-reference.
-    Reattach the function from the current KB when possible; otherwise disable
-    only the renderer's disambiguated-name check for that call.
+    Restore its native project while retaining the chosen prototype and calling
+    convention; otherwise disable only the renderer's disambiguated-name check.
     Dynamic attribute boundary: codegen, cfunc, and C AST nodes are third-party
     angr/codegen objects with optional renderer metadata.
     """
@@ -161,19 +230,7 @@ def repair_cfunctioncall_render_targets_8616(codegen: object) -> int:
     for node in _iter_c_nodes_8616(root):
         if not isinstance(node, structured_c.CFunctionCall):
             continue
-        callee_func = getattr(node, "callee_func", None)
-        if callee_func is None or getattr(callee_func, "project", None) is not None:
-            continue
-        addr = getattr(callee_func, "addr", None)
-        if isinstance(addr, int) and project is not None:
-            replacement = _kb_function_for_addr_8616(project, addr)
-            if replacement is not None and getattr(replacement, "project", None) is not None:
-                typing.cast(typing.Any, node).callee_func = replacement
-                repaired += 1
-                continue
-        if getattr(node, "show_disambiguated_name", False):
-            node.show_disambiguated_name = False
-            repaired += 1
+        repaired += repair_cfunctioncall_render_target_8616(project, node)
     return repaired
 
 

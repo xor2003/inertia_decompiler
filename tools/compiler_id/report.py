@@ -14,7 +14,6 @@ import json
 import logging
 import math
 import os
-import pickle
 import shutil
 import sys
 import tempfile
@@ -31,6 +30,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.signatures.omf_pat import _find_pat_matches, _hyperscan, load_cached_pat_regex_specs  # noqa: E402
+from tools.signatures.pickle_cache import read_signature_pickle  # noqa: E402
 
 
 def _object_int(value: object, default: int = 0) -> int:
@@ -1007,13 +1007,9 @@ def _resolve_catalog_input(catalog_input: Path) -> tuple[Path, Path, tuple[objec
     effective_cache_dir = extract_root / ".signature_catalog_cache"
     preloaded_specs: tuple[object, ...] = ()
     snapshot_path = extract_root / "catalog_specs.pickle"
-    if snapshot_path.exists():
-        try:
-            loaded = pickle.loads(snapshot_path.read_bytes())
-            if isinstance(loaded, tuple):
-                preloaded_specs = loaded
-        except Exception:
-            preloaded_specs = ()
+    loaded = read_signature_pickle(snapshot_path)
+    if isinstance(loaded, tuple):
+        preloaded_specs = loaded
     return effective_catalog, effective_cache_dir, preloaded_specs
 
 

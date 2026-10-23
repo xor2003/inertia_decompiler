@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
@@ -32,14 +33,14 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
-from inertia.cli.cli_access_profiles import (
+from inertia.ir.core import IRAddress
+from inertia.lowering.access_profiles import (
     AccessTraitEvidenceProfile,
     AccessTraitInductionVar,
     InductionSummary,
     build_access_trait_evidence_profiles,
     infer_induction_variable,
 )
-from inertia.ir.core import IRAddress
 from inertia.lowering.c_ast_utils import (
     _replace_c_children_8616,
     _safe_assign_cfunc_statements_8616,
@@ -728,8 +729,18 @@ def _rewrite_induction_loops_8616(codegen: object) -> bool:
     return rewrite.changed
 
 
-def apply_x86_16_array_expression_matching(codegen: object) -> bool:
-    """Attach array matching evidence to an angr codegen object without rewriting semantics."""
+def _run_array_expression_matching_8616(
+    codegen: object, rewrite_step: Callable[[object], bool]
+) -> bool:
+    """Publish array-matching metadata, then run the selected rewrite step.
+
+    Shared by ``apply_x86_16_array_expression_matching`` (the real
+    induction-loop rewrite) and the structuring applicability probe (a proven
+    no-op step). Metadata publication, failure logging, and the
+    ``_inertia_array_matching_error`` contract are identical either way, so a
+    pass skipped by its applicability proof leaves the same diagnostics an
+    executed no-op pass leaves.
+    """
 
     def _impl() -> bool:
         """Attach optional array metadata across the dynamic third-party angr codegen boundary."""
@@ -781,7 +792,7 @@ def apply_x86_16_array_expression_matching(codegen: object) -> bool:
                 "string_arrays": len(typed_string_candidates),
             }
 
-            changed = _rewrite_induction_loops_8616(codegen)
+            changed = rewrite_step(codegen)
             logger.debug("Array expression matching pass completed")
             return changed
         except Exception as ex:
@@ -791,3 +802,8 @@ def apply_x86_16_array_expression_matching(codegen: object) -> bool:
             return False
 
     return _impl()
+
+
+def apply_x86_16_array_expression_matching(codegen: object) -> bool:
+    """Attach array matching evidence to an angr codegen object without rewriting semantics."""
+    return _run_array_expression_matching_8616(codegen, _rewrite_induction_loops_8616)

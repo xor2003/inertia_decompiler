@@ -43,6 +43,12 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
+class _UnifiedVariableLike(Protocol):
+    """Optional unified-variable metadata surface from angr codegen."""
+
+    size: int
+
+
 def _stack_type_for_size(size: int) -> SimType:
     return SimTypeChar(False) if size == 1 else SimTypeShort(False)
 
@@ -84,7 +90,7 @@ def _promote_stack_view_8616(
     return changed
 
 
-def _grow_unified_size_8616(unified: object, size: int) -> bool:
+def _grow_unified_size_8616(unified: _UnifiedVariableLike | None, size: int) -> bool:
     """Grow an optional unified-variable size."""
     # Dynamic codegen boundary: unified variable size is optional codegen metadata.
     if unified is None or getattr(unified, "size", 0) >= size:

@@ -23,7 +23,7 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from types import SimpleNamespace
@@ -354,7 +354,7 @@ class _RetaddrPruneRun8616:
             if isinstance(annotated_prototype, SimTypeFunction)
             else getattr(func, "prototype", None)
         )
-        stack_specs = stack_layout_annotation_specs_8616(annotations)
+        stack_specs = cast(Mapping[object, object], stack_layout_annotation_specs_8616(annotations))
         arg_list = list(getattr(self.codegen.cfunc, "arg_list", ()) or ())
         if prototype is None or not arg_list:
             changed_body = self._prune_return_address_body_assignments(self.codegen.cfunc)
@@ -1274,7 +1274,7 @@ def _collect_source_arg_metadata_8616(
 
 
 def _classify_contained_high_byte_args_8616(
-    candidates: dict[int, tuple[Any, Any]], body_stack_offsets: set[int], body_stack_read_offsets: set[int]
+    candidates: dict[int, tuple[Any, Any]], body_stack_offsets: set[int], body_stack_read_offsets: Set[int]
 ) -> tuple[dict[int, int], dict[int, int]]:
     """Split one-byte odd slots into body-read (projectable) and stale (dead) maps."""
     stale_contained_high_byte_args: dict[int, int] = {}
@@ -1891,7 +1891,7 @@ def _collect_stack_promotion_inputs_8616(
             file=sys.stderr,
             flush=True,
         )
-    stack_specs = stack_layout_annotation_specs_8616(annotations)
+    stack_specs = cast(Mapping[object, object], stack_layout_annotation_specs_8616(annotations))
     return annotations, prototype_pointer_flags, stack_specs, _annotated_args_from_stack_specs_8616(stack_specs)
 
 
@@ -3516,7 +3516,7 @@ def _legacy_return_bp_arg_offsets_8616(
             if isinstance(offset_value, int):
                 stack_slots_by_offset[offset_value] = identity
     offsets: set[int] = set()
-    slot_identities: set[object] = set()
+    slot_identities: set[_StackSlotIdentity] = set()
     for stmt in getattr(codegen.cfunc.statements, "statements", ()) or ():
         if not isinstance(stmt, CReturn):
             continue
@@ -3941,7 +3941,7 @@ def _prevalidated_positive_stack_annotations_complete_8616(
     global_specs = annotations.get("global_vars", {})
     if isinstance(global_specs, Mapping) and global_specs:
         return False
-    stack_specs = stack_layout_annotation_specs_8616(annotations)
+    stack_specs = cast(Mapping[object, object], stack_layout_annotation_specs_8616(annotations))
     if not isinstance(stack_specs, Mapping) or not stack_specs:
         return False
     positive_offsets = [offset for offset in stack_specs if isinstance(offset, int) and offset > 0]
@@ -3998,7 +3998,7 @@ class _ApplyAnnotationsRun8616:
         changed |= _attach_project_cod_source_annotations_if_missing_8616(self.project, self.func_addr, func)
         if not annotations:
             return False
-        self.stack_specs = stack_layout_annotation_specs_8616(annotations)
+        self.stack_specs = cast(Mapping[object, object], stack_layout_annotation_specs_8616(annotations))
         self.global_specs = annotations.get("global_vars", {})
         promote_near_pointers = True
         if os.environ.get("INERTIA_DEBUG_X87_PROTO") == "1":
@@ -4805,7 +4805,7 @@ class _SyncArgsFromAnnotationsRun8616:
                 file=sys.stderr,
                 flush=True,
             )
-        return cast("tuple[bool, ...]", source_pointer_flags)
+        return source_pointer_flags
 
     def _promote_resolved_arg_types_8616(
         self,

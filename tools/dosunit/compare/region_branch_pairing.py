@@ -21,6 +21,7 @@ from enum import StrEnum
 
 from tools.dosunit.compare.paired_region_graph import (
     CollapsedRegion,
+    RegionExitKind,
     RegionGraphReason,
     RegionGraphRefusal,
 )
@@ -54,7 +55,7 @@ class BranchSearchCounters:
 
 @dataclass(frozen=True, slots=True)
 class BranchPairingReport:
-    """Complete cutpoint-bijection proposals plus typed search completeness.
+    """Complete cutpoint proposals plus typed search completeness.
 
     ``ordered`` retains the deterministic typed-IR-order zip proposal when it
     is a complete closed bijection; it is then also ``candidates[0]`` within the same total resource bounds.
@@ -64,6 +65,10 @@ class BranchPairingReport:
     exhausted report with empty ``candidates`` means no such bijection exists
     within the permitted permutations, while ``LIMIT`` reports a possibly
     incomplete result set that must not be read as absence.
+    With explicit allow_terminal_merges, candidates may repeat terminal
+    indices while covering every region; each distinct pair must be proved.
+    Continuing regions remain injective unless allow_state_merges is explicit;
+    then every distinct non-entry BORING pair is a separate proof obligation.
     """
 
     status: BranchSearchStatus
@@ -76,7 +81,7 @@ class BranchPairingReport:
 
 @dataclass(frozen=True, slots=True)
 class _SearchState:
-    """One queued frontier under a fixed partial bijection."""
+    """One queued frontier; optional shared returns retain distinct obligations."""
 
     forward: dict[int, int]
     backward: dict[int, int]
@@ -85,10 +90,27 @@ class _SearchState:
     ordered: bool = True
 
 
+def _terminal_pair(original: CollapsedRegion, rebuilt: CollapsedRegion) -> bool:
+    """Only returns without successors may escape cutpoint injectivity."""
+    return (original.kind is RegionExitKind.RETURN and rebuilt.kind is RegionExitKind.RETURN
+            and not original.exits and not rebuilt.exits)
+
+
+def _terminal_child(
+    state: _SearchState, left: int, right: int, rest: tuple[tuple[int, int], ...],
+) -> _SearchState:
+    """Record every distinct return obligation, retaining full side coverage."""
+    pairs = state.pairs if (left, right) in state.pairs else (*state.pairs, (left, right))
+    return _SearchState({**state.forward, left: right}, {**state.backward, right: left},
+                        rest, pairs, state.ordered)
+
+
 def _expand(state: _SearchState, oracle_regions: tuple[CollapsedRegion, ...],
             candidate_regions: tuple[CollapsedRegion, ...],
             oracle_targets: dict[int, int],
-            candidate_targets: dict[int, int]) -> tuple[list[_SearchState], bool, RegionGraphReason | None]:
+            candidate_targets: dict[int, int],
+            allow_terminal_merges: bool = False,
+            allow_state_merges: bool = False) -> tuple[list[_SearchState], bool, RegionGraphReason | None]:
     """Advance one frontier item under the bijection rules.
 
     Returns ``(children, complete, dead_end)``: ``complete`` means the drained
@@ -96,15 +118,18 @@ def _expand(state: _SearchState, oracle_regions: tuple[CollapsedRegion, ...],
     branch violated bijection, kind/arity or closure and produced nothing.
     """
     if not state.pending:
-        complete = len(state.pairs) == len(oracle_regions) == len(candidate_regions)
+        complete = len(state.forward) == len(oracle_regions) and len(state.backward) == len(candidate_regions)
         return [], complete, None if complete else RegionGraphReason.CLOSURE
     (left, right), rest = state.pending[0], state.pending[1:]
-    known = state.forward.get(left)
-    if known is not None:
-        if known == right:
-            return [_SearchState(state.forward, state.backward, rest, state.pairs, state.ordered)], False, None
-        return [], False, RegionGraphReason.BIJECTION
-    if right in state.backward:
+    original, rebuilt = oracle_regions[left], candidate_regions[right]
+    if allow_terminal_merges and _terminal_pair(original, rebuilt):
+        return [_terminal_child(state, left, right, rest)], False, None
+    merge = (allow_state_merges and bool(state.pairs)
+             and original.kind is rebuilt.kind is RegionExitKind.BORING
+             and left != state.pairs[0][0] and right != state.pairs[0][1])
+    if (left, right) in state.pairs:
+        return [_SearchState(state.forward, state.backward, rest, state.pairs, state.ordered)], False, None
+    if not merge and (left in state.forward or right in state.backward):
         return [], False, RegionGraphReason.BIJECTION
     original, rebuilt = oracle_regions[left], candidate_regions[right]
     if original.kind is not rebuilt.kind or len(original.exits) != len(rebuilt.exits):
@@ -162,8 +187,10 @@ def propose_branch_bijections(
     max_states: int = 4096,
     max_candidates: int = 64,
     deadline_seconds: float | None = None,
+    allow_terminal_merges: bool = False,
+    allow_state_merges: bool = False,
 ) -> BranchPairingReport:
-    """Enumerate complete closed region bijections under binary-arm swaps.
+    """Enumerate complete closed region correspondences under binary-arm swaps.
 
     The deterministic ordered-zip proposal is the first search branch,
     subject to the same total deadline and work/result caps as alternatives. The bounded depth-first enumeration then
@@ -197,7 +224,7 @@ def propose_branch_bijections(
         state = stack.pop()
         expanded += 1
         children, complete, dead_end = _expand(state, oracle_regions, candidate_regions,
-                                               oracle_targets, candidate_targets)
+                                               oracle_targets, candidate_targets, allow_terminal_merges, allow_state_merges)
         generated += len(children)
         stack.extend(children)
         if dead_end is not None:

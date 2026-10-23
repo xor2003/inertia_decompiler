@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from dataclasses import asdict, dataclass, replace
@@ -55,6 +56,17 @@ from tools.compiler_toolchain.compiler_profile import (  # noqa: E402
     compiler_toolchain_lock,
     msc6_ax_toolchain,
     resolve_case_toolchain,
+)
+from tools.compiler_toolchain.conditional_case_composition import (  # noqa: E402
+    CaseCompositionStatus,
+    ConditionalCaseComposition,
+    prepare_conditional_case_composition,
+)
+from tools.compiler_toolchain.conditional_case_inventory import load_final_function_attempts  # noqa: E402
+from tools.compiler_toolchain.conditional_case_request import (  # noqa: E402
+    ConditionalCaseRequestStatus,
+    PreparedConditionalCaseRequest,
+    prepare_conditional_case_request,
 )
 from tools.compiler_toolchain.conditional_function_receipt import (  # noqa: E402
     ConditionalFunctionTransport,
@@ -3396,6 +3408,7 @@ def _probe_decompile_candidates(
             decompile_max_functions=decompile_max_functions,
             stage_deadline=stage_deadline,
             force_rizin=force_rizin,
+            artifact_parent=stdout_path.parent,
         )
         last_proc = proc
         if acceptable and proc.returncode == 0:
@@ -3441,13 +3454,21 @@ def _record_decompile_attempt(
     decompile_max_functions: int,
     stage_deadline: float | None,
     force_rizin: bool,
+    artifact_parent: Path | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, object], bool]:
     """Run one candidate and append its attempt record."""
     candidate_cmd = _decompile_candidate_command(base_cmd, exe_path, candidate)
     candidate_attempt: dict[str, object] = {
         "candidate": candidate,
-        "command": " ".join(candidate_cmd),
     }
+    if decompile_mode == "functions" and artifact_parent is not None:
+        artifact_parent.mkdir(parents=True, exist_ok=True)
+        artifact_dir = Path(tempfile.mkdtemp(
+            prefix=f"{exe_path.stem}.attempt{attempt_index}-", dir=artifact_parent,
+        ))
+        candidate_cmd.extend(["--output-c-dir", str(artifact_dir)])
+        candidate_attempt["artifact_dir"] = str(artifact_dir)
+    candidate_attempt["command"] = " ".join(candidate_cmd)
     attempts.append(candidate_attempt)
     proc, run_profile, acceptable = _run_decompile_candidate(
         candidate_cmd,
@@ -3466,6 +3487,8 @@ def _record_decompile_attempt(
     )
     candidate_attempt["returncode"] = proc.returncode
     candidate_attempt["profile"] = run_profile
+    if "artifact_dir" in candidate_attempt:
+        run_profile["artifact_dir"] = candidate_attempt["artifact_dir"]
     return proc, run_profile, acceptable
 
 
@@ -3908,6 +3931,7 @@ def _decompile_and_validate(
     if first is not None:
         return first
 
+    prepared = _prepare_declared_sweep(options, decompile_declared_input)
     decompile_ok, dec_out, dec_err, decompile_elapsed, decompile_profile = _decompile(
         exe_path,
         out_dir,
@@ -3927,6 +3951,13 @@ def _decompile_and_validate(
         decompile_pat_backend=decompile_pat_backend,
         decompile_signature_catalog=decompile_signature_catalog,
     )
+    if prepared is not None:
+        composition = _compose_retained_sweep(prepared, decompile_profile)
+        if composition is not None and composition.status is CaseCompositionStatus.CONDITIONAL_READY:
+            return _rebuild_conditional_case(
+                options, composition, dec_err=dec_err, elapsed=decompile_elapsed,
+                profile=decompile_profile,
+            )
     if not decompile_ok:
         return _decompile_failure_result(options, dec_out, dec_err, decompile_elapsed, decompile_profile)
 
@@ -3981,6 +4012,75 @@ def _decompile_and_validate(
         decompile_elapsed,
         _selected_function_count(decompile_profile),
         json.dumps(_json_safe_profile(decompile_profile), sort_keys=True),
+    )
+
+
+def _prepare_declared_sweep(
+    options: _DecompileValidateOptions, declaration: Path | None,
+) -> PreparedConditionalCaseRequest | None:
+    """Freeze declared selection and expected observations before worker execution."""
+    if declaration is None:
+        return None
+    context = FrozenCompilerContext.parse(os.environ[TAIL_COMPILER_CONTEXT_ENV])
+    observations = json.dumps({
+        "expected_exit_code": options.expected_exit_code,
+        "expected_stdout_contains": options.expected_stdout_contains,
+    }, sort_keys=True).encode()
+    request = prepare_conditional_case_request(
+        binary_path=options.exe_path, declaration_path=declaration,
+        compiler_context=context, observations=observations,
+    )
+    if request.status not in {ConditionalCaseRequestStatus.READY, ConditionalCaseRequestStatus.NO_FUNCTION_ENTRY}:
+        raise ValueError(f"Declared sweep refused ({request.status.value}): {request.detail}")
+    return request.prepared
+
+
+def _compose_retained_sweep(
+    prepared: PreparedConditionalCaseRequest, profile: dict[str, object],
+) -> ConditionalCaseComposition | None:
+    """Decode final sweep records without deriving proof authority from stdout."""
+    directory, returncode = profile.get("artifact_dir"), profile.get("returncode")
+    if not prepared.inputs_current() or not isinstance(directory, str) or type(returncode) is not int:
+        return None
+    contract = prepared.contract
+    inventory = load_final_function_attempts(
+        contract, project=prepared.project, records_dir=Path(directory), artifact_dir=Path(directory),
+        compiler_context=contract.compiler_context, process_returncode=returncode,
+    )
+    profile["conditional_inventory"] = {"status": inventory.status.value, "detail": inventory.detail}
+    return prepare_conditional_case_composition(
+        contract, inventory.attempts, image=prepared.binary_path,
+        observations=contract.observations, compiler_context=contract.compiler_context,
+    )
+
+
+def _rebuild_conditional_case(
+    options: _DecompileValidateOptions, composition: ConditionalCaseComposition,
+    *, dec_err: Path, elapsed: float, profile: dict[str, object],
+) -> _DecompileValidateResult:
+    """Compile exact verified fragments while retaining conditional proof status."""
+    if composition.status is not CaseCompositionStatus.CONDITIONAL_READY or composition.contract is None:
+        raise ValueError("conditional rebuilding requires a complete verified inventory")
+    source = options.out_dir / f"{options.exe_path.stem}.conditional.c"
+    source.write_text("\n\n".join(payload for _, payload in composition.payloads) + "\n", encoding="utf-8")
+    profile["conditional_case"] = {
+        "status": composition.status.value,
+        "premises": [{"address": address, "premise": json.loads(premise)}
+                     for address, premise in composition.premises],
+        "image_sha256": composition.contract.image_sha256,
+        "compiler_context": json.loads(composition.contract.compiler_context.serialize()),
+        "observations_sha256": hashlib.sha256(composition.contract.observations).hexdigest(),
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "functions": [target.address for target, _ in composition.payloads],
+        "unconditional_acceptance": False,
+    }
+    compiled, rec_out, rec_err, rel_out, rel_err, exit_code, stdout, stderr = _rebuild_and_run(
+        options, source, profile, main_address=composition.contract.entry.address,
+    )
+    return (
+        False, source, dec_err, compiled, _expected_run_ok(options, exit_code, stdout),
+        exit_code, rec_out, rec_err, rel_out, rel_err, stdout, stderr, elapsed,
+        len(composition.payloads), json.dumps(_json_safe_profile(profile), sort_keys=True),
     )
 
 
@@ -4232,6 +4332,7 @@ def _rebuild_and_run(
     options: _DecompileValidateOptions,
     dec_out: Path,
     decompile_profile: dict[str, object],
+    *, main_address: int | None = None,
 ) -> tuple[bool, str, str, str, str, int | None, str, str]:
     """Rebind the entrypoint, recompile, link, and run the rebuilt binary."""
     decomp_name, obj_name, exe_name, map_name = _rebuild_names(options)
@@ -4244,12 +4345,19 @@ def _rebuild_and_run(
 
     entry = bind_msc6_fixture_entrypoint(
         decomp_src.read_text(encoding="utf-8"),
-        main_address=_lookup_sidecar_code_labels(
+        main_address=main_address if main_address is not None else _lookup_sidecar_code_labels(
             options.exe_path, signature_catalog=options.decompile_signature_catalog,
         ).get("main"),
     )
     decompile_profile["entrypoint_binding"] = {"status": entry.status.value, "symbol": entry.symbol, "detail": entry.detail}
-    decomp_src.write_text(entry.source, encoding="utf-8")
+    # Standalone validated fragments may use fixed-width and Boolean types.
+    # _compile_and_link stages these guarded target headers; include them here
+    # without altering the authenticated function bodies or original builds.
+    decomp_src.write_text(
+        '#include "STDINT.H"\n#include "STDBOOL.H"\n' + entry.source,
+        encoding="utf-8",
+    )
+    decompile_profile["recompiled_source_sha256"] = hashlib.sha256(decomp_src.read_bytes()).hexdigest()
 
     recompiled_ok, rec_out, rec_err, rel_out, rel_err = _compile_and_link(
         decomp_src,

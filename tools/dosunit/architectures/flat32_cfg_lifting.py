@@ -1,10 +1,10 @@
 """Lift closed flat-i386 CFG blocks at machine conditional boundaries.
 
 Layer: dosunit binary CFG frontend adapter.
-Responsibility: split a VEX block at the instruction containing its first
-conditional exit, then relift the exact byte prefix. Data effects after an
-exit inside that instruction remain the driver's explicit refusal; no state
-is deleted, assumed unchanged or repaired after SSA lowering.
+Responsibility: split a VEX block at its first conditional instruction or
+before an admitted REP summary, then relift the exact byte prefix. Unsupported
+effects after an exit remain the driver's explicit refusal; no state is
+deleted, assumed unchanged or repaired after SSA lowering.
 """
 
 from __future__ import annotations
@@ -13,6 +13,9 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pyvex
+
+from tools.dosunit.architectures.flat32_control_word import decode_native_x87, unmodeled_x87_status_write
+from tools.dosunit.contracts.repeat_string_contracts import RepeatArchitecture, decode_repeat_summary
 
 if TYPE_CHECKING:
     import angr
@@ -29,6 +32,8 @@ class CfgLiftingReason(StrEnum):
     EFFECT = "effect_after_conditional_exit"
     EXCEPTION = "exception_edge"
     TARGET = "indirect_exit_target"
+    X87_EXCEPTION = "x87_pending_exception_unmodeled"
+    X87_STATUS = "x87_status_update_unmodeled"
 
 
 class CfgLiftingRefusal(Exception):
@@ -82,6 +87,29 @@ def validate_ordinary_exits(irsb: pyvex.IRSB) -> None:
             raise CfgLiftingRefusal(CfgLiftingReason.EFFECT)
 
 
+def _native_summary_boundary_size(irsb: pyvex.IRSB, data: bytes | None, address: int) -> int | None:
+    """Isolate REP or FNSTCW/FNSTSW and retain the pending-exception obligation of WAIT."""
+    if data is None:
+        return None
+    for statement in irsb.statements:
+        if not isinstance(statement, pyvex.stmt.IMark) or statement.len <= 0 or statement.delta != 0:
+            continue
+        offset: int = statement.addr - address
+        if not 0 <= offset <= len(data) - statement.len:
+            raise CfgLiftingRefusal(CfgLiftingReason.RANGE)
+        raw = data[offset:offset + statement.len]
+        if raw.startswith(b"\x9b") and decode_native_x87(raw) is None:
+            raise CfgLiftingRefusal(CfgLiftingReason.X87_EXCEPTION)
+        if unmodeled_x87_status_write(raw):
+            raise CfgLiftingRefusal(CfgLiftingReason.X87_STATUS)
+        if decode_native_x87(raw) is not None:
+            return offset or statement.len
+        instruction = {"bytes": raw.hex(), "size": statement.len}
+        if decode_repeat_summary([instruction], architecture=RepeatArchitecture.FLAT32) is not None:
+            return offset or statement.len
+    return None
+
+
 def reblock_cfg_block(project: angr.Project, block: Block, address: int, maximum: int) -> Block:
     """Retain a byte-verified conditional prefix and its matching decode records.
 
@@ -100,6 +128,9 @@ def reblock_cfg_block(project: angr.Project, block: Block, address: int, maximum
     if not isinstance(irsb, pyvex.IRSB):
         raise CfgLiftingRefusal(CfgLiftingReason.MODEL)
     size = _conditional_size(irsb, address, maximum)
+    repeat_size = _native_summary_boundary_size(irsb, block.bytes, address)
+    if repeat_size is not None:
+        size = min(size, repeat_size) if size is not None else repeat_size
     if size is not None and size < irsb.size:
         prefix = project.factory.block(address, size=size, opt_level=0)
         prefix_irsb = prefix.vex

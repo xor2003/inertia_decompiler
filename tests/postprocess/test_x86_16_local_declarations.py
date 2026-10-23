@@ -7,14 +7,64 @@ from types import SimpleNamespace
 import archinfo
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_type import SimTypeShort
+from angr.sim_type import SimTypeArray, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
 
 from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
 from inertia.postprocess.optimization.local_declarations import (
     dedupe_equivalent_stack_local_declarations_8616,
     prune_dce_proven_declarations_8616,
+    prune_unreferenced_scalar_declarations_8616,
 )
+
+
+@pytest.mark.parametrize("reference", ["none", "body", "argument", "alias"])
+def test_scalar_declaration_retirement_preserves_references(reference: str) -> None:
+    """Only an orphan scalar leaves both declaration inventories."""
+    codegen = _FakeCodegen()
+    variable = SimStackVariable(-4, 2, base="bp", ident="orphan", name="local_word")
+    cvar = _stack_cvar(variable, codegen)
+    live = cvar
+    if reference == "alias":
+        live = _stack_cvar(SimStackVariable(-4, 2, base="bp", ident="other", name="other_word"), codegen)
+    retval = live if reference in {"body", "alias"} else None
+    statements = structured_c.CStatements([structured_c.CReturn(retval, codegen=codegen)], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(
+        statements=statements, arg_list=[live] if reference == "argument" else [],
+        variables_in_use={variable: cvar}, unified_local_vars={variable: {(cvar, cvar.variable_type)}},
+    )
+    assert prune_unreferenced_scalar_declarations_8616(codegen) is (reference == "none")
+    assert bool(codegen.cfunc.variables_in_use) is (reference != "none")
+    assert bool(codegen.cfunc.unified_local_vars) is (reference != "none")
+
+
+@pytest.mark.parametrize("type_kind", ["unknown", "array", "pointer"])
+def test_non_scalar_declarations_remain_unknown(type_kind: str) -> None:
+    """Unknown or potentially evaluating declarators are never retired as scalars."""
+    codegen = _FakeCodegen()
+    variable = SimStackVariable(-4, 2, base="bp", ident="keep", name="keep_local")
+    cvar = _stack_cvar(variable, codegen)
+    cvar.variable_type = {
+        "unknown": None,
+        "array": SimTypeArray(SimTypeShort(False), 4),
+        "pointer": SimTypePointer(SimTypeShort(False)),
+    }[type_kind]
+    codegen.cfunc = SimpleNamespace(
+        statements=structured_c.CStatements([structured_c.CReturn(None, codegen=codegen)], codegen=codegen),
+        arg_list=[], variables_in_use={variable: cvar}, unified_local_vars={},
+    )
+    assert prune_unreferenced_scalar_declarations_8616(codegen) is False
+    assert variable in codegen.cfunc.variables_in_use
+
+
+def test_opaque_body_refuses_declaration_retirement() -> None:
+    """An unavailable reference inventory keeps every declaration."""
+    codegen = _FakeCodegen()
+    variable = SimStackVariable(-4, 2, base="bp", ident="keep", name="keep_local")
+    cvar = _stack_cvar(variable, codegen)
+    codegen.cfunc = SimpleNamespace(statements=object(), arg_list=[], variables_in_use={variable: cvar}, unified_local_vars={})
+    assert prune_unreferenced_scalar_declarations_8616(codegen) is False
+    assert variable in codegen.cfunc.variables_in_use
 
 
 class _FakeCodegen:

@@ -938,7 +938,7 @@ def _transfer_condition_owner_8616(project: object, codegen: object, func_addr: 
             layer="lowering", function_addr=func_addr,
             details={"recovered_address": resolved[1]},
         )
-    return typing.cast(object, resolved[0])
+    return resolved[0]
 
 
 def transfer_typed_conditions_to_codegen_8616(

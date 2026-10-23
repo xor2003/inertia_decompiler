@@ -37,8 +37,27 @@ def test_repeat_operand_defaults_are_architecture_bound(architecture: RepeatArch
     assert spec.family is StringFamily.MOVE
     assert spec.width == width
     assert spec.architecture is architecture
-    assert decode_repeat_summary([_instruction("66f3a5")], architecture=architecture) is None
+    override = decode_repeat_summary([_instruction("66f3a5")], architecture=architecture)
+    if architecture is RepeatArchitecture.REAL16:
+        assert override is None
+    else:
+        assert override is not None and override.width == 2
     assert decode_repeat_summary([_instruction("67f3a5")], architecture=architecture) is None
+
+
+@pytest.mark.parametrize("prefix", ["66f3", "f366", "66f2", "f266"])
+@pytest.mark.parametrize("opcode,width", [("a4", 1), ("a5", 2), ("aa", 1), ("ab", 2),
+                                        ("a6", 1), ("a7", 2), ("ae", 1), ("af", 2)])
+def test_flat32_operand_override_preserves_address_defaults(prefix, opcode, width) -> None:
+    spec = decode_repeat_summary([_instruction(prefix + opcode)], architecture=RepeatArchitecture.FLAT32)
+    assert spec is not None
+    assert spec.width == width
+    assert spec.architecture is RepeatArchitecture.FLAT32
+
+
+@pytest.mark.parametrize("code", ["6666f3a5", "66f367a5", "64f366a5", "f066f3a5", "f366ac", "f3f2a5"])
+def test_flat32_unmodeled_prefixes_retain_native_ir(code) -> None:
+    assert decode_repeat_summary([_instruction(code)], architecture=RepeatArchitecture.FLAT32) is None
 
 
 @pytest.mark.parametrize("code", ["66f3ab", "67f3a4", "64f3a4", "f3ac"])
@@ -133,3 +152,20 @@ def test_public_repeat_proof_and_independent_width_mutation(tmp_path: Path, muta
         assert _guest_store_result(candidate_code) == bytes.fromhex("34123412")
         assert report["status"] == "proved"
         assert report["proof"]["obligations"]["discharged"] == 1
+
+
+@pytest.mark.parametrize("operation", ["f3ab", "f2ae"])
+def test_public_real16_zero_count_repeat_is_identity(tmp_path: Path, operation: str) -> None:
+    codes = (bytes.fromhex("31c9 " + operation + " c3"), bytes.fromhex("31c9 c3"))
+    paths, catalogs = [], []
+    for index, code in enumerate(codes):
+        image = bytearray(0x240)
+        image[0x200:0x200 + len(code)] = code
+        path = tmp_path / f"zero-{index}.exe"
+        path.write_bytes(_mz_exe(bytes(image)))
+        paths.append(path)
+        catalogs.append(_edge_catalog("demo.exe:zero", "zero", offset=0x200, size=len(code)))
+    report = compare_binary16(*paths, *catalogs, selected=["zero"], solver_timeout_ms=2000,
+                              max_function_ms=15000)
+    assert report["status"] == "proved", report
+    assert report["proof"]["obligations"]["discharged"] == 1

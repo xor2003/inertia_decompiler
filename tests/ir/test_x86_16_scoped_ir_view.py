@@ -21,6 +21,7 @@ import inertia.ir.entry_domain_call_preservation as edcp
 import inertia.ir.entry_jump_domain as ejd
 import inertia.ir.real16_invocation_domain as domain
 import inertia.ir.scoped_function_ir_view as view_mod
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
@@ -66,6 +67,49 @@ def _jmp_pending(head: int, encoding: bytes, block_addr: int = FUNC) -> object:
     return ejd.PendingTerminalJump8616(block_addr=block_addr, decoded=decoded)
 
 
+# call near +0 (-> CALLER_ADDR + 3); ret — four exact bytes that relift
+# cleanly under Arch86_16 so the universal native census can bind the
+# retained decoded block to current loader bytes.
+_CALLER_CODE = bytes.fromhex("e80000c3")
+_CALLER_EXTENTS = ((CALLER_ADDR, 3), (CALLER_ADDR + 3, 1))
+
+
+def _load_native(addr: int, size: int) -> bytes:
+    """Serve the retained caller bytes for the bound loader-memory seam."""
+    if addr >= CALLER_ADDR and addr + size <= CALLER_ADDR + len(_CALLER_CODE):
+        return _CALLER_CODE[addr - CALLER_ADDR: addr - CALLER_ADDR + size]
+    return b""
+
+
+def _project() -> SimpleNamespace:
+    """Build the mock project carrying the bound native surface.
+
+    The universal native census authenticates decoded extents, exact
+    native bytes, and an exact-byte relift, so a bare ``SimpleNamespace``
+    can no longer certify coverage: it needs a real ``Arch86_16``
+    architecture and live loader bytes.
+    """
+    return SimpleNamespace(
+        arch=Arch86_16(),
+        loader=SimpleNamespace(memory=SimpleNamespace(load=_load_native)),
+    )
+
+
+def _caller_block() -> object:
+    """Return the retained decoded block backing the caller boundary."""
+    return SimpleNamespace(
+        addr=CALLER_ADDR,
+        size=len(_CALLER_CODE),
+        bytes=_CALLER_CODE,
+        capstone=SimpleNamespace(
+            insns=tuple(
+                SimpleNamespace(address=head, size=extent)
+                for head, extent in _CALLER_EXTENTS
+            )
+        ),
+    )
+
+
 def _caller_surface(
     project: object,
 ) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616, object]:
@@ -95,6 +139,7 @@ def _caller_surface(
         frozenset({CALLER_ADDR}),
         frozenset({CALLER_ADDR, CALLER_ADDR + 3}),
         (),
+        blocks=(_caller_block(),),
     )
     coverage = prove_ir_boundary_coverage_8616(project, boundary, caller)
     assert coverage.complete
@@ -322,7 +367,7 @@ def _boundary(
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """One conditional scoped world: pending JMP plus a source-bound CALL."""
-    project = SimpleNamespace()
+    project = _project()
     boot = object()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True)
@@ -461,7 +506,7 @@ def test_window_unconditional_view_still_requires_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A window-discharged admission still needs an authenticated entry."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, _instrs = _source(call=False)
     boundary = _boundary(project, source, ((FUNC, ISLAND),))
@@ -558,7 +603,7 @@ def test_premise_discharged_view_completes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A premise-discharged far target applies under the real gate."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True, far=True)
     boundary = _boundary(project, source, ((FUNC, FAR_ISLAND),))
@@ -602,7 +647,7 @@ def test_premise_from_foreign_entry_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A premise that is not the common entry cannot redischarge."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True, far=True)
     boundary = _boundary(project, source, ((FUNC, FAR_ISLAND),))
@@ -721,7 +766,7 @@ def test_unrelated_refusal_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A non-window refusal surviving the delta refuses the whole view."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, instrs = _source(call=True, alien_refusal=True)
     boundary = _boundary(project, source, ((FUNC, ISLAND),))
@@ -767,7 +812,7 @@ def _partial_view(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[object, object, IRFunctionArtifact]:
     """Build one partially discharged scoped view with a pending hole."""
-    project = SimpleNamespace()
+    project = _project()
     caller_pack = _caller_surface(project)
     source, _instrs = _source(call=False, second_pending=True)
     boundary = _boundary(

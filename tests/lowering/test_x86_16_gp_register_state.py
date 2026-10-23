@@ -10,6 +10,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
     CConstant,
     CDirtyExpression,
+    CExpressionStatement,
+    CFunctionCall,
     CReturn,
     CStatements,
     CTypeCast,
@@ -17,15 +19,17 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.rustylib.ailment import VirtualVariableCategory
-from angr.sim_type import SimTypeLong, SimTypeShort
-from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
+from angr.sim_type import SimTypeChar, SimTypeLong, SimTypeShort
+from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.ir.core import IRAddress, IRInstr, IRValue, MemSpace
 from inertia.ir.function_ssa_registry import FunctionSSAArtifactStage8616
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.gp_register_state import (
+    _register_projection_for_shape_8616,
     gp_live_in_names_from_c_ast_8616,
     gp_live_in_names_from_ssa_8616,
     lower_architectural_gp_register_state_8616,
@@ -33,6 +37,18 @@ from inertia.lowering.gp_register_state import (
     runtime_gp_name_for_variable_8616,
 )
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
+
+
+def test_register_projection_preserves_aliases_and_refuses_conflicts() -> None:
+    """Only one coherent lane may own a shape; architecture changes stay visible."""
+    registers = {"ax": (8, 2), "AX": (8, 2), "ah": (9, 1), "flags": (40, 2)}
+    project = SimpleNamespace(arch=SimpleNamespace(registers=registers))
+    assert _register_projection_for_shape_8616(project, 8, 2) == ("eax", 0, 2)
+    assert _register_projection_for_shape_8616(project, 9, 1) == ("eax", 8, 1)
+    assert _register_projection_for_shape_8616(project, 8, 4) is None
+    assert _register_projection_for_shape_8616(project, 40, 2) is None
+    registers["bx"] = (8, 2)
+    assert _register_projection_for_shape_8616(project, 8, 2) is None
 
 
 def _gp_live_in_artifact(register_name: str = "di") -> SSAFunctionArtifact:
@@ -674,6 +690,369 @@ def test_gp_runtime_state_projects_entry_sp_from_coherent_esp_lane() -> None:
     assert codegen._inertia_global_declaration_specs_8616 == (
         ("unsigned long", "inertia_esp", None),
     )
+
+
+def _scoped_entry_project() -> SimpleNamespace:
+    """Near-call-scoped function: no published project SSA artifact."""
+    return SimpleNamespace(
+        arch=Arch86_16(),
+        _inertia_function_ssa_artifacts_8616={},
+        _inertia_function_ssa_stages_8616={},
+    )
+
+
+def _entry_dirty(codegen: object, varid: int, register_name: str) -> CDirtyExpression:
+    """Entry-version register read with the captured varid and offset."""
+    offset, size = Arch86_16().registers[register_name]
+    return CDirtyExpression(
+        Expr.VirtualVariable(
+            1,
+            varid,
+            size * 8,
+            VirtualVariableCategory.REGISTER,
+            oident=offset,
+        ),
+        codegen=codegen,
+    )
+
+
+def _stack_store(codegen: object, name: str, offset: int, rhs: object) -> CAssignment:
+    """One byte stack store mirroring the captured push-local targets."""
+    return CAssignment(
+        CVariable(
+            SimStackVariable(offset, 1, base="bp", name=name, region=0x1D43),
+            variable_type=SimTypeChar(False),
+            codegen=codegen,
+        ),
+        rhs,
+        codegen=codegen,
+    )
+
+
+def _captured_1d43_prologue(codegen: object) -> CStatements:
+    """The actual sub_1d43 prologue carriers from semantic-557432-017.
+
+    push_lo/push_hi store entry BP (dirty varid 23) bytes at ins_addr 7491;
+    mov_bp_sp assigns the BP carrier v6/ir_1 from entry SP (dirty varid 22).
+    """
+    arch = Arch86_16()
+    bp_offset, bp_size = arch.registers["bp"]
+    push_lo = _stack_store(
+        codegen,
+        "local_2",
+        -2,
+        CTypeCast(
+            None,
+            SimTypeChar(False),
+            _entry_dirty(codegen, 23, "bp"),
+            codegen=codegen,
+        ),
+    )
+    push_hi = _stack_store(
+        codegen,
+        "local_1",
+        -1,
+        CBinaryOp(
+            "Shr",
+            _entry_dirty(codegen, 23, "bp"),
+            CConstant(8, SimTypeShort(False), codegen=codegen),
+            codegen=codegen,
+        ),
+    )
+    mov_bp_sp = CAssignment(
+        CVariable(
+            SimRegisterVariable(bp_offset, bp_size, ident="ir_1", region=0x1D43),
+            variable_type=SimTypeShort(False),
+            codegen=codegen,
+        ),
+        CBinaryOp(
+            "Sub",
+            _entry_dirty(codegen, 22, "sp"),
+            CConstant(2, SimTypeShort(False), codegen=codegen),
+            codegen=codegen,
+        ),
+        codegen=codegen,
+        tags={"ins_addr": 0x1D44, "vex_stmt_idx": 23},
+    )
+    return CStatements([push_lo, push_hi, mov_bp_sp], codegen=codegen)
+
+
+def _scoped_codegen(project: object, root: object) -> SimpleNamespace:
+    """Codegen surface mirroring the production lowering boundary."""
+    codegen = SimpleNamespace(
+        project=project,
+        cstyle_null_cmp=False,
+        next_idx=lambda _name: 1,
+        next_node_idx=lambda: 1,
+        next_ident=lambda name: name,
+    )
+    codegen.cfunc = SimpleNamespace(
+        addr=0x1D43,
+        statements=root,
+        unified_local_vars={},
+        variables_in_use={},
+        variable_manager=SimpleNamespace(set_variable_type=lambda _v, _t: None),
+        refresh=lambda: None,
+    )
+    return codegen
+
+
+def test_gp_live_in_c_ast_fallback_classifies_entry_dirty_carriers() -> None:
+    """Scoped functions classify dirty entry BP/SP reads as live-ins."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    root = _captured_1d43_prologue(codegen)
+
+    live_ins = gp_live_in_names_from_c_ast_8616(root, project)
+
+    assert live_ins == frozenset({"ebp", "esp"})
+
+
+def test_gp_runtime_state_materializes_scoped_entry_dirty_prologue() -> None:
+    """Entry dirty carriers lower to emitted runtime lanes; stack writes stay."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    codegen.cfunc.statements = _captured_1d43_prologue(codegen)
+
+    assert lower_architectural_gp_register_state_8616(codegen) is True
+    root = codegen.cfunc.statements
+    assert not [
+        node
+        for node in _iter_c_nodes_deep_8616(root)
+        if isinstance(node, CDirtyExpression)
+    ]
+    push_lo, push_hi, mov_bp_sp = root.statements
+    assert isinstance(push_lo.lhs.variable, SimStackVariable)
+    assert push_lo.lhs.variable.name == "local_2"
+    assert isinstance(push_hi.lhs.variable, SimStackVariable)
+    assert push_hi.lhs.variable.name == "local_1"
+    assert isinstance(push_hi.rhs, CBinaryOp) and push_hi.rhs.op == "Shr"
+    bp_view = runtime_gp_expression_view_8616(push_hi.rhs.lhs)
+    assert bp_view is not None and bp_view.register_name == "bp"
+    lo_view = runtime_gp_expression_view_8616(
+        push_lo.rhs.expr if isinstance(push_lo.rhs, CTypeCast) else push_lo.rhs
+    )
+    assert lo_view is not None and lo_view.register_name == "bp"
+    assert isinstance(mov_bp_sp.lhs, CVariable)
+    assert isinstance(mov_bp_sp.lhs.variable, SimMemoryVariable)
+    assert mov_bp_sp.lhs.variable.name == "inertia_ebp"
+    sp_carriers = [
+        node
+        for node in _iter_c_nodes_deep_8616(mov_bp_sp.rhs)
+        if isinstance(node, CVariable)
+        and runtime_gp_name_for_variable_8616(node.variable) == "esp"
+    ]
+    assert sp_carriers
+    specs = set(codegen._inertia_global_declaration_specs_8616)
+    assert ("unsigned long", "inertia_ebp", None) in specs
+    assert ("unsigned long", "inertia_esp", None) in specs
+
+
+def test_gp_runtime_state_refuses_entry_read_after_register_write() -> None:
+    """An entry-version read after a new-BP write never reads the lane."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    prologue = _captured_1d43_prologue(codegen)
+    reordered = CStatements(
+        [prologue.statements[2], prologue.statements[1]],
+        codegen=codegen,
+    )
+    codegen.cfunc.statements = reordered
+
+    assert lower_architectural_gp_register_state_8616(codegen) is True
+    mov_bp_sp, push_hi = codegen.cfunc.statements.statements
+    assert isinstance(mov_bp_sp.lhs.variable, SimMemoryVariable)
+    assert mov_bp_sp.lhs.variable.name == "inertia_ebp"
+    assert isinstance(push_hi.rhs, CBinaryOp) and push_hi.rhs.op == "Shr"
+    assert isinstance(push_hi.rhs.lhs, CDirtyExpression)
+    assert push_hi.rhs.lhs.dirty.varid == 23
+    assert runtime_gp_expression_view_8616(push_hi.rhs.lhs) is None
+
+
+def test_gp_runtime_state_refuses_entry_read_after_dirty_write() -> None:
+    """A different version's dirty BP write still clobbers the lane."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    dirty_write = CAssignment(
+        _entry_dirty(codegen, 99, "bp"),
+        CConstant(0, SimTypeShort(False), codegen=codegen),
+        codegen=codegen,
+    )
+    late_read = _stack_store(
+        codegen,
+        "local_1",
+        -1,
+        CBinaryOp(
+            "Shr",
+            _entry_dirty(codegen, 23, "bp"),
+            CConstant(8, SimTypeShort(False), codegen=codegen),
+            codegen=codegen,
+        ),
+    )
+    codegen.cfunc.statements = CStatements([dirty_write, late_read], codegen=codegen)
+
+    lower_architectural_gp_register_state_8616(codegen)
+    _write, read_stmt = codegen.cfunc.statements.statements
+    assert isinstance(read_stmt.rhs.lhs, CDirtyExpression)
+    assert read_stmt.rhs.lhs.dirty.varid == 23
+
+
+def test_gp_live_in_c_ast_fallback_defined_dirty_varid_not_live_in() -> None:
+    """A dirty version defined inside the AST is not an entry live-in."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    root = CStatements(
+        [
+            CAssignment(
+                _entry_dirty(codegen, 23, "bp"),
+                CConstant(7, SimTypeShort(False), codegen=codegen),
+                codegen=codegen,
+            ),
+            _stack_store(
+                codegen,
+                "local_1",
+                -1,
+                CBinaryOp(
+                    "Shr",
+                    _entry_dirty(codegen, 23, "bp"),
+                    CConstant(8, SimTypeShort(False), codegen=codegen),
+                    codegen=codegen,
+                ),
+            ),
+        ],
+        codegen=codegen,
+    )
+
+    assert "ebp" not in gp_live_in_names_from_c_ast_8616(root, project)
+
+
+def test_entry_version_refusal_survives_lowering_replay() -> None:
+    """A projected runtime write remains a clobber on subsequent passes."""
+    codegen = _scoped_codegen(_scoped_entry_project(), None)
+    prologue = _captured_1d43_prologue(codegen)
+    codegen.cfunc.statements = CStatements(
+        [prologue.statements[2], prologue.statements[1]], codegen=codegen,
+    )
+    for _ in range(2):
+        lower_architectural_gp_register_state_8616(codegen)
+        late_read = codegen.cfunc.statements.statements[-1].rhs.lhs
+        assert isinstance(late_read, CDirtyExpression)
+        assert late_read.dirty.varid == 23
+
+
+def test_entry_version_after_effectful_call_is_not_current_register() -> None:
+    """An opaque call cannot justify reading old AX from the runtime lane."""
+    codegen = _scoped_codegen(_scoped_entry_project(), None)
+    dirty = _entry_dirty(codegen, 23, "ax")
+    read = _stack_store(codegen, "saved", -1, dirty)
+    call = CExpressionStatement(
+        CFunctionCall("opaque", None, args=[], codegen=codegen), codegen=codegen,
+    )
+    codegen.cfunc.statements = CStatements([call, read], codegen=codegen)
+    lower_architectural_gp_register_state_8616(codegen)
+    assert read.rhs is dirty
+
+
+def test_shared_entry_node_preserves_all_evaluations_after_write() -> None:
+    """Early occurrence of a shared node cannot authorize its later read."""
+    codegen = _scoped_codegen(_scoped_entry_project(), None)
+    shared = _entry_dirty(codegen, 23, "bp")
+    early = _stack_store(codegen, "early", -1, shared)
+    late = _stack_store(codegen, "late", -2, shared)
+    write = _captured_1d43_prologue(codegen).statements[2]
+    codegen.cfunc.statements = CStatements([early, write, late], codegen=codegen)
+    lower_architectural_gp_register_state_8616(codegen)
+    assert early.rhs is shared
+    assert late.rhs is shared
+
+
+def test_defined_dirty_versions_preserve_old_value_across_register_overwrite() -> None:
+    """Capture the old SSA value while preserving both architectural writes."""
+    codegen = _scoped_codegen(_scoped_entry_project(), None)
+    entry = _stack_store(codegen, "entry", -2, _entry_dirty(codegen, 1, "bp"))
+    writes = [
+        CAssignment(
+            _entry_dirty(codegen, varid, "bp"),
+            CConstant(value, SimTypeShort(False), codegen=codegen), codegen=codegen,
+        )
+        for varid, value in ((23, 5), (99, 9))
+    ]
+    returned = CReturn(_entry_dirty(codegen, 23, "bp"), codegen=codegen)
+    codegen.cfunc.statements = CStatements([entry, *writes, returned], codegen=codegen)
+    assert lower_architectural_gp_register_state_8616(codegen)
+    captured = returned.retval
+    assert isinstance(captured, CVariable)
+    assert writes[0].lhs is captured
+    assert writes[0].rhs.value == 5
+    statements = codegen.cfunc.statements.statements
+    assert statements[0] is entry
+    assert statements[1] is writes[0]
+    publication, overwrite = statements[2:4]
+    assert publication.rhs.rhs.lhs is captured
+    assert overwrite.rhs.rhs.lhs.value == 9
+    assert statements[4] is returned
+    assert not any(isinstance(node, CDirtyExpression)
+                   for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements))
+
+
+def test_gp_live_in_c_ast_fallback_distinct_varid_stays_live_in() -> None:
+    """Another version's definition never seeds the entry-version read."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    root = CStatements(
+        [
+            CAssignment(
+                _entry_dirty(codegen, 99, "bp"),
+                CConstant(7, SimTypeShort(False), codegen=codegen),
+                codegen=codegen,
+            ),
+            _stack_store(
+                codegen,
+                "local_1",
+                -1,
+                CBinaryOp(
+                    "Shr",
+                    _entry_dirty(codegen, 23, "bp"),
+                    CConstant(8, SimTypeShort(False), codegen=codegen),
+                    codegen=codegen,
+                ),
+            ),
+        ],
+        codegen=codegen,
+    )
+
+    assert "ebp" in gp_live_in_names_from_c_ast_8616(root, project)
+
+
+def test_gp_live_in_c_ast_fallback_ignores_unproven_dirty_carriers() -> None:
+    """Non-register, unprojectable, and non-varid dirty carriers refuse."""
+    project = _scoped_entry_project()
+    codegen = _scoped_codegen(project, None)
+    bp_offset, bp_size = Arch86_16().registers["bp"]
+    cases = (
+        # Non-register-category dirty carriers are not register reads.
+        CDirtyExpression(
+            Expr.VirtualVariable(
+                1, 23, bp_size * 8, VirtualVariableCategory.TMP, oident=bp_offset
+            ),
+            codegen=codegen,
+        ),
+        # Register offsets outside the GP view inventory are unprojectable.
+        CDirtyExpression(
+            Expr.VirtualVariable(
+                1, 23, bp_size * 8, VirtualVariableCategory.REGISTER, oident=0x222
+            ),
+            codegen=codegen,
+        ),
+        # Legacy payloads without varid SSA identity never prove a version.
+        CDirtyExpression(
+            SimpleNamespace(reg=bp_offset, bits=bp_size * 8),
+            codegen=codegen,
+        ),
+    )
+    for index, dirty in enumerate(cases):
+        root = _stack_store(codegen, f"local_{index}", -1 - index, dirty)
+        assert gp_live_in_names_from_c_ast_8616(root, project) == frozenset()
 
 
 def test_gp_runtime_state_materializes_unassigned_ax_carrier() -> None:

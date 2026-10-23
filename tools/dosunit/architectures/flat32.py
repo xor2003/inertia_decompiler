@@ -15,9 +15,21 @@ from tools.dosunit.contracts.registers import RegisterArchitecture
 
 _FLAT32_GPRS: tuple[str, ...] = ("eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi")
 _FLAT32_REG_NAMES: tuple[str, ...] = (
-    *_FLAT32_GPRS, "cc_op", "cc_dep1", "cc_dep2", "cc_ndep", "d",
+    *_FLAT32_GPRS, "cc_op", "cc_dep1", "cc_dep2", "cc_ndep", "d", "id", "ac",
     "eip", "cs", "ds", "es", "fs", "gs", "ss",
 )
+
+# Complete x87 architectural state owned by the native instruction summaries:
+# the full control/status/tag words, the eight physical 80-bit data registers
+# plus the 32-bit FNSTENV record cells. TOP lives in the status word (bits
+# 11-13) and tag classes in the tag word (2 bits per physical register);
+# VEX's fpround/fc3210 projections are lossy aliases and never substitute.
+X87_STATE_REGISTERS: tuple[tuple[str, int], ...] = (
+    ("x87_control_word", 16), ("x87_status_word", 16), ("x87_tag_word", 16),
+    ("x87_fip", 32), ("x87_fcs_op", 32), ("x87_fdp", 32), ("x87_fds", 32),
+    *(tuple((f"x87_st{index}", 80) for index in range(8))),
+)
+X87_REGISTER_NAMES: tuple[str, ...] = tuple(name for name, _width in X87_STATE_REGISTERS)
 
 
 def _flat32_register_map() -> dict[int, tuple[str, int]]:
@@ -92,7 +104,13 @@ _ORIGINAL_LOWER_EXPR = S._lower_expr
 
 def flat32_register_architecture() -> RegisterArchitecture:
     """Supply i386 block state explicitly without installing global seams."""
-    return RegisterArchitecture(tuple(_FLAT32_REGS.values()), _flat32_read_register,
+    # Native x87 summaries own these full-width fields without VEX offsets:
+    # fpround/fc3210 are lossy projections, not aliases for the complete words.
+    # The pointer/opcode environment mirrors the 32-bit FNSTENV record cells;
+    # FNINIT zeroes it and every other admitted control form preserves it.
+    return RegisterArchitecture(
+        (*_FLAT32_REGS.values(), *X87_STATE_REGISTERS),
+        _flat32_read_register,
                                 _flat32_write_register, _flat32_write_target,
                                 "eip", 32, retain_all_statements=True,
                                 expression_lowerer=_flat32_lower_expr)

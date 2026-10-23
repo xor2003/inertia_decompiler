@@ -1,0 +1,23 @@
+{
+  "schema": "dosunit.flat32_abi_observation.v1",
+  "functions": {
+    "sub_238F0": {
+      "return_bits": 32,
+      "private_stack_bytes": 0
+    },
+    "sub_23934": {
+      "return_bits": 32,
+      "private_stack_bytes": 0
+    },
+    "sub_4B3A0": {
+      "return_bits": 32,
+      "private_stack_bytes": 12,
+      "stack_disjoint_buffers": [
+        {
+          "argument_index": 0,
+          "size_bytes": 2
+        }
+      ]
+    }
+  }
+}

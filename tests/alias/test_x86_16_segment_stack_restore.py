@@ -15,6 +15,10 @@ from inertia.alias.segment_stack_restore import (
     build_x86_16_stack_register_restore_artifact_8616,
 )
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+from inertia.frontend.x86_16.lift_86_16 import (
+    Lifter86_16,  # noqa: F401 -- register the native lifter for standalone tests
+)
 from inertia.ir import (
     IRAddress,
     IRBlock,
@@ -29,12 +33,16 @@ from inertia.ir import (
     build_x86_16_segment_function_contract,
     build_x86_16_segment_state_artifact,
 )
+from inertia.ir.call_stack_coordinates import IRCallStackCoordinates8616
 from inertia.ir.core import AddressStatus
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+from inertia.semantics.call_stack_coordinates import prove_call_stack_coordinates_8616
+from inertia.semantics.callsite_summary import CallsiteSummary8616
 from inertia.structuring.decompiler_structuring_stage import DECOMPILER_STRUCTURING_PASSES
 
 
 def _lift_function(code: bytes) -> IRFunctionArtifact:
+    apply_x86_16_bootstrap()
     project = angr.Project(
         io.BytesIO(code),
         main_opts={
@@ -442,6 +450,114 @@ def test_neutral_call_contract_discards_only_transient_return_push() -> None:
 
     restoration = build_x86_16_segment_stack_restore_artifact(artifact)
 
+    assert restoration.summary["materialized_count"] == 1
+    assert restoration.summary["cross_block_restore_count"] == 1
+
+
+def _call_boundary_blocks(
+    call_addr: int, effect: IRCallStackEffect8616,
+) -> tuple[IRBlock, ...]:
+    """PUSH DS before one CALL, POP DS after it, through real block topology."""
+    return (
+        IRBlock(addr=0x4000, instrs=_push_ds_ir(0x4000), successor_addrs=(call_addr,)),
+        IRBlock(
+            addr=call_addr,
+            instrs=(
+                IRInstr(
+                    "MOV",
+                    IRValue(MemSpace.REG, name="sp", size=2),
+                    (IRValue(MemSpace.REG, name="sp", offset=-2, size=2),),
+                    addr=call_addr,
+                ),
+                IRInstr(
+                    "STORE",
+                    None,
+                    (
+                        IRAddress(
+                            MemSpace.SS,
+                            ("sp",),
+                            -4,
+                            2,
+                            AddressStatus.STABLE,
+                            SegmentOrigin.PROVEN,
+                        ),
+                        _const(call_addr + 3),
+                    ),
+                    addr=call_addr,
+                ),
+                IRInstr("CALL", None, (_const(0x5000),), addr=call_addr,
+                        call_stack_effect=effect),
+            ),
+            successor_addrs=(0x4020,),
+        ),
+        IRBlock(addr=0x4020, instrs=_pop_ds_ir(0x4020)),
+    )
+
+
+def _proven_boundary_coordinates(call_addr: int, purge: int) -> IRCallStackCoordinates8616:
+    """Supply the unit's CALL with a real admitted binary/callee SP proof."""
+    apply_x86_16_bootstrap()
+    code = bytearray(b"\x90" * 0x1003)
+    code[:4] = bytes.fromhex("1ee90c00")
+    offset = call_addr - 0x4000
+    code[offset:offset + 3] = b"\xe8" + (0x5000 - call_addr - 3).to_bytes(2, "little")
+    code[0x13:0x16] = bytes.fromhex("e90a00")
+    code[0x20:0x22] = bytes.fromhex("1fc3")
+    ret = b"\xc3" if purge == 0 else b"\xc2" + purge.to_bytes(2, "little")
+    code[0x1000:0x1000 + len(ret)] = ret
+    project = angr.Project(io.BytesIO(bytes(code)), main_opts={
+        "backend": "blob", "arch": Arch86_16(), "base_addr": 0x4000, "entry_point": 0x4000,
+    })
+    project.analyses.CFGFast(normalize=True)
+    block = _call_boundary_blocks(call_addr, IRCallStackEffect8616())[1]
+    summary = CallsiteSummary8616(
+        callsite_addr=call_addr, target_addr=0x5000, return_addr=call_addr + 3,
+        kind="direct_near", arg_count=0, arg_widths=(), stack_cleanup=None,
+        return_register=None, return_used=None,
+    )
+    coordinates = prove_call_stack_coordinates_8616(
+        project, summary, instruction=block.instrs[-1], block=block,
+    )
+    assert coordinates.has_proven_sp_delta
+    return coordinates
+
+
+def test_proven_call_sp_coordinate_survives_unproven_memory_effect() -> None:
+    """An independently evidenced SP delta outlives a refused byte census."""
+    call_addr = 0x4010
+    effect = IRCallStackEffect8616(
+        complete=False,
+        net_stack_delta=2,
+        stack_coordinates=_proven_boundary_coordinates(call_addr, 2),
+    )
+    artifact = IRFunctionArtifact(
+        function_addr=0x4000, blocks=_call_boundary_blocks(call_addr, effect),
+    )
+
+    # -2 from PUSH DS before the boundary, +2 proven callee purge after it.
+    assert _solve_stack_states(artifact)[call_addr].sp_delta == 0
+
+    restoration = build_x86_16_segment_stack_restore_artifact(artifact)
+    # Byte identities never survive without their own preservation proof.
+    assert restoration.summary["materialized_count"] == 0
+    assert restoration.facts[0].verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+
+
+def test_proven_call_sp_coordinate_composes_with_byte_census() -> None:
+    """A proven coordinate alone drives both SP tracking and byte survival."""
+    call_addr = 0x4010
+    effect = IRCallStackEffect8616(
+        complete=True,
+        net_stack_delta=0,
+        stack_coordinates=_proven_boundary_coordinates(call_addr, 0),
+    )
+    artifact = IRFunctionArtifact(
+        function_addr=0x4000, blocks=_call_boundary_blocks(call_addr, effect),
+    )
+
+    restoration = build_x86_16_segment_stack_restore_artifact(artifact)
+
+    assert _solve_stack_states(artifact)[call_addr].sp_delta == -2
     assert restoration.summary["materialized_count"] == 1
     assert restoration.summary["cross_block_restore_count"] == 1
 

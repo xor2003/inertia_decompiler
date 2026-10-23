@@ -17,7 +17,7 @@ from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable, SimTemporaryVariable
 
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir import IRCallOutputProvenance8616, IRCallOutputShape8616
+from inertia.ir import IRCallOutputShape8616
 from inertia.lowering.call_return_stack_bindings import call_result_escapes_group_8616
 from inertia.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
@@ -32,11 +32,21 @@ from inertia.lowering.wide_call_output_assignment_contracts import (
     WideCallOutputAssignmentStats8616,
     WideCallOutputAssignmentVerdict8616,
 )
+from inertia.lowering.wide_call_output_assignment_evidence import (
+    normalize_wide_call_output_assignment_fact_8616,
+)
 from inertia.lowering.wide_call_output_assignment_replay import (
     WideCallOutputAuthoritativeOwnershipStatus8616,
     classify_authoritative_wide_call_output_projection_8616,
 )
 from inertia.semantics.carry_borrow_contracts import CarryBorrowKind8616
+from inertia.widening.pair_type_contracts import WidePairState8616
+from tests.fixtures.x86_16_carry_borrow_call_output_support import (
+    WIDE_STACK_ADD,
+    WIDE_STACK_SUB,
+    wide_assignment_fixture,
+    wide_assignment_storage,
+)
 
 _INITIAL_CALLSITE = 0x100B
 _LATER_CALLSITE = 0x101A
@@ -175,35 +185,39 @@ def test_unique_same_target_fallback_remains_available_without_exact_callsite() 
     assert result.tags["ins_addr"] == _INITIAL_CALLSITE
 
 
-def _wide_fact(callsite_addr: int = 0x100B) -> WideCallOutputAssignmentFact8616:
-    """Build the exact wide call-output fact used by ownership tests."""
-    return WideCallOutputAssignmentFact8616(
-        call_output=IRCallOutputProvenance8616(
-            callsite_addr=callsite_addr,
-            target_addr=0x1446,
-            shape=IRCallOutputShape8616.DX_AX,
-        ),
-        kind=CarryBorrowKind8616.ADD_WITH_CARRY,
-        source_offset=4,
-        destination_offset=-4,
-        carrier_ins_addrs=(0x100B, 0x100E, 0x1011, 0x1014, 0x1017),
-        store_ins_addrs=(0x1014, 0x1017),
+def _wide_authority_fixture(code: bytes = WIDE_STACK_ADD):
+    """Build a real lifted wide fact, storage, and codegen boundary."""
+    codegen, _root, _call, _source = wide_assignment_fixture(code=code)
+    pipeline, storage = wide_assignment_storage(codegen)
+    fact = normalize_wide_call_output_assignment_fact_8616(pipeline, storage)
+    assert isinstance(fact, WideCallOutputAssignmentFact8616)
+    return codegen, storage, fact
+
+
+def _legacy_classify_kwargs(fact: WideCallOutputAssignmentFact8616) -> dict:
+    """Project one real fact into the legacy classifier's scalar surface."""
+    arithmetic = sorted(
+        set(fact.carrier_ins_addrs)
+        - {fact.call_output.callsite_addr}
+        - set(fact.store_ins_addrs)
     )
+    return {
+        "callsite_addr": fact.call_output.callsite_addr,
+        "target_addr": fact.call_output.target_addr,
+        "kind": fact.kind,
+        "source_offset": fact.source_offset,
+        "destination_offset": fact.destination_offset,
+        "low_arithmetic_addr": arithmetic[0],
+        "high_arithmetic_addr": arithmetic[-1],
+        "low_store_addr": fact.store_ins_addrs[0],
+        "high_store_addr": fact.store_ins_addrs[1],
+    }
 
 
-@pytest.mark.parametrize("delta", [0, 0x10000])
-@pytest.mark.parametrize("target_adjustment", [0, 1])
-@pytest.mark.parametrize("shape", [IRCallOutputShape8616.DX_AX, IRCallOutputShape8616.AX])
-def test_authoritative_wide_assignment_blocks_legacy_projection(delta, target_adjustment, shape) -> None:
-    """Treat the exact dedicated wide-call result as the sole semantic owner."""
-    project, codegen, _destination = _fixture()
-    project._inertia_original_linear_delta = delta
-    fact = _wide_fact()
-    fact = replace(fact, call_output=replace(
-        fact.call_output, target_addr=fact.call_output.target_addr + delta + target_adjustment, shape=shape,
-    ))
+def _publish_artifact(codegen, storage, fact: WideCallOutputAssignmentFact8616) -> None:
+    """Attach one materialized-resolution artifact to the codegen boundary."""
     resolution = WideCallOutputAssignmentResolution8616(
-        source=object(),
+        source=storage,
         verdict=WideCallOutputAssignmentVerdict8616.MATERIALIZED,
         fact=fact,
         placement_classified=True,
@@ -221,17 +235,22 @@ def test_authoritative_wide_assignment_blocks_legacy_projection(delta, target_ad
         )
     )
 
+
+@pytest.mark.parametrize("delta", [0, 0x10000])
+@pytest.mark.parametrize("target_adjustment", [0, 1])
+@pytest.mark.parametrize("shape", [IRCallOutputShape8616.DX_AX, IRCallOutputShape8616.AX])
+def test_authoritative_wide_assignment_blocks_legacy_projection(delta, target_adjustment, shape) -> None:
+    """Treat the exact dedicated wide-call result as the sole semantic owner."""
+    codegen, storage, fact = _wide_authority_fixture()
+    codegen.project._inertia_original_linear_delta = delta
+    base_target = fact.call_output.target_addr
+    fact = replace(fact, call_output=replace(
+        fact.call_output, target_addr=base_target + delta + target_adjustment, shape=shape,
+    ))
+    _publish_artifact(codegen, storage, fact)
+
     ownership = classify_authoritative_wide_call_output_projection_8616(
-        codegen,
-        callsite_addr=0x100B,
-        target_addr=0x1446,
-        kind=CarryBorrowKind8616.ADD_WITH_CARRY,
-        source_offset=4,
-        destination_offset=-4,
-        low_arithmetic_addr=0x100E,
-        high_arithmetic_addr=0x1011,
-        low_store_addr=0x1014,
-        high_store_addr=0x1017,
+        codegen, **_legacy_classify_kwargs(fact) | {"target_addr": base_target}
     )
 
     accepted = target_adjustment == 0 and shape is IRCallOutputShape8616.DX_AX
@@ -248,39 +267,133 @@ def test_authoritative_wide_assignment_blocks_legacy_projection(delta, target_ad
 
 def test_different_wide_callsite_does_not_claim_legacy_projection() -> None:
     """Do not suppress a direct projection when the dedicated fact is different."""
-    _project, codegen, _destination = _fixture()
-    resolution = WideCallOutputAssignmentResolution8616(
-        source=object(),
-        verdict=WideCallOutputAssignmentVerdict8616.MATERIALIZED,
-        fact=_wide_fact(callsite_addr=0x1020),
-        placement_classified=True,
+    codegen, storage, fact = _wide_authority_fixture()
+    foreign = replace(
+        fact,
+        call_output=replace(fact.call_output, callsite_addr=0x1020),
+        carrier_ins_addrs=tuple(
+            sorted(
+                set(fact.carrier_ins_addrs)
+                - {fact.call_output.callsite_addr}
+                | {0x1020}
+            )
+        ),
     )
-    codegen._inertia_wide_call_output_assignment_artifact_8616 = (
-        WideCallOutputAssignmentArtifact8616(
-            function_addr=0x1000,
-            resolutions=(resolution,),
-            stats=WideCallOutputAssignmentStats8616(
-                raw_fact_count=1,
-                normalized_fact_count=1,
-                classified_fact_count=1,
-                materialized_count=1,
-            ),
-        )
-    )
+    _publish_artifact(codegen, storage, foreign)
 
     ownership = classify_authoritative_wide_call_output_projection_8616(
-        codegen,
-        callsite_addr=0x100B,
-        target_addr=0x1446,
-        kind=CarryBorrowKind8616.ADD_WITH_CARRY,
-        source_offset=4,
-        destination_offset=-4,
-        low_arithmetic_addr=0x100E,
-        high_arithmetic_addr=0x1011,
-        low_store_addr=0x1014,
-        high_store_addr=0x1017,
+        codegen, **_legacy_classify_kwargs(fact)
     )
 
     assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.FACT_ABSENT
     assert ownership.blocks_legacy_materialization is False
     assert ownership.materialized is False
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    (
+        pytest.param(lambda fact: replace(fact, pair=None), id="missing-pair"),
+        pytest.param(
+            lambda fact: replace(
+                fact, pair=replace(fact.pair, state=WidePairState8616.UNPAIRED)
+            ),
+            id="unpaired",
+        ),
+        pytest.param(
+            lambda fact: replace(
+                fact, pair=replace(fact.pair, state=WidePairState8616.SPLIT)
+            ),
+            id="split-only",
+        ),
+        pytest.param(
+            lambda fact: replace(
+                fact,
+                pair=replace(fact.pair, low=fact.pair.high, high=fact.pair.low),
+            ),
+            id="foreign-halves",
+        ),
+    ),
+)
+def test_wide_authority_refuses_unauthenticated_pair(corrupt) -> None:
+    """Missing or inconsistent pair evidence never certifies authority."""
+    codegen, storage, fact = _wide_authority_fixture()
+    _publish_artifact(codegen, storage, corrupt(fact))
+
+    ownership = classify_authoritative_wide_call_output_projection_8616(
+        codegen, **_legacy_classify_kwargs(fact)
+    )
+
+    assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.REFUSED
+    assert ownership.blocks_legacy_materialization
+    assert not ownership.materialized
+
+
+def test_wide_authority_refuses_unauthenticated_source() -> None:
+    """A foreign resolution source never certifies authority."""
+    codegen, _storage, fact = _wide_authority_fixture()
+    _publish_artifact(codegen, object(), fact)
+
+    ownership = classify_authoritative_wide_call_output_projection_8616(
+        codegen, **_legacy_classify_kwargs(fact)
+    )
+
+    assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.REFUSED
+    assert ownership.blocks_legacy_materialization
+    assert not ownership.materialized
+
+
+@pytest.mark.parametrize(
+    ("code", "kind"),
+    (
+        pytest.param(WIDE_STACK_ADD, CarryBorrowKind8616.ADD_WITH_CARRY, id="add"),
+        pytest.param(WIDE_STACK_SUB, CarryBorrowKind8616.SUB_WITH_BORROW, id="sub"),
+    ),
+)
+def test_authoritative_wide_kind_blocks_legacy_projection(code, kind) -> None:
+    """The dedicated owner claims its exact ADD or SUB projection."""
+    codegen, storage, fact = _wide_authority_fixture(code)
+    assert fact.kind is kind
+    _publish_artifact(codegen, storage, fact)
+
+    ownership = classify_authoritative_wide_call_output_projection_8616(
+        codegen, **_legacy_classify_kwargs(fact)
+    )
+
+    assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.MATERIALIZED
+    assert ownership.blocks_legacy_materialization
+    assert ownership.materialized
+    assert ownership.fact == fact
+
+
+def test_wide_authority_refuses_forged_operation_kind() -> None:
+    """A resolution claiming a different arithmetic kind never certifies."""
+    codegen, storage, fact = _wide_authority_fixture()
+    forged = replace(fact, kind=CarryBorrowKind8616.SUB_WITH_BORROW)
+    _publish_artifact(codegen, storage, forged)
+
+    ownership = classify_authoritative_wide_call_output_projection_8616(
+        codegen, **_legacy_classify_kwargs(forged)
+    )
+
+    assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.REFUSED
+    assert ownership.blocks_legacy_materialization
+    assert not ownership.materialized
+
+
+def test_wide_authority_refuses_coherent_shifted_destination() -> None:
+    """A destination offset agreeing with the fact but not the stores refuses."""
+    codegen, storage, fact = _wide_authority_fixture()
+    forged_source = replace(
+        storage, address=replace(storage.address, offset=2)
+    )
+    forged = replace(fact, destination_offset=2)
+    _publish_artifact(codegen, forged_source, forged)
+
+    ownership = classify_authoritative_wide_call_output_projection_8616(
+        codegen, **_legacy_classify_kwargs(forged)
+    )
+
+    assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.REFUSED
+    assert ownership.blocks_legacy_materialization
+    assert not ownership.materialized

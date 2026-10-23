@@ -218,7 +218,7 @@ def _visit_word_global_stores_8616(node: object, project: object, codegen: objec
 
 
 def _word_global_store_pair_step_8616(
-    node: object,
+    node: CStatements,
     i: int,
     stmt: object,
     project: object,

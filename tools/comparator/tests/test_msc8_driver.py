@@ -169,6 +169,9 @@ def test_closed_loop_induction_and_corrupt_control() -> None:
         "timeout_ms": 10000,
     }
     assert compare_cfg(oracle, candidate, **kwargs)["status"] == "passed"
+    unused = compare_cfg(oracle, candidate, normalization={0x40001000: 0x40002000}, **kwargs)
+    assert unused["status"] == "passed", unused
+    assert unused["normalization_used"] is False
     failed_relation = compare_cfg(oracle, corrupt, **kwargs)
     assert failed_relation["status"] == "refused", failed_relation
     assert failed_relation["backend_status"] == "failed", failed_relation
@@ -204,6 +207,23 @@ def test_auto_retries_only_loop_refusal_with_bounded_cfg(monkeypatch: pytest.Mon
     assert report["results"][0]["reason"] == "matched_cfg_induction"
     assert seen[0]["max_blocks"] == 8
     assert seen[0]["timeout_ms"] == 250
+
+
+@pytest.mark.parametrize("value,width,normalization,expected", [
+    (0x1234, 32, {0x1234: 0x4321}, True),
+    (0xABCD1234, 32, {0x1234: 0x4321}, True),
+    (0x1234, 16, {0xABCD1234: 0x4321}, False),
+    (0x1234, 32, {0x1234: 0x1234}, False),
+])
+def test_cfg_normalization_use_matches_width_and_low_word_policy(
+    value: int, width: int, normalization: dict[int, int], expected: bool,
+) -> None:
+    """A low-word rewrite must not be incorrectly classified as unused."""
+    from tools.comparator.msc8_cfg import _normalization_changes
+
+    document = {"functions": [{"assignments": [], "outputs": {
+        "eax": {"op": "const", "width": width, "value": hex(value)}}}]}
+    assert _normalization_changes(document, normalization) is expected
 
 
 def test_floating_point_body_is_a_refusal_not_an_exception() -> None:
@@ -381,6 +401,7 @@ def test_stripped_pe32_link_map_relocation_is_only_conditional(tmp_path: Path) -
         literal = driver.compare(args)
     assert literal["results"][0]["status"] == "failed"
     assert json.loads((args.out_dir / "globals.json").read_text()) == {}
+    assert literal["proof_contract"]["global_layout_check"]["status"] == "incomplete"
 
     publics = " 0002:00000000       _dword_402000            00403000   data.obj\n"
     relocated = _leaf_link_map_run(tmp_path / "mapped", publics)
@@ -388,6 +409,8 @@ def test_stripped_pe32_link_map_relocation_is_only_conditional(tmp_path: Path) -
     assert row["status"] == "conditional", row
     assert row["backend_status"] == "passed"
     assert relocated["summary"]["passed"] == 0
+    assert relocated["proof_contract"]["global_layout_check"]["mapped_positions"] == 1
+    assert relocated["proof_contract"]["global_layout_check"]["uniform_displacement"] == 0x1000
     premise = relocated["proof_contract"]["global_normalization"]
     assert isinstance(premise, dict)
     map_file = tmp_path / "mapped" / "candidate.map"
@@ -404,6 +427,124 @@ def test_link_map_keeps_declared_register_observations(tmp_path: Path) -> None:
     code = b"\xa1" + _CANDIDATE_DATA.to_bytes(4, "little") + bytes.fromhex("ba01000000c3")
     report = _leaf_link_map_run(tmp_path, publics, candidate_code=code)
     assert report["results"][0]["status"] == "failed", report["results"][0]
+
+
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("environment_complete", [False, True])
+def test_link_map_matched_cfg_keeps_relocation_conditional(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool, environment_complete: bool,
+) -> None:
+    """A relocated two-block PE proves conditionally; changed EDX never proves."""
+    from tools.comparator import msc8_cli as driver
+    from tools.dosunit.contracts.binary_environment import EnvironmentScan
+
+    if not environment_complete:
+        monkeypatch.setattr(
+            "tools.dosunit.contracts.binary_environment.scan_lowered_parts",
+            lambda *_args, **_kwargs: EnvironmentScan(False, False, 0),
+        )
+
+    suffix = bytes.fromhex("eb00ba01000000c3" if changed else "eb00c3")
+    candidate_code = b"\xa1" + _CANDIDATE_DATA.to_bytes(4, "little") + suffix
+    oracle_code = b"\xa1" + _ORACLE_DATA.to_bytes(4, "little") + bytes.fromhex("eb00c3")
+    args = _link_map_fixture(tmp_path, candidate_code)
+    args.oracle_exe.write_bytes(_pe32_image(oracle_code, timestamp=0x11111111, data_rva=0x2000))
+    args.oracle_lst.write_text(
+        ".text:00401000 f proc\n.text:00401007 f endp\n"
+        ".data:00402000 dword_402000 dd 0\n"
+    )
+    args.mode = "matched-cfg"
+    args.candidate_link_map = tmp_path / "candidate.map"
+    args.candidate_link_map.write_text(_link_map_text(
+        " 0002:00000000       _dword_402000            00403000   data.obj\n"
+    ))
+    report = driver.compare(args)
+    row = report["results"][0]
+    assert report["summary"]["passed"] == 0
+    assert report["proof_contract"]["global_normalization"]["map"]["sha256"]
+    layout = report["proof_contract"]["global_layout_check"]
+    assert layout["status"] == "incomplete" and layout["mapped_positions"] == 1
+    assert not layout["function_equivalence_proved"]
+    if changed:
+        # Whole-root composition now supplies a reachable entry-state
+        # counterexample, beyond the failed cutpoint induction proposal.
+        assert row["status"] == "failed", row
+        assert row["proof_method"] == "checked_complete_region_composition"
+        assert any(item.get("reg") == "edx" for item in row["mismatches"])
+    elif not environment_complete:
+        assert row["status"] == "refused", row
+        assert row["reason"] == "environment_effect_coverage_incomplete"
+    else:
+        assert row["status"] == "conditional", row
+        assert row["assumptions"]["constant_map"] == {"0x403000": "0x402000"}
+        assert len(row["block_pairs"]) == 2
+
+
+@pytest.mark.parametrize("case", ["equal", "changed", "unmapped"])
+def test_link_map_cfg_composes_actual_helper_body(tmp_path: Path, case: str) -> None:
+    """A mapped helper needs full byte composition under the same relocation premise."""
+    from tools.comparator import msc8_cli as driver
+
+    caller = bytes.fromhex("e801000000c3")
+    original_helper = b"\xa1" + _ORACLE_DATA.to_bytes(4, "little") + b"\xc3"
+    suffix = bytes.fromhex("ba01000000c3") if case == "changed" else b"\xc3"
+    candidate_helper = b"\xa1" + _CANDIDATE_DATA.to_bytes(4, "little") + suffix
+    args = _link_map_fixture(tmp_path, caller + candidate_helper)
+    args.oracle_exe.write_bytes(_pe32_image(caller + original_helper, timestamp=0x11111111, data_rva=0x2000))
+    root = ".text:00401000 f proc\n.text:00401005 f endp\n"
+    args.oracle_lst.write_text(root +
+        ".text:00401006 original_helper proc\n.text:0040100B original_helper endp\n"
+        ".data:00402000 dword_402000 dd 0\n"
+    )
+    candidate_listing = root
+    if case != "unmapped":
+        end = 0x401006 + len(candidate_helper) - 1
+        candidate_listing += f".text:00401006 rebuilt_helper proc\n.text:{end:08X} rebuilt_helper endp\n"
+    args.candidate_lst.write_text(candidate_listing)
+    args.mode = "matched-cfg"
+    args.candidate_link_map = tmp_path / "candidate.map"
+    args.candidate_link_map.write_text(_link_map_text(
+        " 0002:00000000       _dword_402000            00403000   data.obj\n"
+    ))
+    row, = driver.compare(args)["results"]
+    assert row["status"] == {"equal": "conditional", "changed": "failed", "unmapped": "refused"}[case], row
+    if case != "unmapped":
+        assert row["proof_method"] == "checked_direct_call_composition"
+        assert row["normalization_assumptions"]["constant_map"] == {"0x403000": "0x402000"}
+        assert row["oracle_inlined_calls"] == row["candidate_inlined_calls"] == 1
+        assert row["return_targets_proved"] == 2
+    else:
+        assert set(row["additional_proof_attempts"]) == {"calls"}
+        assert row["additional_proof_attempts"]["calls"]["reason"].startswith("call_target_unmapped:")
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_normalized_complete_region_does_not_require_a_call(tmp_path: Path, changed: bool) -> None:
+    """Different acyclic CFG shapes still compare complete native root effects."""
+    from tools.comparator import msc8_cli as driver
+    from tools.dosunit.contracts.proof_scope import ProofScope
+
+    # The original has two RET sites; the candidate shares one RET through
+    # an explicit jump. Both compute !!loaded_global unless deliberately changed.
+    oracle_code = b"\xa1" + _ORACLE_DATA.to_bytes(4, "little") + bytes.fromhex("85c07406b801000000c331c0c3")
+    arm = "b802000000" if changed else "b801000000"
+    candidate_code = b"\xa1" + _CANDIDATE_DATA.to_bytes(4, "little") + bytes.fromhex("85c07407" + arm + "eb0231c0c3")
+    args = _link_map_fixture(tmp_path, candidate_code)
+    args.oracle_exe.write_bytes(_pe32_image(oracle_code, timestamp=0x11111111, data_rva=0x2000))
+    args.oracle_lst.write_text(
+        f".text:00401000 f proc\n.text:{0x401000 + len(oracle_code) - 1:08X} f endp\n"
+        ".data:00402000 dword_402000 dd 0\n"
+    )
+    args.mode = "matched-cfg"
+    args.candidate_link_map = tmp_path / "candidate.map"
+    args.candidate_link_map.write_text(_link_map_text(
+        " 0002:00000000       _dword_402000            00403000   data.obj\n"
+    ))
+    row, = driver.compare(args)["results"]
+    assert row["status"] == ("failed" if changed else "conditional"), row
+    assert row["proof_method"] == "checked_complete_region_composition"
+    assert row["proof_scope"] is ProofScope.COMPLETE_FUNCTION
+    assert row["oracle_inlined_calls"] == row["candidate_inlined_calls"] == 0
 
 
 def test_link_map_relocation_cannot_hide_changed_arithmetic(tmp_path: Path) -> None:

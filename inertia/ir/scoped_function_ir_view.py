@@ -32,40 +32,60 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
+from typing import cast
 
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 from .core import IRBlock, IRFunctionArtifact, IRRefusal, IRValue, MemSpace
+from .entry_domain_call_preservation import EntryDomainCallPreservation8616
 from .entry_jump_domain import (
+    AdmittedScopedCallTarget8616,
     AdmittedTerminalJump8616,
     EntryJumpDomainApplication8616,
     EntryJumpDomainApplicationStatus8616,
+    EntryJumpDomainBudget8616,
     EntryJumpDomainProof8616,
+    EntryJumpDomainStats8616,
+    ScopedCallTargetStatus8616,
+    _ApplicationSealTiming8616,
+    _apply_entry_jump_domain_core_8616,
+    _staged_near_call_entry_domain_8616,
     apply_entry_jump_domain_8616,
 )
+from .entry_projection_mode import EntryProjectionMode8616
 from .ir_boundary_cfg import (
     IRBoundaryCoverageResult8616,
     _instruction_census_matches_8616,
     _scoped_native_failure_8616,
     closed_ir_boundary_cfg_8616,
 )
+from .native_import_surface_cache import native_import_request_8616
+from .near_call_jump_scope import NearCallJumpScope8616
 from .real16_boot_entry_link import RawBootEntrySurface8616
 from .real16_invocation_domain import (
     DeclaredFunctionEntryLink8616,
     Real16CallChainLink8616,
     Real16EnclosedEntryLink8616,
     Real16InvocationDomain8616,
+    Real16InvocationKind8616,
     same_real16_entry_scope_8616,
 )
 from .segment_call_preservation import (
+    declared_entry_dependency_traversal_scope_8616,
     segment_call_dependency_traversal_scope_8616,
 )
 from .source_graph_binding import source_graphs_equal_8616
-from .vex_terminal_jump import TerminalJumpRefusalReason8616
+from .vex_terminal_jump import (
+    TerminalJumpEvidence8616,
+    TerminalJumpRefusalReason8616,
+)
+
+type EntryJumpConsumingScope8616 = Real16InvocationDomain8616 | NearCallJumpScope8616
+
 
 __all__ = [
     "ScopedFunctionCFGProjection8616",
@@ -95,8 +115,36 @@ class ScopedFunctionIRViewFailure8616(StrEnum):
     RESIDUAL_REFUSAL = "residual_refusal"
 
 
+def _same_consuming_scope_8616(
+    offered: EntryJumpConsumingScope8616 | None,
+    retained: EntryJumpConsumingScope8616 | None,
+) -> bool:
+    """Keep near-call identity distinct from full invocation-domain transport."""
+    if isinstance(offered, NearCallJumpScope8616) or isinstance(retained, NearCallJumpScope8616):
+        return offered is retained
+    return offered is not None and same_real16_entry_scope_8616(offered, retained)
+
+
+def _apply_for_scope_8616(
+    artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
+    scope: EntryJumpConsumingScope8616 | None,
+    mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
+) -> EntryJumpDomainApplication8616:
+    """Replay the shared application, sealing native scopes after all callbacks.
+
+    Internal near-call consumers use the existing FINAL seal exactly once.
+    Public standalone application retains its EAGER admission checks.
+    """
+    if isinstance(scope, NearCallJumpScope8616):
+        return _apply_entry_jump_domain_core_8616(
+            artifact, proof, invocation_scope=None, near_call_scope=scope,
+            projection_mode=mode, seal=_ApplicationSealTiming8616.FINAL,
+        )
+    return apply_entry_jump_domain_8616(artifact, proof, invocation_scope=scope, projection_mode=mode)
+
+
 def _scope_surface_bound_8616(
-    scope: Real16InvocationDomain8616 | None,
+    scope: EntryJumpConsumingScope8616 | None,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
 ) -> bool:
@@ -112,6 +160,16 @@ def _scope_surface_bound_8616(
     was proved over, rooted at the consumed function head under the same
     project authority.
     """
+    if isinstance(scope, NearCallJumpScope8616):
+        # This gate binds ownership only, just like the invocation cases below.
+        # Both consumers synchronously call the application owner, which
+        # authenticates the full native CALL census before returning evidence.
+        return (
+            scope.context.boundary is boundary
+            and scope.project is boundary.project
+            and scope.artifact is artifact
+            and scope.context.target_addr == artifact.function_addr
+        )
     if scope is None or type(scope) is not Real16InvocationDomain8616:
         return False
     if scope.project is not boundary.project:
@@ -127,7 +185,10 @@ def _scope_surface_bound_8616(
         )
     chain = scope.chain
     if type(chain) in (RawBootEntrySurface8616, DeclaredFunctionEntryLink8616):
-        return chain.artifact is artifact and chain.boundary is boundary
+        bound_chain = cast(
+            RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616, chain
+        )
+        return bound_chain.artifact is artifact and bound_chain.boundary is boundary
     if isinstance(chain, (Real16CallChainLink8616, Real16EnclosedEntryLink8616)):
         return (
             chain.callee_artifact is artifact
@@ -293,16 +354,39 @@ def _application_authentic_8616(
         )
     ):
         return False
-    return application.invocation_scope is proof.invocation_scope
+    return (application.invocation_scope is proof.invocation_scope
+            and application.near_call_scope is proof.near_call_scope)
 
 
 def _identity_surface_complete_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
+    application: EntryJumpDomainApplication8616,
 ) -> bool:
-    """Authenticate a complete unchanged native leaf, never an unresolved transform."""
+    """Authenticate unchanged native control without inventing CALL authority.
+
+    CONTROL_ONLY retains every raw CALL and reports no target admission.
+    A semantic target request still requires the canonical admission owner;
+    its missing proof cannot be promoted through an unchanged CFG.
+    """
     if any(instruction.op == "CALL" for block in artifact.blocks for instruction in block.instrs):
-        return False
+        if application.call_target_status is ScopedCallTargetStatus8616.NOT_REQUESTED:
+            if application.call_targets or application.call_target_stats.materialized_count:
+                return False
+        elif application.call_target_status is ScopedCallTargetStatus8616.ADMITTED:
+            calls = tuple((block, instruction) for block in artifact.blocks
+                          for instruction in block.instrs if instruction.op == "CALL")
+            count = len(calls)
+            stats = application.call_target_stats
+            if ((stats.raw_fact_count, stats.normalized_fact_count, stats.classified_fact_count,
+                 stats.materialized_count, stats.failure_count) != (count, count, count, count, 0)
+                    or len(application.call_targets) != count):
+                return False
+            if any(sum(target.block is block and target.instruction is instruction
+                       for target in application.call_targets) != 1 for block, instruction in calls):
+                return False
+        else:
+            return False
     if artifact.refusals or any(block.refusals for block in artifact.blocks):
         return False
     return (
@@ -359,12 +443,23 @@ class ScopedFunctionCFGProjection8616:
 
     function_addr: int
     source_artifact: IRFunctionArtifact
-    scope: Real16InvocationDomain8616
+    scope: EntryJumpConsumingScope8616
     applied: tuple[AdmittedTerminalJump8616, ...]
     blocks: tuple[IRBlock, ...]
     successors: Mapping[int, tuple[int, ...]]
     predecessors: Mapping[int, tuple[int, ...]]
     pending: Mapping[int, tuple[IRRefusal, ...]]
+
+    #: Raw blocks proved unreachable under this exact consuming invocation.
+    #: They remain in the instruction census but grant no outgoing claim.
+    unreachable_block_addrs: frozenset[int] = frozenset()
+
+    # Calls are separate conditional semantic facts; blocks stay control-only.
+    call_targets: tuple[AdmittedScopedCallTarget8616, ...] = ()
+    call_target_status: ScopedCallTargetStatus8616 = ScopedCallTargetStatus8616.UNPROVED
+    call_target_stats: EntryJumpDomainStats8616 = field(
+        default_factory=lambda: EntryJumpDomainStats8616(0, 0, 0, 0, 0),
+    )
 
     def block_for(self, block_addr: int) -> IRBlock | None:
         """Return the effective block, or ``None`` outside the census."""
@@ -442,13 +537,17 @@ class ScopedFunctionIRView8616:
         default=None, compare=False, repr=False
     )
 
+    near_call_scope: NearCallJumpScope8616 | None = field(
+        default=None, compare=False, repr=False
+    )
+
     @property
     def complete(self) -> bool:
         """A scoped view never completes context-free; see ``complete_for``."""
         return self.complete_for(None)
 
     def _consumption_bound_8616(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None
     ) -> bool:
         """Rebind the offered entry and retained records to the proof.
 
@@ -467,25 +566,22 @@ class ScopedFunctionIRView8616:
         """
         if self.failure is not None:
             return False
-        if (
-            type(consuming_scope) is not Real16InvocationDomain8616
-            or self.invocation_scope is None
-            or self.application is None
+        retained_scope = self.near_call_scope or self.invocation_scope
+        if self.application is None or not _same_consuming_scope_8616(
+            consuming_scope, retained_scope,
         ):
+            return False
+        if self.near_call_scope is not None and self.invocation_scope is not None:
             return False
         retained = self.application
         if not _scope_surface_bound_8616(
-            self.invocation_scope, self.source_artifact, self.boundary
-        ):
-            return False
-        if not same_real16_entry_scope_8616(
-            consuming_scope, self.invocation_scope
+            retained_scope, self.source_artifact, self.boundary,
         ):
             return False
         if not _application_authentic_8616(retained, self.proof):
             return False
         if retained.status is EntryJumpDomainApplicationStatus8616.EMPTY and not (
-            _identity_surface_complete_8616(self.source_artifact, self.boundary)
+            _identity_surface_complete_8616(self.source_artifact, self.boundary, retained)
         ):
             return False
         counts = (
@@ -509,7 +605,8 @@ class ScopedFunctionIRView8616:
         )
 
     def _replay_authentic_8616(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None,
+        mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
     ) -> EntryJumpDomainApplication8616 | None:
         """Replay admission under the offered entry and authenticate it.
 
@@ -521,12 +618,11 @@ class ScopedFunctionIRView8616:
         refusal may survive on the effective surface.
         """
         retained = self.application
-        fresh = apply_entry_jump_domain_8616(
-            self.source_artifact,
-            self.proof,
-            invocation_scope=consuming_scope,
-        )
+        fresh = _apply_for_scope_8616(self.source_artifact, self.proof, consuming_scope, mode)
         if not _application_authentic_8616(fresh, self.proof):
+            return None
+        if (fresh.status is EntryJumpDomainApplicationStatus8616.EMPTY
+                and not _identity_surface_complete_8616(self.source_artifact, self.boundary, fresh)):
             return None
         if (
             _transform_delta_failure_8616(
@@ -548,22 +644,29 @@ class ScopedFunctionIRView8616:
         return fresh
 
     def _validated_application_for(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None,
+        mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
     ) -> EntryJumpDomainApplication8616 | None:
         """Revalidate the retained chain and return fresh evidence or ``None``.
 
         The whole retained chain is rebound and replayed inside the
         shared bounded traversal: only the fresh application is returned,
         so consumers never read retained state that was not just
-        revalidated.
+        revalidated. Nested checks share bounded, source-checked raw lifting
+        within this operation, just as view construction does. No proof is
+        reused, and raw records are released when the outer request exits.
         """
-        with segment_call_dependency_traversal_scope_8616():
+        request_scope = (declared_entry_dependency_traversal_scope_8616
+                         if type(consuming_scope) is Real16InvocationDomain8616
+                         and consuming_scope.kind is Real16InvocationKind8616.DECLARED_FUNCTION_ENTRY
+                         else segment_call_dependency_traversal_scope_8616)
+        with native_import_request_8616(), request_scope():
             if not self._consumption_bound_8616(consuming_scope):
                 return None
-            return self._replay_authentic_8616(consuming_scope)
+            return self._replay_authentic_8616(consuming_scope, mode)
 
     def complete_for(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None
     ) -> bool:
         """Revalidate the retained chain under the offered consuming entry.
 
@@ -577,14 +680,14 @@ class ScopedFunctionIRView8616:
         return self._validated_application_for(consuming_scope) is not None
 
     def applied_jumps_for(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None
     ) -> tuple[AdmittedTerminalJump8616, ...] | None:
         """Return the admitted terminal edges under an authenticated entry."""
         application = self._validated_application_for(consuming_scope)
         return None if application is None else application.applied
 
     def effective_blocks_for(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None
     ) -> tuple[IRBlock, ...] | None:
         """Return the effective block surface under an authenticated entry.
 
@@ -599,7 +702,7 @@ class ScopedFunctionIRView8616:
 
     def effective_successors_for(
         self,
-        consuming_scope: Real16InvocationDomain8616 | None,
+        consuming_scope: EntryJumpConsumingScope8616 | None,
         block_addr: int,
     ) -> tuple[int, ...] | None:
         """Return the scoped CFG successors of one block, or ``None``.
@@ -622,7 +725,7 @@ class ScopedFunctionIRView8616:
 
     def effective_predecessors_for(
         self,
-        consuming_scope: Real16InvocationDomain8616 | None,
+        consuming_scope: EntryJumpConsumingScope8616 | None,
         block_addr: int,
     ) -> tuple[int, ...] | None:
         """Return the scoped CFG predecessors of one block, or ``None``.
@@ -647,7 +750,8 @@ class ScopedFunctionIRView8616:
         )
 
     def cfg_projection_for(
-        self, consuming_scope: Real16InvocationDomain8616 | None
+        self, consuming_scope: EntryJumpConsumingScope8616 | None,
+        *, mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
     ) -> ScopedFunctionCFGProjection8616 | None:
         """Validate once; return bounded CFG maps for one consumer operation.
 
@@ -660,7 +764,7 @@ class ScopedFunctionIRView8616:
         unconditional cache, and later independent consumers revalidate
         here rather than trusting a prior projection.
         """
-        application = self._validated_application_for(consuming_scope)
+        application = self._validated_application_for(consuming_scope, mode)
         if application is None or consuming_scope is None:
             return None
         successors: dict[int, tuple[int, ...]] = {}
@@ -680,6 +784,9 @@ class ScopedFunctionIRView8616:
             source_artifact=self.source_artifact,
             scope=consuming_scope,
             applied=application.applied,
+            call_targets=application.call_targets,
+            call_target_status=application.call_target_status,
+            call_target_stats=application.call_target_stats,
             blocks=application.blocks,
             successors=MappingProxyType(successors),
             predecessors=MappingProxyType(
@@ -718,12 +825,13 @@ class ScopedFunctionIRView8616:
         distinguishable from closed coverage, and the five counters are
         recomputed from the retained proof rather than trusted.
         """
-        application = self._validated_application_for(self.invocation_scope)
+        application = self._validated_application_for(self.near_call_scope or self.invocation_scope)
         authenticated = application is not None
         counts = _expected_view_counts_8616(
             self.proof, authenticated=authenticated
         )
         return {
+            "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "function_addr": self.source_artifact.function_addr,
             "boundary_addr": self.boundary.addr,
             "failure": None if self.failure is None else self.failure.value,
@@ -739,6 +847,12 @@ class ScopedFunctionIRView8616:
                 if application is None
                 else [jump.to_dict() for jump in application.applied]
             ),
+            "call_targets": ([] if application is None else
+                             [call.to_dict() for call in application.call_targets]),
+            "call_target_stats": (None if application is None else
+                                  application.call_target_stats.to_dict()),
+            "call_target_status": (None if application is None else
+                                   application.call_target_status.value),
             "residual_pending_count": (
                 0
                 if application is None
@@ -763,7 +877,7 @@ def _view_evaluation_8616(
     source_artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     proof: EntryJumpDomainProof8616,
-    invocation_scope: Real16InvocationDomain8616,
+    invocation_scope: EntryJumpConsumingScope8616,
 ) -> tuple[
     ScopedFunctionIRViewFailure8616 | None,
     str,
@@ -779,7 +893,7 @@ def _view_evaluation_8616(
     not close — a later stage is never consulted to launder an earlier
     failure.
     """
-    if not same_real16_entry_scope_8616(invocation_scope, invocation_scope):
+    if not _same_consuming_scope_8616(invocation_scope, invocation_scope):
         return (
             ScopedFunctionIRViewFailure8616.SCOPE_UNBOUND,
             "the supplied consuming entry cannot authenticate itself",
@@ -794,9 +908,30 @@ def _view_evaluation_8616(
             "source artifact and boundary",
             None,
         )
-    application = apply_entry_jump_domain_8616(
-        source_artifact, proof, invocation_scope=invocation_scope
+    application = _apply_for_scope_8616(source_artifact, proof, invocation_scope)
+    return _application_evaluation_8616(
+        source_artifact, boundary, proof, application
     )
+
+
+def _application_evaluation_8616(
+    source_artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    proof: EntryJumpDomainProof8616,
+    application: EntryJumpDomainApplication8616,
+) -> tuple[
+    ScopedFunctionIRViewFailure8616 | None,
+    str,
+    EntryJumpDomainApplication8616 | None,
+]:
+    """Map one computed application into the view's typed outcome.
+
+    The block/instruction/refusal/edge census is reconciled against the
+    proved delta exactly as the replaying evaluation does; the only
+    difference is that the application record is supplied by the caller
+    rather than replayed here, so the sealed staged route shares this
+    tail without a second admission.
+    """
     if application.status is EntryJumpDomainApplicationStatus8616.STALE_INPUT:
         detail = (
             application.refusals[0].detail
@@ -811,7 +946,7 @@ def _view_evaluation_8616(
     identity = (
         application.status is EntryJumpDomainApplicationStatus8616.EMPTY
         and _application_authentic_8616(application, proof)
-        and _identity_surface_complete_8616(source_artifact, boundary)
+        and _identity_surface_complete_8616(source_artifact, boundary, application)
     )
     if application.status is not EntryJumpDomainApplicationStatus8616.APPLIED and not identity:
         return (
@@ -843,9 +978,14 @@ def prove_scoped_function_ir_view_8616(
     boundary: ExactFunctionRangeBoundary8616,
     proof: EntryJumpDomainProof8616,
     *,
-    invocation_scope: Real16InvocationDomain8616 | None,
+    invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
 ) -> ScopedFunctionIRView8616:
     """Construct the scoped CFG view for one authenticated consuming entry.
+
+    ``near_call_scope`` alternatively retains a native near-CALL selector
+    premise. Its identity must match each explicit consumer; it never becomes
+    a full invocation domain. Supplying both scope kinds refuses.
 
     ``invocation_scope`` is the independently supplied consuming entry —
     it is never read from ``proof.invocation_scope``, so a proof cannot
@@ -868,51 +1008,138 @@ def prove_scoped_function_ir_view_8616(
         raise TypeError(
             "consuming entry must be a typed invocation domain or absent"
         )
-
-    def refuse(
-        failure: ScopedFunctionIRViewFailure8616,
-        detail: str,
-        application: EntryJumpDomainApplication8616 | None = None,
-    ) -> ScopedFunctionIRView8616:
-        counts = _expected_view_counts_8616(proof, authenticated=False)
-        return ScopedFunctionIRView8616(
-            source_artifact=source_artifact,
-            boundary=boundary,
-            proof=proof,
-            application=application,
-            failure=failure,
-            detail=detail,
-            raw_fact_count=counts[0],
-            normalized_fact_count=counts[1],
-            classified_fact_count=counts[2],
-            materialized_count=counts[3],
-            failure_count=counts[4],
+    if invocation_scope is not None and near_call_scope is not None:
+        return _assembled_scoped_view_8616(
+            source_artifact, boundary, proof,
             invocation_scope=invocation_scope,
+            near_call_scope=near_call_scope,
+            evaluation=(
+                ScopedFunctionIRViewFailure8616.SCOPE_UNBOUND,
+                "mixed consuming scopes",
+                None,
+            ),
         )
-
-    if invocation_scope is None:
-        return refuse(
-            ScopedFunctionIRViewFailure8616.SCOPE_ABSENT,
-            "no independently supplied consuming entry was offered",
+    consuming_scope = near_call_scope or invocation_scope
+    if consuming_scope is None:
+        return _assembled_scoped_view_8616(
+            source_artifact, boundary, proof,
+            invocation_scope=invocation_scope,
+            near_call_scope=near_call_scope,
+            evaluation=(
+                ScopedFunctionIRViewFailure8616.SCOPE_ABSENT,
+                "no independently supplied consuming entry was offered",
+                None,
+            ),
         )
-    failure, detail, application = _view_evaluation_8616(
-        source_artifact, boundary, proof, invocation_scope
+    return _assembled_scoped_view_8616(
+        source_artifact, boundary, proof,
+        invocation_scope=invocation_scope,
+        near_call_scope=near_call_scope,
+        evaluation=_view_evaluation_8616(
+            source_artifact, boundary, proof, consuming_scope
+        ),
     )
-    if failure is not None:
-        return refuse(failure, detail, application)
-    assert application is not None
-    counts = _expected_view_counts_8616(proof, authenticated=True)
+
+
+def _assembled_scoped_view_8616(
+    source_artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    proof: EntryJumpDomainProof8616,
+    *,
+    invocation_scope: Real16InvocationDomain8616 | None,
+    near_call_scope: NearCallJumpScope8616 | None,
+    evaluation: tuple[
+        ScopedFunctionIRViewFailure8616 | None,
+        str,
+        EntryJumpDomainApplication8616 | None,
+    ],
+) -> ScopedFunctionIRView8616:
+    """Build the view receipt from one already-computed evaluation.
+
+    Every construction route — the public replaying evaluation and the
+    private sealed staged stage — ends here: a typed failure keeps the
+    refused application as evidence while materializing nothing, and a
+    certified evaluation retains the admitted application under the
+    independently supplied consuming entry.
+    """
+    failure, detail, application = evaluation
+    authenticated = failure is None
+    if authenticated:
+        assert application is not None
+    counts = _expected_view_counts_8616(proof, authenticated=authenticated)
     return ScopedFunctionIRView8616(
         source_artifact=source_artifact,
         boundary=boundary,
         proof=proof,
         application=application,
-        failure=None,
-        detail="",
+        failure=failure,
+        detail=detail if failure is not None else "",
         raw_fact_count=counts[0],
         normalized_fact_count=counts[1],
         classified_fact_count=counts[2],
         materialized_count=counts[3],
         failure_count=counts[4],
         invocation_scope=invocation_scope,
+        near_call_scope=near_call_scope,
+    )
+
+
+def _staged_scoped_function_ir_view_8616(
+    source_artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    *,
+    project: object,
+    near_call_scope: NearCallJumpScope8616,
+    budget: EntryJumpDomainBudget8616 | None = None,
+    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    invocation_resolver: Callable[
+        [int], Real16InvocationDomain8616 | None
+    ] | None = None,
+) -> ScopedFunctionIRView8616:
+    """Construct the view through one sealed synchronous prove/apply stage.
+
+    The prove/apply owner runs its private staged operation: the proof's
+    final near-call scope authentication and source-digest comparison are
+    deferred into the application core's final seal, which re-runs both
+    after every application callback and solver. This factory consumes
+    only the returned sealed pair — it never replays the application —
+    and the public standalone prove/apply/view routes keep their full
+    replay unchanged.
+    """
+    if type(source_artifact) is not IRFunctionArtifact:
+        raise TypeError("scoped view requires a typed IRFunctionArtifact source")
+    if not isinstance(boundary, ExactFunctionRangeBoundary8616):
+        raise TypeError("scoped view requires the exact frontend boundary")
+    if type(near_call_scope) is not NearCallJumpScope8616:
+        raise TypeError("staged view requires the typed near-call scope")
+    sealed = _staged_near_call_entry_domain_8616(
+        source_artifact,
+        evidence_by_block,
+        project=project,
+        near_call_scope=near_call_scope,
+        budget=budget,
+        call_preservations=call_preservations,
+        invocation_resolver=invocation_resolver,
+    )
+    if not _scope_surface_bound_8616(near_call_scope, source_artifact, boundary):
+        evaluation: tuple[
+            ScopedFunctionIRViewFailure8616 | None,
+            str,
+            EntryJumpDomainApplication8616 | None,
+        ] = (
+            ScopedFunctionIRViewFailure8616.SCOPE_UNBOUND,
+            "the supplied consuming entry does not own the identical raw "
+            "source artifact and boundary",
+            None,
+        )
+    else:
+        evaluation = _application_evaluation_8616(
+            source_artifact, boundary, sealed.proof, sealed.application
+        )
+    return _assembled_scoped_view_8616(
+        source_artifact, boundary, sealed.proof,
+        invocation_scope=None,
+        near_call_scope=near_call_scope,
+        evaluation=evaluation,
     )

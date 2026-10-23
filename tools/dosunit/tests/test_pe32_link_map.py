@@ -25,6 +25,24 @@ TIMESTAMP = 0x6AC4B06D
 BASE = 0x400000
 
 
+def test_static_symbols_are_explicit_separate_intake(tmp_path: Path) -> None:
+    path = _map_file(tmp_path)
+    default = parse_link_map(path)
+    code = parse_link_map(path, include_statics=True)
+    assert default.statics == ()
+    assert default.publics == code.publics
+    assert [symbol.name for symbol in code.statics] == ["_helper"]
+    assert code.provenance()["static_count"] == 1
+
+
+def test_malformed_static_table_rejects_code_intake_only(tmp_path: Path) -> None:
+    path = _map_file(tmp_path)
+    path.write_text(path.read_text().replace("0001:00000001       _helper", "broken       _helper"))
+    assert parse_link_map(path).statics == ()
+    with pytest.raises(LinkMapError):
+        parse_link_map(path, include_statics=True)
+
+
 def _pe32(code: bytes, data: bytes = b"", *, imagebase: int = BASE, timestamp: int = TIMESTAMP,
           data_rva: int = 0x2000) -> bytes:
     """Construct a real i386 PE32 with .text and optional .data sections."""
@@ -211,3 +229,226 @@ def test_map_bound_to_wrong_image_refuses(tmp_path: Path) -> None:
     bound = load_candidate_link_map(_map_file(tmp_path), exe)
     assert bound.provenance()["sha256"] == bound.sha256
     assert bound.provenance()["preferred_base"] == f"{BASE:08x}"
+
+
+def test_global_layout_report_retains_checked_scope_and_pending_obligations() -> None:
+    from tools.comparator.global_layout_checks import check_global_layout
+
+    result = check_global_layout({0x3000: 0x1000, 0x3010: 0x1010, 0x3014: 0x1014})
+    assert result["status"] == "checked"
+    assert result["order_preserved"] and result["spacing_preserved"]
+    assert result["uniform_displacement"] == 0x2000
+    assert result["checked_adjacent_pairs"] == 2
+    assert not result["function_equivalence_proved"]
+    assert result["pending_conditions"]
+    assert check_global_layout({0x3014: 0x1014, 0x3010: 0x1010, 0x3000: 0x1000}) == result
+
+
+@pytest.mark.parametrize(("pairs", "order", "spacing"), [
+    ({0x3000: 0x1010, 0x3010: 0x1000}, False, False),
+    ({0x3000: 0x1000, 0x3014: 0x1010}, True, False),
+    ({0x3000: 0x1000, 0x3010: 0x1000}, False, False),
+])
+def test_global_layout_detects_shuffle_padding_and_collapsed_objects(
+    pairs: dict[int, int], order: bool, spacing: bool,
+) -> None:
+    from tools.comparator.global_layout_checks import check_global_layout
+
+    result = check_global_layout(pairs)
+    assert result["status"] == "mismatch"
+    assert result["order_preserved"] is order
+    assert result["spacing_preserved"] is spacing
+    assert result["adjacent_pairs"][0]["status"] == "mismatch"
+
+
+@pytest.mark.parametrize("pairs", [{}, {0x3000: 0x1000}])
+def test_global_layout_requires_two_distinct_positions(pairs: dict[int, int]) -> None:
+    from tools.comparator.global_layout_checks import check_global_layout
+
+    assert check_global_layout(pairs)["status"] == "incomplete"
+
+
+@pytest.mark.parametrize("pairs", [{True: 1}, {1: False}, {-1: 1}, {1: 0x100000000}])
+def test_global_layout_rejects_invalid_coordinates(pairs: dict[int, int]) -> None:
+    from tools.comparator.global_layout_checks import check_global_layout
+
+    with pytest.raises(ValueError, match="32-bit"):
+        check_global_layout(pairs)
+
+
+def test_named_data_symbol_maps_only_bound_data(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map, lst_data_symbols
+    from tools.dosunit.architectures.flat32_loader import load_flat32_project
+
+    original_path = tmp_path / "original.exe"
+    original_path.write_bytes(_pe32(b"\xc3", b"\0" * 16))
+    original = load_flat32_project(original_path)
+    candidate = load_flat32_project(_exe(tmp_path, data_rva=0x3000))
+    listing = tmp_path / "original.lst"
+    listing.write_text(".data:00402000 saved_handle dd ?\n.text:00401000 ignored dd 0\n")
+    symbols = lst_data_symbols(listing)
+    assert symbols == {"saved_handle": 0x402000}
+    link_map = parse_link_map(_map_file(tmp_path, publics=
+        " 0002:00000000       _saved_handle            00403000   data.obj\n"))
+    assert link_map_global_map(link_map, candidate, original, symbols) == {0x403000: 0x402000}
+    assert link_map_global_map(link_map, candidate, original, {}) == {}
+
+
+def test_named_data_repeated_label_cannot_select_last_address(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import lst_data_symbols
+
+    listing = tmp_path / "original.lst"
+    listing.write_text(".data:00402000 saved_handle dd ?\n.data:00402004 saved_handle dd ?\n")
+    with pytest.raises(ValueError, match="conflicting"):
+        lst_data_symbols(listing)
+
+
+def _anonymous_fixture(tmp_path: Path, listing_rows: str, publics: str,
+                       segments: str | None = None):
+    """Bind a fixture oracle/candidate pair, listing rows, and map publics."""
+    from tools.comparator.msc8_catalog import lst_data_rows
+    from tools.dosunit.architectures.flat32_loader import load_flat32_project
+
+    (tmp_path / "original.exe").write_bytes(_pe32(b"\xc3", b"\0" * 16))
+    original = load_flat32_project(tmp_path / "original.exe")
+    candidate = load_flat32_project(_exe(tmp_path, data_rva=0x3000))
+    listing = tmp_path / "original.lst"
+    listing.write_text(listing_rows)
+    link_map = parse_link_map(_map_file(tmp_path, publics=publics, segments=segments))
+    return link_map, candidate, original, lst_data_rows(listing)
+
+
+def test_lst_data_rows_indexes_named_and_anonymous_only(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import lst_data_rows
+
+    listing = tmp_path / "original.lst"
+    listing.write_text(
+        ".data:00402000 saved_handle dd ?\n"
+        ".data:00402004                 db 0FFh\n"
+        ".data:00402008 aString        db 'x',0\n"
+        ".data:00402010                 dw 4 dup(?)\n"
+        ".data:00402018 ; just a comment about dd\n"
+        ".data:00402020                 align 10h\n"
+        ".text:00401000                 dd 0\n"
+        ".text:00401004                 db 90h\n"
+        ".rdata:00403000                dq ?\n"
+        ".bss:00404000                  db ?\n"
+    )
+    rows = lst_data_rows(listing)
+    assert rows == {
+        0x402000: "dd", 0x402004: "db", 0x402008: "db", 0x402010: "dw",
+        0x403000: "dq", 0x404000: "db",
+    }
+
+
+def test_anonymous_data_row_maps_with_explicit_claim(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402000 saved_handle dd ?\n.data:00402004                 db 0FFh\n",
+        " 0002:00000000       _saved_handle            00403000   data.obj\n"
+        " 0002:00000004       _unk_402004              00403004   data.obj\n",
+    )
+    assert link_map_global_map(link_map, candidate, original, {}, rows) == {
+        0x403004: 0x402004
+    }
+
+
+def test_anonymous_claim_never_reaches_code_address(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402004                 db 0FFh\n.text:00401000                 db 90h\n",
+        " 0002:00000004       _unk_401000              00403004   data.obj\n",
+    )
+    assert link_map_global_map(link_map, candidate, original, {}, rows) == {}
+
+
+def test_anonymous_claim_requires_declared_row(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402000 buffer_402000 dd ?\n",
+        " 0002:00000004       _unk_402002              00403004   data.obj\n",
+    )
+    assert link_map_global_map(link_map, candidate, original, {}, rows) == {}
+
+
+def test_anonymous_claim_requires_mapped_oracle(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402004                 db 0FFh\n",
+        " 0002:00000004       _unk_405000              00403004   data.obj\n",
+    )
+    assert link_map_global_map(link_map, candidate, original, {}, rows) == {}
+
+
+def test_anonymous_claim_refuses_code_segment_public(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402004                 db 0FFh\n",
+        " 0001:00000004       _unk_402004              00401004   code.obj\n",
+    )
+    with pytest.raises(ValueError, match="CODE segment"):
+        link_map_global_map(link_map, candidate, original, {}, rows)
+
+
+def test_anonymous_claim_refuses_unmapped_candidate(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402004                 db 0FFh\n",
+        " 0002:00000800       _unk_402004              00403800   data.obj\n",
+        segments=(
+            " 0001:00000000 00000010H .text                   CODE\n"
+            " 0002:00000000 00001000H .data                   DATA\n"
+        ),
+    )
+    with pytest.raises(ValueError, match="not mapped non-executable"):
+        link_map_global_map(link_map, candidate, original, {}, rows)
+
+
+def test_conflicting_anonymous_claims_refuse(tmp_path: Path) -> None:
+    from tools.comparator.msc8_catalog import link_map_global_map
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402004                 db 0FFh\n",
+        " 0002:00000004       _unk_402004              00403004   a.obj\n"
+        " 0002:00000008       _unk_402004              00403008   b.obj\n",
+    )
+    with pytest.raises(ValueError, match="conflicting data aliases"):
+        link_map_global_map(link_map, candidate, original, {}, rows)
+
+
+def test_anonymous_claim_requires_declared_segment(tmp_path: Path) -> None:
+    """A public pointing outside every declared segment is refused at parse."""
+    path = _map_file(
+        tmp_path, publics=" 0009:00000004       _unk_402004              00403004   data.obj\n"
+    )
+    with pytest.raises(LinkMapError):
+        parse_link_map(path)
+
+
+def test_contradictory_named_label_blocks_anonymous_fallback(tmp_path: Path) -> None:
+    """A listing label binding a different VA is contradictory evidence; an
+    anonymous row at the claimed VA must never override it."""
+    from tools.comparator.msc8_catalog import link_map_global_map, lst_data_symbols
+
+    link_map, candidate, original, rows = _anonymous_fixture(
+        tmp_path,
+        ".data:00402004                 db 0FFh\n"
+        ".data:00402100 unk_402004    dd ?\n",
+        " 0002:00000004       _unk_402004              00403004   data.obj\n",
+    )
+    symbols = lst_data_symbols(tmp_path / "original.lst")
+    assert symbols.get("unk_402004") == 0x402100
+    assert link_map_global_map(link_map, candidate, original, symbols, rows) == {}

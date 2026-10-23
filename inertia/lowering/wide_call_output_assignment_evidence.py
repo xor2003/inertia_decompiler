@@ -13,6 +13,9 @@ from inertia.ir.core import MemSpace
 from inertia.semantics.carry_borrow_contracts import CarryBorrowKind8616
 from inertia.widening.carry_borrow_pipeline import CarryBorrowWideningPipeline8616
 from inertia.widening.carry_borrow_storage import WideCarryBorrowStorage8616
+from inertia.widening.pair_type_contracts import (
+    wide_pair_value_consistent_8616,
+)
 
 from .wide_call_output_assignment_contracts import (
     WideCallOutputAssignmentFact8616,
@@ -42,9 +45,12 @@ def normalize_wide_call_output_assignment_fact_8616(
     source_memory = source.value.source_memory
     if call_output is None or source_memory is None:
         return WideCallOutputAssignmentFailure8616.SOURCE_RANGE_MISMATCH
+    if wide_pair_value_consistent_8616(source.value) is not None:
+        return WideCallOutputAssignmentFailure8616.PAIR_LEGALITY_UNPROVEN
+    pair = source.value.pair
     if (
         source_memory.space is not MemSpace.SS
-        or source_memory.size != 4
+        or source_memory.size != pair.type.total_size
         or any(address.base != ("bp",) for address in source_memory.addresses)
     ):
         return WideCallOutputAssignmentFailure8616.SOURCE_RANGE_MISMATCH
@@ -56,6 +62,11 @@ def normalize_wide_call_output_assignment_fact_8616(
     link = source.value.provenance
     low_store = source.destination.low_store
     high_store = source.destination.high_store
+    if (
+        source.source_versions != low_store.versions + high_store.versions
+        or source.address.size != pair.type.total_size
+    ):
+        return WideCallOutputAssignmentFailure8616.PAIR_LEGALITY_UNPROVEN
     low_store_addr = _instruction_addr_for_store_8616(
         pipeline, low_store.block_addr, low_store.instr_index
     )
@@ -83,6 +94,7 @@ def normalize_wide_call_output_assignment_fact_8616(
         destination_offset=source.address.offset,
         carrier_ins_addrs=carrier_addrs,
         store_ins_addrs=(low_store_addr, high_store_addr),
+        pair=pair,
     )
 
 

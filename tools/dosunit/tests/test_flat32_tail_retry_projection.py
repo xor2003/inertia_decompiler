@@ -20,13 +20,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-import tools.dosunit.compare.flat32_proof_retry as retry_owner
 from tools.dosunit.compare.flat32_proof_retry import (
     ProofContext,
     checked_environment_verdict,
     retry_function_proof,
 )
 from tools.dosunit.contracts.binary_environment import EnvironmentScan
+from tools.dosunit.contracts.proof_scope import ProofScope
 
 if TYPE_CHECKING:
     import angr
@@ -104,14 +104,16 @@ def test_retry_preserves_original_total_deadline(monkeypatch: pytest.MonkeyPatch
     _stub_boundaries(monkeypatch, _tail_only("passed"))
     now = [1000.0]
     monkeypatch.setattr(time, "monotonic", lambda: now[0])
-    original_import = retry_owner.import_module
+    from tools.dosunit.compare import flat32_call_composition
 
-    def setup(name: str) -> object:
-        adapter = original_import(name)
+    original_limits = flat32_call_composition.CallCompositionLimits
+
+    def setup(**kwargs: Any) -> object:
+        limits = original_limits(**kwargs)
         now[0] += 0.25
-        return adapter
+        return limits
 
-    monkeypatch.setattr("tools.dosunit.compare.flat32_proof_retry.import_module", setup)
+    monkeypatch.setattr("tools.dosunit.compare.flat32_call_composition.CallCompositionLimits", setup)
     received: dict[str, Any] = {}
 
     def compare(*_args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -191,6 +193,85 @@ def test_call_only_composition_still_publishes(monkeypatch: pytest.MonkeyPatch) 
     result = retry_function_proof("f", original, _context(), ("eax",), 1000)
     assert result["status"] == "passed"
     assert result["proof_method"] == "checked_direct_call_composition"
+
+
+@pytest.mark.parametrize("backend_status", ["passed", "refused"])
+def test_normalized_retry_never_publishes_unconditional_or_runs_strict_fallback(
+    monkeypatch: pytest.MonkeyPatch, backend_status: str,
+) -> None:
+    """A bound constant premise excludes unconditional publication and unrelated retries."""
+    _stub_boundaries(monkeypatch, _tail_only(backend_status))
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        pytest.fail("normalized retry entered a strict proof lane")
+
+    monkeypatch.setattr("tools.dosunit.compare.flat32_cfg_regions.compare_reblocked_cfg", forbidden)
+    original = {"status": "refused", "reason": "call_or_exception_boundary"}
+    result = retry_function_proof(
+        "f", original, _context(), ("eax",), 1000, candidate_normalization={0x3000: 0x2000},
+    )
+    assert result["status"] == "refused"
+    assert set(result["additional_proof_attempts"]) == {"calls"}
+
+
+def test_normalized_retry_retains_existing_conditional_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An existing conditional CFG proof is not discarded for another strategy."""
+    def forbidden(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        pytest.fail("existing normalized proof was retried")
+
+    monkeypatch.setattr("tools.dosunit.compare.flat32_call_composition.compare_functions_with_calls", forbidden)
+    original = {"status": "conditional", "assumptions": {"constant_map": {"0x3000": "0x2000"}}}
+    assert retry_function_proof(
+        "f", original, _context(), ("eax",), 1000, candidate_normalization={0x3000: 0x2000},
+    ) is original
+
+
+@pytest.mark.parametrize("premise", [None, {"proved": False, "constant_map": {}},
+    {"proved": True, "constant_map": {"0x3000": "0x2000"}}])
+def test_normalized_retry_requires_exact_published_premise(
+    monkeypatch: pytest.MonkeyPatch, premise: object,
+) -> None:
+    """Missing, different or falsely proved maps cannot describe the requested proof."""
+    _stub_boundaries(monkeypatch, _tail_only(
+        "conditional", assumptions={"declared": True}, normalization_assumptions=premise,
+    ))
+    result = retry_function_proof(
+        "f", {"status": "refused"}, _context(), ("eax",), 1000,
+        candidate_normalization={0x3000: 0x2000},
+    )
+    assert result["status"] == "refused"
+
+
+def _root_only() -> dict[str, Any]:
+    """A complete no-call summary with retained native coverage on both sides."""
+    return {
+        "status": "conditional", "assumptions": {"declared": True},
+        "proof_scope": ProofScope.COMPLETE_FUNCTION,
+        "oracle_blocks_composed": 2, "candidate_blocks_composed": 3,
+        "environment_coverage": {"oracle": [{"entry": {}}], "candidate": [{"entry": {}}]},
+    }
+
+
+@pytest.mark.parametrize("field,value", [
+    ("proof_scope", ProofScope.CUTPOINT_SIMULATION), ("proof_scope", None),
+    ("oracle_blocks_composed", 0), ("oracle_blocks_composed", True),
+    ("candidate_blocks_composed", "3"), ("environment_coverage", None),
+    ("environment_coverage", {"oracle": [{}], "candidate": []}),
+])
+def test_incomplete_no_call_evidence_cannot_publish(
+    monkeypatch: pytest.MonkeyPatch, field: str, value: object,
+) -> None:
+    """Root composition needs whole-function scope, real work and both byte covers."""
+    _stub_boundaries(monkeypatch, {**_root_only(), field: value})
+    result = retry_function_proof("f", {"status": "refused"}, _context(), ("eax",), 1000)
+    assert result["status"] == "refused"
+
+
+def test_complete_no_call_conditional_still_checks_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pure root's conditional proof cannot bypass binary environment validation."""
+    _stub_scan(monkeypatch, EnvironmentScan(complete=False, requires_contract=False, blocks_scanned=0))
+    result = checked_environment_verdict(_root_only(), _context(), [], [])
+    assert result == {"status": "refused", "reason": "environment_effect_coverage_incomplete"}
 
 
 @pytest.mark.parametrize("verdict", [

@@ -450,7 +450,9 @@ def _frontier_closure(run: _DomainRun) -> None:
 def _state_inputs(run: _DomainRun, state: MachineState) -> dict[str, tuple[z3.ExprRef, int]]:
     """Materialize one effect's z3 inputs once per state."""
     document = materialize_function("flat32:access", state)
-    inputs = S._z3_inputs(document, document, z3)
+    # straightline_ssa crosses an unfollowed boundary; its owned declaration
+    # is already dict[str, tuple[Any, int]].
+    inputs = cast(dict[str, tuple[z3.ExprRef, int]], S._z3_inputs(document, document, z3))
     run.limits.check_time()
     return inputs
 

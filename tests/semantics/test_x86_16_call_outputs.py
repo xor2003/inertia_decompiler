@@ -203,3 +203,94 @@ def test_known_unused_call_has_no_output_definitions() -> None:
         for block in result.function.blocks
         for instruction in block.instrs
     )
+
+
+def test_output_artifact_retains_source_snapshot() -> None:
+    """The canonical materializer retains the IR its fact indexes name."""
+    source = _artifact()
+    result = materialize_call_outputs_8616(source, {0x1003: _summary(shape="ax")})
+
+    assert result.source_function is source
+    assert result.function is not source
+
+
+def test_validate_call_output_fact_accepts_proven_and_empty() -> None:
+    """Proven shaped and proven no-output facts are internally consistent."""
+    from inertia.semantics.call_output_contracts import (
+        validate_call_output_fact_8616,
+    )
+
+    proven = materialize_call_outputs_8616(
+        _artifact(), {0x1003: _summary(shape="ax")}
+    ).facts[0]
+    unused = materialize_call_outputs_8616(
+        _artifact(), {0x1003: _summary(used=False, shape=None)}
+    ).facts[0]
+
+    assert validate_call_output_fact_8616(proven) == ()
+    assert validate_call_output_fact_8616(unused) == ()
+
+
+def test_validate_call_output_fact_rejects_foreign_provenance() -> None:
+    """Inner provenance of a different callsite is contradictory evidence."""
+    from inertia.semantics.call_output_contracts import (
+        validate_call_output_fact_8616,
+    )
+
+    proven = materialize_call_outputs_8616(
+        _artifact(), {0x1003: _summary(shape="ax")}
+    ).facts[0]
+    foreign = replace(
+        proven,
+        outputs=(
+            replace(
+                proven.outputs[0],
+                call_output=replace(
+                    proven.outputs[0].call_output, callsite_addr=0x9999
+                ),
+            ),
+        ),
+    )
+
+    assert validate_call_output_fact_8616(foreign) == (
+        CallOutputFailure8616.OUTPUT_PROVENANCE_MISMATCH,
+    )
+
+
+def test_validate_call_output_fact_rejects_wrong_width_and_shape() -> None:
+    """Wrong register widths and shape cardinality are contradictory."""
+    from inertia.semantics.call_output_contracts import (
+        validate_call_output_fact_8616,
+    )
+
+    proven = materialize_call_outputs_8616(
+        _artifact(), {0x1003: _summary(shape="ax")}
+    ).facts[0]
+    narrow = replace(proven, outputs=(replace(proven.outputs[0], size=1),))
+    pair = replace(proven, shape=CallOutputShape8616.DX_AX)
+
+    assert CallOutputFailure8616.OUTPUT_WIDTH_MISMATCH in (
+        validate_call_output_fact_8616(narrow)
+    )
+    assert CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH in (
+        validate_call_output_fact_8616(pair)
+    )
+
+
+def test_validate_call_output_fact_refuses_unnamed_pair_output() -> None:
+    """An optional-unnamed output is a typed refusal, not a sort crash."""
+    from inertia.semantics.call_output_contracts import (
+        validate_call_output_fact_8616,
+    )
+
+    proven = materialize_call_outputs_8616(
+        _artifact(), {0x1003: _summary(shape="dx_ax")}
+    ).facts[0]
+    assert validate_call_output_fact_8616(proven) == ()
+    bad = replace(
+        proven,
+        outputs=(replace(proven.outputs[0], name=None), proven.outputs[1]),
+    )
+
+    failures = validate_call_output_fact_8616(bad)
+    assert CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH in failures

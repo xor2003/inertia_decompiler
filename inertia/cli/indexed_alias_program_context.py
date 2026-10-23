@@ -195,8 +195,8 @@ def _reused_persisted_context_8616(
     persisted: PersistedIndexedGlobalObjectEvidence8616 | None,
     timeout: int,
     window: int,
-    callsite_cache_key: object,
-    direct_cache_key: object,
+    callsite_cache_key: dict[str, object] | None,
+    direct_cache_key: dict[str, object] | None,
     direct_evidence_ready: bool,
     program_callsites_ready: bool,
 ) -> IndexedAliasProgramContextResult8616 | None:

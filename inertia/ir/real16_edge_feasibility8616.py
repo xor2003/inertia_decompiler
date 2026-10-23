@@ -51,6 +51,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol
 
 from inertia.semantics.register_value_preservation import (
     register_value_family_8616,
@@ -89,8 +90,12 @@ from .scalar_instruction_effects import (
     ScalarInstructionEffectKind8616,
     scalar_instruction_effect_8616,
 )
+from .scalar_instruction_effects import (
+    scalar_select_result_bits_8616 as scalar_select_result_bits_8616,
+)
 
 __all__ = [
+    "EdgeFeasibilityProducerBindings8616",
     "Real16CallCutRequest8616",
     "Real16CallCutState8616",
     "Real16EdgeFeasibility8616",
@@ -290,6 +295,18 @@ class LoadSnapshotReplay8616(Enum):
     READ_ONLY_OWNED = "read_only_owned"
 
 
+class BranchSnapshotReplay8616(Enum):
+    """Whether branch observations need a second externally observable transfer.
+
+    PURE_TRANSFER requires a side-effect-free service rejection and an owned
+    read-only LOAD reader. CALL/repeat handlers and requested CALL-cut states
+    retain ordinary replay. Observations never survive this dataflow request.
+    """
+
+    OBSERVABLE = "observable"
+    PURE_TRANSFER = "pure_transfer"
+
+
 def invocation_transfer_order_8616(
     scope: frozenset[int], proposed: tuple[int, ...] | None,
 ) -> tuple[int, ...] | None:
@@ -311,11 +328,15 @@ def acyclic_invocation_order_8616(
     callback schedules and use this projection only where their own transfers
     cannot mutate the CFG or external callback authority. A cycle retains the
     original bounded fixpoint; exhausted preparation grants no ordering.
+    Strictly increasing in-scope edges establish the sorted order during
+    collection, so that case needs no second node/edge walk through the heap.
     """
     degree = dict.fromkeys(scope, 0)
     successors: dict[int, list[int]] = {addr: [] for addr in scope}
     work = 0
-    for addr in sorted(scope):
+    sorted_scope = sorted(scope)
+    forward_only = True
+    for addr in sorted_scope:
         work += 1
         if _invocation_order_budget_exhausted_8616(work, work_limit, deadline):
             return Real16InvocationOrder8616(None, work)
@@ -326,6 +347,10 @@ def acyclic_invocation_order_8616(
             if pred in scope:
                 degree[addr] += 1
                 successors[pred].append(addr)
+                forward_only = (forward_only and type(pred) is int
+                                and type(addr) is int and pred < addr)
+    if forward_only:
+        return Real16InvocationOrder8616(tuple(sorted_scope), work)
     return _walk_acyclic_invocation_order_8616(
         scope, degree, successors, work, deadline=deadline, work_limit=work_limit,
     )
@@ -1168,6 +1193,34 @@ def _kb_store_row_8616(
     )
 
 
+def _kb_select_value_8616(
+    instruction: IRInstr, regs: _KbRegs8616, tmps: _KbTmps8616,
+) -> _Kb8616 | None:
+    """Select one known arm, or retain only bits proven equal in both arms."""
+    select_bits = scalar_select_result_bits_8616(instruction)
+    if select_bits is None:
+        return None
+    evaluated: _Kb8616 | None = None
+    guard = _kb_eval_value_8616(instruction.args[0], regs, tmps)
+    result_mask = (1 << select_bits) - 1
+    if guard is not None and guard[0] & 1:
+        selected = _kb_eval_value_8616(
+            instruction.args[1 if guard[1] & 1 else 2], regs, tmps,
+        )
+        if selected is not None:
+            known = selected[0] & result_mask
+            evaluated = (known, selected[1] & known)
+    else:
+        true_value = _kb_eval_value_8616(instruction.args[1], regs, tmps)
+        false_value = _kb_eval_value_8616(instruction.args[2], regs, tmps)
+        if true_value is not None and false_value is not None:
+            # Without the guard, only bits known equal in both arms survive.
+            known = (true_value[0] & false_value[0]
+                     & ~(true_value[1] ^ false_value[1]) & result_mask)
+            evaluated = (known, true_value[1] & known)
+    return evaluated
+
+
 def _kb_tmp_write_8616(
     instruction: IRInstr,
     dst: IRValue,
@@ -1198,6 +1251,8 @@ def _kb_tmp_write_8616(
         arg = _kb_eval_value_8616(instruction.args[0], regs, tmps)
         if arg is not None:
             evaluated = _kb_unary_op_8616(instruction.op, arg)
+    else:
+        evaluated = _kb_select_value_8616(instruction, regs, tmps)
     # An unevaluatable operand is bottom knowledge — ``(0, 0)`` — never a
     # missing tmp: dropping the row would also erase the partial knowledge
     # downstream rows could still derive (e.g. AND-with-constant zero
@@ -1632,7 +1687,11 @@ def _kb_cjmp_exit_8616(
     """
     if instruction is not block.instrs[-1]:
         return True
-    if sink is not None:
+    if type(sink) is _BranchTransferCollector8616:
+        # This owned sink consumes the values immediately and retains only
+        # integer CFG edges. External sinks still receive detached maps.
+        sink(instruction, registers, tmps)
+    elif sink is not None:
         sink(instruction, dict(registers), dict(tmps))
     return False
 
@@ -1689,6 +1748,150 @@ def _kb_data_row_8616(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _BranchTransferObservation8616:
+    """Provisional edge verdict from one block's latest entry state."""
+
+    infeasible_edges: tuple[tuple[int, int], ...]
+    evaluated_cjmps: int
+
+
+@dataclass(slots=True)
+class _BranchTransferCollector8616:
+    """Consume a terminal branch immediately without retaining machine-state maps."""
+
+    block: IRBlock
+    observations: dict[int, _BranchTransferObservation8616]
+    budget: list[int]
+
+    def __call__(self, instruction: IRInstr, registers: _KbRegs8616, tmps: _KbTmps8616) -> None:
+        """Record only the first, terminal branch admitted by the normal walker."""
+        successors = sorted(self.block.successor_addrs)
+        self.budget[0] -= len(successors) + 1
+        live = _cjmp_live_successor_8616(instruction, successors, registers, tmps)
+        edges = tuple((self.block.addr, successor) for successor in successors
+                      if live is not None and successor != live)
+        self.observations[self.block.addr] = _BranchTransferObservation8616(edges, 1)
+
+
+def _branch_transfer_collector_8616(
+    observations: dict[int, _BranchTransferObservation8616] | None,
+    block: IRBlock, budget: list[int],
+) -> _BranchTransferCollector8616 | None:
+    """Replace provisional observations whenever the block entry changes."""
+    if observations is None:
+        return None
+    observations[block.addr] = _BranchTransferObservation8616((), 0)
+    return _BranchTransferCollector8616(block, observations, budget)
+
+
+def _kb_entry_chain_edges_8616(
+    blocks: Mapping[int, IRBlock], scope: frozenset[int],
+    predecessors: Mapping[int, Iterable[int]], head: int, terminal: int,
+    stop: int, seed: _KbPathState8616,
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None,
+    deadline: float, budget: list[int],
+) -> frozenset[tuple[int, int]] | None:
+    """Evaluate an entry chain with no joins or backedges under pure effects.
+
+    The entry must have no in-scope predecessors. Every subsequent block must
+    have exactly the previous block as its sole predecessor, and the preceding
+    transfer must prove exactly one live successor. Thus each input is final
+    without a loop fixpoint. Only edge candidates escape; the caller still
+    requires its complete converged transfer before publishing observations.
+    """
+    addr, previous, state = head, None, seed
+    visited: set[int] = set()
+    dead: set[tuple[int, int]] = set()
+    while addr in scope and addr not in visited:
+        incoming = tuple(predecessors.get(addr, ()))
+        budget[0] -= len(incoming) + 1
+        if budget[0] <= 0 or time.monotonic() > deadline:
+            return None
+        required: set[int] = set() if previous is None else {previous}
+        if {pred for pred in incoming if pred in scope} != required:
+            break
+        visited.add(addr)
+        block = blocks[addr]
+        observations: dict[int, _BranchTransferObservation8616] = {}
+        state = _kb_block_exit_8616(
+            block, state, apply_service,
+            stop_after=stop if addr == terminal else None,
+            sink=_branch_transfer_collector_8616(observations, block, budget),
+            budget=budget, read_load=read_load,
+        )
+        if budget[0] < 0 or time.monotonic() > deadline:
+            return None
+        dead.update(observations[addr].infeasible_edges)
+        successors = tuple(target for target in block.successor_addrs
+                           if (addr, target) not in dead)
+        budget[0] -= len(block.successor_addrs)
+        if addr == terminal or len(successors) != 1:
+            break
+        previous, addr = addr, successors[0]
+    return frozenset(dead)
+
+
+def _kb_entry_chain_scope_8616(
+    blocks: Mapping[int, IRBlock], scope: frozenset[int],
+    predecessors: Mapping[int, Iterable[int]], head: int, terminal: int,
+    stop: int, seed: _KbPathState8616,
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None,
+    deadline: float, budget: list[int], dead: frozenset[tuple[int, int]],
+    *, enabled: bool,
+) -> tuple[frozenset[int], frozenset[tuple[int, int]]] | None:
+    """Restrict the first pure transfer by independently final entry guards.
+
+    Three-block and smaller callees retain the single transfer to avoid
+    adding a cone walk to the common short leaf path.
+    Refined rounds already exclude the guard edges and need no extra replay.
+    """
+    if not enabled or dead or len(scope) <= 3:
+        return scope, dead
+    entry_dead = _kb_entry_chain_edges_8616(
+        blocks, scope, predecessors, head, terminal, stop, seed,
+        apply_service, read_load, deadline, budget,
+    )
+    if entry_dead is None:
+        return None
+    if not entry_dead:
+        return scope, dead
+    surviving = _kb_surviving_cone_8616(
+        blocks, scope, predecessors, head, terminal, entry_dead, deadline, budget,
+    )
+    return None if surviving is None else (surviving, entry_dead)
+
+
+def _kb_ready_entry_8616(
+    predecessors: Sequence[int], exits: Mapping[int, _KbPathState8616],
+    seed: _KbPathState8616 | None,
+) -> _KbPathState8616 | None:
+    """Meet ready predecessors and an optional entry seed; defer pending nodes."""
+    ready = [exits[pred] for pred in predecessors if pred in exits]
+    if seed is not None:
+        ready.insert(0, _KbPathState8616(dict(seed.registers), seed.memory))
+    elif predecessors and not ready:
+        return None
+    return _kb_meet_state_8616(ready)
+
+
+@dataclass(frozen=True, slots=True)
+class _KbFixpointResult8616:
+    """Completed local round and the exact CFG inputs used for its transfers.
+
+    Entry-chain pruning can narrow those inputs before iteration. Keeping
+    that fact prevents an identical completed round from being rerun merely
+    because the outer refinement owner still remembers the larger input.
+    No record escapes an incomplete round or survives this feasibility call.
+    """
+
+    entries: dict[int, _KbPathState8616]
+    live_blocks: frozenset[int]
+    infeasible_edges: frozenset[tuple[int, int]]
+
+
 def _kb_fixpoint_8616(
     blocks_by_addr: Mapping[int, IRBlock],
     dangerous: frozenset[int],
@@ -1706,7 +1909,8 @@ def _kb_fixpoint_8616(
     infeasible_edges: frozenset[tuple[int, int]] = frozenset(),
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
     transfer_order: tuple[int, ...] | None = None,
-) -> dict[int, _KbPathState8616] | None:
+    branch_snapshots: dict[int, _BranchTransferObservation8616] | None = None,
+) -> _KbFixpointResult8616 | None:
     """Iterate the must-meet transfer to convergence, or ``None``.
 
     Mirrors ``_simulate_scope_8616``: the head meets the seed *and* its
@@ -1720,6 +1924,17 @@ def _kb_fixpoint_8616(
     order = invocation_transfer_order_8616(dangerous, transfer_order)
     if order is None:
         return None
+    if branch_snapshots is not None:
+        initial = _kb_entry_chain_scope_8616(
+            blocks_by_addr, dangerous, predecessor_map, head_addr,
+            call_block_addr, callsite_addr, seed_state, apply_service,
+            read_load, deadline, budget, infeasible_edges,
+            enabled=iteration_limit > 1,
+        )
+        if initial is None:
+            return None
+        dangerous, infeasible_edges = initial
+        order = tuple(addr for addr in order if addr in dangerous)
     entries: dict[int, _KbPathState8616] = {}
     exits: dict[int, _KbPathState8616] = {}
     for _ in range(iteration_limit):
@@ -1731,20 +1946,11 @@ def _kb_fixpoint_8616(
                 pred for pred in predecessor_map.get(addr, ())
                 if pred in dangerous and (pred, addr) not in infeasible_edges
             ]
-            if addr == head_addr:
-                entry = _kb_meet_state_8616(
-                    [
-                        _KbPathState8616(
-                            dict(seed_state.registers), seed_state.memory
-                        )
-                    ]
-                    + [exits[pred] for pred in predecessors if pred in exits]
-                )
-            else:
-                ready = [exits[pred] for pred in predecessors if pred in exits]
-                if predecessors and not ready:
-                    continue
-                entry = _kb_meet_state_8616(ready)
+            entry = _kb_ready_entry_8616(
+                predecessors, exits, seed_state if addr == head_addr else None,
+            )
+            if entry is None:
+                continue
             if entries.get(addr) == entry and addr in exits:
                 continue
             entries[addr] = entry
@@ -1753,7 +1959,7 @@ def _kb_fixpoint_8616(
                 entry,
                 apply_service,
                 stop_after=callsite_addr if addr == call_block_addr else None,
-                sink=None,
+                sink=_branch_transfer_collector_8616(branch_snapshots, blocks_by_addr[addr], budget),
                 budget=budget,
                 read_load=read_load,
                 apply_repeat=apply_repeat,
@@ -1761,13 +1967,14 @@ def _kb_fixpoint_8616(
             )
             changed = True
         if not changed:
-            return entries
+            return _KbFixpointResult8616(entries, dangerous, infeasible_edges)
     return None
 
 
 def _kb_snapshot_observed_8616(
     block: IRBlock, *, has_load_hook: bool,
     exempt_call: IRInstr | None = None,
+    call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
 ) -> bool:
     """Keep branch/hook replay; pure owned transfers have no snapshot observer.
 
@@ -1779,6 +1986,11 @@ def _kb_snapshot_observed_8616(
     because even NOT_APPLICABLE may change external authentication state.
     ``exempt_call`` is a single instruction object the caller proved inert:
     only that exact row object skips the CALL observability check.
+    ``call_replay_unobserved`` is a per-row, per-moment verdict that consulting the
+    call handler on one exact row is confined to the discarded walk state —
+    the mandatory fixpoint transfer already ran the identical consult, so a
+    second consultation cannot publish a new retained effect. A declined or
+    absent verdict keeps every CALL row, and thus the block, observed.
     """
     if type(block) is not IRBlock:
         return True
@@ -1788,7 +2000,10 @@ def _kb_snapshot_observed_8616(
         if instruction.op in ("CJMP", "CALL") or (
             instruction.op == "LOAD" and has_load_hook
         ):
-            if instruction.op == "CALL" and instruction is exempt_call:
+            if instruction.op == "CALL" and (
+                instruction is exempt_call
+                or (call_replay_unobserved is not None and call_replay_unobserved(instruction))
+            ):
                 continue
             return True
         if instruction.op == "RET":
@@ -1832,6 +2047,7 @@ def _kb_cjmp_snapshots_8616(
     repeat_consult_noop: Callable[[IRBlock], bool] | None = None,
     load_reader_readonly: Callable[[], bool] | None = None,
     terminal_call_noop: Callable[[IRInstr], bool] | None = None,
+    call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
     call_cut: Real16CallCutRequest8616 | None = None,
     cut_states: list[Real16CallCutState8616] | None = None,
 ) -> list[tuple[int, IRInstr, _KbRegs8616, _KbTmps8616]] | None:
@@ -1848,7 +2064,13 @@ def _kb_cjmp_snapshots_8616(
     keeps hooked LOAD rows observable. ``terminal_call_noop`` is the
     per-moment verdict that consulting the call handler on one exact row is
     inert; it can exempt only the last row of the selected stopping block at
-    the stopping coordinate, never under a requested cut for that block. A
+    the stopping coordinate, never under a requested cut for that block.
+    ``call_replay_unobserved`` is the per-moment verdict that consulting the call
+    handler on one exact row is confined to the discarded walk state —
+    the fixpoint already ran the identical consult on the identical
+    converged entry, so only its discarded dataflow output repeats here.
+    It is withheld entirely on a block carrying a requested cut, whose
+    detached pre-CALL capture remains an obligatory replay product. A
     ``False`` verdict or a missing predicate retains the unconditional
     replay, including the repeat and call consultations.
     """
@@ -1858,18 +2080,20 @@ def _kb_cjmp_snapshots_8616(
             return None
         if addr not in entries:
             continue
+        block = blocks_by_addr[addr]
+        cut_block = call_cut is not None and call_cut.block is block
         if apply_repeat is None:
             budget[0] -= 1
             if not _kb_snapshot_observed_8616(
-                blocks_by_addr[addr], has_load_hook=(
+                block, has_load_hook=(
                     read_load is not None
                     and load_snapshot_replay is not LoadSnapshotReplay8616.READ_ONLY_OWNED
                 ),
+                call_replay_unobserved=None if cut_block else call_replay_unobserved,
             ):
                 continue
-        elif repeat_consult_noop is not None and repeat_consult_noop(blocks_by_addr[addr]):
+        elif repeat_consult_noop is not None and repeat_consult_noop(block):
             budget[0] -= 1
-            block = blocks_by_addr[addr]
             exempt_call = _snapshot_terminal_exemption_8616(
                 block, call_block_addr, callsite_addr, terminal_call_noop, call_cut,
             )
@@ -1878,6 +2102,7 @@ def _kb_cjmp_snapshots_8616(
                     read_load is not None
                     and not (load_reader_readonly is not None and load_reader_readonly())
                 ), exempt_call=exempt_call,
+                call_replay_unobserved=None if cut_block else call_replay_unobserved,
             ):
                 continue
         def collect_snapshot(
@@ -1899,7 +2124,7 @@ def _kb_cjmp_snapshots_8616(
             read_load=read_load,
             apply_repeat=apply_repeat,
             apply_call=apply_call,
-            call_cut=call_cut if call_cut is not None and call_cut.block is blocks_by_addr[addr] else None,
+            call_cut=call_cut if cut_block else None,
             cut_states=cut_states,
         )
     if time.monotonic() > deadline or budget[0] < 0:
@@ -2039,7 +2264,9 @@ def invocation_feasible_scope_8616(
     repeat_consult_noop: Callable[[IRBlock], bool] | None = None,
     load_reader_readonly: Callable[[], bool] | None = None,
     terminal_call_noop: Callable[[IRInstr], bool] | None = None,
+    call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
     call_cut: Real16CallCutRequest8616 | None = None,
+    branch_snapshot_replay: BranchSnapshotReplay8616 = BranchSnapshotReplay8616.OBSERVABLE,
 ) -> Real16EdgeFeasibility8616:
     """Prove which dangerous-cone edges are untraversable on this invocation.
 
@@ -2074,6 +2301,17 @@ def invocation_feasible_scope_8616(
     Only a complete final round with unchanged refinement inputs publishes
     it; retained earlier pruning never authorizes a provisional cut state.
     This data is neither source authentication nor prefix reuse admission.
+    ``PURE_TRANSFER`` additionally permits the owning callee walker to collect
+    branch verdicts during each transfer. That policy requires a no-op service
+    handler and read-only LOADs; CALL/repeat handlers and cut requests retain
+    fresh replay. Provisional verdicts are replaced on changed block entries
+    and discarded unless the entire round converges within the original budget.
+    ``call_replay_unobserved`` is the caller-owned per-moment verdict that a CALL row's
+    replay consult is confined to discarded state — the mandatory fixpoint
+    already consulted the identical handler on the identical converged entry.
+    Only blocks whose every CALL row earns that verdict lose their replay;
+    interrupt/service rows, foreign consult chains and cut-carrying blocks
+    always retain it.
     """
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
     budget = [work_limit]
@@ -2105,7 +2343,13 @@ def invocation_feasible_scope_8616(
     if requested_order is None or any(addr not in blocks_by_addr for addr in dangerous):
         return finish(False)
     for _ in range(_EDGE_REFINEMENT_ROUND_LIMIT_8616):
-        entries = _kb_fixpoint_8616(
+        branch_snapshots: dict[int, _BranchTransferObservation8616] | None = (
+            {} if branch_snapshot_replay is BranchSnapshotReplay8616.PURE_TRANSFER
+            and apply_call is None and apply_repeat is None and call_cut is None
+            and (read_load is None or load_snapshot_replay is LoadSnapshotReplay8616.READ_ONLY_OWNED)
+            else None
+        )
+        completed = _kb_fixpoint_8616(
             blocks_by_addr,
             live,
             predecessor_map,
@@ -2122,33 +2366,44 @@ def invocation_feasible_scope_8616(
             infeasible_edges=dead,
             apply_call=apply_call,
             transfer_order=tuple(addr for addr in requested_order if addr in live),
+            branch_snapshots=branch_snapshots,
         )
-        if entries is None:
+        if completed is None:
             return finish(bool(dead))
         cut_states: list[Real16CallCutState8616] = []
-        snapshots = _kb_cjmp_snapshots_8616(
-            blocks_by_addr,
-            live,
-            entries,
-            call_block_addr,
-            callsite_addr,
-            apply_service,
-            deadline,
-            budget,
-            read_load,
-            apply_repeat,
-            apply_call,
-            load_snapshot_replay=load_snapshot_replay,
-            repeat_consult_noop=repeat_consult_noop,
-            load_reader_readonly=load_reader_readonly,
-            terminal_call_noop=terminal_call_noop,
-            call_cut=call_cut, cut_states=cut_states,
+        snapshots = (
+            []
+            if branch_snapshots is not None else _kb_cjmp_snapshots_8616(
+                blocks_by_addr,
+                live,
+                completed.entries,
+                call_block_addr,
+                callsite_addr,
+                apply_service,
+                deadline,
+                budget,
+                read_load,
+                apply_repeat,
+                apply_call,
+                load_snapshot_replay=load_snapshot_replay,
+                repeat_consult_noop=repeat_consult_noop,
+                load_reader_readonly=load_reader_readonly,
+                terminal_call_noop=terminal_call_noop,
+                call_replay_unobserved=call_replay_unobserved,
+                call_cut=call_cut, cut_states=cut_states,
+            )
         )
-        if snapshots is None:
+        if snapshots is None or time.monotonic() > deadline or budget[0] < 0:
             return finish(bool(dead))
-        candidate = dead | frozenset(_kb_infeasible_edges_8616(snapshots, blocks_by_addr))
+        observed_dead = (
+            frozenset(edge for observation in branch_snapshots.values() for edge in observation.infeasible_edges)
+            if branch_snapshots is not None else frozenset(_kb_infeasible_edges_8616(snapshots, blocks_by_addr))
+        )
+        candidate = dead | observed_dead
+        observations = (sum(row.evaluated_cjmps for row in branch_snapshots.values())
+                        if branch_snapshots is not None else len(snapshots))
         if candidate == dead:
-            evaluated += len(snapshots)
+            evaluated += observations
             return finish(True, cut_states[0] if len(cut_states) == 1 else None)
         surviving = _kb_surviving_cone_8616(
             blocks_by_addr,
@@ -2166,10 +2421,11 @@ def invocation_feasible_scope_8616(
         # evidence. Commit the entire round, then restart from the same seed
         # under only the dead edges proved by these completed rounds.
         inputs_changed = _kb_refinement_inputs_changed_8616(
-            live, surviving, candidate - dead, deadline, budget,
+            completed.live_blocks, surviving,
+            candidate - completed.infeasible_edges, deadline, budget,
         )
         dead, live = candidate, surviving
-        evaluated += len(snapshots)
+        evaluated += observations
         if inputs_changed is not True:
             return finish(True, cut_states[0] if inputs_changed is False and len(cut_states) == 1 else None)
     return finish(bool(dead))
@@ -2226,3 +2482,17 @@ class DirectionTracker8616:
     def direction(self) -> bool | None:
         """Return the proven DF bit, without asserting a complete FLAGS word."""
         return direction_fact_8616(self.registers)
+
+
+class EdgeFeasibilityProducerBindings8616(Protocol):
+    """Typed namespace of helper identities actually retained by this consumer.
+
+    This metadata view grants no call authority and invokes no accessor.
+    Consumers read the existing module bindings directly for cache keys.
+    """
+
+    scalar_instruction_effect_8616: object
+    register_value_family_8616: object
+    register_value_projection_8616: object
+    wide_multiply_shape_8616: object
+    wide_multiply_value_8616: object

@@ -9,6 +9,7 @@ Every ambiguous guard, iterator, storage identity, or rendered shape remains unc
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Protocol, cast
@@ -592,6 +593,30 @@ def _materialize_canonical_for_loop_8616(
     )
 
 
+def _loop_recovery_descent_children_8616(
+    statement: CStatement,
+) -> Iterator[CStatement | None]:
+    """Yield the child statements the recovery traversal descends into.
+
+    Single authoritative descent contract for non-sequence control nodes,
+    shared by ``_recover_nested_loops_8616`` and the applicability query so a
+    skipped pass and an executed pass observe exactly the same AST region.
+    """
+    if isinstance(statement, (CWhileLoop, CDoWhileLoop, CForLoop)):
+        yield statement.body
+        return
+    if isinstance(statement, CIfElse):
+        for _condition, child in statement.condition_and_nodes:
+            yield child
+        yield statement.else_node
+        return
+    if isinstance(statement, CSwitchCase):
+        for child in _iter_c_node_children_8616(statement.cases):
+            if isinstance(child, CStatement):
+                yield child
+        yield statement.default
+
+
 def _recover_nested_loops_8616(
     statement: CStatement | None,
     codegen: _CodegenBoundary8616,
@@ -603,19 +628,8 @@ def _recover_nested_loops_8616(
     if isinstance(statement, CStatements):
         _recover_statement_list_8616(statement, codegen, counts)
         return
-    if isinstance(statement, (CWhileLoop, CDoWhileLoop, CForLoop)):
-        _recover_nested_loops_8616(statement.body, codegen, counts)
-        return
-    if isinstance(statement, CIfElse):
-        for _condition, child in statement.condition_and_nodes:
-            _recover_nested_loops_8616(child, codegen, counts)
-        _recover_nested_loops_8616(statement.else_node, codegen, counts)
-        return
-    if isinstance(statement, CSwitchCase):
-        for child in _iter_c_node_children_8616(statement.cases):
-            if isinstance(child, CStatement):
-                _recover_nested_loops_8616(child, codegen, counts)
-        _recover_nested_loops_8616(statement.default, codegen, counts)
+    for child in _loop_recovery_descent_children_8616(statement):
+        _recover_nested_loops_8616(child, codegen, counts)
 
 
 def _recover_statement_list_8616(
@@ -655,9 +669,86 @@ def recover_canonical_for_loops_8616(codegen: object) -> bool:
     return stats.changed
 
 
+def _statement_proven_loop_free_8616(
+    statement: CStatement,
+    active: set[int],
+    proven: set[int],
+) -> bool:
+    """Prove that the recovery traversal below ``statement`` finds no loop.
+
+    Returns ``True`` only when the shared descent contract reaches a finite,
+    fully typed statement region containing no ``CWhileLoop``/``CForLoop``.
+    ``active`` holds ancestors on the current path so a cyclic graph refuses
+    the proof instead of diverging; ``proven`` memoizes loop-free subgraphs.
+    """
+    ident = id(statement)
+    if ident in proven:
+        return True
+    if ident in active:
+        return False
+    active.add(ident)
+    try:
+        if isinstance(statement, (CWhileLoop, CForLoop)):
+            return False
+        children: Iterable[CStatement | None] = (
+            statement.statements
+            if isinstance(statement, CStatements)
+            else _loop_recovery_descent_children_8616(statement)
+        )
+        for child in children:
+            if child is None:
+                continue
+            if not isinstance(child, CStatement):
+                return False
+            if not _statement_proven_loop_free_8616(child, active, proven):
+                return False
+    finally:
+        active.discard(ident)
+    proven.add(ident)
+    return True
+
+
+def canonical_for_loop_recovery_applicable_8616(codegen: object) -> bool:
+    """Conservatively decide whether the current C AST admits this pass.
+
+    Returns ``False`` only when a fresh traversal of ``codegen.cfunc.statements``
+    — the same typed statement region the recovery walks — proves that no
+    ``CWhileLoop`` or ``CForLoop`` is reachable, so the recovery provably has no
+    candidate and would produce a zero-evidence no-op. Missing ``cfunc`` /
+    ``statements``, non-statement payloads, and cyclic graphs all count as
+    unknown input and keep the pass applicable (``True``); the query is
+    stateless and re-reads the live root on every call, so in-place loop
+    insertions are observed immediately.
+
+    Diagnostic publication: when returning ``False`` the query writes a zero
+    ``CanonicalForLoopRecoveryStats8616`` to
+    ``codegen._inertia_canonical_for_loop_recovery_stats_8616``, identical to
+    the statistics an executed no-op recovery publishes, so diagnostics and
+    validation consumers see the same evidence shape whether the pass ran or
+    was scheduled out. No AST mutation is performed.
+    """
+    typed_codegen = cast(_CodegenBoundary8616, codegen)
+    try:
+        root = typed_codegen.cfunc.statements
+        proven_loop_free = isinstance(root, CStatement) and _statement_proven_loop_free_8616(
+            root,
+            set(),
+            set(),
+        )
+    except (AttributeError, TypeError):
+        return True
+    if not proven_loop_free:
+        return True
+    typed_codegen._inertia_canonical_for_loop_recovery_stats_8616 = (
+        CanonicalForLoopRecoveryStats8616()
+    )
+    return False
+
+
 __all__ = [
     "CanonicalForLoopRecoveryStats8616",
     "CanonicalLoopValidationShape8616",
+    "canonical_for_loop_recovery_applicable_8616",
     "canonical_loop_validation_shape_8616",
     "recover_canonical_for_loops_8616",
 ]

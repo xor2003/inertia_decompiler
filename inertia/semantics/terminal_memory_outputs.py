@@ -66,8 +66,11 @@ def _direct_store_8616(
     if instruction.op != "STORE" or len(instruction.args) < 2:
         return None
     address, value = instruction.args[:2]
-    if not _stable_direct_address_8616(address) or not _width_coherent_value_8616(
-        address, value, instruction
+    if (
+        not isinstance(address, IRAddress)
+        or not _stable_direct_address_8616(address)
+        or not _width_coherent_value_8616(address, value, instruction)
+        or instruction.addr is None
     ):
         return None
     key = (address.space, address.offset, address.size)

@@ -2269,6 +2269,14 @@ remain reachable CFG obligations. Effects after an Exit inside that same
 instruction, including unsupported REP effects, retain the adapter's refusal;
 relifting cannot delete part of an instruction to obtain equality.
 
+Flat32 call composition isolates default-form REP MOVS, STOS, SCAS and CMPS
+instructions from native prefixes and consumes the existing byte-admitted
+repeat-string SSA summary. Its output terms retain complete counter, index,
+memory, segment, direction and lazy-flag dependencies. Both the prefix and
+fallthrough remain reachable proof obligations. Overridden or unsupported
+forms retain native-IR admission; no blanket exemption authorizes effects after
+an Exit. A summary callee still requires the ordinary saved-return-target proof.
+
 The shared `x86_lazy_conditions` owner models all sixteen integer branch
 conditions for concrete VEX i386 COPY, ADD, SUB, ADC, SBB, LOGIC, INC and DEC
 thunks. Arithmetic uses the decoded byte/word/dword operand width, including

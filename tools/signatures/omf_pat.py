@@ -21,12 +21,16 @@ from typing import Any
 
 from tools.signatures.flair_paths import flair_signature_root
 from tools.signatures.pat_literal_filter import required_pat_literal
+from tools.signatures.pickle_cache import read_signature_pickle
 from tools.signatures.signature_matching_policy import signature_matching_disabled
 
 try:
-    import hyperscan as _hyperscan
-except Exception:
-    _hyperscan = None
+    import hyperscan as _hyperscan_module
+except ImportError:
+    # The optional extension exposes a dynamic third-party module API.
+    _hyperscan: Any = None
+else:
+    _hyperscan = _hyperscan_module
 
 
 @dataclass(frozen=True)
@@ -2545,12 +2549,9 @@ def load_cached_pat_regex_specs(pat_path: Path, cache_dir: Path) -> tuple[Cached
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_key = _cache_key_for_file(pat_path)
     cache_path = cache_dir / f"{_sanitize_component(pat_path.stem)}-{cache_key}-literal-v1.patrx.pickle"
-    try:
-        cached = pickle.loads(cache_path.read_bytes())
-        if isinstance(cached, tuple) and all(isinstance(item, CachedPatRegexSpec) for item in cached):
-            return cached
-    except Exception:
-        pass
+    cached = read_signature_pickle(cache_path)
+    if isinstance(cached, tuple) and all(isinstance(item, CachedPatRegexSpec) for item in cached):
+        return cached
     modules = parse_pat_file(pat_path)
     specs = tuple(_compile_pat_module_to_cached_regex(module) for module in modules)
     with contextlib.suppress(OSError):
@@ -2711,7 +2712,7 @@ def _omf_pat_tool_cache_fingerprint() -> str:
     """
     tool_path = Path(__file__).resolve()
     fingerprints: list[str] = []
-    for path in (tool_path, tool_path.with_name("pat_literal_filter.py")):
+    for path in (tool_path, tool_path.with_name("pat_literal_filter.py"), tool_path.with_name("pickle_cache.py")):
         stat = path.stat()
         fingerprints.append(f"{path}:{stat.st_mtime_ns}:{stat.st_size}")
     return "|".join(fingerprints)

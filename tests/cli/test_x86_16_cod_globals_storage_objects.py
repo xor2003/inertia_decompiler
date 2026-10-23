@@ -6,8 +6,8 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
 
-from inertia.cli.cli_access_profiles import build_access_trait_evidence_profiles
 from inertia.cli.cli_cod_globals import _coalesce_cod_word_global_loads
+from inertia.lowering.access_profiles import build_access_trait_evidence_profiles
 from inertia.lowering.object_lowering import _build_stable_access_object_hints
 
 

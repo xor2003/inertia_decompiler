@@ -224,6 +224,23 @@ def _record_temporary_snapshot(
         snapshots[destination.source_tmp] = arguments[0]
 
 
+def _is_definition_destination_8616(instruction: IRInstr) -> bool:
+    """Return whether ``instruction`` binds a new SSA definition for its dst.
+
+    Shared definition-eligibility predicate for the SSA builder and the
+    allocation-light binding counter: a ``CALL`` destination is an input
+    target, never an output, and a missing or CONST/UNKNOWN destination
+    never binds. One predicate keeps the bare count provably equal to the
+    real builder's ``len(bindings)`` instead of duplicating the rule.
+    """
+    destination = instruction.dst
+    return (
+        instruction.op != "CALL"
+        and destination is not None
+        and destination.space not in {MemSpace.CONST, MemSpace.UNKNOWN}
+    )
+
+
 def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
     """Rewrite one typed IR block without consulting the identity cache.
 
@@ -243,7 +260,7 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
         rewritten_dst = instr.dst
         if instr.op == "CALL" and rewritten_dst is not None:
             rewritten_dst = _rewrite_value(rewritten_dst, versions, snapshots, definitions)
-        elif rewritten_dst is not None and rewritten_dst.space not in {MemSpace.CONST, MemSpace.UNKNOWN}:
+        elif rewritten_dst is not None and _is_definition_destination_8616(instr):
             key = _version_key(rewritten_dst)
             version = versions.get(key, -1) + 1
             versions[key] = version
@@ -260,6 +277,22 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
             )
         )
     return SSABlock(addr=block.addr, instrs=tuple(rewritten), bindings=tuple(bindings))
+
+
+def _block_local_ssa_binding_count_8616(block: IRBlock) -> int:
+    """Count ``SSABlock.bindings`` without rewriting or caching the SSA view.
+
+    Shares ``_is_definition_destination_8616`` with the real builder, so the
+    result equals ``len(build_x86_16_block_local_ssa(block).bindings)`` by
+    the same eligibility evidence. Nothing is rewritten, published, cached,
+    or mutated: this is a read-only count for summary callers that do not
+    consume the materialized SSA projection itself.
+    """
+    return sum(
+        1
+        for instruction in block.instrs
+        if _is_definition_destination_8616(instruction)
+    )
 
 
 def build_x86_16_block_local_ssa(block: IRBlock) -> SSABlock:

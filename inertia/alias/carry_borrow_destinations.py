@@ -216,7 +216,11 @@ def _shr16_by_8_shape_8616(definition: IRInstr) -> bool:
 
 def _shr8_step_value_8616(definition: IRInstr, required_shift: int) -> IRValue | None:
     """Return the Shr16-by-8 source when the step consumes 8 bits."""
-    if not _shr16_by_8_shape_8616(definition) or required_shift < 8:
+    if (
+        not _shr16_by_8_shape_8616(definition)
+        or required_shift < 8
+        or not isinstance(definition.args[0], IRValue)
+    ):
         return None
     return definition.args[0]
 

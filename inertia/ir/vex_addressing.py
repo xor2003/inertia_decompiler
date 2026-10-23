@@ -183,7 +183,7 @@ def _address_from_parts(
     unknown. Register defaults and contextual hints cannot replace it with
     another segment: that would change alias identity and the memory effect.
     """
-    explicit_spaces = {"ss": MemSpace.SS, "ds": MemSpace.DS, "es": MemSpace.ES}
+    explicit_spaces = {"cs": MemSpace.CS, "ss": MemSpace.SS, "ds": MemSpace.DS, "es": MemSpace.ES}
     if explicit_segment is not None:
         space = explicit_spaces.get(explicit_segment, MemSpace.UNKNOWN)
         supported = space is not MemSpace.UNKNOWN

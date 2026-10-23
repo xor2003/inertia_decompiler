@@ -68,14 +68,15 @@ def _result(evidence: RegisterReachingSourceResult8616) -> ConditionRegisterDefi
     )
 
 
-def resolve_condition_register_definition_8616(
+def _resolve_definition_tokens_8616(
     inventory: RegisterSourceBlockInventory8616,
     *,
     instruction_addr: int,
     register: str,
     size: int,
     candidate_addrs: frozenset[int],
-) -> ConditionRegisterDefinition8616:
+    shared_storage: bool = False,
+) -> RegisterReachingSourceResult8616:
     """Resolve a represented full-register definition, never nearest address.
 
     Query prefixes are separate sinks. Original blocks retain their full effects,
@@ -84,7 +85,7 @@ def resolve_condition_register_definition_8616(
     """
     refused = resolve_register_reaching_source_8616((), entry_addr=0, sink_addr=0)
     if not inventory.complete or size <= 0:
-        return _result(refused)
+        return refused
     sink_addr = max(block.block_addr for block in inventory.blocks) + 1
     transfers: list[RegisterBlockTransfer8616] = []
     prefix: RegisterBlockTransfer8616 | None = None
@@ -95,7 +96,7 @@ def resolve_condition_register_definition_8616(
         for instruction in cast(tuple[DecodedInstructionFactSurface8616, ...], block.instructions):
             if instruction.address == instruction_addr:
                 if prefix is not None:
-                    return _result(refused)
+                    return refused
                 prefix = RegisterBlockTransfer8616(sink_addr, block.predecessors, kind, source)
                 if block.block_addr == inventory.function_addr:
                     # The first entry has unknown state even when a backedge exists.
@@ -104,15 +105,68 @@ def resolve_condition_register_definition_8616(
             if effect is RegisterBlockTransferKind8616.PRESERVE:
                 continue
             kind = effect
+            if shared_storage and is_x86_16_call_mnemonic_8616(instruction.mnemonic.lower()):
+                kind = RegisterBlockTransferKind8616.KILL
             source = (
-                ("definition", instruction.address)
+                (("storage", register.lower(), size) if shared_storage else ("definition", instruction.address))
                 if kind is RegisterBlockTransferKind8616.REPLACE
                 else None
             )
         transfers.append(RegisterBlockTransfer8616(block.block_addr, block.predecessors, kind, source))
     if prefix is None:
-        return _result(refused)
+        return refused
     transfers.append(prefix)
-    return _result(resolve_register_reaching_source_8616(
+    return resolve_register_reaching_source_8616(
         tuple(transfers), entry_addr=entry_addr, sink_addr=sink_addr,
+    )
+
+
+def resolve_condition_register_definition_8616(
+    inventory: RegisterSourceBlockInventory8616,
+    *, instruction_addr: int, register: str, size: int,
+    candidate_addrs: frozenset[int],
+) -> ConditionRegisterDefinition8616:
+    """Prove one unchanged value definition reaches the condition producer."""
+    return _result(_resolve_definition_tokens_8616(
+        inventory, instruction_addr=instruction_addr, register=register,
+        size=size, candidate_addrs=candidate_addrs,
     ))
+
+
+def resolve_condition_register_storage_8616(
+    inventory: RegisterSourceBlockInventory8616,
+    *, instruction_addr: int, consumption_addr: int, register: str, size: int,
+    materialized_writes: frozenset[int],
+) -> RegisterReachingSourceResult8616:
+    """Prove a single retained mutable lane is current on every incoming path.
+
+    The consumer supplies writes to ONE authenticated C storage identity. Each
+    must be a full native write; missing/partial writes and calls kill coverage.
+    Unlike a value-definition proof, different writes to that storage may join.
+    Its live read is valid only with an unchanged lane from CMP through JCC.
+    """
+    refused = resolve_register_reaching_source_8616((), entry_addr=0, sink_addr=0)
+    containing = tuple(
+        block for block in inventory.blocks
+        if any(
+            ins.address == instruction_addr
+            for ins in cast(tuple[DecodedInstructionFactSurface8616, ...], block.instructions)
+        )
+    )
+    if not inventory.complete or len(containing) != 1:
+        return refused
+    instructions = cast(tuple[DecodedInstructionFactSurface8616, ...], containing[0].instructions)
+    addresses = tuple(ins.address for ins in instructions)
+    if consumption_addr not in addresses:
+        return refused
+    first, last = addresses.index(instruction_addr), addresses.index(consumption_addr)
+    if last <= first:
+        return refused
+    for instruction in instructions[first:last]:
+        effects = decoded_register_bit_effects_8616(instruction, register)
+        if is_x86_16_call_mnemonic_8616(instruction.mnemonic.lower()) or effects is None or effects[1]:
+            return refused
+    return _resolve_definition_tokens_8616(
+        inventory, instruction_addr=instruction_addr, register=register, size=size,
+        candidate_addrs=materialized_writes, shared_storage=True,
+    )

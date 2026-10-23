@@ -16,10 +16,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+
 import inertia.lowering.c_ast_utils as c_ast_utils
 import inertia.postprocess.decompiler_postprocess_utils as decompiler_postprocess_utils
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-
 from inertia.lowering.c_ast_utils import (
     _c_ast_cycle_path_8616,
     _clone_c_ast_tree_8616,
@@ -284,3 +284,29 @@ def test_cycle_detection_does_not_confuse_shared_subtrees_with_cycles():
     root = CBinaryOp("Or", shared, shared, codegen=codegen)
     assert not _c_ast_cycle_path_8616(root)
     assert not _c_ast_cycle_path_8616(root, max_nodes=0)
+
+
+@pytest.mark.parametrize("base", [int, str, list])
+def test_builtin_subclasses_keep_dynamic_codegen_boundary_and_children(base):
+    """Only exact builtins are leaves; foreign extensions retain live metadata."""
+    class Boundary(base):
+        pass
+
+    node = Boundary()
+    child = CConstant(7, SimTypeShort(False), codegen=_DummyCodegen())
+    node.child = child
+    assert not c_ast_utils._structured_codegen_node_8616(node)
+    Boundary.__module__ = "angr.analyses.decompiler.structured_codegen.synthetic"
+    assert c_ast_utils._structured_codegen_node_8616(node)
+    assert list(c_ast_utils._iter_c_nodes_deep_8616(node)) == [node, child]
+
+
+def test_codegen_classifier_does_not_require_hashable_foreign_classes():
+    """Node classification must not invoke a foreign metaclass's hashing."""
+    class UnhashableType(type):
+        __hash__ = None
+
+    class Boundary(metaclass=UnhashableType):
+        __module__ = "angr.analyses.decompiler.structured_codegen.synthetic"
+
+    assert c_ast_utils._structured_codegen_node_8616(Boundary())

@@ -15,7 +15,7 @@ import contextlib
 import copy
 import logging
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -32,7 +32,6 @@ from inertia.alias.alias_model_impl import (
 )
 from inertia.alias.domains import DomainKey, register_pair_name
 from inertia.alias.state import AliasState
-from inertia.cli import cli_access_profiles as _cli_access_profiles
 from inertia.cli import cli_access_rewrite_artifact as _cli_access_rewrite_artifact
 from inertia.cli import cli_access_trait_rewrite as _cli_access_trait_rewrite
 from inertia.cli import cli_access_traits as _cli_access_traits
@@ -54,7 +53,6 @@ from inertia.cli import cli_segmented_load_coalesce as _cli_segmented_load_coale
 from inertia.cli import cli_stack_byte_offsets as _cli_stack_byte_offsets
 from inertia.cli import cli_stack_locals as _cli_stack_locals
 from inertia.cli import cli_word_global_helpers as _cli_word_global_helpers
-from inertia.cli.cli_access_profiles import AccessTraitStrideEvidence as _AccessTraitStrideEvidence
 from inertia.cli.cli_output import (
     _timestamped_print,
 )
@@ -64,10 +62,12 @@ from inertia.cli.sidecar_metadata import (
     _lst_data_label,
 )
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
+from inertia.lowering import access_profiles as _cli_access_profiles
 from inertia.lowering import object_lowering as _cli_access_object_hints
 from inertia.lowering import object_lowering as _cli_segmented_lowering
 from inertia.lowering import segmented_lowering as _cli_segmented
 from inertia.lowering import stack_lowering as _cli_stack_cvars
+from inertia.lowering.access_profiles import AccessTraitStrideEvidence as _AccessTraitStrideEvidence
 from inertia.lowering.analysis_helpers import (
     collect_dos_int21_calls,
     collect_interrupt_service_calls,
@@ -582,7 +582,10 @@ _CLI_AST_LEAF_TYPES_8616: frozenset[type] = frozenset({str, bytes, int, float, c
 
 def _structured_slot_names_8616(value: StructuredAstValue) -> tuple[str, ...]:
     """Reuse class layouts and read every instance's current public fields."""
-    base_attrs: tuple[str, ...] = _structured_slot_names_for_type_8616(type(value), _CLI_AST_NON_CHILD_ATTRS_8616)
+    # type(value) is always a hashable class object; the lru_cache wrapper only
+    # accepts Hashable args and cannot prove hashability through Any.
+    value_type = cast(Hashable, type(value))
+    base_attrs: tuple[str, ...] = _structured_slot_names_for_type_8616(value_type, _CLI_AST_NON_CHILD_ATTRS_8616)
     # __dict__ is the dynamic third-party codegen boundary, not owned state.
     dynamic_attrs = getattr(value, "__dict__", None)
     if not dynamic_attrs:
@@ -684,10 +687,7 @@ class _CODSourceRewriteSpec:
 
 
 def _segment_reg_name(node: StructuredAstValue, project: AngrProjectValue) -> str | None:
-    return cast(
-        str | None,
-        _cli_segmented._segment_reg_name(node, project, project_rewrite_cache=_project_rewrite_cache),
-    )
+    return _cli_segmented._segment_reg_name(node, project, project_rewrite_cache=_project_rewrite_cache)
 
 
 def _classify_segmented_addr_expr(node: StructuredAstValue, project: AngrProjectValue) -> _SegmentedAccess | None:
@@ -714,26 +714,20 @@ def _classify_segmented_dereference(node: StructuredAstValue, project: AngrProje
 
 
 def _match_real_mode_linear_expr(node: StructuredAstValue, project: AngrProjectValue) -> tuple[str | None, int | None]:
-    return cast(
-        tuple[str | None, int | None],
-        _cli_segmented._match_real_mode_linear_expr(
-            node,
-            project,
-            project_rewrite_cache=_project_rewrite_cache,
-            classify_segmented_addr_expr=_classify_segmented_addr_expr,
-        ),
+    return _cli_segmented._match_real_mode_linear_expr(
+        node,
+        project,
+        project_rewrite_cache=_project_rewrite_cache,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
     )
 
 
 def _match_segmented_dereference(node: StructuredAstValue, project: AngrProjectValue) -> tuple[str | None, int | None]:
-    return cast(
-        tuple[str | None, int | None],
-        _cli_segmented._match_segmented_dereference(
-            node,
-            project,
-            project_rewrite_cache=_compat_callback(_project_rewrite_cache),
-            classify_segmented_dereference=_compat_callback(_classify_segmented_dereference),
-        ),
+    return _cli_segmented._match_segmented_dereference(
+        node,
+        project,
+        project_rewrite_cache=_compat_callback(_project_rewrite_cache),
+        classify_segmented_dereference=_compat_callback(_classify_segmented_dereference),
     )
 
 
@@ -3871,7 +3865,7 @@ def _access_trait_profile_for_key(
     evidence_profiles: Mapping[tuple[object, ...], _AccessTraitEvidenceProfile],
     base_key: tuple[object, ...],
 ) -> _AccessTraitEvidenceProfile | None:
-    return cast(_AccessTraitEvidenceProfile | None, _cli_access_profiles.access_trait_profile_for_key(evidence_profiles, base_key))
+    return _cli_access_profiles.access_trait_profile_for_key(evidence_profiles, base_key)
 
 
 @dataclass(frozen=True)
@@ -3907,10 +3901,7 @@ class _AccessTraitRewriteDecision:
 def _build_access_trait_evidence_profiles(
     traits: dict[str, dict[tuple[object, ...], object]],
 ) -> dict[tuple[object, ...], _AccessTraitEvidenceProfile]:
-    return cast(
-        dict[tuple[object, ...], _AccessTraitEvidenceProfile],
-        _cli_access_profiles.build_access_trait_evidence_profiles(traits),
-    )
+    return _cli_access_profiles.build_access_trait_evidence_profiles(traits)
 
 
 def _linear_delta_or_base_8616(
@@ -4071,83 +4062,73 @@ def _access_trait_member_candidates(
     traits: dict[str, dict[tuple[object, ...], int]],
 ) -> dict[tuple[object, ...], list[tuple[int, int, int]]]:
     compatible_traits = cast(dict[str, dict[tuple[object, ...], object]], traits)
-    return cast(
-        dict[tuple[object, ...], list[tuple[int, int, int]]],
-        _cli_access_profiles.access_trait_member_candidates(compatible_traits),
-    )
+    return _cli_access_profiles.access_trait_member_candidates(compatible_traits)
 
 
 def _should_attach_access_trait_names(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_access_trait_rewrite._should_attach_access_trait_names(
-        codegen,
-        has_access_rewrite_artifact=lambda current_codegen: _cli_access_rewrite_artifact.has_access_rewrite_artifact(
-            getattr(current_codegen, "project", None),
-            getattr(getattr(current_codegen, "cfunc", None), "addr", None),
+    return _cli_access_trait_rewrite._should_attach_access_trait_names(
+    codegen,
+    has_access_rewrite_artifact=lambda current_codegen: _cli_access_rewrite_artifact.has_access_rewrite_artifact(
+        getattr(current_codegen, "project", None),
+        getattr(getattr(current_codegen, "cfunc", None), "addr", None),
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-            build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
-                traits,
-                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-            ),
         ),
-    )
-    )
+    ),
+)
 
 
 def _attach_access_trait_field_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_access_trait_rewrite._attach_access_trait_field_names(
-        project,
-        codegen,
-        should_attach_access_trait_names=_should_attach_access_trait_names,
-        load_access_rewrite_artifact=lambda current_project, function_addr: (
-            _cli_access_rewrite_artifact.load_access_rewrite_artifact(
-                current_project,
-                function_addr if isinstance(function_addr, int) else None,
-                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-                build_stable_access_object_hints=lambda traits: (
-                    _cli_access_object_hints._build_stable_access_object_hints(
-                        traits,
-                        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-                    )
-                ),
-            )
-        ),
-        stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
-        access_trait_variable_key=_access_trait_variable_key,
-        stack_object_name=_stack_object_name,
-        access_trait_field_name=_access_trait_field_name,
-        replace_c_children=_replace_c_children,
-    ))
+    return _cli_access_trait_rewrite._attach_access_trait_field_names(
+    project,
+    codegen,
+    should_attach_access_trait_names=_should_attach_access_trait_names,
+    load_access_rewrite_artifact=lambda current_project, function_addr: (
+        _cli_access_rewrite_artifact.load_access_rewrite_artifact(
+            current_project,
+            function_addr if isinstance(function_addr, int) else None,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            build_stable_access_object_hints=lambda traits: (
+                _cli_access_object_hints._build_stable_access_object_hints(
+                    traits,
+                    build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+                )
+            ),
+        )
+    ),
+    stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
+    access_trait_variable_key=_access_trait_variable_key,
+    stack_object_name=_stack_object_name,
+    access_trait_field_name=_access_trait_field_name,
+    replace_c_children=_replace_c_children,
+)
 
 
 def _attach_pointer_member_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_access_trait_rewrite._attach_pointer_member_names(
-        project,
-        codegen,
-        should_attach_access_trait_names=_should_attach_access_trait_names,
-        load_access_rewrite_artifact=lambda current_project, function_addr: (
-            _cli_access_rewrite_artifact.load_access_rewrite_artifact(
-                current_project,
-                function_addr if isinstance(function_addr, int) else None,
-                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-                build_stable_access_object_hints=lambda traits: (
-                    _cli_access_object_hints._build_stable_access_object_hints(
-                        traits,
-                        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-                    )
-                ),
-            )
-        ),
-        stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
-        access_trait_variable_key=_access_trait_variable_key,
-        access_trait_field_name=_access_trait_field_name,
-        replace_c_children=_replace_c_children,
-    ))
+    return _cli_access_trait_rewrite._attach_pointer_member_names(
+    project,
+    codegen,
+    should_attach_access_trait_names=_should_attach_access_trait_names,
+    load_access_rewrite_artifact=lambda current_project, function_addr: (
+        _cli_access_rewrite_artifact.load_access_rewrite_artifact(
+            current_project,
+            function_addr if isinstance(function_addr, int) else None,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            build_stable_access_object_hints=lambda traits: (
+                _cli_access_object_hints._build_stable_access_object_hints(
+                    traits,
+                    build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+                )
+            ),
+        )
+    ),
+    stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
+    access_trait_variable_key=_access_trait_variable_key,
+    access_trait_field_name=_access_trait_field_name,
+    replace_c_children=_replace_c_children,
+)
 
 
 def _lst_is_linear_temp_8616(cvar: StructuredAstValue) -> bool:
@@ -4687,207 +4668,164 @@ def _attach_register_names(project: AngrProjectValue, codegen: StructuredCodegen
     return changed
 
 def _elide_redundant_segment_pointer_dereferences(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_elision._elide_redundant_segment_pointer_dereferences(
-            project,
-            codegen,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            classify_segmented_dereference=_compat_callback(_classify_segmented_dereference),
-            flatten_c_add_terms=_flatten_c_add_terms,
-            unwrap_c_casts=_unwrap_c_casts,
-            c_constant_value=_c_constant_value,
-            segment_reg_name=_segment_reg_name,
-            match_segment_register_based_dereference=_match_segment_register_based_dereference,
-            strip_segment_scale_from_addr_expr=_strip_segment_scale_from_addr_expr,
-            same_c_storage=_same_c_storage,
-            replace_c_children=_replace_c_children,
-        ),
+    return _cli_segmented_elision._elide_redundant_segment_pointer_dereferences(
+        project,
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        classify_segmented_dereference=_compat_callback(_classify_segmented_dereference),
+        flatten_c_add_terms=_flatten_c_add_terms,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        segment_reg_name=_segment_reg_name,
+        match_segment_register_based_dereference=_match_segment_register_based_dereference,
+        strip_segment_scale_from_addr_expr=_strip_segment_scale_from_addr_expr,
+        same_c_storage=_same_c_storage,
+        replace_c_children=_replace_c_children,
     )
 
 
 def _collect_access_traits(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_access_traits._collect_access_traits(
-            project,
-            codegen,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            unwrap_c_casts=_unwrap_c_casts,
-            c_constant_value=_c_constant_value,
-            classify_segmented_dereference=_compat_callback(_classify_segmented_dereference),
-            stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
-            access_trait_variable_key=_access_trait_variable_key,
-            AccessTraitStrideEvidence=_AccessTraitStrideEvidence,
-        ),
+    return _cli_access_traits._collect_access_traits(
+        project,
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        classify_segmented_dereference=_compat_callback(_classify_segmented_dereference),
+        stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
+        access_trait_variable_key=_access_trait_variable_key,
+        AccessTraitStrideEvidence=_AccessTraitStrideEvidence,
     )
 
 
 def _prune_unused_unnamed_memory_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_memory_prune._prune_unused_unnamed_memory_declarations(
-            codegen,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-        ),
+    return _cli_memory_prune._prune_unused_unnamed_memory_declarations(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
 def _prune_unused_linear_register_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_local_prune._prune_unused_linear_register_declarations(
-            codegen,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-        ),
+    return _cli_local_prune._prune_unused_linear_register_declarations(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
 def _prune_unused_local_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_local_prune._prune_unused_local_declarations(
-            codegen,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            describe_alias_storage=_compat_callback(describe_alias_storage),
-        ),
-    )
+    """Consume canonical declaration cleanup after the producer's early pass."""
+    from inertia.postprocess.optimization.local_declarations import prune_unreferenced_scalar_declarations_8616
+
+    return prune_unreferenced_scalar_declarations_8616(codegen)
 
 
 def _prune_dead_local_assignments(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_dead_local_prune._prune_dead_local_assignments(
-            codegen,
-            structured_codegen_node=_structured_codegen_node,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            unwrap_c_casts=_unwrap_c_casts,
-            describe_alias_storage=_compat_callback(describe_alias_storage),
-        ),
+    return _cli_dead_local_prune._prune_dead_local_assignments(
+        codegen,
+        structured_codegen_node=_structured_codegen_node,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        unwrap_c_casts=_unwrap_c_casts,
+        describe_alias_storage=_compat_callback(describe_alias_storage),
     )
 
 
 def _materialize_missing_stack_local_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_local_rewrites._materialize_missing_stack_local_declarations(
-            codegen,
-            stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
-            stack_type_for_size=_stack_type_for_size,
-            replace_c_children=_replace_c_children,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-        ),
+    return _cli_local_rewrites._materialize_missing_stack_local_declarations(
+        codegen,
+        stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
+        stack_type_for_size=_stack_type_for_size,
+        replace_c_children=_replace_c_children,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
 def _dedupe_codegen_variable_names_8616(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_local_rewrites._dedupe_codegen_variable_names_8616(
-            codegen,
-            make_unique_identifier=_make_unique_identifier,
-        ),
+    return _cli_local_rewrites._dedupe_codegen_variable_names_8616(
+        codegen,
+        make_unique_identifier=_make_unique_identifier,
     )
 
 
 def _materialize_missing_register_local_declarations(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_local_rewrites._materialize_missing_register_local_declarations(
-            codegen,
-            stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
-            stack_type_for_size=_stack_type_for_size,
-            structured_codegen_node=_structured_codegen_node,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-        ),
+    return _cli_local_rewrites._materialize_missing_register_local_declarations(
+        codegen,
+        stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
+        stack_type_for_size=_stack_type_for_size,
+        structured_codegen_node=_structured_codegen_node,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
 def _prune_void_function_return_values(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_local_rewrites._prune_void_function_return_values(
-            codegen,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-        ),
+    return _cli_local_rewrites._prune_void_function_return_values(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
 def _coalesce_far_pointer_stack_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_far_pointer_stack._coalesce_far_pointer_stack_expressions(
-            project,
-            codegen,
-            unwrap_c_casts=_unwrap_c_casts,
-            segment_reg_name=_segment_reg_name,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+    return _cli_far_pointer_stack._coalesce_far_pointer_stack_expressions(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        segment_reg_name=_segment_reg_name,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-            build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
-                traits,
-                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-            ),
-            access_trait_variable_key=_access_trait_variable_key,
-            replace_c_children=_replace_c_children,
-            describe_alias_storage=_compat_callback(describe_alias_storage),
         ),
+        access_trait_variable_key=_access_trait_variable_key,
+        replace_c_children=_replace_c_children,
+        describe_alias_storage=_compat_callback(describe_alias_storage),
     )
 
 
 def _simplify_nested_mk_fp_calls(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_mkfp_simplify._simplify_nested_mk_fp_calls(
-            codegen,
-            unwrap_c_casts=_unwrap_c_casts,
-            c_constant_value=_c_constant_value,
-            replace_c_children=_replace_c_children,
-        ),
+    return _cli_mkfp_simplify._simplify_nested_mk_fp_calls(
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        replace_c_children=_replace_c_children,
     )
 
 
 def _attach_ss_stack_variables(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_stack_locals._attach_ss_stack_variables(
-            project,
-            codegen,
-            match_ss_stack_reference=_match_ss_stack_reference,
-            resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
-            replace_c_children=_replace_c_children,
-            stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
-        ),
+    return _cli_stack_locals._attach_ss_stack_variables(
+        project,
+        codegen,
+        match_ss_stack_reference=_match_ss_stack_reference,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        replace_c_children=_replace_c_children,
+        stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
     )
 
 
 def _rewrite_ss_stack_byte_offsets(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_stack_byte_offsets._rewrite_ss_stack_byte_offsets(
-            project,
-            codegen,
-            unwrap_c_casts=_unwrap_c_casts,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            replace_c_children=_replace_c_children,
-            c_constant_value=_c_constant_value,
-            flatten_c_add_terms=_flatten_c_add_terms,
-            classify_segmented_dereference=_classify_segmented_dereference,
-            strip_segment_scale_from_addr_expr=_strip_segment_scale_from_addr_expr,
-            resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
-            promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
-            stack_type_for_size=_stack_type_for_size,
-            materialize_stack_cvar_at_offset=_materialize_stack_cvar_at_offset,
-            stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
-            stack_pointer_alias_state=_compat_callback(_StackPointerAliasState),
-        ),
+    return _cli_stack_byte_offsets._rewrite_ss_stack_byte_offsets(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        replace_c_children=_replace_c_children,
+        c_constant_value=_c_constant_value,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        classify_segmented_dereference=_classify_segmented_dereference,
+        strip_segment_scale_from_addr_expr=_strip_segment_scale_from_addr_expr,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+        stack_type_for_size=_stack_type_for_size,
+        materialize_stack_cvar_at_offset=_materialize_stack_cvar_at_offset,
+        stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
+        stack_pointer_alias_state=_compat_callback(_StackPointerAliasState),
     )
 
 
 def _promote_direct_stack_cvariable(
     codegen: StructuredCodegenValue, cvar: StructuredAstValue, size: int, type_: StructuredAstValue
 ) -> bool:
-    return cast(bool, _cli_stack_locals._promote_direct_stack_cvariable(codegen, cvar, size, type_))
+    return _cli_stack_locals._promote_direct_stack_cvariable(codegen, cvar, size, type_)
 
 
 def _stack_type_for_size(size: int) -> StructuredAstValue:
@@ -4936,13 +4874,10 @@ def _canonicalize_stack_cvar_expr(
 
 
 def _canonicalize_stack_cvars(codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_stack_cvars._canonicalize_stack_cvars(
-        codegen,
-        replace_c_children=_replace_c_children,
-        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
-        ),
+    return _cli_stack_cvars._canonicalize_stack_cvars(
+    codegen,
+    replace_c_children=_replace_c_children,
+    canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
     )
 
 
@@ -4962,130 +4897,112 @@ def _resolve_stack_cvar_from_addr_expr(
 
 
 def _coalesce_direct_ss_local_word_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_stack_coalesce._coalesce_direct_ss_local_word_statements(
-        project,
-        codegen,
-        match_ss_local_plus_const=_match_ss_local_plus_const,
-        match_shift_right_8_expr=_match_shift_right_8_expr,
-        stack_slot_identity_can_join=_stack_slot_identity_can_join,
-        derived_stack_high_byte_follows_slot=_derived_stack_high_byte_follows_cvar,
-        same_c_expression=_same_c_expression,
-        unwrap_c_casts=_unwrap_c_casts,
-        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
-        stack_type_for_size=_stack_type_for_size,
-        match_byte_store_addr_expr=_match_byte_store_addr_expr,
-        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
-        resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
-        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
-        ),
+    return _cli_stack_coalesce._coalesce_direct_ss_local_word_statements(
+    project,
+    codegen,
+    match_ss_local_plus_const=_match_ss_local_plus_const,
+    match_shift_right_8_expr=_match_shift_right_8_expr,
+    stack_slot_identity_can_join=_stack_slot_identity_can_join,
+    derived_stack_high_byte_follows_slot=_derived_stack_high_byte_follows_cvar,
+    same_c_expression=_same_c_expression,
+    unwrap_c_casts=_unwrap_c_casts,
+    promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+    stack_type_for_size=_stack_type_for_size,
+    match_byte_store_addr_expr=_match_byte_store_addr_expr,
+    addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+    resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
+    canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
     )
 
 
 def _seed_adjacent_byte_pair_aliases(project: AngrProjectValue, codegen: StructuredCodegenValue) -> dict[int, object]:
-    return cast(
-        dict[int, object],
-        _cli_linear_aliases._seed_adjacent_byte_pair_aliases(
-        project,
-        codegen,
-        structured_codegen_node=_structured_codegen_node,
-        unwrap_c_casts=_unwrap_c_casts,
-        iter_c_nodes_deep=_iter_c_nodes_deep,
-        match_byte_load_addr_expr=_match_byte_load_addr_expr,
-        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
-        make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
-        ),
+    return _cli_linear_aliases._seed_adjacent_byte_pair_aliases(
+    project,
+    codegen,
+    structured_codegen_node=_structured_codegen_node,
+    unwrap_c_casts=_unwrap_c_casts,
+    iter_c_nodes_deep=_iter_c_nodes_deep,
+    match_byte_load_addr_expr=_match_byte_load_addr_expr,
+    addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+    make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
     )
 
 
 def _coalesce_linear_recurrence_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_linear_recurrence._coalesce_linear_recurrence_statements(
-            project,
-            codegen,
-            unwrap_c_casts=_unwrap_c_casts,
-            structured_codegen_node=_structured_codegen_node,
-            iter_c_nodes_deep=_iter_c_nodes_deep,
-            same_c_expression=_same_c_expression,
-            c_constant_value=_c_constant_value,
-            canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
-            seed_adjacent_byte_pair_aliases=_compat_callback(_seed_adjacent_byte_pair_aliases),
-            describe_alias_storage=describe_alias_storage,
-            analyze_widening_expr=_analyze_widening_expr,
-            match_high_byte_projection_base=_match_high_byte_projection_base,
-        match_duplicate_word_base_expr=_match_duplicate_word_base_expr,
-        match_duplicate_word_increment_shift_expr=_match_duplicate_word_increment_shift_expr,
-        same_stack_slot_identity_var=_same_stack_slot_identity_var,
-        rules=_cli_linear_recurrence_rules,
-        ),
+    return _cli_linear_recurrence._coalesce_linear_recurrence_statements(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        structured_codegen_node=_structured_codegen_node,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        same_c_expression=_same_c_expression,
+        c_constant_value=_c_constant_value,
+        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
+        seed_adjacent_byte_pair_aliases=_compat_callback(_seed_adjacent_byte_pair_aliases),
+        describe_alias_storage=describe_alias_storage,
+        analyze_widening_expr=_analyze_widening_expr,
+        match_high_byte_projection_base=_match_high_byte_projection_base,
+    match_duplicate_word_base_expr=_match_duplicate_word_base_expr,
+    match_duplicate_word_increment_shift_expr=_match_duplicate_word_increment_shift_expr,
+    same_stack_slot_identity_var=_same_stack_slot_identity_var,
+    rules=_cli_linear_recurrence_rules,
     )
 
 
 def _coalesce_segmented_word_store_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_store_coalesce._coalesce_segmented_word_store_statements(
-        project,
-        codegen,
-        match_ss_local_plus_const=_match_ss_local_plus_const,
-        match_word_rhs_from_byte_pair=_match_word_rhs_from_byte_pair,
-        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
-        stack_type_for_size=_stack_type_for_size,
-        stack_slot_identity_can_join=_stack_slot_identity_can_join,
-        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
-        match_byte_store_addr_expr=_match_byte_store_addr_expr,
-        match_shift_right_8_expr=_match_shift_right_8_expr,
-        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
-        resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
-        make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
-        classify_segmented_addr_expr=_classify_segmented_addr_expr,
-        describe_alias_storage=describe_alias_storage,
-        match_byte_load_addr_expr=_match_byte_load_addr_expr,
-        same_c_expression=_same_c_expression,
-        ),
+    return _cli_segmented_store_coalesce._coalesce_segmented_word_store_statements(
+    project,
+    codegen,
+    match_ss_local_plus_const=_match_ss_local_plus_const,
+    match_word_rhs_from_byte_pair=_match_word_rhs_from_byte_pair,
+    promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+    stack_type_for_size=_stack_type_for_size,
+    stack_slot_identity_can_join=_stack_slot_identity_can_join,
+    canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
+    match_byte_store_addr_expr=_match_byte_store_addr_expr,
+    match_shift_right_8_expr=_match_shift_right_8_expr,
+    addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+    resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
+    make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
+    classify_segmented_addr_expr=_classify_segmented_addr_expr,
+    describe_alias_storage=describe_alias_storage,
+    match_byte_load_addr_expr=_match_byte_load_addr_expr,
+    same_c_expression=_same_c_expression,
     )
 
 
 def _run_typed_widening_pass(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_store_coalesce.run_typed_widening_pass_8616(
-        project,
-        codegen,
-        coalesce_direct_ss_local_word_statements=_coalesce_direct_ss_local_word_statements,
-        coalesce_segmented_word_store_statements=_coalesce_segmented_word_store_statements,
-        promote_stack_slots_from_instruction_widths=lambda current_project, current_codegen: (
-                _cli_segmented_store_coalesce.promote_stack_slots_from_instruction_widths_8616(
-                    current_project,
-                    current_codegen,
-                    resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
-                    promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
-                    stack_type_for_size=_stack_type_for_size,
-                )
-        ),
-        ),
+    return _cli_segmented_store_coalesce.run_typed_widening_pass_8616(
+    project,
+    codegen,
+    coalesce_direct_ss_local_word_statements=_coalesce_direct_ss_local_word_statements,
+    coalesce_segmented_word_store_statements=_coalesce_segmented_word_store_statements,
+    promote_stack_slots_from_instruction_widths=lambda current_project, current_codegen: (
+            _cli_segmented_store_coalesce.promote_stack_slots_from_instruction_widths_8616(
+                current_project,
+                current_codegen,
+                resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+                promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+                stack_type_for_size=_stack_type_for_size,
+            )
+    ),
     )
 
 
 def _global_memory_addr(node: StructuredAstValue) -> int | None:
-    return cast(int | None, _cli_word_loads._global_memory_addr(node))
+    return _cli_word_loads._global_memory_addr(node)
 
 
 def _global_load_addr(node: StructuredAstValue, project: AngrProjectValue) -> int | None:
-    return cast(int | None, _cli_word_loads._global_load_addr(node, project))
+    return _cli_word_loads._global_load_addr(node, project)
 
 
 def _match_scaled_high_byte(node: StructuredAstValue, project: AngrProjectValue) -> int | None:
-    return cast(
-        int | None,
-        _cli_word_loads._match_scaled_high_byte(
-        node,
-        project,
-        c_constant_value=_c_constant_value,
-        global_load_addr=_global_load_addr,
-        ),
+    return _cli_word_loads._match_scaled_high_byte(
+    node,
+    project,
+    c_constant_value=_c_constant_value,
+    global_load_addr=_global_load_addr,
     )
 
 
@@ -5134,47 +5051,38 @@ def _split_expr_const_offset(node: StructuredAstValue) -> StructuredAstValue:
 
 
 def _same_expression_list(lhs_terms: StructuredAstValue, rhs_terms: StructuredAstValue) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_compare._same_expression_list(
-        lhs_terms,
-        rhs_terms,
-        same_c_expression=_same_c_expression,
-        ),
+    return _cli_segmented_compare._same_expression_list(
+    lhs_terms,
+    rhs_terms,
+    same_c_expression=_same_c_expression,
     )
 
 
 def _addr_exprs_are_same(
     low_addr_expr: StructuredAstValue, high_addr_expr: StructuredAstValue, project: AngrProjectValue
 ) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_compare._addr_exprs_are_same(
-        low_addr_expr,
-        high_addr_expr,
-        project,
-        classify_segmented_addr_expr=_classify_segmented_addr_expr,
-        same_c_expression=_same_c_expression,
-        split_expr_const_offset=_split_expr_const_offset,
-        same_expression_list=_same_expression_list,
-        ),
+    return _cli_segmented_compare._addr_exprs_are_same(
+    low_addr_expr,
+    high_addr_expr,
+    project,
+    classify_segmented_addr_expr=_classify_segmented_addr_expr,
+    same_c_expression=_same_c_expression,
+    split_expr_const_offset=_split_expr_const_offset,
+    same_expression_list=_same_expression_list,
     )
 
 
 def _addr_exprs_are_byte_pair(
     low_addr_expr: StructuredAstValue, high_addr_expr: StructuredAstValue, project: AngrProjectValue = None
 ) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_compare._addr_exprs_are_byte_pair(
-        low_addr_expr,
-        high_addr_expr,
-        project,
-        classify_segmented_addr_expr=_classify_segmented_addr_expr,
-        stack_slot_identity_can_join_var=_stack_slot_identity_can_join_var,
-        split_expr_const_offset=_split_expr_const_offset,
-        same_expression_list=_same_expression_list,
-        ),
+    return _cli_segmented_compare._addr_exprs_are_byte_pair(
+    low_addr_expr,
+    high_addr_expr,
+    project,
+    classify_segmented_addr_expr=_classify_segmented_addr_expr,
+    stack_slot_identity_can_join_var=_stack_slot_identity_can_join_var,
+    split_expr_const_offset=_split_expr_const_offset,
+    same_expression_list=_same_expression_list,
     )
 
 
@@ -5360,13 +5268,10 @@ def _match_word_rhs_from_byte_pair(
 
 
 def _high_byte_store_addr(node: StructuredAstValue, project: AngrProjectValue) -> int | None:
-    return cast(
-        int | None,
-        _cli_word_loads._high_byte_store_addr(
-        node,
-        project,
-        classify_segmented_dereference=_classify_segmented_dereference,
-        ),
+    return _cli_word_loads._high_byte_store_addr(
+    node,
+    project,
+    classify_segmented_dereference=_classify_segmented_dereference,
     )
 
 
@@ -5389,131 +5294,107 @@ def _synthetic_word_global_variable(
 def _coalesce_cod_word_global_loads(
     project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
 ) -> bool:
-    return cast(
-        bool,
-        _cli_cod_globals._coalesce_cod_word_global_loads(
-        project,
-        codegen,
-            synthetic_globals,
-            collect_access_traits=_collect_access_traits,
+    return _cli_cod_globals._coalesce_cod_word_global_loads(
+    project,
+    codegen,
+        synthetic_globals,
+        collect_access_traits=_collect_access_traits,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-            build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
-                traits,
-                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-            ),
-        global_load_addr=_global_load_addr,
-        match_scaled_high_byte=_match_scaled_high_byte,
-        synthetic_word_global_variable=_compat_callback(_synthetic_word_global_variable),
-        replace_c_children=_replace_c_children,
         ),
+    global_load_addr=_global_load_addr,
+    match_scaled_high_byte=_match_scaled_high_byte,
+    synthetic_word_global_variable=_compat_callback(_synthetic_word_global_variable),
+    replace_c_children=_replace_c_children,
     )
 
 
 def _coalesce_segmented_word_load_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
-    return cast(
-        bool,
-        _cli_segmented_load_coalesce._coalesce_segmented_word_load_expressions(
-        project,
-        codegen,
-        unwrap_c_casts=_unwrap_c_casts,
-        iter_c_nodes_deep=_iter_c_nodes_deep,
-        replace_c_children=_replace_c_children,
-        structured_codegen_node=_structured_codegen_node,
-        match_byte_load_addr_expr=_match_byte_load_addr_expr,
-        match_shifted_high_byte_addr_expr=_match_shifted_high_byte_addr_expr,
-        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
-        classify_segmented_addr_expr=_compat_callback(_classify_segmented_addr_expr),
-        resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
-        make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
-        describe_alias_storage=_compat_callback(describe_alias_storage),
-        ),
+    return _cli_segmented_load_coalesce._coalesce_segmented_word_load_expressions(
+    project,
+    codegen,
+    unwrap_c_casts=_unwrap_c_casts,
+    iter_c_nodes_deep=_iter_c_nodes_deep,
+    replace_c_children=_replace_c_children,
+    structured_codegen_node=_structured_codegen_node,
+    match_byte_load_addr_expr=_match_byte_load_addr_expr,
+    match_shifted_high_byte_addr_expr=_match_shifted_high_byte_addr_expr,
+    addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+    classify_segmented_addr_expr=_compat_callback(_classify_segmented_addr_expr),
+    resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
+    make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
+    describe_alias_storage=_compat_callback(describe_alias_storage),
     )
 
 
 def _coalesce_cod_word_global_statements(
     project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
 ) -> bool:
-    return cast(
-        bool,
-        _cli_cod_global_statements._coalesce_cod_word_global_statements(
-        project,
-        codegen,
-        synthetic_globals,
-        global_memory_addr=_global_memory_addr,
-        high_byte_store_addr=_high_byte_store_addr,
-        synthetic_word_global_variable=_compat_callback(_synthetic_word_global_variable),
-        ),
+    return _cli_cod_global_statements._coalesce_cod_word_global_statements(
+    project,
+    codegen,
+    synthetic_globals,
+    global_memory_addr=_global_memory_addr,
+    high_byte_store_addr=_high_byte_store_addr,
+    synthetic_word_global_variable=_compat_callback(_synthetic_word_global_variable),
     )
 
 
 def _int21_call_replacements(
     project: AngrProjectValue, function: StructuredAstValue, api_style: str, binary_path: Path | None
 ) -> list[str]:
-    return cast(
-        list[str],
-        _cli_helper_modeling._int21_call_replacements(
-        project,
-        function,
-        api_style,
-        binary_path,
-        collect_dos_int21_calls=collect_dos_int21_calls,
-        render_dos_int21_call=_compat_callback(render_dos_int21_call),
-        ),
+    return _cli_helper_modeling._int21_call_replacements(
+    project,
+    function,
+    api_style,
+    binary_path,
+    collect_dos_int21_calls=collect_dos_int21_calls,
+    render_dos_int21_call=_compat_callback(render_dos_int21_call),
     )
 
 
 def _interrupt_call_replacement_map(
     project: AngrProjectValue, function: StructuredAstValue, api_style: str, binary_path: Path | None
 ) -> dict[str, tuple[str, ...]]:
-    return cast(
-        dict[str, tuple[str, ...]],
-        _cli_helper_modeling._interrupt_call_replacement_map(
-        project,
-        function,
-        api_style,
-        binary_path,
-        collect_interrupt_service_calls=collect_interrupt_service_calls,
-        render_interrupt_call=_compat_callback(render_interrupt_call),
-        helper_name=_helper_name,
-        interrupt_service_addr=_compat_callback(interrupt_service_addr),
-        interrupt_service_name=_compat_callback(interrupt_service_name),
-        ),
+    return _cli_helper_modeling._interrupt_call_replacement_map(
+    project,
+    function,
+    api_style,
+    binary_path,
+    collect_interrupt_service_calls=collect_interrupt_service_calls,
+    render_interrupt_call=_compat_callback(render_interrupt_call),
+    helper_name=_helper_name,
+    interrupt_service_addr=_compat_callback(interrupt_service_addr),
+    interrupt_service_name=_compat_callback(interrupt_service_name),
     )
 
 
 def _dos_helper_declarations(function: StructuredAstValue, api_style: str, binary_path: Path | None) -> list[str]:
-    return cast(
-        list[str],
-        _cli_helper_modeling._dos_helper_declarations(
-        function,
-        api_style,
-        binary_path,
-        collect_dos_int21_calls=collect_dos_int21_calls,
-        dos_helper_declarations=_compat_callback(dos_helper_declarations),
-        ),
+    return _cli_helper_modeling._dos_helper_declarations(
+    function,
+    api_style,
+    binary_path,
+    collect_dos_int21_calls=collect_dos_int21_calls,
+    dos_helper_declarations=_compat_callback(dos_helper_declarations),
     )
 
 
 def _interrupt_helper_declarations(function: StructuredAstValue, api_style: str, binary_path: Path | None) -> list[str]:
-    return cast(
-        list[str],
-        _cli_helper_modeling._interrupt_helper_declarations(
-        function,
-        api_style,
-        binary_path,
-        collect_interrupt_service_calls=collect_interrupt_service_calls,
-        interrupt_service_declarations=_compat_callback(interrupt_helper_declarations_8616),
-        ),
+    return _cli_helper_modeling._interrupt_helper_declarations(
+    function,
+    api_style,
+    binary_path,
+    collect_interrupt_service_calls=collect_interrupt_service_calls,
+    interrupt_service_declarations=_compat_callback(interrupt_helper_declarations_8616),
     )
 
 
 def _known_helper_declarations(cod_metadata: CODProcMetadata | None) -> list[str]:
-    return cast(
-        list[str],
-        _cli_helper_modeling._known_helper_declarations(
-        cod_metadata,
-        preferred_known_helper_signature_decl=preferred_known_helper_signature_decl,
-        ),
+    return _cli_helper_modeling._known_helper_declarations(
+    cod_metadata,
+    preferred_known_helper_signature_decl=preferred_known_helper_signature_decl,
     )
 
 

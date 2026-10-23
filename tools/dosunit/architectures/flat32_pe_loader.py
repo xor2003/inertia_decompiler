@@ -27,6 +27,13 @@ class InclusivePE(PE):  # type: ignore[misc]
     memory: Clemory
     """CLE backend memory, initialized before root binding and relocation."""
 
+    source_pe_bytes: bytes
+    """Original serialized PE retained before CLE closes its parser and stream.
+
+    Import-contract intake must use these loaded bytes instead of reopening a
+    path that may have changed after project construction.
+    """
+
     def __init__(self, *args: object, max_mapped_bytes: int, **kwargs: object) -> None:
         """Keep upstream parsed metadata and repair only its inclusive seed span."""
         if type(max_mapped_bytes) is not int or max_mapped_bytes <= 0:
@@ -36,6 +43,8 @@ class InclusivePE(PE):  # type: ignore[misc]
         # CLE supplies heterogeneous backend options, including its evolving
         # debug callback arguments. Preserve that third-party keyword boundary.
         super().__init__(*args, **cast(Any, kwargs))
+        # Dynamic third-party pefile boundary: CLE later deletes its parser.
+        self.source_pe_bytes = bytes(self._pe.__data__)
         seed = self._owned_seed
         if not seed:
             raise ValueError("PE constructor did not materialize its bounded image")

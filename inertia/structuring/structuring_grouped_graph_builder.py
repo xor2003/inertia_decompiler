@@ -140,7 +140,7 @@ def _format_ir_condition_hint_8616(condition: IRCondition) -> str | None:
     return _impl()
 
 
-def _logical_condition_hint_8616(op: str, args: tuple[object, ...]) -> str | None:
+def _logical_condition_hint_8616(op: str, args: tuple[IRAtom, ...]) -> str | None:
     """Render the not/and/or condition shapes as a hint."""
     if op == "not" and len(args) == 1 and isinstance(args[0], IRCondition):
         inner = _format_ir_condition_hint_8616(args[0])
@@ -162,7 +162,7 @@ def _logical_condition_hint_8616(op: str, args: tuple[object, ...]) -> str | Non
     return None
 
 
-def _comparison_condition_hint_8616(op: str, args: tuple[object, ...]) -> str | None:
+def _comparison_condition_hint_8616(op: str, args: tuple[IRAtom, ...]) -> str | None:
     """Render the zero/masked/compare condition shapes as a hint."""
     if op in {"zero", "nonzero"} and len(args) == 1:
         value = _format_ir_value_8616(args[0])

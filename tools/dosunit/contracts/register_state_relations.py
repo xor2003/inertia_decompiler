@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import combinations
 from typing import Any, Final
 
 from tools.dosunit.contracts.model import canonical_json_bytes
@@ -156,3 +157,33 @@ def propose_entry_permutation(
     except RegisterRelationRefusal as error:
         return RegisterProposal(error.reason, None)
     return RegisterProposal(RegisterRelationReason.BINARY_EFFECTS, relation)
+
+
+def propose_entry_swaps(
+    oracle: MachineState, candidate: MachineState, widths: dict[str, int],
+) -> tuple[RegisterPermutation, ...]:
+    """Propose at most three swaps from one matching cross-register entry effect.
+
+    Scratch coordinates need not match at entry. Every proposal still requires
+    full transition proofs with independently justified liveness/invariants.
+    No structural match is itself evidence of equivalent behavior.
+    """
+    changed = [name for name, width in sorted(widths.items())
+               if name in oracle and name in candidate
+               and oracle[name].get("width") == candidate[name].get("width") == width
+               and canonical_json_bytes(oracle[name]) != canonical_json_bytes(candidate[name])]
+    proposals = []
+    for left, right in combinations(changed, 2):
+        if widths[left] != widths[right]:
+            continue
+        cross_match = (
+            canonical_json_bytes(oracle[left]) == canonical_json_bytes(candidate[right])
+            or canonical_json_bytes(oracle[right]) == canonical_json_bytes(candidate[left])
+        )
+        if cross_match:
+            proposals.append(RegisterPermutation((
+                RegisterBinding(left, right, widths[left]), RegisterBinding(right, left, widths[left]),
+            )))
+        if len(proposals) == 3:
+            break
+    return tuple(proposals)

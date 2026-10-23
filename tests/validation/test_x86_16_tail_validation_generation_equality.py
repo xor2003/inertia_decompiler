@@ -208,3 +208,34 @@ def test_generation_equality_keeps_literal_cycles_and_request_mutations() -> Non
     before = _generation(mutable)
     mutable["k"].append(3)
     assert before != _generation(mutable)
+
+
+def _assert_shared_enum_dag_contract() -> None:
+    """Actual compiler enum leaves must not disable bounded DAG comparison."""
+    from inertia.frontend.x86_16.control_coordinates import ControlWidth
+    from inertia.frontend.x86_16.relative_control_edge import RelativeEdgeForm
+
+    resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
+    left: object = (ControlWidth.WORD, RelativeEdgeForm.JMP_REL8)
+    right: object = (ControlWidth.WORD, RelativeEdgeForm.JMP_REL8)
+    for _ in range(40):
+        left, right = (left, left), (right, right)
+    assert atoms.validation_generation_atoms_equal_8616(left, right)
+    leaf = _SelfUnequalInt(7)
+    left, right = (leaf,), (leaf,)
+    for _ in range(40):
+        left, right = (left, left), (right, right)
+    _SelfUnequalInt.comparisons = 0
+    assert atoms.validation_generation_atoms_equal_8616(left, right)
+    assert _SelfUnequalInt.comparisons == 0
+
+
+def test_generation_equality_bounds_shared_enum_and_identical_scalar_dags() -> None:
+    """Singleton enums and identical stateful leaves follow tuple identity rules."""
+    child = multiprocessing.get_context("fork").Process(target=_assert_shared_enum_dag_contract)
+    child.start()
+    child.join(timeout=30)
+    if child.is_alive():
+        child.terminate()
+        child.join(timeout=5)
+    assert child.exitcode == 0, "shared enum DAG comparison exceeded component budget"

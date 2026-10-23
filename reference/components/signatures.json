@@ -43,7 +43,8 @@
     "tests/integration/test_signature_matching_policy.py",
     "tests/integration/test_signature_region_bounds.py",
     "tools/signatures/tests/test_x86_16_life_signature_matches.py",
-    "tools/signatures/tests/test_configuration.py"
+    "tools/signatures/tests/test_configuration.py",
+    "tools/signatures/tests/test_pickle_cache.py"
   ],
   "focus": [
     "tools/signatures/tests/test_configuration.py",
@@ -63,7 +64,8 @@
     "tools/signatures/signature_catalog.py",
     "tools/signatures/cli.py",
     "tools/signatures/__main__.py",
-    "tools/signatures/omf_pat.py"
+    "tools/signatures/omf_pat.py",
+    "tools/signatures/pickle_cache.py"
   ],
   "routine_tests": [
     "tools/signatures/tests/test_configuration.py",
@@ -75,7 +77,8 @@
     "tools/signatures/tests/test_omf_pat_zero_displacement.py",
     "tools/signatures/tests/test_pat_literal_prefilter.py",
     "tools/signatures/tests/test_pat_catalog_cache_identity.py",
-    "tools/signatures/tests/test_signature_match_ambiguity.py"
+    "tools/signatures/tests/test_signature_match_ambiguity.py",
+    "tools/signatures/tests/test_pickle_cache.py"
   ],
   "order": 2
 }

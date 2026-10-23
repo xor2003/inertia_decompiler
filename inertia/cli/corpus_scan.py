@@ -542,6 +542,8 @@ def _ugly_cluster_from_fallback_8616(fallback_kind: str | None) -> str | None:
         "lift_only": "lift_only_recovery",
         "block_lift": "block_lift_recovery",
     }
+    if fallback_kind is None:
+        return None
     return fallback_clusters.get(fallback_kind)
 
 

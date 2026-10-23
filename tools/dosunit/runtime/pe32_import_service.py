@@ -31,8 +31,13 @@ IAT_DIRECTORY_INDEX: int = 12
 MAX_IMPORT_DESCRIPTORS: int = 8
 """Bounded count of import descriptors the intake admits."""
 
-MAX_IMPORT_SLOTS: int = 32
-"""Bounded total IAT slot count across every descriptor."""
+MAX_IMPORT_SLOTS: int = 64
+"""Bounded total IAT slot count across every descriptor.
+
+The MSC8 original/rebuilt compiler corpus contains up to 47 imports per
+image. Metadata intake accommodates those complete tables independently
+of the smaller returning-service binding budget.
+"""
 
 MAX_IMPORT_BINDINGS: int = 16
 """Bounded count of caller-declared services per environment."""

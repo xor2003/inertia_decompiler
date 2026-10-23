@@ -5,13 +5,13 @@ from types import SimpleNamespace
 import networkx as nx
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CStatements, CWhileLoop
+
+import inertia.structuring.loop_break_jcc as loop_break_jcc
+import inertia.structuring.loop_break_topology as loop_break_topology
 from inertia.semantics.register_source_block_inventory import (
     RegisterSourceBlockEvidence8616,
     RegisterSourceBlockInventory8616,
 )
-import inertia.structuring.loop_break_jcc as loop_break_jcc
-import inertia.structuring.loop_break_topology as loop_break_topology
-
 from inertia.structuring.loop_break_topology import LoopBreakTopology8616
 from inertia.structuring.natural_loop_topology import classify_natural_loop_topology_8616
 from tests.structuring.test_x86_16_structuring_loop_break_jcc import _callbacks, _const, _DummyCodegen, _Insn, _reg
@@ -67,6 +67,47 @@ def test_topology_collection_requires_complete_inventory(monkeypatch, complete):
 
 def test_missing_function_cfg_is_not_exit_evidence():
     assert loop_break_topology.collect_loop_break_topology_8616(SimpleNamespace(), _DummyCodegen()) is None
+
+
+@pytest.mark.parametrize("stale_default", [False, True])
+def test_topology_uses_authenticated_private_function(monkeypatch, stale_default):
+    """Loop evidence must use codegen's owner even when the default KB differs."""
+    from tests.ir.test_x86_16_codegen_function_ownership import _recovered_function
+
+    project, _cfg, function = _recovered_function()
+    if stale_default:
+        project.kb.functions.function(addr=function.addr, create=True)
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=function.addr), _func=function)
+    graph = nx.DiGraph([(0x1000, 0x1010), (0x1010, 0x1000), (0x1000, 0x1020)])
+    blocks = tuple(
+        RegisterSourceBlockEvidence8616(node, tuple(sorted(graph.predecessors(node))), ())
+        for node in sorted(graph)
+    )
+    inventory = RegisterSourceBlockInventory8616(function.addr, blocks, 3, 3, 3, 3, 0)
+    observed = []
+
+    def collect(owner):
+        observed.append(owner)
+        return inventory
+
+    monkeypatch.setattr(loop_break_topology, "collect_register_source_block_inventory_8616", collect)
+    result = loop_break_topology.collect_loop_break_topology_8616(project, codegen)
+    assert observed == [function]
+    assert result is not None
+    assert result.loops[0].is_proven
+    assert result.loops[0].header == function.addr
+
+
+def test_topology_rejects_foreign_retained_owner():
+    """A same-address function from another project cannot authorize loop edges."""
+    from inertia.pipeline.errors import PipelineHardError
+    from tests.ir.test_x86_16_codegen_function_ownership import _recovered_function
+
+    _project, _cfg, function = _recovered_function()
+    foreign_project, _, _ = _recovered_function()
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=function.addr), _func=function)
+    with pytest.raises(PipelineHardError, match="different project"):
+        loop_break_topology.collect_loop_break_topology_8616(foreign_project, codegen)
 
 
 @pytest.mark.parametrize("extra_latch", [False, True])

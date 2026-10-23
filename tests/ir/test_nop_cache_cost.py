@@ -28,3 +28,25 @@ def test_repeated_native_coverage_does_not_relift_and_stale_bytes_refuse(
         assert coverage.complete
     project.loader.memory.store(_BASE, b"\xf4")
     assert not coverage.complete
+
+
+def test_repeated_multiblock_coverage_reuses_exact_lift_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A modest CFG working set survives repeated complete census replays."""
+    code = b"\x90\xeb\x00" * 31 + b"\x90\xc3"
+    built = _built(code, _BASE, _BASE + len(code))
+    assert built is not None
+    project, _, artifact, coverage = built
+    assert len(artifact.blocks) == 32
+    assert coverage.complete
+
+    def unexpected_lift(*args: object, **kwargs: object) -> object:
+        """Fail if an unchanged census re-lifts a warm working-set block."""
+        raise AssertionError("unchanged multiblock coverage repeated native lifting")
+
+    monkeypatch.setattr(effects.pyvex, "lift", unexpected_lift)
+    for _ in range(3):
+        assert coverage.complete
+    project.loader.memory.store(_BASE + 3 * 30, b"\xf4")
+    assert not coverage.complete

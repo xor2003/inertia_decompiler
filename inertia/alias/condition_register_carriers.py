@@ -127,12 +127,12 @@ def _binding_proofs_8616(group: list[ConditionIR]) -> list[tuple[str, IRValue]]:
         binding = condition_self_test_register_binding_8616(condition)
         if binding is not None:
             register_name, operand = binding
-            if _memory_lhs_width_8616(operand, condition.width_bits):
+            if _memory_lhs_width_8616(operand, condition.width_bits) and isinstance(operand, IRValue):
                 proofs.append((register_name, operand))
         for bound_register, bound_operand in condition_self_test_storage_bindings_8616(
             condition
         ):
-            if _memory_lhs_width_8616(bound_operand, condition.width_bits):
+            if _memory_lhs_width_8616(bound_operand, condition.width_bits) and isinstance(bound_operand, IRValue):
                 proofs.append((bound_register, bound_operand))
     return proofs
 

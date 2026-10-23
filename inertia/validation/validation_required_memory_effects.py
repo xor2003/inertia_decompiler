@@ -151,7 +151,9 @@ def _iter_ast_nodes_8616(root: object) -> Iterable[object]:
             continue
         child_ancestors = ancestors | {id(node)}
         if isinstance(node, dict):
-            pending.extend((child, child_ancestors) for child in reversed(tuple(node.values())))
+            dict_children: list[object] = list(node.values())
+            for child in reversed(dict_children):
+                pending.append((child, child_ancestors))
             continue
         if isinstance(node, (list, tuple)):
             pending.extend((child, child_ancestors) for child in reversed(node))

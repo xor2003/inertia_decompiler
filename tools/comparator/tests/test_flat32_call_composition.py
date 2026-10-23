@@ -319,6 +319,11 @@ def test_budget_and_depth_limits_refuse() -> None:
         candidate_functions=functions,
         limits=CallCompositionLimits(max_inline_depth=1),
     )
+    assert result["status"] == "passed"  # Leaf-first construction needs no deeper descent.
+    result = _compare(
+        chain, chain, oracle_functions=functions, candidate_functions=functions,
+        limits=CallCompositionLimits(max_inline_depth=0),
+    )
     assert result["status"] == "refused"
     assert result["reason"] == "call_inline_depth_limit"
 
@@ -453,3 +458,27 @@ def test_return_slot_corruption_publishes_counterexample_evidence() -> None:
         candidate_functions=_ret4_functions(10),
     )
     _assert_corruption_failure(candidate_side, "candidate")
+
+
+@pytest.mark.parametrize("indirect", [False, True])
+def test_completed_summary_can_be_reused_beyond_inline_depth_without_new_descent(indirect: bool) -> None:
+    code = ("e80e000000 e801000000 c3 b913001000 ffd1 c3 83c001c3" if indirect else
+            "e80c000000 e801000000 c3 e801000000 c3 83c001c3")
+    leaf_offset = 19 if indirect else 17
+    functions = {BASE: 11, BASE + 11: leaf_offset - 11, BASE + leaf_offset: 4}
+    summary = summarize_with_calls(_project(code), entry=BASE, functions=functions,
+                                   outputs=OUTPUTS, limits=CallCompositionLimits(max_inline_depth=1))
+    reused = [site for site in summary["call_sites"] if site["cached_summary_depth_exemption"]]
+    assert len(reused) == 1
+    assert reused[0]["target"] == hex(BASE + leaf_offset)
+    assert summary["return_targets_proved"] == 3
+    assert summary["inlined_calls"] == 3
+    assert _compare(code, code, oracle_functions=functions, candidate_functions=functions,
+                    limits=CallCompositionLimits(max_inline_depth=1))["status"] == "passed"
+    changed = code.replace("83c001", "83c002")
+    assert _compare(code, changed, oracle_functions=functions, candidate_functions=functions,
+                    limits=CallCompositionLimits(max_inline_depth=1))["status"] == "failed"
+    result = _compare(code, code, oracle_functions=functions, candidate_functions=functions,
+                      limits=CallCompositionLimits(max_inline_depth=1, max_inlined_calls=2))
+    assert result["status"] == "refused"
+    assert result["reason"] == "call_inline_budget"

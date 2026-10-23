@@ -113,6 +113,8 @@ def _condition_value_from_ir_value_8616(instruction: _ConditionInstruction, valu
 
 def _reg_condition_value_8616(instruction: _ConditionInstruction, value: IRValue) -> _ConditionExpr | None:
     """Convert a typed register IR value into a pyvex condition value."""
+    if not isinstance(value.name, str):
+        return None
     reg_name = value.name.lower()
     bits = int(value.size or 0) * 8
     if bits <= 8:
@@ -124,7 +126,7 @@ def _reg_condition_value_8616(instruction: _ConditionInstruction, value: IRValue
 
 def _tmp_condition_value_8616(instruction: _ConditionInstruction, value: IRValue) -> _ConditionExpr | None:
     """Convert a typed temp IR value into a pyvex condition value."""
-    if value.name == "VexValue":
+    if not isinstance(value.name, str) or value.name == "VexValue":
         return None
     bits = int(value.size or 0) * 8
     if bits <= 8:

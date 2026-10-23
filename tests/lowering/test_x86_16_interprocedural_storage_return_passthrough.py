@@ -66,6 +66,9 @@ class _Graph8616:
             SimpleNamespace(addr=RETURN_ADDR, size=1),
         )
         self._nodes_by_addr = {node.addr: node for node in self.nodes}
+        self.edges: tuple[tuple[SimpleNamespace, SimpleNamespace], ...] = tuple(
+            (node, target) for node in self.nodes for target in self.successors(node)
+        )
 
     def successors(self, node: SimpleNamespace) -> tuple[SimpleNamespace, ...]:
         """Return the unique post-call edge to the terminal return."""

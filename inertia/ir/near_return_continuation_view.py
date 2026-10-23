@@ -206,27 +206,21 @@ def _pending_block_failure_8616(
     return None
 
 
-def _scope_binds_premise_8616(
+def _scope_edge_binding_matches_8616(
     scope: Real16InvocationDomain8616 | None,
     premise: NearCallFramePremise8616,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
 ) -> bool:
-    """Prove one consuming entry owns the premise's exact decoded edge.
+    """Match the retained edge and raw surface without replaying entry state.
 
-    Only a chain-bound in-flight entry may consume conditional evidence:
-    its retained link must carry the identical decoded row and index the
-    premise binds and own the identical raw artifact/boundary pair —
-    then the whole entry self-authenticates through the shared
-    entry-provenance owner, which replays parent provenance. A
-    coverage-bound entry names a registered surface and can never own a
-    pending body; an enclosed entry crosses an enclosing surface, not
-    this exact edge.
+    This identity check grants no evidence authority. Projection consumers
+    authenticate their offered entry separately; the factory below retains
+    its own independent authentication before constructing a view.
     """
     from .real16_invocation_domain import (
         Real16CallChainLink8616,
         Real16InvocationDomain8616,
-        same_real16_entry_scope_8616,
     )
 
     if (
@@ -238,14 +232,26 @@ def _scope_binds_premise_8616(
     link = scope.chain
     if type(link) is not Real16CallChainLink8616:
         return False
-    if (
-        link.callsite is not premise.callsite
-        or link.callsite_index is not premise.callsite_index
-        or link.callee_artifact is not artifact
-        or link.callee_boundary is not boundary
-    ):
-        return False
-    return same_real16_entry_scope_8616(scope, scope)
+    return (
+        link.callsite is premise.callsite
+        and link.callsite_index is premise.callsite_index
+        and link.callee_artifact is artifact
+        and link.callee_boundary is boundary
+    )
+
+
+def _scope_binds_premise_8616(
+    scope: Real16InvocationDomain8616 | None,
+    premise: NearCallFramePremise8616,
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+) -> bool:
+    """Authenticate a factory input and bind its exact retained call edge."""
+    from .real16_invocation_domain import same_real16_entry_scope_8616
+
+    return _scope_edge_binding_matches_8616(scope, premise, artifact, boundary) and (
+        same_real16_entry_scope_8616(scope, scope)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +297,10 @@ class ScopedNearReturnContinuationView8616:
         default=None, compare=False, repr=False
     )
     selector_application: EntryJumpDomainApplication8616 | None = field(
+        default=None, compare=False, repr=False
+    )
+    #: A replayed return-domain proof may exclude branches for this call only.
+    reachability_domain: Real16InvocationDomain8616 | None = field(
         default=None, compare=False, repr=False
     )
 
@@ -354,11 +364,20 @@ class ScopedNearReturnContinuationView8616:
             or consuming_scope.project is not self.boundary.project
         ):
             return None
+        if self.reachability_domain is not None:
+            from .scoped_return_reachability import scoped_reachable_return_projection_8616
+
+            # This owner authenticates the entry and its return-domain proof
+            # together; do not run a duplicate whole parent replay first.
+            reachable_projection: ScopedFunctionCFGProjection8616 | None = (
+                scoped_reachable_return_projection_8616(self, consuming_scope)
+            )
+            return reachable_projection
         if not same_real16_entry_scope_8616(
             consuming_scope, self.invocation_scope
         ):
             return None
-        if not _scope_binds_premise_8616(
+        if not _scope_edge_binding_matches_8616(
             consuming_scope,
             self.premise,
             self.source_artifact,
@@ -471,6 +490,13 @@ class ScopedNearReturnContinuationView8616:
             "detail": self.detail,
             "function_addr": self.source_artifact.function_addr,
             "proven_block_addrs": sorted(self.proven_block_addrs),
+            "reachability_domain": (
+                None if self.reachability_domain is None else {
+                    "callsite_addr": self.reachability_domain.callsite_addr,
+                    "path_block_addrs": list(self.reachability_domain.path_block_addrs),
+                    "infeasible_edges": list(self.reachability_domain.infeasible_edges),
+                }
+            ),
             "premise": (
                 None if self.premise is None else self.premise.to_dict()
             ),

@@ -418,7 +418,7 @@ def _interrupt_wrapper_helper_call_expr(
         if vector is None:
             return None
 
-        service_call = InterruptCall(insn_addr=0, vector=vector & 0xFF)
+        service_call: InterruptCall | None = InterruptCall(insn_addr=0, vector=vector & 0xFF)
         if vector == 0x21:
             service_call = _interrupt_wrapper_int21_call(input_state)
             if service_call is None:
@@ -427,6 +427,8 @@ def _interrupt_wrapper_helper_call_expr(
             service_call = _interrupt_wrapper_int10_call(input_state)
             if service_call is None:
                 return None
+        if service_call is None:
+            return None
 
         helper_name = interrupt_service_name(service_call, api_style)
         if helper_name.startswith(("int86", "intdos")):

@@ -76,6 +76,9 @@ from inertia.cli.tail_validation import (
 from inertia.cli.tail_validation import (
     tail_validation_snapshot_for_function_run as _tail_validation_snapshot_for_function_run,
 )
+from inertia.cli.work_items import (
+    TerminalDecompileFailure8616,
+)
 from inertia.cli.x86_16_exact_slice import (
     X86ExactSlicePlan,
     mark_function_original_addr,
@@ -99,7 +102,9 @@ _SIDECAR_SLICE_MAX_INSTRUCTION_BYTES_8616 = 0x800
 # when global mypy checks this CLI module without following every import. The
 # forwarding function intentionally resolves the module global on each call so
 # tests and integrations can replace the decompilation boundary.
-_DecompileFunctionWithStats = Callable[..., tuple[str, str, str | None, int, int, float]]
+_DecompileFunctionWithStats = Callable[
+    ..., tuple[str, str, str | None, int, int, float, TerminalDecompileFailure8616 | None]
+]
 
 
 @runtime_checkable
@@ -131,7 +136,8 @@ class _SidecarFunctionBoundary8616(Protocol):
 
 def _call_decompile_function_with_stats(
     *args: object, **kwargs: object
-) -> tuple[str, str, str | None, int, int, float]:
+) -> tuple[str, str, str | None, int, int, float, TerminalDecompileFailure8616 | None]:
+    """Forward run statistics and terminal provenance without dropping fields."""
     decompile_function = typing.cast(_DecompileFunctionWithStats, _decompile_function_with_stats)
     return decompile_function(*args, **kwargs)
 
@@ -902,6 +908,7 @@ class _NonOptimizedSliceFallback8616:
                 force_blob=_is_blob_only_input(Path(self.binary_path)),
                 # Dynamic angr boundary: loader objects expose backend-specific main object metadata.
                 base_addr=getattr(getattr(self.project.loader, "main_object", None), "linked_base", 0) or 0,
+                base_addr_is_linear=True,
                 # Dynamic angr boundary: project entry point is supplied by angr.
                 entry_point=getattr(self.project, "entry", 0),
                 real16_declared_input=declared_input_path_8616(self.project),

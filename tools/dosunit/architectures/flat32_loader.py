@@ -9,6 +9,7 @@ from pathlib import Path
 
 import angr
 
+from tools.dosunit.architectures.flat32_enter_lifter import ensure_flat32_enter_lifter
 from tools.dosunit.architectures.flat32_pe_loader import InclusivePE
 
 
@@ -26,4 +27,5 @@ def load_flat32_project(exe_path: Path, *, perform_relocations: bool = True) -> 
         project = angr.Project(str(exe_path), auto_load_libs=False, main_opts={"backend": "elf"})
     if project.arch.name != "X86":
         raise ValueError(f"expected i386, found {project.arch.name}: {exe_path}")
+    ensure_flat32_enter_lifter()
     return project

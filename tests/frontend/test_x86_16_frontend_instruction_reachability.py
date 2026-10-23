@@ -19,10 +19,65 @@ from inertia.frontend.x86_16.frontend_instruction_kinds import (
     is_x86_16_call_mnemonic_8616,
 )
 from inertia.frontend.x86_16.frontend_instruction_reachability import (
+    ConditionalIndirectEdge8616,
     collect_decoded_block_evidence_8616,
     collect_instruction_reachability_8616,
     decoded_block_instructions_8616,
 )
+
+
+def test_conditional_indirect_inventory_never_becomes_unconditional() -> None:
+    """A target hint closes decoding only and cannot contaminate ordinary cache reads."""
+    project = _build_project_from_bytes(bytes.fromhex("ffe3c3"), base_addr=0x1000, entry_point=0x1000)
+    kwargs = {"entry": 0x1000, "region_start": 0x1000, "region_end": 0x1003}
+    edge = ConditionalIndirectEdge8616(0x1000, 0x1000, 0x1002)
+    conditional = collect_instruction_reachability_8616(project, **kwargs, conditional_edges=(edge,))
+    assert conditional.inventory_complete
+    assert not conditional.complete
+    assert conditional.conditional_edges == (edge,)
+    assert conditional.successor_edges == ((0x1000, 0x1002),)
+    ordinary = collect_instruction_reachability_8616(project, **kwargs)
+    assert not ordinary.inventory_complete
+    assert ordinary.unresolved_block_addrs == (0x1000,)
+
+
+@pytest.mark.parametrize("instruction,target", [(0x1001, 0x1002), (0x1000, 0x2000)])
+def test_conditional_indirect_inventory_rejects_unusable_hint(instruction: int, target: int) -> None:
+    """Unbound instruction coordinates and out-of-image targets remain unresolved."""
+    project = _build_project_from_bytes(bytes.fromhex("ffe3c3"), base_addr=0x1000, entry_point=0x1000)
+    result = collect_instruction_reachability_8616(
+        project, entry=0x1000, region_start=0x1000, region_end=0x1003,
+        conditional_edges=(ConditionalIndirectEdge8616(0x1000, instruction, target),),
+    )
+    assert not result.inventory_complete
+    assert not result.complete
+
+
+@pytest.mark.parametrize("module_base", [0x1000, 0x1A20, 0x11000])
+def test_bounded_cs_table_does_not_infer_selector_from_loader(module_base: int) -> None:
+    """A guarded table index alone cannot authorize CS-relative destinations.
+
+    This standalone Borland small-model switch has four guarded table entries.
+    The image coordinate supplies bytes, not the runtime CS or a stable table
+    memory premise. Keep the indirect edge unresolved without those premises.
+    """
+    body = bytes.fromhex(
+        "558bec8b56048bda83fb037719d1e32effa73903"
+        "b80a00eb148bc2051400ebf78bc2d1e0ebf1"
+        "8bc205fbffebea5dc31e03230323032a03"
+    )
+    entry = module_base + 0x30A
+    image = bytes(0x30A) + body
+    project = _build_project_from_bytes(image, base_addr=module_base, entry_point=entry)
+    evidence = collect_instruction_reachability_8616(
+        project, entry=entry, region_start=module_base, region_end=module_base + len(image),
+    )
+    assert not evidence.complete
+    assert module_base + 0x317 in evidence.unresolved_block_addrs
+    assert module_base + 0x319 in evidence.reachable_instruction_addrs
+    # The table's first entry is 031eh; interpreting it using the image base
+    # would silently assume a CS value that no caller has established.
+    assert (module_base + 0x317, module_base + 0x31E) not in evidence.successor_edges
 
 
 @pytest.mark.parametrize("cached_failure", [False, True])

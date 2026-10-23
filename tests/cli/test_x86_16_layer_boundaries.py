@@ -50,12 +50,13 @@ def _tracked_python_files() -> tuple[Path, ...]:
         path
         for base in (
             repo / "angr_platforms",
-            repo / "inertia" / "cli",
+            repo / "inertia",
             repo / "scripts",
+            repo / "tools",
         )
         if base.exists()
         for path in sorted(base.rglob("*.py"))
-        if "__pycache__" not in path.parts
+        if not {"__pycache__", "tests"}.intersection(path.relative_to(repo).parts)
     )
 
 
@@ -130,59 +131,29 @@ def test_owning_layers_do_not_import_postprocess_layer() -> None:
     assert offenders == []
 
 
-def test_cli_segmented_modules_are_compatibility_shims_only() -> None:
-    shim_paths = (
-        Path(__file__).resolve().parents[2] / "inertia" / "cli" / "cli_segmented.py",
-        Path(__file__).resolve().parents[2] / "inertia" / "cli" / "cli_segmented_lowering.py",
-        Path(__file__).resolve().parents[2] / "inertia" / "cli" / "cli_access_object_hints.py",
-        Path(__file__).resolve().parents[2] / "inertia" / "cli" / "cli_stack_coalesce.py",
-        Path(__file__).resolve().parents[2] / "inertia" / "cli" / "cli_segmented_store_coalesce.py",
-        Path(__file__).resolve().parents[2] / "inertia" / "cli" / "cli_word_loads.py",
-    )
-    offenders: list[str] = []
-    for path in shim_paths:
-        tree = ast.parse(path.read_text(), filename=str(path))
-        if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in tree.body):
-            offenders.append(str(path))
-    assert offenders == []
+@pytest.mark.parametrize("relative_path", (
+    "cli/cli_segmented.py", "cli/cli_segmented_lowering.py",
+    "cli/cli_access_object_hints.py", "cli/cli_stack_coalesce.py",
+    "cli/cli_segmented_store_coalesce.py", "cli/cli_word_loads.py",
+    "widening_alias.py", "widening_model.py",
+    "alias_domains.py", "alias_state.py", "alias_transfer.py",
+))
+def test_removed_layer_forwarders_are_not_reintroduced(relative_path: str) -> None:
+    """Migrated layer implementations must be imported through their canonical owners."""
+    assert not (_ROOT / relative_path).exists()
 
 
-def test_alias_stack_lowering_module_is_compatibility_shim_only() -> None:
+
+
+
+
+
+
+def test_existing_alias_stack_bridge_has_no_owned_implementation() -> None:
+    """The retained alias bridge must not duplicate the canonical Lowering owner."""
     path = _ROOT / "alias" / "stack_lowering.py"
     tree = ast.parse(path.read_text(), filename=str(path))
     assert not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in tree.body)
-
-
-def test_flat_widening_modules_are_compatibility_shims_only() -> None:
-    widening_alias_path = _ROOT / "widening_alias.py"
-    alias_tree = ast.parse(widening_alias_path.read_text(), filename=str(widening_alias_path))
-    assert not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in alias_tree.body)
-
-    widening_model_path = _ROOT / "widening_model.py"
-    model_tree = ast.parse(widening_model_path.read_text(), filename=str(widening_model_path))
-    assert not any(isinstance(node, ast.ClassDef) for node in model_tree.body)
-    allowed_wrappers = {
-        "prove_adjacent_storage_slices",
-        "analyze_adjacent_storage_slices",
-        "can_join_adjacent_storage_slices",
-        "merge_storage_slice_domains",
-    }
-    wrapper_names = {node.name for node in model_tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    assert wrapper_names <= allowed_wrappers
-
-
-def test_flat_alias_modules_are_compatibility_shims_only() -> None:
-    shim_paths = (
-        _ROOT / "alias_domains.py",
-        _ROOT / "alias_state.py",
-        _ROOT / "alias_transfer.py",
-    )
-    offenders: list[str] = []
-    for path in shim_paths:
-        tree = ast.parse(path.read_text(), filename=str(path))
-        if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in tree.body):
-            offenders.append(str(path))
-    assert offenders == []
 
 
 def test_quality_and_diagnostics_modules_are_wired_into_production_paths() -> None:
@@ -243,7 +214,7 @@ def test_flagged_layer_modules_have_explicit_admission_status() -> None:
         "inertia.structuring.control_flow",
         "inertia.semantics.evidence_cache",
         "inertia.postprocess.simplify",
-        "inertia.frontend.x86_16.public_api.quality",
+        "inertia.cli.acceptance_scorecard",
         "inertia.postprocess.cleanup",
         "inertia.lowering.segmented_lowering",
         "inertia.ir.ir_canonicalize_8616",
@@ -271,8 +242,7 @@ def test_compatibility_wrapper_admission_modules_do_not_hide_logic() -> None:
     for record in LAYER_MODULE_RECORDS:
         if record.admission is not LayerModuleAdmission.COMPATIBILITY_WRAPPER:
             continue
-        rel_parts = record.module.removeprefix("inertia.frontend.x86_16.public_api.").split(".")
-        path = _ROOT.joinpath(*rel_parts).with_suffix(".py")
+        path = _ROOT.parent.joinpath(*record.module.split(".")).with_suffix(".py")
         tree = ast.parse(path.read_text(), filename=str(path))
         if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in tree.body):
             offenders.append(str(path))

@@ -1,0 +1,43 @@
+{
+  "schema": "dosunit.flat32_abi_observation.v1",
+  "functions": {
+    "sub_202C8": {
+      "return_bits": 32,
+      "private_stack_bytes": 0
+    },
+    "sub_7EDA0": {
+      "return_bits": 32,
+      "private_stack_bytes": 12,
+      "stack_disjoint_buffers": [
+        {
+          "argument_index": 0,
+          "size_bytes": 2
+        }
+      ]
+    },
+    "sub_7ED00": {
+      "return_bits": 32,
+      "private_stack_bytes": 8,
+      "entry_memory_ranges": [
+        {
+          "address": 643184,
+          "width": 32,
+          "min": 0,
+          "max": 64
+        }
+      ]
+    },
+    "sub_794D0": {
+      "return_bits": 32,
+      "private_stack_bytes": 28,
+      "entry_memory_ranges": [
+        {
+          "address": 641760,
+          "width": 32,
+          "min": 0,
+          "max": 0
+        }
+      ]
+    }
+  }
+}

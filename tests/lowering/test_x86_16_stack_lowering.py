@@ -12,13 +12,6 @@ from types import SimpleNamespace
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.ir.core import (
-    AddressStatus,
-    IRAddress,
-    MemSpace,
-    SegmentOrigin,
-)
 
 from inertia.alias.alias_model_impl import (
     AliasFailure,
@@ -26,6 +19,13 @@ from inertia.alias.alias_model_impl import (
     _stack_storage_facts_for_segmented_address_8616,
     _StackSlotIdentity,
     alias_facts_for_ir_address_8616,
+)
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.ir.core import (
+    AddressStatus,
+    IRAddress,
+    MemSpace,
+    SegmentOrigin,
 )
 from inertia.lowering.stack_lowering_from_facts import (
     build_stack_variable_bindings_from_alias_facts_8616,
@@ -374,3 +374,229 @@ class TestStackVariableMaterializationDiagnostics:
             name = _stack_object_name(offset)
             assert "stack[" not in name, f"Offset {offset} produced bad name: {name}"
             assert "(ss" not in name, f"Offset {offset} produced bad name: {name}"
+
+
+class TestStackPointerAliasResult:
+    """The shared alias result decides convergence and drives or refuses lowering."""
+
+    @staticmethod
+    def _canonicalizer(codegen):
+        """Build the real canonicalizer bound to ``codegen``."""
+        from inertia.lowering.stack_lowering_impl import _StackCvarCanonicalize8616
+        from inertia.semantics.expression_analysis import _unwrap_c_casts
+
+        canonicalizer = _StackCvarCanonicalize8616(
+            None,
+            codegen,
+            unwrap_c_casts=_unwrap_c_casts,
+            resolve_stack_cvar_at_offset=lambda *_args, **_kwargs: None,
+            materialize_stack_cvar_at_offset=None,
+            active_expr_ids=set(),
+            analysis_context={},
+        )
+        canonicalizer.codegen_dynamic = codegen
+        canonicalizer.context = canonicalizer.analysis_context
+        canonicalizer.debug_stats = {}
+        canonicalizer.synthetic_sp_anchor = None
+        canonicalizer.synthetic_bp_anchor = None
+        canonicalizer.inferred_stack_base_alias = None
+        canonicalizer.run_8616_part1()
+        return canonicalizer
+
+    @staticmethod
+    def _bp_cvar(codegen, offset, name):
+        """Build one bp stack C variable for alias fixtures."""
+        var = SimStackVariable(offset, 2, base="bp", name=name)
+        cvar = structured_c.CVariable(var, codegen=codegen)
+        codegen.cfunc.variables_in_use[var] = cvar
+        return var, cvar
+
+    def test_complete_result_for_ordered_unique_definitions(self):
+        """An ordered unique-definition chain materializes canonical aliases."""
+        from inertia.alias.stack_pointer_alias_map import (
+            StackPointerAliasResult8616,
+            StackPointerAliasStatus8616,
+        )
+
+        codegen = _StackResolutionCodegen()
+        __local_var, local_cvar = self._bp_cvar(codegen, -20, "local_20")
+        a_var, a_cvar = self._bp_cvar(codegen, -2, "s_2")
+        b_var, b_cvar = self._bp_cvar(codegen, -4, "s_4")
+        codegen.cfunc.statements = structured_c.CStatements(
+            [
+                structured_c.CAssignment(
+                    a_cvar,
+                    structured_c.CUnaryOp("Reference", local_cvar, codegen=codegen),
+                    codegen=codegen,
+                ),
+                structured_c.CAssignment(b_cvar, a_cvar, codegen=codegen),
+            ],
+            codegen=codegen,
+        )
+
+        aliases = self._canonicalizer(codegen)._stack_pointer_aliases()
+
+        result = codegen._inertia_stack_pointer_aliases_for_cvars
+        assert isinstance(result, StackPointerAliasResult8616)
+        assert result.status is StackPointerAliasStatus8616.COMPLETE
+        assert aliases[id(a_var)] == (local_cvar, 0)
+        assert aliases[id(b_var)] == (local_cvar, 0)
+        assert result.materialized_count == 2
+        assert result.failure_count == 0
+
+    def test_incomplete_result_cannot_drive_lowering(self):
+        """A non-complete cached result yields an empty lowering map."""
+        from inertia.alias.stack_pointer_alias_map import (
+            StackPointerAliasResult8616,
+            StackPointerAliasStatus8616,
+            write_stack_pointer_alias_map_8616,
+        )
+
+        codegen = _StackResolutionCodegen()
+        a_var, _a_cvar = self._bp_cvar(codegen, -2, "s_2")
+        root = structured_c.CStatements([], codegen=codegen)
+        codegen.cfunc.statements = root
+        write_stack_pointer_alias_map_8616(
+            codegen,
+            StackPointerAliasResult8616(
+                root=root,
+                status=StackPointerAliasStatus8616.NODE_BUDGET_EXHAUSTED,
+                aliases={id(a_var): (object(), 0)},
+                definition_index={},
+                refused=frozenset(),
+            ),
+        )
+
+        assert self._canonicalizer(codegen)._stack_pointer_aliases() == {}
+        assert self._canonicalizer(codegen)._stack_pointer_aliases() == {}
+
+    def test_overwritten_carrier_refuses_in_lowering_map(self):
+        """A multiply-defined carrier never reaches the lowering alias map."""
+        codegen = _StackResolutionCodegen()
+        __local_var, local_cvar = self._bp_cvar(codegen, -20, "local_20")
+        _other_var, other_cvar = self._bp_cvar(codegen, -22, "local_22")
+        x_var, x_cvar = self._bp_cvar(codegen, -2, "s_2")
+        codegen.cfunc.statements = structured_c.CStatements(
+            [
+                structured_c.CAssignment(
+                    x_cvar,
+                    structured_c.CUnaryOp("Reference", local_cvar, codegen=codegen),
+                    codegen=codegen,
+                ),
+                structured_c.CAssignment(
+                    x_cvar,
+                    structured_c.CUnaryOp("Reference", other_cvar, codegen=codegen),
+                    codegen=codegen,
+                ),
+            ],
+            codegen=codegen,
+        )
+
+        aliases = self._canonicalizer(codegen)._stack_pointer_aliases()
+
+        result = codegen._inertia_stack_pointer_aliases_for_cvars
+        assert aliases == {}
+        assert id(x_var) in result.refused
+        assert result.failure_count == 1
+
+    def test_use_before_definition_lookup_refuses(self):
+        """Carriers read before their only definition cannot drive lowering."""
+        codegen = _StackResolutionCodegen()
+        _local_var, local_cvar = self._bp_cvar(codegen, -20, "local_20")
+        b_var, b_cvar = self._bp_cvar(codegen, -4, "s_4")
+        a_var, a_cvar = self._bp_cvar(codegen, -2, "s_2")
+        codegen.cfunc.statements = structured_c.CStatements(
+            [
+                structured_c.CAssignment(b_cvar, a_cvar, codegen=codegen),
+                structured_c.CAssignment(
+                    a_cvar,
+                    structured_c.CUnaryOp("Reference", local_cvar, codegen=codegen),
+                    codegen=codegen,
+                ),
+            ],
+            codegen=codegen,
+        )
+
+        aliases = self._canonicalizer(codegen)._stack_pointer_aliases()
+
+        # `a` is read inside `b = a` before its definition, so both refuse and
+        # the map stays empty rather than publishing an unsafe global alias.
+        result = codegen._inertia_stack_pointer_aliases_for_cvars
+        assert aliases == {}
+        assert id(a_var) in result.refused
+        assert id(b_var) in result.refused
+
+    def test_address_of_carrier_resolves_own_slot(self):
+        """After ``p = &local``, ``&p`` names p's slot, not local's."""
+        codegen = _StackResolutionCodegen()
+        _local_var, local_cvar = self._bp_cvar(codegen, -20, "local_20")
+        p_var, p_cvar = self._bp_cvar(codegen, -2, "s_2")
+        codegen.cfunc.statements = structured_c.CStatements(
+            [
+                structured_c.CAssignment(
+                    p_cvar,
+                    structured_c.CUnaryOp("Reference", local_cvar, codegen=codegen),
+                    codegen=codegen,
+                )
+            ],
+            codegen=codegen,
+        )
+        canonicalizer = self._canonicalizer(codegen)
+        ref_p = structured_c.CUnaryOp("Reference", p_cvar, codegen=codegen)
+
+        assert canonicalizer._resolve_stack_pointer_alias_expr(p_cvar) == (local_cvar, 0)
+        assert canonicalizer._resolve_stack_pointer_alias_expr(ref_p) == (p_cvar, 0)
+        assert id(p_var) in codegen._inertia_stack_pointer_aliases_for_cvars.aliases
+
+    def test_plain_pointer_copy_not_driven_as_address(self):
+        """``p = q`` refuses: a pointer value is not the address of q's slot."""
+        codegen = _StackResolutionCodegen()
+        _q_var, q_cvar = self._bp_cvar(codegen, -4, "local_4")
+        p_var, p_cvar = self._bp_cvar(codegen, -2, "s_2")
+        codegen.cfunc.statements = structured_c.CStatements(
+            [structured_c.CAssignment(p_cvar, q_cvar, codegen=codegen)],
+            codegen=codegen,
+        )
+        canonicalizer = self._canonicalizer(codegen)
+
+        assert canonicalizer._stack_pointer_aliases() == {}
+        assert canonicalizer._resolve_stack_pointer_alias_expr(p_cvar) is None
+        result = codegen._inertia_stack_pointer_aliases_for_cvars
+        assert id(p_var) in result.refused
+
+    def test_conditional_definition_not_driven(self):
+        """A sole branch-local definition cannot drive lowering globally."""
+        codegen = _StackResolutionCodegen()
+        _local_var, local_cvar = self._bp_cvar(codegen, -20, "local_20")
+        _cond_var, cond_cvar = self._bp_cvar(codegen, -6, "cond_6")
+        p_var, p_cvar = self._bp_cvar(codegen, -2, "s_2")
+        codegen.cfunc.statements = structured_c.CStatements(
+            [
+                structured_c.CIfElse(
+                    [
+                        (
+                            cond_cvar,
+                            structured_c.CStatements(
+                                [
+                                    structured_c.CAssignment(
+                                        p_cvar,
+                                        structured_c.CUnaryOp(
+                                            "Reference", local_cvar, codegen=codegen
+                                        ),
+                                        codegen=codegen,
+                                    )
+                                ],
+                                codegen=codegen,
+                            ),
+                        )
+                    ],
+                    codegen=codegen,
+                )
+            ],
+            codegen=codegen,
+        )
+        canonicalizer = self._canonicalizer(codegen)
+
+        assert canonicalizer._stack_pointer_aliases() == {}
+        assert canonicalizer._resolve_stack_pointer_alias_expr(p_cvar) is None
+        assert id(p_var) in codegen._inertia_stack_pointer_aliases_for_cvars.refused

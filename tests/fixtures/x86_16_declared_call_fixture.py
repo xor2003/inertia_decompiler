@@ -14,8 +14,18 @@ import json
 from pathlib import Path
 
 import angr
+
 import inertia.frontend.x86_16.lift_86_16 as lift_86_16
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.cod_analysis_image import build_cod_analysis_image_8616
+from inertia.frontend.x86_16.declared_external_call_evidence import (
+    DeclaredCallAdmission8616,
+    admit_declared_external_call_files_8616,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
+    record_synthetic_call_stubs_8616,
+)
 from inertia.ir.core import (
     IRBlock,
     IRFunctionArtifact,
@@ -24,16 +34,12 @@ from inertia.ir.core import (
 from inertia.ir.function_ir_registry import (
     publish_function_ir_artifact_8616,
 )
+from inertia.ir.function_readiness_contracts import (
+    function_artifact_body_digest_8616,
+    observed_function_source_revision_8616,
+    record_function_build_attestation_8616,
+)
 from inertia.ir.vex_import import _block_to_ir
-
-from inertia.frontend.x86_16.cod_analysis_image import build_cod_analysis_image_8616
-from inertia.frontend.x86_16.declared_external_call_evidence import (
-    DeclaredCallAdmission8616,
-    admit_declared_external_call_files_8616,
-)
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
-    record_synthetic_call_stubs_8616,
-)
 
 BASE = 0x1000
 
@@ -103,6 +109,20 @@ def world(tmp_path: Path, *, is_far: bool = False) -> NativeConsumption:
     admission = registry.admissions[0]
     block, _transport, _terminal = _block_to_ir(project.factory.block(BASE, opt_level=0))
     call = next(i for i in block.instrs if i.op == "CALL")
-    artifact = IRFunctionArtifact(BASE, (block,))
+    boundary = exact_function_range_boundary_8616(project, BASE, admission.caller_end)
+    assert boundary is not None
+    revision = observed_function_source_revision_8616(project, BASE, boundary=boundary)
+    assert revision is not None
+    artifact = IRFunctionArtifact(BASE, (block,), source_revision=revision)
+    digest = function_artifact_body_digest_8616(artifact)
+    assert digest is not None
+    record_function_build_attestation_8616(
+        project,
+        BASE,
+        digest,
+        revision,
+        "x86_16_vex_ir",
+        boundary=boundary,
+    )
     assert publish_function_ir_artifact_8616(project, artifact).artifact is artifact
     return project, block, call, artifact, admission, image.code

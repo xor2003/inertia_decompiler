@@ -1,7 +1,8 @@
 """Layer: Semantics.
 
-Responsibility: prove the register and memory preservation of a direct near
-call whose mapped, real callee body consists of a single near RET instruction.
+Responsibility: authenticate mapped word CALL coordinates and prove register
+and memory preservation only for a direct near call whose real body consists
+of a single near RET instruction. Coordinate binding alone proves no effects.
 Unknown bodies remain unknown; this proof does not infer a compiler ABI.
 Owns instruction effects, flags, branch meaning, and expression interpretation.
 Do not perform alias-state ownership, widening, lowering/materialization,
@@ -16,6 +17,7 @@ from typing import Protocol, cast
 
 from cle.backends.externs import ExternObject
 
+from inertia.frontend.x86_16.stack_helpers import far_linear_target_8616
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import synthetic_call_stub_registry_8616
 from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
 
@@ -138,6 +140,45 @@ def direct_near_call_encoding_is_bound_8616(
         return False
     return bool(len(call_bytes) == 3 and call_bytes[0] == 0xE8
                 and callsite_addr + 3 + int.from_bytes(call_bytes[1:], "little", signed=True) == target_addr)
+
+
+def direct_call_target_is_bound_8616(
+    project: object, callsite_addr: int | None, return_addr: int | None,
+    target_addr: int | None, frame_kind: CallsiteMachineFrameKind8616 | None,
+) -> bool:
+    """Bind mapped word near or immediate far CALL bytes to their real target.
+
+    This authenticates transfer coordinates only. Far returns, register
+    effects and SP displacement still require their independent body proofs.
+    Prefixed wide calls, indirect targets and different-image targets refuse.
+    """
+    if frame_kind is CallsiteMachineFrameKind8616.NEAR:
+        return direct_near_call_target_is_bound_8616(
+            project, callsite_addr, return_addr, target_addr, frame_kind,
+        )
+    if frame_kind is not CallsiteMachineFrameKind8616.FAR:
+        return False
+    if type(callsite_addr) is not int or callsite_addr < 0 or return_addr != callsite_addr + 5:
+        return False
+    if type(target_addr) is not int or target_addr < 0:
+        return False
+    synthetic = synthetic_call_stub_registry_8616(project)
+    if synthetic is not None and (not synthetic.closes_evidence or target_addr in synthetic.addresses):
+        return False
+    boundary = cast(_ProjectSurface8616, project)
+    try:
+        loaded = boundary.loader.find_object_containing(target_addr)
+        if (boundary.arch.name != "86_16" or loaded is None or isinstance(loaded, ExternObject)
+                or loaded is not boundary.loader.find_object_containing(callsite_addr)):
+            return False
+        call_bytes = bytes(boundary.loader.memory.load(callsite_addr, 5))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+    if len(call_bytes) != 5 or call_bytes[0] != 0x9A:
+        return False
+    return far_linear_target_8616(
+        int.from_bytes(call_bytes[3:5], "little"), int.from_bytes(call_bytes[1:3], "little"),
+    ) == target_addr
 
 
 def prove_direct_near_ret_only_effect_8616(

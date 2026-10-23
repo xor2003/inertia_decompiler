@@ -1,6 +1,7 @@
 """Binary callee cleanup becomes a narrow scalar effect, never guessed DCE."""
 
 import io
+from types import SimpleNamespace
 
 import angr
 import networkx as nx
@@ -9,6 +10,11 @@ from angr import ailment
 
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.call_cleanup_compat import materialize_callee_cleanup_8616
+from inertia.semantics.terminal_return_contract import TerminalReturnFrameKind8616
+from inertia.semantics.terminal_stack_cleanup import (
+    _return_cleanup_8616,
+    terminal_stack_cleanup_at_address_8616,
+)
 
 
 def _fixture(encoded="c2 08 00"):
@@ -49,6 +55,50 @@ def test_binary_cleanup_is_after_call_narrow_and_idempotent():
     assert successor.statements == [] and list(graph.edges) == [(block, successor)]
     repeated = materialize_callee_cleanup_8616(project, graph, manager, (0x1000,), sp_offset=project.arch.sp_offset)
     assert repeated.materialized_count == 0 and len(block.statements) == 2
+
+
+@pytest.mark.parametrize(
+    "encoded,expected",
+    [("c2 03 00", 3), ("c2 81 00", 129), ("c2 82 00", 130), ("c2 fe ff", 0xFFFE), ("c2 ff ff", 0xFFFF)],
+)
+def test_imm16_byte_range_callee_cleanup_is_materialized(encoded, expected):
+    project, manager, graph, block, successor, _call = _fixture(encoded)
+    result = materialize_callee_cleanup_8616(project, graph, manager, (0x1000,), sp_offset=project.arch.sp_offset)
+    assert result.materialized_count == 1 and result.failure_count == 0
+    assert result.facts[0].cleanup_bytes == expected
+    update = block.statements[1]
+    assert update.src.op == "Add" and update.src.operands[1].value == expected
+    assert update.dst.bits == 16 and update.src.bits == 16
+    assert successor.statements == []
+
+
+def test_far_return_cleanup_evidence_is_exact_but_materializer_refuses():
+    project, manager, graph, block, _successor, call = _fixture("ca 04 00")
+    evidence = terminal_stack_cleanup_at_address_8616(project, 0x2000)
+    assert evidence.complete and evidence.consistent_cleanup == 4
+    assert evidence.consistent_return_frame_kind is TerminalReturnFrameKind8616.FAR
+    assert evidence.consistent_return_operand_bits == 16
+    result = materialize_callee_cleanup_8616(project, graph, manager, (0x1000,), sp_offset=project.arch.sp_offset)
+    assert result.materialized_count == 0 and result.failure_count == 1
+    assert block.statements == [call]
+
+
+@pytest.mark.parametrize(
+    "operands,expected",
+    [((), 0), (({"type": 2, "imm": 3},), 3), (({"type": 2, "imm": 0xFFFF},), 0xFFFF)],
+)
+def test_return_cleanup_decodes_whole_imm16_byte_count(operands, expected):
+    insn = SimpleNamespace(operands=tuple(SimpleNamespace(**operand) for operand in operands))
+    assert _return_cleanup_8616(insn) == expected
+
+
+@pytest.mark.parametrize(
+    "operands",
+    [({"type": 2, "imm": 0x10000},), ({"type": 1, "imm": 8},), ({"type": 2, "imm": 2}, {"type": 2, "imm": 4})],
+)
+def test_return_cleanup_refuses_out_of_range_or_non_imm_operands(operands):
+    insn = SimpleNamespace(operands=tuple(SimpleNamespace(**operand) for operand in operands))
+    assert _return_cleanup_8616(insn) is None
 
 
 @pytest.mark.parametrize("encoded", ["c3", "66 c2 08 00", "ca 08 00", "ff e0", "85 c0 74 03 c2 08 00 c2 04 00"])

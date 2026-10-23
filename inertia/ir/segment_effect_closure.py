@@ -100,11 +100,11 @@ def _closure_evidence_8616(
     candidates = _return_candidates_8616(coverage, state)
     if candidates is None:
         return SegmentEffectClosureFailure8616.RETURN_EXIT_UNPROVEN, (), ()
-    exit_addrs, exits = candidates
+    exit_addrs, exits, live_blocks = candidates
     if not exits or any(not block.instrs or block.instrs[-1].op != "RET" for block in exits):
         return SegmentEffectClosureFailure8616.RETURN_EXIT_UNPROVEN, (), ()
     calls = tuple(sorted({
-        instruction.addr for block in artifact.blocks for instruction in block.instrs
+        instruction.addr for block in artifact.blocks if block.addr in live_blocks for instruction in block.instrs
         if instruction.op == "CALL" and type(instruction.addr) is int
     }))
     return None, calls, tuple(sorted(exit_addrs))
@@ -131,7 +131,7 @@ def _state_census_complete_8616(
 def _return_candidates_8616(
     coverage: IRBoundaryCoverageResult8616,
     state: SegmentStateArtifact,
-) -> tuple[frozenset[int], tuple[IRBlock, ...]] | None:
+) -> tuple[frozenset[int], tuple[IRBlock, ...], frozenset[int]] | None:
     """Select closed CFG exits, preserving raw instruction identities.
 
     A scoped pending edge has no successor claim: it must not become a
@@ -148,19 +148,22 @@ def _return_candidates_8616(
         exits = tuple(
             block for block in artifact.blocks if not block.successor_addrs
         )
-        return frozenset(block.addr for block in exits), exits
+        return frozenset(block.addr for block in exits), exits, frozenset(block.addr for block in artifact.blocks)
     projection = view.cfg_projection_for(state.invocation_scope)
     if projection is None or projection.source_artifact is not artifact:
         return None
-    block_addrs = {block.addr for block in artifact.blocks}
-    if set(projection.successors) != block_addrs or any(projection.pending.values()):
+    block_addrs = frozenset(block.addr for block in artifact.blocks)
+    live_blocks = block_addrs - projection.unreachable_block_addrs
+    if set(projection.successors) != live_blocks or any(
+        refusals for addr, refusals in projection.pending.items() if addr in live_blocks
+    ):
         return None
     exits = tuple(
         block
         for block in projection.blocks
-        if not projection.successors[block.addr]
+        if block.addr in live_blocks and not projection.successors[block.addr]
     )
-    return frozenset(block.addr for block in exits), exits
+    return frozenset(block.addr for block in exits), exits, live_blocks
 
 
 def _bounded_closure_evidence_8616(

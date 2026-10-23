@@ -426,9 +426,14 @@ class _NativeLiftFacts8616:
     next_const: int | None
 
 
-_NO_EFFECT_RELIFT_CACHE_8616 = ConditionReliftArtifactCache8616[_NativeLiftFacts8616](max_entries=16)
-_MAX_CACHED_CODE_BYTES_8616 = 4096
-_MAX_CACHED_STATEMENTS_8616 = 2048
+# Whole-function censuses revisit every block; retain a bounded CFG working set
+# instead of evicting its earliest blocks before the next independent replay.
+_MAX_CACHED_RELIFT_BLOCKS_8616: int = 128
+_MAX_CACHED_CODE_BYTES_8616: int = 4096
+_MAX_CACHED_STATEMENTS_8616: int = 2048
+_NO_EFFECT_RELIFT_CACHE_8616 = ConditionReliftArtifactCache8616[_NativeLiftFacts8616](
+    max_entries=_MAX_CACHED_RELIFT_BLOCKS_8616,
+)
 
 
 def _relift_bound_block_8616(

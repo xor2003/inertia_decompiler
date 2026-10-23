@@ -60,3 +60,9 @@ context-aware function and finisher implementations. The historical
 `_lower_function` and `_finish_irsb_lowering` facades remain patchable only for
 legacy calls without architecture state. Recursive PE32 drivers no longer
 need an inner region installation to undo an enclosing leaf finisher patch.
+
+`register_cycle_proposals.py` proposes at most six three-register cycles from
+a cross-register entry effect, including a third coordinate initialized later.
+Declared relocation maps affect proposal keys only. The actual SSA, memory and
+flag effects are unchanged; every candidate requires complete entry, transition
+and exit proofs. A matching key alone establishes no equivalence.

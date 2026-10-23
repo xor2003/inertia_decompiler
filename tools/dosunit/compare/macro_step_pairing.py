@@ -2,7 +2,7 @@
 
 Layer: dosunit relational control-flow proposal.
 Responsibility: expand each side's collapsed region graph into finite frontier
-paths between paired macro-cuts (this slice proposes the entry pair only),
+paths between paired macro-cuts (the entry pair is the default),
 enumerate 1..K concatenations per side, and emit endpoint-compatible pairing
 candidates for the solver layer. Every path retains all feasible exits:
 nothing is dropped, and every bound that stops expansion is a typed refusal
@@ -156,7 +156,7 @@ def _endpoints_compatible(
         return False
     if fast.end_kind is MacroEndpointKind.RETURN:
         return True
-    return fast_head_to_slow_head.get(fast.end_head) == slow_last.end_head
+    return bool(fast_head_to_slow_head.get(fast.end_head) == slow_last.end_head)
 
 
 def _path_key(path: FrontierPath) -> tuple[int, ...]:
@@ -176,7 +176,8 @@ def _directional_pairings(
         budget.tick()
         candidates = tuple(sorted(
             (concat for concat in slow_concats
-             if _endpoints_compatible(path, concat[-1], fast_head_to_slow_head)),
+             if fast_head_to_slow_head.get(path.start_cut) == concat[0].start_cut
+             and _endpoints_compatible(path, concat[-1], fast_head_to_slow_head)),
             key=lambda concat: (len(concat), tuple(_path_key(p) for p in concat)),
         ))
         pairings.append(PairingCandidate(path, candidates))
@@ -187,8 +188,9 @@ def propose_macro_steps(
     oracle_nodes: dict[int, RegionNode], candidate_nodes: dict[int, RegionNode],
     oracle_entry: int, candidate_entry: int,
     *, limits: MacroStepLimits | None = None, deadline_seconds: float,
+    cut_pairs: tuple[tuple[int, int], ...] | None = None,
 ) -> MacroStepSearch:
-    """Propose entry-cut macro-step pairings under one shared search budget.
+    """Propose declared-cut macro-step pairings under one shared search budget.
 
     Both partitions collapse through the production finite-chain formation; a
     chain cycle or malformed graph keeps its original typed refusal. The
@@ -199,8 +201,21 @@ def propose_macro_steps(
     budget = _SearchBudget(bound, time.monotonic() + max(deadline_seconds, 0.001))
     oracle = collapse_regions(oracle_nodes, oracle_entry)
     candidate = collapse_regions(candidate_nodes, candidate_entry)
-    oracle_paths = _expand_frontier(oracle, frozenset({oracle_entry}), budget)
-    candidate_paths = _expand_frontier(candidate, frozenset({candidate_entry}), budget)
+    pairs = ((oracle_entry, candidate_entry),) if cut_pairs is None else cut_pairs
+    oracle_cuts = frozenset(left for left, _right in pairs)
+    candidate_cuts = frozenset(right for _left, right in pairs)
+    if (
+        not pairs or pairs[0] != (oracle_entry, candidate_entry)
+        or len(oracle_cuts) != len(pairs) or len(candidate_cuts) != len(pairs)
+    ):
+        raise MacroStepRefusal(MacroStepReason.MACRO_ENDPOINT, {"detail": "invalid_cut_pairs"})
+    if (
+        not oracle_cuts <= {region.members[0] for region in oracle.regions}
+        or not candidate_cuts <= {region.members[0] for region in candidate.regions}
+    ):
+        raise MacroStepRefusal(MacroStepReason.MACRO_ENDPOINT, {"detail": "invalid_cut_pairs"})
+    oracle_paths = _expand_frontier(oracle, oracle_cuts, budget)
+    candidate_paths = _expand_frontier(candidate, candidate_cuts, budget)
     oracle_concats = _enumerate_concats(oracle_paths, bound.max_concat_segments, budget)
     candidate_concats = _enumerate_concats(candidate_paths, bound.max_concat_segments, budget)
 
@@ -213,12 +228,11 @@ def propose_macro_steps(
         fast_is_oracle = direction is MacroDirection.CANDIDATE_SLOWER
         fast_paths = oracle_paths if fast_is_oracle else candidate_paths
         slow_concats = candidate_concats if fast_is_oracle else oracle_concats
-        pair_map = ({oracle_entry: candidate_entry} if fast_is_oracle
-                    else {candidate_entry: oracle_entry})
+        pair_map = dict(pairs) if fast_is_oracle else {right: left for left, right in pairs}
         pairings = _directional_pairings(fast_paths, slow_concats, pair_map, budget)
         pairing_candidates += sum(len(candidate.slow_concats) for candidate in pairings)
         proposals.append(MacroStepProposal(
-            direction, ((oracle_entry, candidate_entry),), pairings,
+            direction, pairs, pairings,
             oracle_paths, candidate_paths,
         ))
         if pairing_candidates > bound.max_transitions:

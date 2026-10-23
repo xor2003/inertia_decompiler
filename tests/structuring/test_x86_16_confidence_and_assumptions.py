@@ -9,11 +9,11 @@ import types
 
 import pytest
 
-from inertia.cli.cli_storage_objects import StorageObjectRefusal
 from inertia.lowering.segmented_memory_reasoning import (
     SegmentAssociation,
     SegmentRegister,
 )
+from inertia.lowering.storage_objects import StorageObjectRefusal
 from inertia.lowering.type_array_matching import ArrayRecoveryInfo
 from inertia.lowering.type_storage_object_bridge import (
     SegmentedStorageFact,

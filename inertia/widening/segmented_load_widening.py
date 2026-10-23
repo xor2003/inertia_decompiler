@@ -31,7 +31,7 @@ from angr.sim_variable import SimRegisterVariable, SimTemporaryVariable
 from capstone.x86_const import X86_INS_MOV, X86_OP_MEM, X86_OP_REG
 
 from inertia.frontend.x86_16.frontend_function_instructions import collect_function_instruction_inventory_8616
-from inertia.ir.core import SEGMENTED_LOAD_ADDRESS_TAG_8616, IRAddress, IRValue, MemSpace
+from inertia.ir.core import SEGMENTED_LOAD_ADDRESS_TAG_8616, IRAddress, IRInstr, IRValue, MemSpace
 from inertia.ir.function_ssa_registry import (
     FunctionSSAArtifactVerdict8616,
     registered_function_ssa_artifact_8616,
@@ -277,7 +277,7 @@ def _ssa_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozens
     return frozenset(proven)
 
 
-def _is_segmented_word_mov_8616(instruction: object, destination: object) -> bool:
+def _is_segmented_word_mov_8616(instruction: IRInstr, destination: IRValue | None) -> bool:
     """Return whether an instruction is a proven segmented word MOV."""
     if instruction.op.upper() != "MOV" or instruction.size != 2:
         return False
@@ -556,13 +556,13 @@ class _SegmentedLoadWidener8616:
             if identity is not None:
                 tags = segmented_load_tags_8616(identity, existing=tags)
             self.stats.materialized += 1
-            return CFunctionCall(
+            return cast(object, CFunctionCall(
                 "SEG_U16",
                 None,
                 [low_segment, low_offset],
                 codegen=self.codegen,
                 tags=tags,
-            )
+            ))
         return None
 
     def _authorized_pair(self, node: CBinaryOp) -> object | None:
@@ -589,7 +589,7 @@ class _SegmentedLoadWidener8616:
                 continue
             self.stats.classified += 1
             self.stats.materialized += 1
-            return CFunctionCall(
+            return cast(object, CFunctionCall(
                 "SEG_U16",
                 None,
                 [low_segment, low_offset],
@@ -598,7 +598,7 @@ class _SegmentedLoadWidener8616:
                     "inertia_x86_16_runtime_segment_helper": "SEG_U16",
                     "inertia_source_instruction_addrs": tuple(sorted(authorized)),
                 },
-            )
+            ))
         return None
 
     def transform(self, node: object) -> object:

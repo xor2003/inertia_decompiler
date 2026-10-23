@@ -23,6 +23,10 @@ from inertia.lowering.callee_pointer_contracts import (
     callee_pointer_argument_evidence_by_addr_8616,
     record_callee_pointer_argument_evidence_8616,
 )
+from inertia.lowering.scalar_interface_transport import (
+    attach_scalar_interface_8616,
+    scalar_interfaces_8616,
+)
 from inertia.semantics.callsite_summary import (
     caller_return_use_evidence_by_addr_8616,
     record_caller_return_use_evidence_8616,
@@ -72,6 +76,7 @@ class ProjectEvidenceTransferResult8616:
     global_object_source_artifact_count: int
     callee_callsite_census_count: int = 0
     program_callsite_summary_artifact_count: int = 0
+    scalar_interface_count: int = 0
 
 
 class _ProjectGlobalLayoutSurface8616(Protocol):
@@ -291,6 +296,10 @@ def transfer_project_evidence_8616(
     destination_project: object,
 ) -> ProjectEvidenceTransferResult8616:
     """Copy all typed evidence required by fresh and sliced CLI projects."""
+    scalar_interfaces = scalar_interfaces_8616(source_project)
+    if source_project is not destination_project:
+        for receipt in scalar_interfaces:
+            attach_scalar_interface_8616(destination_project, receipt)
     global_layout = project_global_object_layout_evidence_8616(source_project)
     bounded_ranges = project_bounded_global_object_ranges_8616(source_project)
     direct_layout = project_direct_global_object_layout_evidence_8616(source_project)
@@ -322,6 +331,7 @@ def transfer_project_evidence_8616(
         destination_project,
     )
     return ProjectEvidenceTransferResult8616(
+        scalar_interface_count=len(scalar_interfaces),
         caller_return_use_count=transfer_caller_return_use_evidence_8616(
             source_project,
             destination_project,

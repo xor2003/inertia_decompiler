@@ -11,12 +11,12 @@ No rendered-text recovery belongs here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, cast
 
 import networkx as nx
 
 from inertia.ir.function_ssa_registry import registered_function_ssa_artifact_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
+from inertia.ir.vex_import import codegen_function_8616
 from inertia.semantics.register_source_block_inventory import collect_register_source_block_inventory_8616
 
 from .condition_exit_normalization import transparent_condition_exit_8616
@@ -25,37 +25,6 @@ from .natural_loop_topology import (
     NaturalLoopTopology8616,
     classify_natural_loop_topology_8616,
 )
-
-
-class _Functions(Protocol):
-    """Read-only angr function lookup boundary."""
-
-    def function(self, *, addr: int, create: bool) -> object | None:
-        """Find the already-discovered function."""
-
-
-class _KnowledgeBase(Protocol):
-    """angr function inventory boundary."""
-
-    functions: _Functions
-
-
-class _Project(Protocol):
-    """angr project boundary needed for CFG evidence."""
-
-    kb: _KnowledgeBase
-
-
-class _Function(Protocol):
-    """Structured function identity boundary."""
-
-    addr: int
-
-
-class _Codegen(Protocol):
-    """angr codegen function boundary."""
-
-    cfunc: _Function
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,13 +101,12 @@ def _transparent_topology_8616(
 def collect_loop_break_topology_8616(project: object, codegen: object) -> LoopBreakTopology8616 | None:
     """Collect exact topology, refusing incomplete or unsupported loop regions."""
     try:
-        function = cast(_Project, project).kb.functions.function(
-            addr=cast(_Codegen, codegen).cfunc.addr, create=False,
-        )
+        resolved = codegen_function_8616(project, codegen)
     except (AttributeError, TypeError):
         return None
-    if function is None:
+    if resolved is None:
         return None
+    function, _function_addr = resolved
     inventory = collect_register_source_block_inventory_8616(function)
     if not inventory.complete:
         return None

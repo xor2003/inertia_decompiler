@@ -193,7 +193,7 @@ def _resolve_stack_bp_term_8616(
 
 
 def _resolve_bp_variable_term_8616(
-    node: object,
+    node: CVariable,
     project: _ProjectArch8616 | None,
     codegen: object,
     seen: set[int],

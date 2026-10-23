@@ -17,6 +17,7 @@ from typing import cast
 
 import angr
 
+from inertia.ir.function_readiness_contracts import bind_function_source_owner_8616
 from inertia.lowering.project_callee_callsite_collection import (
     collect_complete_project_callee_callsites_8616,
 )
@@ -71,6 +72,10 @@ def recover_direct_indexed_alias_catalog_8616(
             "indexed Alias program context refused: binary function census incomplete"
         )
         return None
+    # The catalog outlives these temporary CFG analyses. Retain each exact
+    # native manager while its discovery context is still strongly owned.
+    for _cfg, function in recovered:
+        bind_function_source_owner_8616(evidence_project, function)
     functions = tuple(function for _cfg, function in recovered)
     hydration = hydrate_function_ir_ssa_catalog_8616(
         evidence_project,

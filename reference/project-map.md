@@ -110,3 +110,9 @@ Run changed-file checks periodically while developing, `quality-fast` regularly,
 ## Knowledge Graph
 
 Understand-Anything may be used for architecture exploration with `--no-auto-update`. Its config lives at `.understand-anything/config.json` and must keep `autoUpdate` disabled so ordinary agent work does not mutate graph state unexpectedly.
+
+
+Access-trait profiles and storage-object records are owned by
+`inertia/lowering/access_profiles.py` and `inertia/lowering/storage_objects.py`.
+CLI, Structuring and Types consumers import these owners directly; the CLI
+facade preserves export identity without historical forwarding source files.

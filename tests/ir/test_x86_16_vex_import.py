@@ -8,6 +8,10 @@ import pytest
 import inertia.ir.direct_evidence_deadline as deadline_owner
 import inertia.ir.vex_import as importer
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.frontend_direct_callsite_index import (
+    DecodedDirectCallsiteIndex8616,
+    DecodedDirectCallsiteIndexStats8616,
+)
 from inertia.frontend.x86_16.relative_control_edge import DecodedRelativeEdge, decode_relative_edge
 from inertia.ir.core import (
     AddressStatus,
@@ -21,6 +25,7 @@ from inertia.ir.core import (
     MemSpace,
     SegmentOrigin,
 )
+from inertia.ir.entry_domain_call_preservation import Real16InvocationSource8616
 from inertia.ir.entry_jump_domain import (
     EntryJumpDomainApplication8616,
     EntryJumpDomainApplicationStatus8616,
@@ -168,6 +173,7 @@ def test_ir_summary_traverses_binary_value_operands() -> None:
 
     assert summary["space_counts"] == {
         "const": 1,
+        "cs": 0,
         "ds": 0,
         "es": 0,
         "reg": 1,
@@ -771,6 +777,11 @@ def test_attached_non_deadline_refusal_is_reused_without_relift(monkeypatch) -> 
     project = _project(
         {0x1000: _block(0x1000, _wrtmp(0, _get_register("ax")), SimpleNamespace(tag="Ist_Dirty"))},
         function,
+    )
+    project._inertia_real16_invocation_source_8616 = Real16InvocationSource8616(
+        object(),
+        None,
+        DecodedDirectCallsiteIndex8616({}, DecodedDirectCallsiteIndexStats8616(0, 0, 0, 0, 0)),
     )
     codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x1000))
     original_block = project.factory.block

@@ -8,6 +8,7 @@ and array recovery metadata synthesis.
 from types import SimpleNamespace
 
 import pytest
+
 from inertia.ir import IRAddress, IRStringEffectArtifact, IRStringEffectRecord
 from inertia.ir.core import AddressStatus, MemSpace, SegmentOrigin
 from inertia.lowering.type_array_matching import (
@@ -397,9 +398,8 @@ class TestPhase22Integration:
         )
 
         import inertia.lowering.type_array_matching as array_matching
-
+        from inertia.lowering.access_profiles import AccessTraitEvidenceProfile
         from inertia.lowering.object_lowering import AccessTraitObjectHint
-        from inertia.cli.cli_access_profiles import AccessTraitEvidenceProfile
 
         bridge_loader = array_matching.load_storage_object_bridge
         array_matching.load_storage_object_bridge = lambda _project, _addr, *, codegen=None: bridge_loader(

@@ -10,13 +10,16 @@ work here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from types import MappingProxyType
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_external_call_evidence import DeclaredCallAdmission8616
 
     from .direct_call_segment_context import SegmentEntryContext8616
+    from .near_call_jump_scope import NearCallJumpScope8616
     from .near_return_continuation_view import (
         ScopedNearReturnContinuationView8616,
     )
@@ -28,6 +31,7 @@ if TYPE_CHECKING:
     from .segment_call_preservation import SegmentCallPreservationResult8616
 
 from .core import IRFunctionArtifact
+from .declared_selector_native_effects import NativeEffectSurvey8616
 from .segment_state_transfer import (
     SEGMENT_REGISTERS,
     InstructionStateKey,
@@ -114,6 +118,7 @@ def _scoped_predecessor_map_8616(
         ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616
     ),
     invocation_scope: Real16InvocationDomain8616 | None,
+    near_call_scope: NearCallJumpScope8616 | None,
 ) -> tuple[dict[int, tuple[int, ...]], ScopedFunctionCFGProjection8616]:
     """Authenticate the scoped view once and return its effective CFG.
 
@@ -132,9 +137,14 @@ def _scoped_predecessor_map_8616(
     predecessor tuple and join to honest unknowns exactly like the
     universal route.
     """
+    from .near_call_jump_scope import NearCallJumpScope8616
     from .real16_invocation_domain import Real16InvocationDomain8616
+    from .scoped_function_ir_view import ScopedFunctionIRView8616
 
-    if type(invocation_scope) is not Real16InvocationDomain8616:
+    scope = near_call_scope if near_call_scope is not None else invocation_scope
+    if (near_call_scope is not None and invocation_scope is not None) or (
+        type(scope) is not Real16InvocationDomain8616 and type(scope) is not NearCallJumpScope8616
+    ):
         raise ValueError(
             "scoped segment state requires an independently supplied "
             "typed consuming entry"
@@ -143,16 +153,22 @@ def _scoped_predecessor_map_8616(
         raise ValueError(
             "scoped view is not bound to the identical raw IR artifact"
         )
-    retained_scope = scoped_view.invocation_scope
+    retained_scope = scope
     if retained_scope is None:
         raise ValueError(
             "supplied entry does not authenticate the retained scoped view"
         )
-    projection = scoped_view.cfg_projection_for(invocation_scope)
+    projection = (
+        scoped_view.cfg_projection_for(scope)
+        if type(scoped_view) is ScopedFunctionIRView8616
+        else scoped_view.cfg_projection_for(
+            cast(Real16InvocationDomain8616, scope)
+        )
+    )
     if (
         projection is None
         or projection.source_artifact is not artifact
-        or projection.scope is not invocation_scope
+        or projection.scope is not scope
         or projection.function_addr != artifact.function_addr
     ):
         raise ValueError(
@@ -226,15 +242,25 @@ def _solve_once(
     entry_context: SegmentEntryContext8616 | None,
     invocation_scope: Real16InvocationDomain8616 | None,
     declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
+    near_call_effects: Mapping[int, frozenset[str]] | None = None,
 ) -> SegmentStateSolution8616:
     """Solve one CFG fixed point using the prior restore-source state surface."""
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
+    ordered_blocks = sorted(blocks_by_addr)
     entry_states: dict[int, dict[str, SegmentRegisterState]] = {addr: {} for addr in blocks_by_addr}
     exit_states: dict[int, dict[str, SegmentRegisterState]] = {addr: {} for addr in blocks_by_addr}
+    instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+    instruction_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
     changed = True
     while changed:
         changed = False
-        for block_addr in sorted(blocks_by_addr):
+        # The converged sweep already transfers every block under the final
+        # joined entry states, so its per-instruction maps are exactly the
+        # fixed point's instruction states; retaining them makes a separate
+        # final transfer pass over the same inputs redundant.
+        sweep_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+        sweep_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+        for block_addr in ordered_blocks:
             new_entry = _join_entry_state(
                 predecessor_map,
                 exit_states,
@@ -242,7 +268,7 @@ def _solve_once(
                 artifact.function_addr,
                 entry_context,
             )
-            new_exit = transfer_block_with_instruction_states(
+            new_exit, block_entries, block_exits = transfer_block_with_instruction_states(
                 blocks_by_addr[block_addr],
                 new_entry,
                 restore_sources,
@@ -250,34 +276,151 @@ def _solve_once(
                 call_preservations=call_preservations,
                 source_artifact=artifact, invocation_scope=invocation_scope,
                 declared_call_effects=declared_call_effects,
-            )[0]
+                near_call_effects=near_call_effects,
+            )
+            sweep_entries.update(block_entries)
+            sweep_exits.update(block_exits)
             if new_entry != entry_states[block_addr]:
                 entry_states[block_addr] = new_entry
                 changed = True
             if new_exit != exit_states[block_addr]:
                 exit_states[block_addr] = new_exit
                 changed = True
-
-    instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
-    instruction_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
-    for block_addr, block in sorted(blocks_by_addr.items()):
-        _, block_entries, block_exits = transfer_block_with_instruction_states(
-            block,
-            entry_states[block_addr],
-            restore_sources,
-            saved_instruction_entries,
-            call_preservations=call_preservations,
-            source_artifact=artifact, invocation_scope=invocation_scope,
-            declared_call_effects=declared_call_effects,
-        )
-        instruction_entries.update(block_entries)
-        instruction_exits.update(block_exits)
+        instruction_entries = sweep_entries
+        instruction_exits = sweep_exits
+    if call_preservations or declared_call_effects:
+        # Bound CALL-boundary evidence revalidates inside the ambient
+        # dependency traversal and consumes its budgeted work; replay the
+        # original final pass so evaluation counts match exactly. With no
+        # such evidence the retained converged-sweep maps are already exact.
+        instruction_entries = {}
+        instruction_exits = {}
+        for block_addr in ordered_blocks:
+            _, block_entries, block_exits = transfer_block_with_instruction_states(
+                blocks_by_addr[block_addr],
+                entry_states[block_addr],
+                restore_sources,
+                saved_instruction_entries,
+                call_preservations=call_preservations,
+                source_artifact=artifact, invocation_scope=invocation_scope,
+                declared_call_effects=declared_call_effects,
+                near_call_effects=near_call_effects,
+            )
+            instruction_entries.update(block_entries)
+            instruction_exits.update(block_exits)
     return SegmentStateSolution8616(
         entry_states,
         exit_states,
         instruction_entries,
         instruction_exits,
     )
+
+
+def _prepare_near_call_effects(
+    artifact: IRFunctionArtifact, near_call_scope: NearCallJumpScope8616 | None,
+) -> tuple[Mapping[int, frozenset[str]], str | None, str | None]:
+    """Authenticate and prepare operation-local conditional CALL effects."""
+    source_before: str | None = None
+    dependencies_before: str | None = None
+    near_call_effects: dict[int, frozenset[str]] = {}
+    if near_call_scope is not None:
+        from .entry_domain_call_preservation import _callee_preserved_registers_8616
+        from .near_call_jump_scope import _dependency_facts_8616, authenticate_near_call_jump_scope_8616
+        from .source_graph_binding import canonical_source_graph_8616
+
+        if not authenticate_near_call_jump_scope_8616(near_call_scope, project=near_call_scope.project, artifact=artifact):
+            raise ValueError("near-call segment dependencies are stale")
+        source_before = canonical_source_graph_8616(artifact.function_addr, artifact.blocks)
+        dependencies_before = _dependency_facts_8616(near_call_scope)
+        for step in near_call_scope.preservations:
+            if step.theorem is None or step.callee is None:
+                raise ValueError("near-call segment dependency missing")
+            near_call_effects[id(step.theorem.instruction)] = frozenset(_callee_preserved_registers_8616(step.callee))
+    return MappingProxyType(near_call_effects), source_before, dependencies_before
+
+
+def _reconcile_near_call_effects(
+    artifact: IRFunctionArtifact, near_call_scope: NearCallJumpScope8616 | None,
+    source_before: str | None, dependencies_before: str | None,
+) -> None:
+    """Revalidate bytes and frozen dependencies before publishing solved state."""
+    from .near_call_jump_scope import _dependency_facts_8616, authenticate_near_call_jump_scope_8616
+    from .source_graph_binding import canonical_source_graph_8616
+
+    if near_call_scope is not None and (
+        not authenticate_near_call_jump_scope_8616(near_call_scope, project=near_call_scope.project, artifact=artifact)
+        or source_before != canonical_source_graph_8616(artifact.function_addr, artifact.blocks)
+        or dependencies_before != _dependency_facts_8616(near_call_scope)
+    ):
+        raise ValueError("near-call segment dependencies changed during solve")
+
+
+def _restore_chain_fixed_point_8616(
+    artifact: IRFunctionArtifact,
+    predecessor_map: dict[int, tuple[int, ...]],
+    restore_sources: tuple[SegmentRestoreSource, ...],
+    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    entry_context: SegmentEntryContext8616 | None,
+    invocation_scope: Real16InvocationDomain8616 | None,
+    declared_call_effects: tuple[DeclaredCallAdmission8616, ...],
+    near_call_effects: Mapping[int, frozenset[str]] | None,
+) -> SegmentStateSolution8616:
+    """Re-solve while prior instruction entries still feed restore chains.
+
+    Saved instruction entries are reachable only through a proved restore
+    source; with no sources a second solve consumes identical inputs and
+    cannot differ, so the propagation loop has no work to close over. Bound
+    CALL-boundary evidence forces the original replay count because its
+    revalidation consumes ambient traversal budget.
+    """
+    saved_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+    solution = _solve_once(
+        artifact, predecessor_map, restore_sources, saved_entries,
+        call_preservations, entry_context, invocation_scope,
+        declared_call_effects, near_call_effects,
+    )
+    if restore_sources or call_preservations or declared_call_effects:
+        for _ in range(len(restore_sources) + 2):
+            if solution.instruction_entry_states == saved_entries:
+                break
+            saved_entries = solution.instruction_entry_states
+            solution = _solve_once(
+                artifact, predecessor_map, restore_sources, saved_entries,
+                call_preservations, entry_context, invocation_scope,
+                declared_call_effects, near_call_effects,
+            )
+    return solution
+
+
+def _require_distinct_near_scope(
+    scope: NearCallJumpScope8616 | None, view: object,
+    invocation: Real16InvocationDomain8616 | None, entry: SegmentEntryContext8616 | None,
+) -> None:
+    """Require independently supplied near scope with no competing entry domain."""
+    if scope is not None and (view is None or invocation is not None or entry is not None):
+        raise ValueError("near-call scope requires its distinct scoped view")
+
+
+def _require_native_invocation_surface_8616(
+    artifact: IRFunctionArtifact, scope: Real16InvocationDomain8616,
+) -> None:
+    """Authenticate ordinary coverage or an identical refusal-free chained body."""
+    from .real16_invocation_domain import (
+        Real16InvocationKind8616,
+        _retained_parent_census_surface_8616,
+        same_real16_entry_scope_8616,
+    )
+
+    if not same_real16_entry_scope_8616(scope, scope):
+        raise ValueError("invocation scope is not bound to this registered IR")
+    if scope.coverage is not None and scope.coverage.artifact is artifact:
+        return
+    retained = _retained_parent_census_surface_8616(scope)
+    if (scope.kind is Real16InvocationKind8616.CALL_CHAINED and retained is not None
+            and retained[0] is artifact and not artifact.refusals
+            and not any(block.refusals for block in artifact.blocks)):
+        return
+    raise ValueError("invocation scope is not bound to this registered IR")
 
 
 def solve_segment_state_8616(
@@ -288,6 +431,7 @@ def solve_segment_state_8616(
     *,
     entry_context: SegmentEntryContext8616 | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
     scoped_view: (
         ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
     ) = None,
@@ -318,16 +462,10 @@ def solve_segment_state_8616(
     ):
         raise ValueError("segment entry context is not bound to this callee IR")
     scoped_projection: ScopedFunctionCFGProjection8616 | None = None
+    _require_distinct_near_scope(near_call_scope, scoped_view, invocation_scope, entry_context)
     if scoped_view is None:
         if invocation_scope is not None:
-            from .real16_invocation_domain import same_real16_entry_scope_8616
-
-            if (
-                not same_real16_entry_scope_8616(invocation_scope, invocation_scope)
-                or invocation_scope.coverage is None
-                or invocation_scope.coverage.artifact is not artifact
-            ):
-                raise ValueError("invocation scope is not bound to this registered IR")
+            _require_native_invocation_surface_8616(artifact, invocation_scope)
         predecessor_map = (
             dict(function_ssa.predecessor_map)
             if function_ssa is not None and function_ssa.predecessor_map
@@ -346,19 +484,62 @@ def solve_segment_state_8616(
                 "scoped segment state requires a typed scoped view owner"
             )
         predecessor_map, scoped_projection = _scoped_predecessor_map_8616(
-            artifact, scoped_view, invocation_scope
+            artifact, scoped_view, invocation_scope, near_call_scope
         )
         if function_ssa is not None:
             _require_supplied_predecessor_map_8616(
                 function_ssa, set(predecessor_map), predecessor_map
             )
-    saved_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
-    solution = _solve_once(artifact, predecessor_map, restore_sources, saved_entries, call_preservations, entry_context, invocation_scope, declared_call_effects)
-    for _ in range(len(restore_sources) + 2):
-        if solution.instruction_entry_states == saved_entries:
-            break
-        saved_entries = solution.instruction_entry_states
-        solution = _solve_once(artifact, predecessor_map, restore_sources, saved_entries, call_preservations, entry_context, invocation_scope, declared_call_effects)
+    near_call_effects, source_before, dependencies_before = _prepare_near_call_effects(artifact, near_call_scope)
+    solution = _restore_chain_fixed_point_8616(
+        artifact, predecessor_map, restore_sources, call_preservations,
+        entry_context, invocation_scope, declared_call_effects, near_call_effects,
+    )
+    _reconcile_near_call_effects(artifact, near_call_scope, source_before, dependencies_before)
     if scoped_projection is not None:
         solution = replace(solution, scoped_projection=scoped_projection)
     return solution
+
+
+def _solve_identity_segment_survey_8616(
+    artifact: IRFunctionArtifact, survey: NativeEffectSurvey8616,
+) -> tuple[SegmentStateSolution8616, int]:
+    """Solve identity transfers from the caller's freshly classified native survey.
+
+    Only the canonical paired builder calls this private operation. No input
+    CALL, segment write, unknown effect, or opaque instruction key is eligible.
+    Ordinary predecessor joins preserve disconnected and loop behavior.
+    """
+    if not survey.segment_identity_transfer or survey.census_covered is not True:
+        raise ValueError("identity transfer requires the complete fresh native survey")
+    predecessors = build_x86_16_ir_predecessor_map(artifact)
+    blocks = {item.block.addr: item for item in survey.selector_blocks}
+    entries: dict[int, dict[str, SegmentRegisterState]] = {address: {} for address in blocks}
+    exits: dict[int, dict[str, SegmentRegisterState]] = {address: {} for address in blocks}
+    work = len(blocks)
+    changed = True
+    while changed:
+        changed = False
+        for address in sorted(blocks):
+            work += 1
+            incoming = _join_entry_state(predecessors, exits, address, artifact.function_addr, None)
+            if incoming != entries[address] or incoming != exits[address]:
+                entries[address] = incoming
+                exits[address] = dict(incoming)
+                changed = True
+    instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+    instruction_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+    for address in sorted(blocks):
+        item = blocks[address]
+        work += 1
+        block_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+        block_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
+        for row in item.record_rows:
+            work += 1
+            if type(row.addr) is not int:
+                raise ValueError("identity survey retained an opaque instruction key")
+            block_entries.setdefault(row.addr, dict(entries[address]))
+            block_exits[row.addr] = dict(exits[address])
+        instruction_entries.update(block_entries)
+        instruction_exits.update(block_exits)
+    return SegmentStateSolution8616(entries, exits, instruction_entries, instruction_exits), work

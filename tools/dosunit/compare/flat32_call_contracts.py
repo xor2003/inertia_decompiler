@@ -22,12 +22,15 @@ from typing import TYPE_CHECKING, Any
 
 from tools.dosunit.architectures.flat32 import flat32_register_architecture
 from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.contracts.flat32_buffer_domain import Flat32EntryMemoryBinding, Flat32StackDisjointBuffer
 from tools.dosunit.contracts.flat32_proof_domain import Flat32ProofDomain
 from tools.dosunit.contracts.proof_contracts import ProofStatus
 
 if TYPE_CHECKING:
     import angr
     import pyvex
+
+    from tools.dosunit.compare.flat32_external_binding import ExternalImportBinding
 
 PRESERVED_OUTPUTS: tuple[str, ...] = ("ebx", "ebp", "esi", "edi", "esp")
 """ABI-preserved registers that are always observable in a composed proof.
@@ -62,6 +65,17 @@ class CallCompositionLimits:
     consumes one ``max_inline_depth`` level like a real call, so thunk
     chains stay bounded by both limits.
 
+    A direct call to an exact native JMP-IAT leaf with an explicit external
+    contract may cross the inline-depth boundary. Its bytes and effects are
+    still composed, and call-count, node, deadline and return-proof limits
+    still apply; only the structural depth refusal is bypassed for this leaf.
+
+    A completed generic callee summary may also be reused beyond the depth
+    boundary because substitution performs no new recursive descent. Both
+    direct and finite indirect calls retain their call-count, deadline and
+    return-target obligations. Context-bound summaries are never reused by
+    entry address alone; tail-transfer depth rules are unchanged.
+
     ``max_total_seconds`` is an optional wall-clock bound for one
     ``summarize_with_calls`` composition, measured on ``time.monotonic``
     from session start.  ``None`` (the default) preserves the historical
@@ -92,7 +106,7 @@ class CallCompositionLimits:
     max_blocks_per_function: int = 64
     max_inline_depth: int = 4
     max_inlined_calls: int = 32
-    max_compositions: int = 128
+    max_compositions: int = 256
     max_term_nodes: int = 12000
     max_lift_bytes: int = 4096
     max_assignments_per_block: int = 2048
@@ -179,8 +193,31 @@ class ReturnTargetProofFailure:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CallRefusalLocation:
+    """Exact native stopping site; root and side are attached by the caller."""
+
+    function_entry: int
+    block_address: int
+    instruction_address: int | None
+    side: CallProofSide | None = None
+    root_entry: int | None = None
+
+    def to_document(self) -> dict[str, Any]:
+        """Publish coordinates without inferring a call chain or target value."""
+        return {
+            "function_entry": hex(self.function_entry),
+            "block_address": hex(self.block_address),
+            "instruction_address": hex(self.instruction_address) if self.instruction_address is not None else None,
+            "side": self.side.value if self.side is not None else None,
+            "root_entry": hex(self.root_entry) if self.root_entry is not None else None,
+        }
+
+
 class CallCompositionRefusal(ValueError):
     """An incomplete or unsupported call region, never an equivalence verdict.
+
+    Location independently records the exact native stopping site when known.
 
     ``str(error)`` remains the stable machine-readable reason.  ``evidence``
     optionally carries the typed return-target proof failure; it is populated
@@ -188,11 +225,54 @@ class CallCompositionRefusal(ValueError):
     """
 
     def __init__(
-        self, reason: str, *, evidence: ReturnTargetProofFailure | None = None
+        self, reason: str, *, evidence: ReturnTargetProofFailure | None = None,
+        location: CallRefusalLocation | None = None,
     ) -> None:
         """Bind the stable reason string and optional typed proof evidence."""
         super().__init__(reason)
         self.evidence: ReturnTargetProofFailure | None = evidence
+        self.location: CallRefusalLocation | None = location
+
+
+class NativeExceptionEdge(CallCompositionRefusal):
+    """A native exceptional exit remains unmodeled and must stay observable."""
+
+    def __init__(self, jumpkind: str, location: CallRefusalLocation) -> None:
+        """Record architecture exit kind and exact instruction for later diagnosis."""
+        super().__init__("exception_edge", location=location)
+        self.jumpkind: str = jumpkind
+
+
+class InductiveLoopRequired(CallCompositionRefusal):
+    """A native backedge needs induction; generic scheduling may forward it.
+
+    This records a structural stopping site, never a counterexample obtained
+    from generic inputs that could be invalid in the caller's entry domain.
+    """
+
+    def __init__(self, location: CallRefusalLocation) -> None:
+        """Keep the public reason stable while providing a typed retry signal."""
+        super().__init__("loop_requires_inductive_proof", location=location)
+
+
+class IndirectReadProposal(CallCompositionRefusal):
+    """A preserved literal read names an image-derived root-entry cell premise.
+
+    Raised inside ``flat32_call_execution._compose_indirect_arm`` when a
+    deferred-indirect ``ip`` leaf is a ``loadle`` whose concrete address range
+    is proved preserved against canonical top-level entry memory.  The
+    innermost ``_compose_function`` retries once per newly proposed cell;
+    seeded reads rewrite to ``loadle(storele(mem_input, cell, value), cell)``
+    and the exact ``mem_input`` equality publishes as a typed root-entry
+    obligation — the premise is never assumed silently and never binds a
+    nested callee's callsite state.  If a seeded cell is proposed again, the
+    stable ``call_indirect_target_unconstrained`` refusal is preserved.
+    """
+
+    def __init__(self, cells: Mapping[int, int]) -> None:
+        """Bind candidate ``{address: entry-memory value}`` cells for one retry."""
+        super().__init__("call_indirect_target_unconstrained")
+        self.cells: dict[int, int] = dict(cells)
 
 
 @dataclass(frozen=True)
@@ -247,6 +327,10 @@ class _LiftedBlock:
     admitted only while ``_ComposeSession.admit_indirect_calls`` is set.
     Execution then proves the finite target set from the block's composed
     ``ip`` term; it is never a wildcard.
+
+    ``external_slot`` binds an exact native CALL/JMP-IAT terminator to a
+    declared loaded import. Execution must still prove its target equals
+    the root-entry IAT value before applying any declared external effects.
     """
 
     address: int
@@ -257,6 +341,7 @@ class _LiftedBlock:
     call_target: int | None
     fallthrough: int | None
     tail_targets: frozenset[int] = frozenset()
+    external_slot: int | None = None
 
 
 @dataclass
@@ -298,6 +383,11 @@ class _ComposeSession:
     ``_lift_function`` consumers that never pass through ``_compose_root``
     keep the historical lift-time ``call_indirect_target`` refusal.
 
+    ``external_bindings`` contains only authenticated loaded PE import slots.
+    When nonempty, execution uses root-bound inputs from the beginning so
+    live-target checks always refer to root-entry memory. ``external_sites``
+    retains the consumed targets, their preservation proofs and premises.
+
     ``block_lift_retries`` collects the typed :class:`BlockLiftRetry`
     evidence for each closure that engaged the opt-in
     ``retry_max_blocks_per_function`` continuation and completed under
@@ -312,9 +402,15 @@ class _ComposeSession:
     limits: CallCompositionLimits
     reg_widths: dict[str, int]
     entry_domain: Flat32ProofDomain | None = None
+    root_buffer_domains: tuple[tuple[Flat32StackDisjointBuffer, int], ...] = ()
+    root_memory_bindings: tuple[Flat32EntryMemoryBinding, ...] = ()
+    return_buffer_proofs: list[dict[str, Any]] = field(default_factory=list)
     blocks: dict[int, dict[int, _LiftedBlock]] = field(default_factory=dict)
     summaries: dict[int, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    leaf_summary_attempts: set[int] = field(default_factory=set)
     call_sites: list[dict[str, Any]] = field(default_factory=list)
+    constant_branch_proofs: list[dict[str, Any]] = field(default_factory=list)
+    unreachable_exception_proofs: list[dict[str, Any]] = field(default_factory=list)
     tail_sites: list[dict[str, Any]] = field(default_factory=list)
     block_lift_retries: list[BlockLiftRetry] = field(default_factory=list)
     compositions: int = 0
@@ -325,6 +421,35 @@ class _ComposeSession:
     compose_stats: dict[str, Any] = field(default_factory=dict)
     root_bound_inputs: bool = False
     admit_indirect_calls: bool = False
+    external_bindings: dict[int, ExternalImportBinding] = field(default_factory=dict)
+    external_sites: list[dict[str, Any]] = field(default_factory=list)
+    # Typed per-site x87 obligations bound to the composed entry state at
+    # each checking instruction (pending-exception guards); the comparison
+    # domain enforces them and the verdict publisher serializes them.
+    x87_obligations: list[dict[str, Any]] = field(default_factory=list)
+    # Per-function obligation frames: ``_walk`` appends sites to the innermost
+    # frame so generic callee obligations can be substituted into each caller's
+    # live state at the call site instead of leaking into the root namespace.
+    obligation_frames: list[list[dict[str, Any]]] = field(default_factory=list)
+    # Generic (input-leaf) obligation terms cached beside ``summaries`` so a
+    # reused callee summary still contributes its sites at every later call.
+    summary_obligations: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    # Obligation frame produced by the most recent ``_compose_function`` call;
+    # consumed immediately by the composing call site (root-bound callees bind
+    # directly to caller terms and are never keyed by entry).
+    last_obligation_frame: list[dict[str, Any]] = field(default_factory=list)
+    # Image-derived entry-memory cell premises installed by seeded retries:
+    # ``seed_cells`` maps each admitted literal address to the exact
+    # ``mem_input`` value the premise binds, and ``cells_used`` records which
+    # function entry actually consumed a seeded cell. Its obligation is
+    # published directly against root-entry memory, never rebound to a callee.
+    # ``root_entry`` identifies the single composition whose ``mem_input`` is
+    # the canonical top-level entry array; generic prepared summaries at
+    # depth 0 for other entries must never anchor these premises.
+    seed_cells: dict[int, int] = field(default_factory=dict)
+    cells_used: dict[int, set[int]] = field(default_factory=dict)
+    cells_published: set[tuple[int, int]] = field(default_factory=set)
+    root_entry: int | None = None
 
 
 def _check_compose_deadline(compose_stats: dict[str, Any] | None) -> None:

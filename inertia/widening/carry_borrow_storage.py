@@ -27,6 +27,7 @@ from .carry_borrow_values import (
     WideCarryBorrowEvidence8616,
     WideCarryBorrowValue8616,
 )
+from .pair_type_contracts import WidePairEvidence8616
 
 
 class WideCarryBorrowStorageVerdict8616(StrEnum):
@@ -55,6 +56,11 @@ class WideCarryBorrowStorage8616:
     address: IRAddress
     storage: AliasStorageFacts
     source_versions: tuple[int, ...]
+
+    @property
+    def pair(self) -> WidePairEvidence8616:
+        """Return the retained named-pair legality evidence of this value."""
+        return self.value.pair
 
 
 @dataclass(frozen=True, slots=True)

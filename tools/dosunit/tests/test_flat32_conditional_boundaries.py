@@ -131,3 +131,58 @@ def test_native_division_fault_edge_is_still_refused() -> None:
     block = project.factory.block(BASE, size=3, opt_level=0).vex
     with pytest.raises(CallCompositionRefusal, match="exception_edge"):
         _check_exits(block, project.arch.ip_offset)
+
+
+@pytest.mark.parametrize("route", ["cfg", "reblocked", "macro"])
+@pytest.mark.parametrize("repeat", ["f3a4", "f2ae", "66f3a5", "f366af"])
+@pytest.mark.parametrize("mutation", ["none", "prefix", "suffix"])
+def test_cfg_routes_preserve_complete_repeat_effects(route: str, repeat: str, mutation: str) -> None:
+    """REP admission retains effects on both sides of its isolated instruction."""
+    from tools.dosunit.compare.flat32_cfg_regions import compare_reblocked_cfg
+    from tools.dosunit.compare.flat32_macro_proof import compare_macro_cfg
+
+    repeat_size = len(bytes.fromhex(repeat))
+    branch = bytes([256 - (repeat_size + 5)]).hex()
+    original = bytes.fromhex("90" + repeat + "85db75" + branch + "c3")
+    candidate = original
+    if mutation == "prefix":
+        candidate = bytes.fromhex("47" + repeat + "85db75" + branch + "c3")
+    elif mutation == "suffix":
+        branch = bytes([256 - (repeat_size + 6)]).hex()
+        candidate = bytes.fromhex("90" + repeat + "4085db75" + branch + "c3")
+    projects = (angr.load_shellcode(original, arch="x86", load_address=BASE),
+                angr.load_shellcode(candidate, arch="x86", load_address=BASE + 0x10000))
+    with _driver_lane("msc8") as lane:
+        ranges = ((BASE, len(original)), (BASE + 0x10000, len(candidate)))
+        if route == "cfg":
+            result = lane.cfg.compare_cfg(*projects, name="rep_loop", oracle_range=ranges[0],
+                                          candidate_range=ranges[1], outputs=lane.adapter.OUTPUT_REGS, timeout_ms=5000)
+        else:
+            compare = compare_reblocked_cfg if route == "reblocked" else compare_macro_cfg
+            result = compare(projects, *ranges, lane.adapter.OUTPUT_REGS, 5000)
+    if mutation == "none":
+        assert result["status"] == "passed", result
+    else:
+        assert result["status"] != "passed", result
+
+
+@pytest.mark.parametrize("code", ["67f3a4c3", "66f3acc3", "f3a4"])
+def test_cfg_repeat_requires_default_encoding_and_closed_continuation(code: str) -> None:
+    """Unsupported widths and a missing terminal cannot inherit REP equality."""
+    from tools.comparator.cfg import CfgRefusal, discover
+
+    raw = bytes.fromhex(code)
+    project = angr.load_shellcode(raw, arch="x86", load_address=BASE)
+    with pytest.raises(CfgRefusal):
+        discover(project, BASE, len(raw), 16)
+
+
+def test_cfg_repeat_refuses_missing_authoritative_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Byte admission cannot substitute for a complete effect document."""
+    from tools.comparator.cfg import CfgRefusal, discover, lower_blocks
+
+    project = angr.load_shellcode(bytes.fromhex("f3a4c3"), arch="x86", load_address=BASE)
+    blocks = discover(project, BASE, 3, 16)
+    monkeypatch.setattr(S, "_lower_repeat_string_summary", lambda *args, **kwargs: None)
+    with pytest.raises(CfgRefusal, match="repeat_summary_unavailable"):
+        lower_blocks(blocks, list(blocks), "test", ("eax", "esp", "eip"))

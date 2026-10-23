@@ -240,7 +240,7 @@ def _entry_leaf_preservation_sites_8616(
         effect = instruction.call_stack_effect
         if instruction.addr is None or effect is None or not effect.complete:
             return None
-        if value.name == "sp" and effect.net_stack_delta != 0:
+        if value.name == "sp" and effect.current_net_stack_delta != 0:
             return None
         if value.name == "bp" and not effect.bp_preserved:
             return None

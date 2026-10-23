@@ -236,6 +236,7 @@ def test_import_discharges_indexed_loop_back_edge(
             "target": _JMP_TARGET,
             "invocation": None,
             "invocation_scope": None,
+            "near_call_scope": None,
             "call_dependencies": [],
         }
     ]
@@ -284,6 +285,13 @@ def test_apply_materializes_only_the_admitted_edge(
         assert result.applied == domain_proof.admitted
         assert result.blocks == supplied.blocks
         assert _JMP_TARGET in _block(result, _JMP_BLOCK).successor_addrs
+        source_block = _block(supplied, _JMP_BLOCK)
+        effective_block = _block(result, _JMP_BLOCK)
+        for source, effective in zip(source_block.instrs, effective_block.instrs, strict=True):
+            if source.op == "CALL" or (source.op == "JMP" and source.addr == _JMP_HEAD):
+                assert effective is not source
+            else:
+                assert effective is source
 
 
 def test_empty_proof_returns_input_unchanged(

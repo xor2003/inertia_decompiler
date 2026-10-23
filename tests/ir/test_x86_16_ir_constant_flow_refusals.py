@@ -121,3 +121,22 @@ def test_unknown_layout_register_write_refuses() -> None:
     state = _state((_move(_reg("not_a_reg", 1), 0x4C),))
     assert state.constant(_reg("not_a_reg", 1)) is None
     assert state.constant(_reg("ax", 2)) is None
+
+
+@pytest.mark.parametrize("wide_word", [2, 3, 0x102])
+def test_contradictory_seed_lanes_cannot_be_reintroduced(wide_word: int) -> None:
+    """A wider entry fact must not revive a contradicted narrow register lane."""
+    flow = IRConstantFlow8616()
+    flow.seed_register_constants_8616({"al": 1, "ax": 2, "eax": wide_word})
+    assert flow.constant(_reg("al", 1)) is None
+    assert flow.constant(_reg("ax", 2)) is None
+    assert flow.constant(_reg("eax", 4)) is None
+
+
+def test_compatible_partial_seed_preserves_newly_known_bits() -> None:
+    """Compare overlapping known bits only when admitting a wider entry seed."""
+    flow = IRConstantFlow8616()
+    flow.seed_register_constants_8616({"ah": 1, "ax": 0x102})
+    assert flow.constant(_reg("ax", 2)) == 0x102
+    assert flow.constant(_reg("al", 1)) == 2
+    assert flow.constant(_reg("ah", 1)) == 1

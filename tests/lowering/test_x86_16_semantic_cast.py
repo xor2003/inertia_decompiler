@@ -2,11 +2,12 @@
 
 import shutil
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_type import SimTypeChar, SimTypeShort
+from angr.sim_type import SimTypeChar, SimTypeNum, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from archinfo import ArchX86
 
@@ -272,3 +273,35 @@ def test_runtime_segment_carrier_pass_preserves_unrelated_semantic_cast() -> Non
 
     assert not materialize_runtime_helper_segment_carriers_8616(codegen)
     assert assignment.rhs is required_cast
+
+
+def test_runtime_segment_carrier_pass_keeps_plain_narrowing_value(tmp_path: Path) -> None:
+    """A segment-only pass cannot turn a 16-bit conversion into a 32-bit value."""
+    from tests.lowering.test_call_stack_inputs import _fixture
+
+    compiler = shutil.which('gcc')
+    assert compiler is not None
+    codegen, _call = _fixture()
+    codegen.show_casts = True
+    word = SimTypeShort(False).with_arch(codegen.project.arch)
+    wide = SimTypeNum(32, False).with_arch(codegen.project.arch)
+    required = structured_c.CTypeCast(wide, word, structured_c.CConstant(0x12345, wide, codegen=codegen), codegen=codegen)
+    returned = structured_c.CReturn(required, codegen=codegen)
+    root = structured_c.CStatements([returned], codegen=codegen)
+    codegen.cfunc.statements = root
+    codegen._func = None
+
+    def execute(label: str) -> int:
+        """Use the host compiler as an independent value-conversion oracle."""
+        source = tmp_path / (label+'.c')
+        source.write_text('#include <stdio.h>\nunsigned run(void) {\n'+root.c_repr()
+            +'\n}\nint main(void) { printf("%u\\n",run()); }\n')
+        binary = tmp_path / label
+        subprocess.run([compiler,'-std=c11',str(source),'-o',str(binary)],capture_output=True,text=True,check=True)
+        return int(subprocess.run([str(binary)],capture_output=True,text=True,check=True).stdout)
+
+    before = execute('before')
+    changed = materialize_runtime_helper_segment_carriers_8616(codegen)
+    after = execute('after')
+    assert before == after == 0x2345
+    assert not changed and returned.retval is required

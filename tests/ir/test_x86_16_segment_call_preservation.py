@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
     DecodedDirectCallsiteIndex8616,
@@ -27,6 +28,27 @@ from inertia.ir.function_ir_registry import (
 from inertia.ir.ir_boundary_cfg import prove_ir_boundary_coverage_8616
 from inertia.ir.segment_call_preservation import prove_segment_call_preservation_8616
 from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
+
+_CALLER_CODE = bytes.fromhex("8cd8e8fb0f8ec0c3")  # mov ax,ds; call 0x2000; mov es,ax; ret
+_CALLEE_CODE = bytes.fromhex("b800b8c3")          # mov ax,0xb800; ret
+
+
+def _load_native_bytes_8616(addr: int, size: int) -> bytes:
+    """Serve retained native bytes for the two mock block extents."""
+    for base, code in ((0x1000, _CALLER_CODE), (0x2000, _CALLEE_CODE)):
+        if base <= addr and addr + size <= base + len(code):
+            return code[addr - base: addr - base + size]
+    return b""
+
+
+def _decoded_block_8616(addr: int, code: bytes,
+                        extents: tuple[tuple[int, int], ...]) -> object:
+    """Mint the decoded-block surface bound-block authentication reads."""
+    return SimpleNamespace(
+        addr=addr, size=len(code), bytes=code,
+        capstone=SimpleNamespace(insns=tuple(
+            SimpleNamespace(address=head, size=size) for head, size in extents)),
+    )
 
 
 def test_callee_resolution_keeps_registry_conflicts_loudly_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,7 +146,13 @@ def test_catalog_free_repeated_callee_collection_retains_contextual_equality(
 @pytest.mark.parametrize("mode", ("valid", "absent", "duplicate", "foreign", "stale", "far", "invalidate_after"))
 def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """A proven callee preserves DS while its ES write and unknown AX remain explicit."""
-    project = SimpleNamespace()
+    # Bound-block authentication requires a real arch, live loader bytes and
+    # retained decoded blocks; the mock supplies that exact surface.
+    project = SimpleNamespace(
+        arch=Arch86_16(),
+        loader=SimpleNamespace(
+            memory=SimpleNamespace(load=_load_native_bytes_8616)),
+    )
     caller = IRFunctionArtifact(0x1000, (IRBlock(0x1000, instrs=(
         IRInstr("MOV", IRValue(MemSpace.REG, name="ax", size=2),
                 (IRValue(MemSpace.REG, name="ds", size=2),), addr=0x1000),
@@ -142,9 +170,13 @@ def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch
     publish_function_ir_artifact_8616(project, callee)
     caller_boundary = ExactFunctionRangeBoundary8616(
         project, 0x1000, 8, frozenset({0x1000}), frozenset({0x1000, 0x1002, 0x1005, 0x1007}), (),
+        blocks=(_decoded_block_8616(
+            0x1000, _CALLER_CODE,
+            ((0x1000, 2), (0x1002, 3), (0x1005, 2), (0x1007, 1))),),
     )
     callee_boundary = ExactFunctionRangeBoundary8616(
         project, 0x2000, 4, frozenset({0x2000}), frozenset({0x2000, 0x2003}), (),
+        blocks=(_decoded_block_8616(0x2000, _CALLEE_CODE, ((0x2000, 3), (0x2003, 1))),),
     )
     caller_coverage = prove_ir_boundary_coverage_8616(project, caller_boundary, caller)
     callee_coverage = prove_ir_boundary_coverage_8616(project, callee_boundary, callee)
@@ -178,20 +210,11 @@ def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch
             CallerReturnUseProgramStats8616(1, 1, 1, 1, 0),
         )
         request = SegmentCallPreservationRequest8616(0x1002, 0x2000)
-        import capstone
-
         from inertia.frontend.x86_16.frontend_caller_return_use_program import (
             current_caller_return_use_program_evidence_8616,
         )
         from inertia.semantics.callsite_summary import caller_return_use_program_scope_8616
 
-        decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
-        decoder.detail = True
-        machine_bytes = bytes.fromhex("8cd8e8fb0f8ec0c3")
-        project.arch = SimpleNamespace(capstone=decoder)
-        project.loader = SimpleNamespace(memory=SimpleNamespace(
-            load=lambda address, size: machine_bytes[address - 0x1000:address - 0x1000 + size],
-        ))
         with caller_return_use_program_scope_8616(project, ((0x1000, 0x1008),)):
             decoded_program = current_caller_return_use_program_evidence_8616(project, ((0x1000, 0x1008),))
             decoded_collection = collect_segment_call_preservations_8616(
@@ -264,7 +287,9 @@ def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch
     elif mode == "foreign":
         source = replace(caller)
     elif mode == "stale":
-        publish_function_ir_artifact_8616(project, replace(callee))
+        # Immutable bindings refuse republish even for a different body, so
+        # swap the registry entry directly to test the staleness contract.
+        project._inertia_function_ir_artifacts_8616[0x2000] = replace(callee)
     elif mode == "far":
         proof = replace(proof, index=DecodedDirectCallsiteIndex8616(
             {0x2000: (replace(entry, is_far=True),)}, index.stats,
@@ -278,5 +303,5 @@ def test_closed_leaf_call_preserves_ds_but_drops_gp_proxy(mode: str, monkeypatch
     if mode == "invalidate_after":
         caller_closure = prove_segment_effect_closure_8616(caller_coverage, state)
         assert caller_closure.complete
-        publish_function_ir_artifact_8616(project, replace(callee))
+        project._inertia_function_ir_artifacts_8616[0x2000] = replace(callee)
         assert not caller_closure.complete

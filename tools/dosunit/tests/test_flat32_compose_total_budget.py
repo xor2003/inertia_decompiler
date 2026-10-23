@@ -396,16 +396,18 @@ def test_max_total_seconds_limits_field() -> None:
 
 def test_last_materialization_cannot_publish_after_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     """A late last output must invalidate standalone summary publication."""
+    from tools.dosunit.compare import flat32_call_composition
+
     clock = _Clock()
     monkeypatch.setattr(time, "monotonic", clock.monotonic)
-    original_inputs = _S._term_input_items
+    original_inputs = flat32_call_composition.input_items
 
     def late_inputs(*args: Any, **kwargs: Any) -> Any:
         result = original_inputs(*args, **kwargs)
         clock.advance(10.0)
         return result
 
-    monkeypatch.setattr(_S, "_term_input_items", late_inputs)
+    monkeypatch.setattr(flat32_call_composition, "input_items", late_inputs)
     with installed(region=True), pytest.raises(CallCompositionRefusal, match="compose_budget_exceeded"):
         summarize_with_calls(
             _project("c3"), entry=BASE, functions={BASE: 1}, outputs=OUTPUTS,

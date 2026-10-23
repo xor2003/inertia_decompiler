@@ -752,8 +752,11 @@ def _filter_work_items_by_proc_names(
 
 
 def _lower_process_priority() -> None:
+    """Keep inherited niceness10 stable across parent and worker startup."""
     with contextlib.suppress(AttributeError, OSError):
-        os.nice(10)
+        current = os.nice(0)
+        if current < 10:
+            os.nice(10 - current)
 
 
 def _apply_memory_limit(max_memory_mb: int | None) -> None:

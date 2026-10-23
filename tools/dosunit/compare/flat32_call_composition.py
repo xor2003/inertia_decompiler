@@ -36,13 +36,22 @@ Callers do not need to install mutable flat32 adapter globals.
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from tools.dosunit.architectures.flat32 import X87_REGISTER_NAMES
+from tools.dosunit.architectures.flat32_entry_inputs import bind_direction_input
 from tools.dosunit.compare import straightline_ssa as S
+from tools.dosunit.compare.flat32_abi_observation import (
+    Flat32AbiObservation,
+    apply_completed_observation,
+    observation_outputs,
+    record_abi_observation,
+)
 from tools.dosunit.compare.flat32_call_contracts import (
     PRESERVED_OUTPUTS,
     BlockLiftRetry,
@@ -59,9 +68,20 @@ from tools.dosunit.compare.flat32_call_contracts import (
 )
 from tools.dosunit.compare.flat32_call_execution import _compose_root
 from tools.dosunit.compare.flat32_environment_coverage import environment_parts
+from tools.dosunit.compare.flat32_external_binding import bind_project_imports, import_slot_correspondence
+from tools.dosunit.compare.flat32_external_call import Flat32ExternalCall
+from tools.dosunit.compare.flat32_memory_preservation import simplify_preserved_root_reads
 from tools.dosunit.compare.flat32_region_attempts import comparison_deadline
+from tools.dosunit.contracts.flat32_buffer_domain import (
+    Flat32EntryMemoryBinding,
+    Flat32EntryMemoryRange,
+    Flat32StackDisjointBuffer,
+)
 from tools.dosunit.contracts.flat32_proof_domain import Flat32ProofDomain
 from tools.dosunit.contracts.proof_contracts import ProofStatus, proof_status_from_legacy
+from tools.dosunit.contracts.proof_scope import ProofScope
+from tools.dosunit.ssa.materialization import input_items, materialize_term
+from tools.dosunit.ssa.obligation_codec import encode_bound_predicates
 
 if TYPE_CHECKING:
     import angr
@@ -88,6 +108,9 @@ def summarize_with_calls(
     labels: Mapping[int, str] | None = None,
     entry_domain: Flat32ProofDomain | None = None,
     total_deadline: float | None = None,
+    external_contracts: tuple[Flat32ExternalCall, ...] = (),
+    root_buffer_domains: tuple[tuple[Flat32StackDisjointBuffer, int], ...] = (),
+    root_memory_bindings: tuple[Flat32EntryMemoryBinding, ...] = (),
 ) -> dict[str, Any]:
     """Compose one complete flat32 function, inlining proved direct calls.
 
@@ -96,11 +119,24 @@ def summarize_with_calls(
     entry and the callee's own reachable blocks stay inside its declared range.
     Labels are evidence metadata only; call targets resolve by address.
 
+    ``external_contracts`` explicitly opts into returning PE-import effects.
+    Each declaration must bind a real loaded import. Exact CALL/JMP-IAT forms
+    require a live-target preservation proof against root-entry memory before
+    effects apply. Initial loader binding and the external ABI/effects remain
+    declared premises, retained in ``external_sites``. All nested execution
+    uses root inputs in this mode, without generic callee-summary caching.
+
     Caller-selected ``outputs`` choose which return values are observed, but
     the ABI-preserved registers in ``PRESERVED_OUTPUTS`` (ebx, ebp, esi, edi,
     esp) plus ``eip``, ``memory`` and ``io`` are always observed, so a callee
     that silently clobbers a preserved register cannot pass under a narrow
     output selection.
+
+    ``abi_observation`` optionally projects only completed root outputs under
+    a caller-declared scalar return and private-stack lifetime premise. All
+    executed memory accesses, intermediate state and return checks remain
+    unchanged. Any projected success is conditional with its exact byte
+    exclusions published; absence preserves strict comparison.
 
     ``entry_domain`` is an optional caller-declared premise bounding the
     top-level entry ``esp`` input.  It is attached to root-frame return
@@ -114,6 +150,13 @@ def summarize_with_calls(
     ``root_bound_retry`` identifies this mode in the summary. Block/call/tail
     work counters include the failed first attempt; proof records and the
     return-target proof count describe only the successful complete attempt.
+
+    ``root_buffer_domains`` carries explicit root argument-buffer/frame
+    disjointness predicates into auxiliary return proofs. This mode binds all
+    nested execution to root inputs from the start, without reusable generic
+    callee summaries. Predicates remain in the final document's obligations;
+    complete comparisons publish the caller's ABI premise and per-call
+    ``return_buffer_proofs``. No store is removed from memory observations.
 
     ``limits.retry_max_blocks_per_function`` is a separate, strictly opt-in
     bound: a function closure whose lift worklist demonstrably reaches
@@ -162,11 +205,17 @@ def summarize_with_calls(
         limits=limits,
         reg_widths=reg_widths,
         entry_domain=entry_domain,
+        root_buffer_domains=root_buffer_domains,
+        root_memory_bindings=root_memory_bindings,
         compose_stats=compose_stats,
+        external_bindings=bind_project_imports(project, external_contracts),
     )
+    buffer_obligations = [item.obligation(depth) for item, depth in root_buffer_domains]
+    memory_obligations = [item.domain.obligation() for item in root_memory_bindings]
     final_state = _compose_root(session, entry)
     _check_compose_deadline(session.compose_stats)
-    observed = tuple(dict.fromkeys((*outputs, *PRESERVED_OUTPUTS, "eip", "memory", "io")))
+    observed = tuple(dict.fromkeys(
+        (*outputs, *PRESERVED_OUTPUTS, "eip", "memory", "io", *X87_REGISTER_NAMES)))
     if any(name not in final_state for name in observed):
         raise CallCompositionRefusal("observable_state_missing")
     terms = {name: final_state[name] for name in observed}
@@ -178,24 +227,49 @@ def summarize_with_calls(
     materialized: dict[str, dict[str, Any]] = {}
     for name, term in terms.items():
         _check_compose_deadline(session.compose_stats)
-        materialized[name] = S._materialize_json_term(
+        materialized[name] = materialize_term(
             term, assignments=assignments, memo=memo, term_cache=term_cache
         )
     document = {
-        "inputs": S._term_input_items(list(materialized.values()), assignments),
+        "inputs": input_items(
+            list(materialized.values()) + [
+                obligation.get("predicate")
+                for obligation in [*session.x87_obligations, *buffer_obligations, *memory_obligations]
+            ],
+            assignments,
+        ),
         "outputs": materialized,
         "assignments": assignments,
         "blocks_composed": session.compositions,
         "blocks_lifted": session.blocks_lifted,
         "inlined_calls": session.inlined_calls,
+        "repeat_sites": [
+            {"entry": hex(block.address), "summary": block.part["summary"]}
+            for blocks in session.blocks.values() for block in blocks.values()
+            if isinstance(block.part.get("summary"), dict) and block.part["summary"].get("kind") == "repeat_string"
+        ],
+        "x87_sites": [
+            {"entry": hex(block.address), "summary": block.part["summary"]}
+            for blocks in session.blocks.values() for block in blocks.values()
+            if isinstance(block.part.get("summary"), dict) and block.part["summary"].get("premises")
+        ],
+        "obligations": [dict(obligation) for obligation in [*session.x87_obligations, *buffer_obligations, *memory_obligations]],
+        "return_buffer_proofs": session.return_buffer_proofs,
+        "root_buffer_domains": buffer_obligations,
+        "root_memory_domains": memory_obligations,
         "return_targets_proved": session.return_targets_proved,
         "call_sites": session.call_sites,
+        "constant_branch_proofs": session.constant_branch_proofs,
+        "unreachable_exception_proofs": session.unreachable_exception_proofs,
         "tail_transfers": session.tail_transfers,
         "tail_sites": session.tail_sites,
         "block_lift_retries": [
             retry.to_document() for retry in session.block_lift_retries
         ],
-        "root_bound_retry": session.root_bound_inputs,
+        "root_bound_retry": session.root_bound_inputs and not session.external_bindings and not root_buffer_domains
+        and not root_memory_bindings,
+        "root_bound_external_calls": bool(session.external_bindings),
+        "external_sites": session.external_sites,
         "environment_parts": environment_parts({
             address: block for blocks in session.blocks.values() for address, block in blocks.items()
         }),
@@ -218,6 +292,9 @@ def _summarize_side(
     labels: Mapping[int, str] | None,
     entry_domain: Flat32ProofDomain | None,
     total_deadline: float | None,
+    external_contracts: tuple[Flat32ExternalCall, ...] = (),
+    root_buffer_domains: tuple[tuple[Flat32StackDisjointBuffer, int], ...] = (),
+    root_memory_bindings: tuple[Flat32EntryMemoryBinding, ...] = (),
 ) -> dict[str, Any]:
     """Compose one compare side; retained proof evidence records which side refused.
 
@@ -235,12 +312,17 @@ def _summarize_side(
             labels=labels,
             entry_domain=entry_domain,
             total_deadline=total_deadline,
+            external_contracts=external_contracts,
+            root_buffer_domains=root_buffer_domains,
+            root_memory_bindings=root_memory_bindings,
         )
     except CallCompositionRefusal as error:
-        if error.evidence is None:
+        if error.evidence is None and error.location is None:
             raise
         raise CallCompositionRefusal(
-            str(error), evidence=replace(error.evidence, side=side)
+            str(error),
+            evidence=replace(error.evidence, side=side) if error.evidence is not None else None,
+            location=replace(error.location, side=side, root_entry=entry) if error.location is not None else None,
         ) from error
 
 
@@ -275,7 +357,7 @@ def _normalization_assumptions(normalization: Mapping[int, int]) -> dict[str, An
         "constant_map": {hex(candidate): hex(oracle) for candidate, oracle in normalization.items()},
         "scope": (
             "each listed candidate constant is assumed to denote the corresponding oracle "
-            "constant (relocated code addresses); the map is caller-supplied evidence, not a "
+            "constant (relocated code or data addresses); the map is caller-supplied evidence, not a "
             "proved relation, and no semantic pointer equivalence is inferred from labels"
         ),
     }
@@ -306,6 +388,18 @@ def _domain_labelled_refusal(
     if entry_domain is not None:
         report["input_constraints"] = entry_domain.constraints()
         report["entry_domain_assumptions"] = entry_domain.assumption_document()
+    return report
+
+
+def _composition_refusal_report(
+    error: CallCompositionRefusal, entry_domain: Flat32ProofDomain | None,
+) -> dict[str, Any]:
+    """Retain domain premises, return-proof failures and exact stopping sites."""
+    report = _domain_labelled_refusal(str(error), entry_domain)
+    if error.evidence is not None:
+        report["return_proof_failure"] = error.evidence.to_document()
+    if error.location is not None:
+        report["refusal_location"] = error.location.to_document()
     return report
 
 
@@ -357,6 +451,113 @@ def _record_caller_premises(
         )
 
 
+def _block_x87_premises(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect each distinct declared x87 premise record from a composed body.
+
+    Dedup uses the whole serialized record — two sites or policies sharing a
+    ``kind`` but different effects/predicates must never overwrite each other.
+    """
+    premises: dict[str, dict[str, Any]] = {}
+    for site in summary.get("x87_sites", ()):
+        for premise in site.get("summary", {}).get("premises", ()):
+            premises.setdefault(json.dumps(premise, sort_keys=True), premise)
+    return list(premises.values())
+
+
+def _bound_x87_obligations(*summaries: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect bound per-site obligation records, keeping typed predicates."""
+    bound: list[dict[str, Any]] = []
+    for side, summary in zip(("oracle", "candidate"), summaries, strict=True):
+        for obligation in summary.get("obligations", ()) or ():
+            if isinstance(obligation, dict) and obligation.get("kind") == "x87_pending_check":
+                bound.append({"side": side, **obligation})
+    return bound
+
+
+def _record_x87_premises(
+    comparison: dict[str, Any],
+    oracle_summary: dict[str, Any], candidate_summary: dict[str, Any],
+) -> None:
+    """Publish all declared policies and bound checking-instruction premises.
+
+    The shared SSA solver enforces these predicates and verifies the domain
+    is nonempty before producing a proof or countermodel. Do not re-evaluate
+    them with a second, partial interpreter: SSA shift widths and signed
+    comparisons must have the same meaning in validation and publication.
+    """
+    records = [*_block_x87_premises(oracle_summary), *_block_x87_premises(candidate_summary)]
+    obligations = _bound_x87_obligations(oracle_summary, candidate_summary)
+    if not records and not obligations:
+        return
+    assumption = {
+        "kind": "declared_x87_premises",
+        "premises": records,
+        "obligations": obligations,
+    }
+    comparison["x87_assumptions"] = assumption
+    if comparison.get("status") == "passed":
+        comparison.update(status="conditional", reason="declared_x87_premises", assumptions=assumption)
+    elif comparison.get("status") == "conditional":
+        existing = comparison.get("assumptions")
+        if isinstance(existing, dict):
+            comparison["assumptions"] = {**existing, "declared_x87_premises": assumption}
+        else:
+            comparison["assumptions"] = {"prior": existing, "declared_x87_premises": assumption}
+
+
+def _discovered_indirect_cell_obligations(*summaries: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect seeded indirect-call cell premises, tagged with their side."""
+    bound: list[dict[str, Any]] = []
+    for side, summary in zip(("oracle", "candidate"), summaries, strict=True):
+        for obligation in summary.get("obligations", ()) or ():
+            if (
+                isinstance(obligation, dict)
+                and obligation.get("provenance") == "discovered_indirect_target_bytes"
+            ):
+                bound.append({"side": side, **obligation})
+    return bound
+
+
+def _record_indirect_cell_premises(
+    comparison: dict[str, Any],
+    oracle_summary: dict[str, Any], candidate_summary: dict[str, Any],
+) -> None:
+    """Publish image-derived entry-memory cell premises as disclosed assumptions.
+
+    A deferred indirect call whose selector preserved a literal global read
+    retried composition under an explicit root-entry premise naming the image
+    bytes at that cell.  The premise is unproved: every verdict reached under
+    it is ``conditional`` and the record carries side/address/value/site so a
+    corrupted cell stays a mismatch instead of a silent pass.
+    """
+    obligations = _discovered_indirect_cell_obligations(oracle_summary, candidate_summary)
+    if not obligations:
+        return
+    assumption = {
+        "kind": "discovered_indirect_target_bytes",
+        "obligations": obligations,
+        "scope": (
+            "canonical root entry memory only; image-derived disclosed premise, "
+            "not an immutability claim"
+        ),
+    }
+    comparison["indirect_cell_assumptions"] = assumption
+    if comparison.get("status") == "passed":
+        comparison.update(
+            status="conditional",
+            reason="discovered_indirect_target_bytes",
+            assumptions=assumption,
+        )
+    elif comparison.get("status") == "conditional":
+        existing = comparison.get("assumptions")
+        if isinstance(existing, dict):
+            comparison["assumptions"] = {
+                **existing, "discovered_indirect_target_bytes": assumption}
+        else:
+            comparison["assumptions"] = {
+                "prior": existing, "discovered_indirect_target_bytes": assumption}
+
+
 def _shared_compare_deadline(timeout_ms: int, total_deadline: float | None) -> float:
     """Resolve the single absolute compare deadline, refusing unusable bounds.
 
@@ -370,12 +571,34 @@ def _shared_compare_deadline(timeout_ms: int, total_deadline: float | None) -> f
         raise CallCompositionRefusal("compose_budget_exceeded")
     if total_deadline is not None and not math.isfinite(total_deadline):
         raise CallCompositionRefusal("invalid_total_deadline")
-    deadline = comparison_deadline(timeout_ms, total_deadline)
+    deadline: float = comparison_deadline(timeout_ms, total_deadline)
     if not math.isfinite(deadline):
         raise CallCompositionRefusal("invalid_total_deadline")
     if time.monotonic() >= deadline:
         raise CallCompositionRefusal("compose_budget_exceeded")
     return deadline
+
+
+def _record_external_premises(
+    comparison: dict[str, Any], contracts: tuple[Flat32ExternalCall, ...],
+    oracle_summary: dict[str, Any], candidate_summary: dict[str, Any],
+) -> None:
+    """Publish premises only for used external summaries, preserving native witnesses."""
+    if contracts and (oracle_summary["external_sites"] or candidate_summary["external_sites"]):
+        external_premise = {
+            "kind": "declared_external_call_contracts",
+            "contracts": [contract.declared_fields() for contract in contracts],
+            "oracle_sites": oracle_summary["external_sites"],
+            "candidate_sites": candidate_summary["external_sites"],
+        }
+        comparison["external_call_assumptions"] = external_premise
+        if comparison.get("status") == "passed":
+            comparison.update(status="conditional", reason="declared_external_call_contracts", assumptions=external_premise)
+        elif comparison.get("status") == "conditional":
+            comparison["assumptions"] = {"prior": comparison.get("assumptions"), "external_calls": external_premise}
+        elif proof_status_from_legacy(comparison.get("status")) is ProofStatus.COUNTEREXAMPLE:
+            # An arbitrary external-memory countermodel is not a concrete OS failure.
+            comparison.update(status="refused", reason="opaque_external_call_countermodel")
 
 
 def compare_functions_with_calls(
@@ -394,6 +617,8 @@ def compare_functions_with_calls(
     candidate_normalization: Mapping[int, int] | None = None,
     entry_domain: Flat32ProofDomain | None = None,
     total_deadline: float | None = None,
+    abi_observation: Flat32AbiObservation | None = None,
+    external_contracts: tuple[Flat32ExternalCall, ...] = (),
 ) -> dict[str, Any]:
     """Compare two complete flat32 functions, inlining proved direct calls.
 
@@ -401,6 +626,12 @@ def compare_functions_with_calls(
     and composed independently, so a strict verdict is a real equality proof:
     ``passed`` needs no paired-call assumptions and a changed callee changes
     the caller's composed semantics directly.
+
+    ``external_contracts`` is an opt-in shared declaration for returning PE
+    imports. Each image independently binds its actual IAT slots and proves
+    live-target preservation. Success is conditional and publishes both sets
+    of sites plus the full contract. Opaque-effect countermodels are refused
+    as inconclusive, never reported as witnessed operating-system failures.
 
     ``candidate_normalization`` is an explicit, unproved candidate-constant to
     oracle-constant map applied to the candidate document (as in
@@ -444,6 +675,10 @@ def compare_functions_with_calls(
     comparisons keep the minimal refused-report shape and do not publish
     it.
 
+    Completed summaries carry ``ProofScope.COMPLETE_FUNCTION`` even when
+    neither root contains a call. Every entry-to-return path has been
+    composed; their result is not a cutpoint-only induction obligation.
+
     The whole comparison shares one absolute deadline: ``timeout_ms`` bounds
     the total wall-clock budget (an optional ``total_deadline`` absolute
     ``time.monotonic()`` value can only tighten it, as in
@@ -456,10 +691,18 @@ def compare_functions_with_calls(
     the deadline, even if a solver run finished just past it.
     """
     limits = limits or CallCompositionLimits()
+    outputs = observation_outputs(outputs, abi_observation)
+    root_buffer_domains = tuple((item, abi_observation.private_stack_bytes)
+        for item in abi_observation.stack_disjoint_buffers) if abi_observation is not None else ()
     normalization = _normalization_map(candidate_normalization)
     if entry_domain is not None and not isinstance(entry_domain, Flat32ProofDomain):
         return _domain_labelled_refusal("invalid_entry_domain", None)
     try:
+        import_slots = import_slot_correspondence(oracle, candidate, external_contracts)
+        _merge_import_slots(normalization, import_slots)
+        memory_ranges = abi_observation.entry_memory_ranges if abi_observation is not None else ()
+        oracle_bindings = _entry_memory_bindings(memory_ranges, {})
+        candidate_bindings = _entry_memory_bindings(memory_ranges, normalization)
         deadline = _shared_compare_deadline(timeout_ms, total_deadline)
         oracle_summary = _summarize_side(
             CallProofSide.ORACLE,
@@ -471,6 +714,9 @@ def compare_functions_with_calls(
             labels=oracle_labels,
             entry_domain=entry_domain,
             total_deadline=deadline,
+            external_contracts=external_contracts,
+            root_buffer_domains=root_buffer_domains,
+            root_memory_bindings=oracle_bindings,
         )
         if time.monotonic() >= deadline:
             raise CallCompositionRefusal("compose_budget_exceeded")
@@ -484,8 +730,31 @@ def compare_functions_with_calls(
             labels=candidate_labels,
             entry_domain=entry_domain,
             total_deadline=deadline,
+            external_contracts=external_contracts,
+            root_buffer_domains=root_buffer_domains,
+            root_memory_bindings=candidate_bindings,
+        )
+        oracle_summary, candidate_summary, abi_premise = apply_completed_observation(
+            oracle_summary, candidate_summary, abi_observation,
+        )
+        oracle_summary = bind_direction_input(
+            oracle_summary, architecture_name=oracle.arch.name, compose_stats={"deadline": deadline},
+        )
+        candidate_summary = bind_direction_input(
+            candidate_summary, architecture_name=candidate.arch.name, compose_stats={"deadline": deadline},
         )
         _stamp_normalization(candidate_summary, normalization)
+        oracle_summary = simplify_preserved_root_reads(
+            oracle_summary,
+            normalize=lambda value, width: value,
+            check_budget=lambda: _check_compose_deadline({"deadline": deadline}),
+        )
+        candidate_summary = simplify_preserved_root_reads(
+            candidate_summary,
+            normalize=lambda value, width: S._normalized_constant_value(
+                value, width=width, document=candidate_summary),
+            check_budget=lambda: _check_compose_deadline({"deadline": deadline}),
+        )
         gate = S._ssa_solver_gate(
             oracle_summary,
             candidate_summary,
@@ -496,10 +765,9 @@ def compare_functions_with_calls(
         if gate is not None:
             raise CallCompositionRefusal(str(gate["reason"]))
     except CallCompositionRefusal as error:
-        report = _domain_labelled_refusal(str(error), entry_domain)
-        if error.evidence is not None:
-            report["return_proof_failure"] = error.evidence.to_document()
-        return report
+        return _composition_refusal_report(error, entry_domain)
+    except S.LowerFailure as error:
+        return _domain_labelled_refusal(error.reason, entry_domain)
     remaining_ms = int((deadline - time.monotonic()) * 1000)
     if remaining_ms <= 0:
         return _domain_labelled_refusal("compose_budget_exceeded", entry_domain)
@@ -521,14 +789,35 @@ def compare_functions_with_calls(
     _record_caller_premises(
         comparison, normalization=normalization, entry_domain=entry_domain
     )
+    comparison["import_slot_correspondence"] = {
+        "source": "loaded_pe_import_metadata_exact_dll_export_identity",
+        "slots": {hex(candidate): hex(oracle) for candidate, oracle in import_slots.items()},
+        "live_pointer_equality_proved": False,
+    }
+    _record_x87_premises(comparison, oracle_summary, candidate_summary)
+    _record_indirect_cell_premises(comparison, oracle_summary, candidate_summary)
+    record_abi_observation(comparison, abi_premise)
+    _record_external_premises(comparison, external_contracts, oracle_summary, candidate_summary)
     if time.monotonic() >= deadline:
         return _domain_labelled_refusal("compose_budget_exceeded", entry_domain)
-    return {
+    encoded: dict[str, Any] = encode_bound_predicates({
         **comparison,
+        "proof_scope": ProofScope.COMPLETE_FUNCTION,
+        "root_read_preservation": {"oracle": oracle_summary.get("root_read_preservation", []),
+                                   "candidate": candidate_summary.get("root_read_preservation", [])},
+        "return_buffer_proofs": {"oracle": oracle_summary["return_buffer_proofs"],
+                                 "candidate": candidate_summary["return_buffer_proofs"]},
+        "architectural_input_bindings": {
+            "oracle": oracle_summary.get("architectural_input_bindings", {}),
+            "candidate": candidate_summary.get("architectural_input_bindings", {}),
+        },
         "oracle_blocks_composed": oracle_summary["blocks_composed"],
         "candidate_blocks_composed": candidate_summary["blocks_composed"],
         "oracle_inlined_calls": oracle_summary["inlined_calls"],
         "candidate_inlined_calls": candidate_summary["inlined_calls"],
+        "oracle_repeat_summaries": len(oracle_summary["repeat_sites"]),
+        "candidate_repeat_summaries": len(candidate_summary["repeat_sites"]),
+        "repeat_sites": {"oracle": oracle_summary["repeat_sites"], "candidate": candidate_summary["repeat_sites"]},
         "return_targets_proved": (
             oracle_summary["return_targets_proved"] + candidate_summary["return_targets_proved"]
         ),
@@ -540,6 +829,14 @@ def compare_functions_with_calls(
             "oracle": oracle_summary["call_sites"],
             "candidate": candidate_summary["call_sites"],
         },
+        "unreachable_exception_proofs": {
+            "oracle": oracle_summary["unreachable_exception_proofs"],
+            "candidate": candidate_summary["unreachable_exception_proofs"],
+        },
+        "constant_branch_proofs": {
+            "oracle": oracle_summary["constant_branch_proofs"],
+            "candidate": candidate_summary["constant_branch_proofs"],
+        },
         "oracle_tail_transfers": oracle_summary["tail_transfers"],
         "candidate_tail_transfers": candidate_summary["tail_transfers"],
         "tail_sites": {
@@ -550,4 +847,29 @@ def compare_functions_with_calls(
             "oracle": oracle_summary["block_lift_retries"],
             "candidate": candidate_summary["block_lift_retries"],
         },
-    }
+    })
+    return encoded
+
+
+def _entry_memory_bindings(
+    ranges: tuple[Flat32EntryMemoryRange, ...], normalization: dict[int, int],
+) -> tuple[Flat32EntryMemoryBinding, ...]:
+    """Bind singleton root bytes to an unambiguous side-local coordinate."""
+    bindings = []
+    for item in ranges:
+        if item.minimum != item.maximum:
+            continue
+        candidates = [address for address, original in normalization.items() if original == item.address]
+        if len(candidates) > 1:
+            raise CallCompositionRefusal("ambiguous_entry_memory_binding")
+        address = candidates[0] if candidates else item.address
+        bindings.append(Flat32EntryMemoryBinding(item, address))
+    return tuple(bindings)
+
+
+def _merge_import_slots(normalization: dict[int, int], slots: dict[int, int]) -> None:
+    """Extend relocation only when declared and metadata-derived identities agree."""
+    for candidate, oracle in slots.items():
+        if candidate in normalization and normalization[candidate] != oracle:
+            raise CallCompositionRefusal("conflicting_import_slot_correspondence")
+        normalization[candidate] = oracle

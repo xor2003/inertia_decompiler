@@ -35,7 +35,7 @@ def test_decompilation_cache_surface_includes_condition_and_induction_rewrite_la
     assert "decompiler_postprocess_stage.py" in names
     assert "type_array_matching.py" in names
     assert "object_lowering.py" in names
-    assert "cli_access_profiles.py" in names
+    assert "access_profiles.py" in names
     assert "cli_access_traits.py" in names
 
 

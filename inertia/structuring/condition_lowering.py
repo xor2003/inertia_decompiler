@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from inertia.alias.condition_register_definition import resolve_condition_register_storage_8616
+from inertia.alias.register_reaching_source import RegisterReachingSourceVerdict8616
 from inertia.ir.condition_ir import (
     ConditionIR,
     condition_compare_symbol_8616,
@@ -29,11 +31,16 @@ from inertia.ir.core import (
     MemSpace,
     SegmentOrigin,
 )
+from inertia.ir.vex_import import codegen_function_8616
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.condition_stack_operands import materialize_typed_condition_stack_operand_8616
 from inertia.lowering.condition_stack_value import condition_stack_operand_tags_8616
-from inertia.lowering.gp_register_state import runtime_gp_name_for_variable_8616
+from inertia.lowering.gp_register_state import (
+    runtime_gp_name_for_variable_8616,
+    runtime_gp_state_expr_8616,
+)
 from inertia.lowering.stack_variable_binding import StackVariableBinding, stable_stack_binding_tags_8616
+from inertia.semantics import register_source_block_inventory as register_inventory_owner
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 
 from .condition_binary_value import materialize_binary_ir_value_8616
@@ -242,8 +249,10 @@ def lower_ir_value_to_c_expr_8616(
 ) -> object | None:
     """Convert typed IR value evidence into a structured-codegen C expression."""
     if isinstance(value, IRBinaryValue):
-        return materialize_binary_ir_value_8616(value, codegen, lambda operand: lower_ir_value_to_c_expr_8616(
-            operand, project, codegen, resolve_register_name=resolve_register_name,
+        return cast(object, materialize_binary_ir_value_8616(
+            value, codegen, lambda operand: lower_ir_value_to_c_expr_8616(
+                operand, project, codegen, resolve_register_name=resolve_register_name,
+            ),
         ))
     return _ir_value_to_cvar_8616(value, project, codegen, resolve_register_name=resolve_register_name)
 
@@ -389,6 +398,370 @@ def materialize_same_block_register_projection_8616(
             raw_fact_count=len(candidates),
             normalized_fact_count=1,
             classified_fact_count=1,
+            materialized_count=1,
+        ),
+    )
+
+
+def _register_lane_identity_8616(variable: object, project: object) -> tuple[int, int] | None:
+    """Return the architectural byte view owned by one register variable.
+
+    Register metadata is read through the dynamic third-party angr project
+    boundary only for runtime GP names; owned variables resolve directly.
+    """
+    from angr.sim_variable import SimRegisterVariable
+
+    if isinstance(variable, SimRegisterVariable):
+        return int(variable.reg), int(variable.size)
+    runtime_name = runtime_gp_name_for_variable_8616(variable)
+    if runtime_name is None:
+        return None
+    registers = getattr(getattr(project, "arch", None), "registers", {})
+    register = registers.get(runtime_name)
+    if register is None:
+        return None
+    return int(register[0]), int(register[1])
+
+
+def _low_word_lane_value_8616(
+    assignment: SameBlockRegisterAssignment8616,
+    project: object,
+) -> object | None:
+    """Extract the proven low-word SSA value of a canonical word insert.
+
+    Only the exact preserved-half merge ``Or(And(lane, 0xffff0000),
+    And(value, 0xffff))`` proves that ``value`` is the new low word of the
+    assignment's register lane. ``value`` must be a captured temporary, so
+    binding it in a condition can never re-evaluate a call.
+    """
+    from angr.analyses.decompiler.structured_codegen.c import (
+        CBinaryOp,
+        CConstant,
+        CVariable,
+    )
+    from angr.sim_variable import SimTemporaryVariable
+
+    rhs = assignment.rhs
+    if not (isinstance(rhs, CBinaryOp) and rhs.op == "Or"):
+        return None
+    preserved, inserted = rhs.lhs, rhs.rhs
+    if not (
+        isinstance(preserved, CBinaryOp)
+        and preserved.op == "And"
+        and isinstance(inserted, CBinaryOp)
+        and inserted.op == "And"
+    ):
+        return None
+    if not (
+        isinstance(preserved.rhs, CConstant)
+        and int(preserved.rhs.value) == 0xFFFF0000
+        and isinstance(inserted.rhs, CConstant)
+        and int(inserted.rhs.value) == 0xFFFF
+    ):
+        return None
+    lane = (assignment.register_offset, assignment.register_size)
+    if not (
+        isinstance(preserved.lhs, CVariable)
+        and _register_lane_identity_8616(preserved.lhs.variable, project) == lane
+    ):
+        return None
+    value = inserted.lhs
+    if not (
+        isinstance(value, CVariable)
+        and isinstance(value.variable, SimTemporaryVariable)
+    ):
+        return None
+    # A captured temporary is stable but need not fit an unsigned word.
+    # Preserve its truncation unless the C type proves that it is redundant.
+    from angr.sim_type import SimTypeShort
+
+    if (
+        value.variable.size == 2
+        and isinstance(value.variable_type, SimTypeShort)
+        and value.variable_type.signed is False
+    ):
+        return cast(object, value)
+    return cast(object, inserted)
+
+
+def _stored_low_word_expression_8616(
+    assignment: SameBlockRegisterAssignment8616, project: object,
+) -> object | None:
+    """Read the low word of retained storage without evaluating its RHS again.
+
+    This is only a candidate expression. The reaching-definition consumer must
+    still bind the assignment instruction to the native requested register view.
+    """
+    from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CVariable
+    from angr.sim_type import SimTypeLong
+
+    lhs = assignment.lhs
+    if not isinstance(lhs, CVariable) or _register_lane_identity_8616(lhs.variable, project) != (
+        assignment.register_offset, assignment.register_size,
+    ):
+        return None
+    return cast(object, CBinaryOp(
+        "And", lhs, CConstant(0xFFFF, SimTypeLong(signed=False), codegen=lhs.codegen),
+        codegen=lhs.codegen,
+    ))
+
+
+def _reaching_lane_expression_8616(
+    assignment: SameBlockRegisterAssignment8616,
+    requested_offset: int,
+    requested_size: int,
+    project: object,
+) -> object | None:
+    """Return the value a contained byte view receives, or refuse staleness.
+
+    Exact views reuse the same rule as the same-block projection. Strict
+    subviews reuse a proven low-word SSA insert when available, otherwise read
+    the retained destination through a word mask. Neither route re-evaluates
+    the assignment RHS; native reaching-definition binding follows selection.
+    """
+    from angr.analyses.decompiler.structured_codegen.c import (
+        CFunctionCall,
+        CVariable,
+    )
+    from angr.sim_variable import SimTemporaryVariable
+
+    written_offset = assignment.register_offset
+    written_size = assignment.register_size
+    if not (
+        written_offset <= requested_offset
+        and requested_offset + requested_size <= written_offset + written_size
+    ):
+        return None
+    rhs = assignment.rhs
+    if written_offset == requested_offset and written_size == requested_size:
+        if assignment.use_stored_value or any(
+            isinstance(child, CFunctionCall)
+            for child in _iter_c_nodes_deep_8616(rhs)
+        ):
+            return assignment.lhs
+        variables = [
+            node
+            for node in _iter_c_nodes_deep_8616(rhs)
+            if isinstance(node, CVariable)
+        ]
+        if any(
+            not isinstance(node.variable, SimTemporaryVariable)
+            for node in variables
+        ):
+            return None
+        return rhs
+    if written_size == 4 and requested_size == 2 and written_offset == requested_offset:
+        projected = _low_word_lane_value_8616(assignment, project)
+        return projected if projected is not None else _stored_low_word_expression_8616(assignment, project)
+    return None
+
+
+def _reaching_register_candidates_8616(
+    index: SameBlockRegisterAssignmentIndex8616,
+    register_name: str,
+    requested_offset: int,
+    requested_size: int,
+    project: object,
+) -> tuple[int, int, dict[tuple[int, str, int], object]]:
+    """Census non-conflicting reaching-definition expressions for one view."""
+    raw_count = 0
+    classified_count = 0
+    candidates: dict[tuple[int, str, int], object] = {}
+    conflicted_addrs: set[int] = set()
+    for _block_addr, assignments in index.assignments_by_block:
+        for assignment in assignments:
+            expression = _reaching_lane_expression_8616(
+                assignment,
+                requested_offset,
+                requested_size,
+                project,
+            )
+            if expression is None:
+                continue
+            raw_count += 1
+            key = (assignment.instruction_addr, register_name, requested_size)
+            existing = candidates.get(key)
+            if existing is not None and existing is not expression:
+                conflicted_addrs.add(assignment.instruction_addr)
+                continue
+            classified_count += 1
+            candidates[key] = expression
+    for address in conflicted_addrs:
+        candidates.pop((address, register_name, requested_size), None)
+    return raw_count, classified_count, candidates
+
+
+def _runtime_storage_write_census_8616(
+    index: SameBlockRegisterAssignmentIndex8616, offset: int, size: int,
+) -> tuple[tuple[object, ...], frozenset[int]] | None:
+    """Require represented assignments to one exact owned runtime carrier."""
+    from angr.analyses.decompiler.structured_codegen.c import CVariable
+    from angr.sim_variable import SimMemoryVariable
+
+    writes: set[int] = set()
+    identities: set[tuple[object, ...]] = set()
+    duplicates: set[int] = set()
+    for _block, assignments in index.assignments_by_block:
+        for assignment in assignments:
+            if assignment.register_offset != offset or assignment.register_size < size:
+                continue
+            if not assignment.use_stored_value or not isinstance(assignment.lhs, CVariable):
+                continue
+            variable = assignment.lhs.variable
+            parent = runtime_gp_name_for_variable_8616(variable)
+            if parent is None or not isinstance(variable, SimMemoryVariable):
+                continue
+            identities.add((parent, variable.addr, variable.size, variable.region))
+            if assignment.instruction_addr in writes:
+                duplicates.add(assignment.instruction_addr)
+            writes.add(assignment.instruction_addr)
+    if len(identities) != 1 or not writes or duplicates:
+        return None
+    return next(iter(identities)), frozenset(writes)
+
+
+def _materialized_runtime_register_storage_8616(
+    index: SameBlockRegisterAssignmentIndex8616,
+    value: IRValue, condition: ConditionIR, project: object, codegen: object,
+) -> object | None:
+    """Read retained runtime state only after Alias proves all-path write coverage."""
+    from angr.analyses.decompiler.structured_codegen.c import CVariable
+    from angr.sim_variable import SimMemoryVariable
+
+    resolved = codegen_function_8616(project, codegen)
+    if resolved is None or not isinstance(value.name, str):
+        return None
+    function, _ = resolved
+    offset, size = _register_offset_size_for_value_8616(value, project)
+    census = _runtime_storage_write_census_8616(index, offset, size)
+    if census is None:
+        return None
+    identity, writes = census
+    bind = condition.operand_bind_insn if condition.operand_bind_insn is not None else condition.producer_insn
+    if not isinstance(bind, int) or not isinstance(condition.src_insn, int):
+        return None
+    inventory = register_inventory_owner.collect_register_source_block_inventory_8616(function)
+    proof = resolve_condition_register_storage_8616(
+        inventory, instruction_addr=bind,
+        consumption_addr=condition.src_insn, register=value.name, size=size,
+        materialized_writes=frozenset(writes),
+    )
+    if proof.verdict is not RegisterReachingSourceVerdict8616.PROVEN:
+        return None
+    # Return the existing carrier's view, retaining its function storage region.
+    region = identity[3]
+    if not isinstance(region, int) or region != inventory.function_addr:
+        return None
+    parent_expression = runtime_gp_state_expr_8616(str(identity[0]), codegen=codegen, function_addr=region)
+    if not isinstance(parent_expression, CVariable) or not isinstance(parent_expression.variable, SimMemoryVariable):
+        return None
+    canonical = parent_expression.variable
+    if (canonical.addr, canonical.size, canonical.region) != identity[1:]:
+        return None
+    return cast(object, runtime_gp_state_expr_8616(value.name, codegen=codegen, function_addr=region))
+
+
+def materialize_reaching_register_projection_8616(
+    value: IRValue,
+    condition: ConditionIR,
+    project: object,
+    codegen: object,
+    *,
+    assignment_index: SameBlockRegisterAssignmentIndex8616 | None = None,
+) -> SameBlockRegisterProjectionResult8616:
+    """Project a condition register operand from its proven reaching definition.
+
+    Candidate expressions come from register-lane assignments across the whole
+    structured AST, so cross-block values such as a captured call result can
+    qualify. The Alias reaching-definition join must then prove the candidate's
+    instruction is the unique definition reaching the condition bind point on
+    every path. If distinct definitions join, a retained runtime storage view
+    may qualify through separate all-path write coverage and an unchanged
+    producer-to-branch interval. Missing writes and clobbers still refuse.
+    Returned expressions never contain calls or replay assignment effects.
+    """
+    from angr.analyses.decompiler.structured_codegen.c import (
+        CExpression,
+        CFunctionCall,
+    )
+
+    from .condition_register_expression import condition_register_expression_8616
+
+    if (
+        value.space is not MemSpace.REG
+        or not isinstance(value.name, str)
+        or not value.name
+    ):
+        return SameBlockRegisterProjectionResult8616(
+            None,
+            SameBlockRegisterProjectionVerdict8616.NO_CANDIDATE,
+            SameBlockRegisterProjectionStats8616(),
+        )
+    bind_addr = condition.operand_bind_insn
+    if not isinstance(bind_addr, int):
+        bind_addr = condition.producer_insn
+    if not isinstance(bind_addr, int):
+        return SameBlockRegisterProjectionResult8616(
+            None,
+            SameBlockRegisterProjectionVerdict8616.UNKNOWN_REFUSE,
+            SameBlockRegisterProjectionStats8616(raw_fact_count=1, failure_count=1),
+        )
+    requested_offset, requested_size = _register_offset_size_for_value_8616(
+        value,
+        project,
+    )
+    active_index = assignment_index or build_same_block_register_assignment_index_8616(
+        codegen
+    )
+    raw_count, classified_count, candidates = _reaching_register_candidates_8616(
+        active_index,
+        value.name.lower(),
+        requested_offset,
+        requested_size,
+        project,
+    )
+    if not candidates:
+        return SameBlockRegisterProjectionResult8616(
+            None,
+            SameBlockRegisterProjectionVerdict8616.NO_CANDIDATE,
+            SameBlockRegisterProjectionStats8616(raw_fact_count=raw_count),
+        )
+    expression = condition_register_expression_8616(
+        project,
+        codegen,
+        candidates,
+        instruction_addr=bind_addr,
+        register=value.name,
+        size=requested_size,
+    )
+    if expression is None:
+        expression = _materialized_runtime_register_storage_8616(
+            active_index, value, condition, project, codegen,
+        )
+    if (
+        not isinstance(expression, CExpression)
+        or any(
+            isinstance(child, CFunctionCall)
+            for child in _iter_c_nodes_deep_8616(expression)
+        )
+    ):
+        return SameBlockRegisterProjectionResult8616(
+            None,
+            SameBlockRegisterProjectionVerdict8616.UNKNOWN_REFUSE,
+            SameBlockRegisterProjectionStats8616(
+                raw_fact_count=raw_count,
+                normalized_fact_count=classified_count,
+                classified_fact_count=classified_count,
+                failure_count=1,
+            ),
+        )
+    return SameBlockRegisterProjectionResult8616(
+        expression,
+        SameBlockRegisterProjectionVerdict8616.MATERIALIZED,
+        SameBlockRegisterProjectionStats8616(
+            raw_fact_count=raw_count,
+            normalized_fact_count=classified_count,
+            classified_fact_count=classified_count,
             materialized_count=1,
         ),
     )
@@ -601,7 +974,7 @@ def _lowered_condition_arg_8616(
 ) -> object:
     """Lower one IRValue operand using the condition's signedness and width."""
     return _ir_value_to_cvar_8616(
-        condition.args[index],
+        cast(IRValue, condition.args[index]),
         project,
         codegen,
         signed=condition.is_signed,

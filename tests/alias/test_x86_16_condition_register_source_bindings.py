@@ -15,12 +15,19 @@ from inertia.alias.register_reaching_source import (
     RegisterReachingSourceVerdict8616,
 )
 from inertia.cli.project_loading import _build_project_from_bytes
+from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
 from inertia.ir.condition_ir import ConditionIR, ConditionRegisterBindingIR
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.callsite_register_provenance import (
     recover_register_source_before_instruction_8616,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _initialize_native_frontend() -> None:
+    """Register the calling convention and native adapters for isolated runs."""
+    apply_x86_16_bootstrap()
 
 
 def _function_from_bytes(code: bytes):

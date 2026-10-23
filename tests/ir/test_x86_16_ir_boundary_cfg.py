@@ -89,17 +89,18 @@ def test_coverage_requires_registered_complete_instruction_census(defect: str | 
 
 def test_retained_coverage_does_not_survive_registry_replacement() -> None:
     """An equal-content replacement cannot borrow the original proof lineage."""
-    project = SimpleNamespace()
-    artifact = IRFunctionArtifact(0x1000, (IRBlock(
-        0x1000, instrs=(IRInstr("RET", None, (), addr=0x1000),),
-    ),))
-    boundary = ExactFunctionRangeBoundary8616(
-        project, 0x1000, 1, frozenset({0x1000}), frozenset({0x1000}), (),
-    )
+    project = _project(bytes.fromhex("c3"))
+    boundary = exact_function_range_boundary_8616(project, 0x1000, 0x1001)
+    assert boundary is not None
+    artifact = build_x86_16_ir_function_artifact(project, boundary)
     publish_function_ir_artifact_8616(project, artifact)
     result = _PROVE(project, boundary, artifact)
     assert result.complete
-    publish_function_ir_artifact_8616(project, replace(artifact))
+    # Equal-content publication is idempotent and retains the existing slot.
+    # Replace the slot itself to exercise loss of the original proof lineage.
+    replacement = replace(artifact)
+    project._inertia_function_ir_artifacts_8616[artifact.function_addr] = replacement
+    assert project._inertia_function_ir_artifacts_8616[artifact.function_addr] is not artifact
     assert not result.complete
 
 

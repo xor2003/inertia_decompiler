@@ -16,7 +16,6 @@ import sys
 import threading
 import time
 import typing
-import weakref
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field, replace
@@ -93,6 +92,9 @@ from inertia.cli.x86_16_exact_slice import (
     X86ExactSlicePlan,
     mark_function_original_addr,
     plan_x86_16_exact_slice,
+)
+from inertia.frontend.x86_16.frontend_function_boundary import (
+    bounded_entry_function_boundary_8616,
 )
 from inertia.frontend.x86_16.frontend_indirect_jump_targets import (
     collect_constant_indirect_jump_edges_8616,
@@ -1416,13 +1418,25 @@ def _exact_region_recovery_looks_truncated(
     function: _AngrFunction,
     exact_region: tuple[int, int] | None,
 ) -> bool:
+    """Detect omitted native instructions inside independently supplied bounds.
+
+    Region size and byte ratios cannot prove completeness: a short function
+    may lose its entire post-call body, while a complete return may precede
+    substantial padding. Only a closed Frontend census authorizes recovery.
+    """
     if exact_region is None:
         return False
-    region_size = max(0, exact_region[1] - exact_region[0])
-    if region_size < 0x40:
+    boundary = bounded_entry_function_boundary_8616(
+        function.project, function.addr, exact_region[0], exact_region[1]
+    )
+    if boundary is None:
         return False
-    _blocks, total_bytes = _function_recovery_score(function)
-    return total_bytes < max(0x20, region_size // 3)
+    recovered_instructions = {
+        instruction_addr
+        for block in function.blocks
+        for instruction_addr in block.instruction_addrs
+    }
+    return bool(boundary.reachable_instruction_addrs - recovered_instructions)
 
 
 def _stitch_x86_16_exact_function_8616(
@@ -1661,6 +1675,9 @@ def _commit_exact_region_function_to_kb_8616(
     those stale entries visible makes later decompiler stages treat internal
     block leaders as independent functions. The recovery layer owns this handoff:
     it has the exact-region evidence and the selected bounded graph.
+
+    Publication creates lookup aliases while retaining the originating manager.
+    Native consumers resolve its CFG model through that manager's knowledge base.
     """
     if _dynamic_attr(_dynamic_attr(project, "arch", None), "name", None) != "86_16":
         return False
@@ -1684,11 +1701,7 @@ def _commit_exact_region_function_to_kb_8616(
     for manager in managers:
         changed = _commit_region_to_manager_8616(manager, function, entry_addr, start, end) or changed
 
-    if project_functions is not None:
-        with contextlib.suppress(Exception):
-            function._function_manager = weakref.proxy(project_functions)
-    with contextlib.suppress(Exception):
-        function._local_transition_graph = None
+    function._local_transition_graph = None
     info = _dynamic_attr(function, "info", None)
     if isinstance(info, dict):
         info["x86_16_exact_region_committed"] = True
@@ -3095,6 +3108,7 @@ def _recover_prologue_candidate_8616(
             str(Path(ctx.binary_path)),
             force_blob=False,
             base_addr=ctx.linked_base,
+            base_addr_is_linear=True,
             entry_point=project.entry,
             real16_declared_input=declared_input_path_8616(project),
         )
@@ -3129,9 +3143,13 @@ def _scan_prologue_candidates_8616(
         if len(supplemental) >= recover_limit or scanned >= scan_limit:
             break
         scanned += 1
+
+        def _recover_supplemental(candidate_addr: int = addr) -> _FunctionCfgPair:
+            return _recover_prologue_candidate_8616(project, ctx, candidate_addr, region_span)
+
         try:
             function_cfg, function = _run_with_timeout_in_daemon_thread(
-                lambda addr=addr: _recover_prologue_candidate_8616(project, ctx, addr, region_span),
+                _recover_supplemental,
                 timeout=per_function_timeout,
                 thread_name_prefix="supplement",
             )
@@ -5089,6 +5107,7 @@ def _recover_once_with_cache_8616(
             str(binary_path),
             force_blob=False,
             base_addr=linked_base,
+            base_addr_is_linear=True,
             entry_point=ctx.project_entry,
             real16_declared_input=declared_input_path_8616(project),
         )

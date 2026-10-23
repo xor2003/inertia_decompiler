@@ -48,8 +48,8 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from enum import StrEnum
+from dataclasses import dataclass, field, replace
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pyvex
@@ -69,8 +69,16 @@ from .core import (
     MemSpace,
     SegmentOrigin,
 )
-from .entry_domain_call_preservation import EntryDomainCallPreservation8616
+from .entry_domain_call_preservation import (
+    EntryDomainCallPreservation8616,
+    _callee_preserved_registers_8616,
+)
+from .entry_projection_mode import EntryProjectionMode8616
 from .instruction_origin import IRInstructionOrigin8616
+from .near_call_jump_scope import (
+    NearCallJumpScope8616,
+    authenticate_near_call_jump_scope_8616,
+)
 from .scalar_instruction_effects import (
     ScalarInstructionEffectKind8616,
     scalar_instruction_effect_8616,
@@ -94,6 +102,7 @@ if TYPE_CHECKING:
     from .real16_invocation_domain import Real16InvocationDomain8616
 
 __all__ = [
+    "AdmittedScopedCallTarget8616",
     "AdmittedTerminalJump8616",
     "EntryJumpDomainApplication8616",
     "EntryJumpDomainApplicationStatus8616",
@@ -105,6 +114,7 @@ __all__ = [
     "EntryJumpDomainStage8616",
     "EntryJumpDomainStats8616",
     "PendingTerminalJump8616",
+    "ScopedCallTargetStatus8616",
     "apply_entry_jump_domain_8616",
     "collect_pending_terminal_jumps_8616",
     "prove_entry_jump_domains_8616",
@@ -237,6 +247,7 @@ class AdmittedTerminalJump8616:
     target: int
     invocation: Real16InvocationDomain8616 | None = field(default=None, compare=False)
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, compare=False)
+    near_call_scope: NearCallJumpScope8616 | None = field(default=None, compare=False)
     call_dependencies: tuple[_ScopedCallDependency8616, ...] = field(
         default=(), compare=False
     )
@@ -253,6 +264,7 @@ class AdmittedTerminalJump8616:
                 else self.invocation.to_dict()
             ),
             "invocation_scope": None if self.invocation_scope is None else self.invocation_scope.to_dict(),
+            "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "call_dependencies": [
                 dependency.to_dict()
                 for dependency in self.call_dependencies
@@ -381,6 +393,7 @@ class EntryJumpDomainProof8616:
     iterations: int
     call_preservations: tuple[EntryDomainCallPreservation8616, ...] = ()
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, compare=False)
+    near_call_scope: NearCallJumpScope8616 | None = field(default=None, compare=False)
 
     def admitted_target_for(self, head: int) -> int | None:
         """Return the proven target for one discharged jump head."""
@@ -393,6 +406,7 @@ class EntryJumpDomainProof8616:
         """Serialize the proof product for diagnostics and workers."""
         return {
             "invocation_scope": None if self.invocation_scope is None else self.invocation_scope.to_dict(),
+            "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "function_addr": self.function_addr,
             "source_binding": self.source_binding.to_dict(),
             "admitted": [jump.to_dict() for jump in self.admitted],
@@ -413,6 +427,37 @@ class EntryJumpDomainApplicationStatus8616(StrEnum):
     APPLIED = "applied"
     EMPTY = "empty"
     STALE_INPUT = "stale_input"
+
+
+class ScopedCallTargetStatus8616(StrEnum):
+    """Call-only admission availability, separate from proved CFG edges."""
+
+    NOT_REQUESTED = "not_requested"
+    ADMITTED = "admitted"
+    UNPROVED = "unproved"
+    STALE_SOURCE = "stale_source"
+
+
+@dataclass(frozen=True, slots=True)
+class AdmittedScopedCallTarget8616:
+    """Exact outgoing target under a discharged callsite selector obligation.
+
+    Authority belongs to the source-bound application and identical entry
+    scope. This proves no calling convention, callee termination or universal
+    target. CFG blocks retain their original CALL operand.
+    """
+
+    block: IRBlock = field(compare=False)
+    instruction: IRInstr = field(compare=False)
+    scope: NearCallJumpScope8616 | Real16InvocationDomain8616 = field(compare=False)
+    target: int
+    next_addr: int
+
+    def to_dict(self) -> dict[str, object]:
+        """Expose the exact conditional callsite without erasing its premise."""
+        return {"block_addr": self.block.addr, "callsite_addr": self.instruction.addr,
+                "target": self.target, "next_addr": self.next_addr,
+                "conditional_only": True}
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,12 +481,23 @@ class EntryJumpDomainApplication8616:
     applied: tuple[AdmittedTerminalJump8616, ...]
     refusals: tuple[IRRefusal, ...]
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, compare=False)
+    near_call_scope: NearCallJumpScope8616 | None = field(default=None, compare=False)
+
+    call_targets: tuple[AdmittedScopedCallTarget8616, ...] = ()
+    call_target_status: ScopedCallTargetStatus8616 = ScopedCallTargetStatus8616.UNPROVED
+    call_target_stats: EntryJumpDomainStats8616 = field(
+        default_factory=lambda: EntryJumpDomainStats8616(0, 0, 0, 0, 0),
+    )
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the discharge decision for diagnostics and workers."""
         return {
             "invocation_scope": None if self.invocation_scope is None else self.invocation_scope.to_dict(),
+            "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "status": self.status.value,
+            "call_targets": [call.to_dict() for call in self.call_targets],
+            "call_target_status": self.call_target_status.value,
+            "call_target_stats": self.call_target_stats.to_dict(),
             "applied": [jump.to_dict() for jump in self.applied],
             "refusals": [refusal.to_dict() for refusal in self.refusals],
         }
@@ -855,7 +911,12 @@ class _ProofRun8616:
         invocation_resolver: Callable[
             [int], Real16InvocationDomain8616 | None
         ] | None = None,
+        near_call_scope: NearCallJumpScope8616 | None = None,
+        defer_near_call_final_seal: bool = False,
+        offered_invocation_scope: Real16InvocationDomain8616 | None = None,
     ) -> None:
+        self.near_call_scope = near_call_scope
+        self._defer_near_call_final_seal = defer_near_call_final_seal
         self.artifact = artifact
         self.pending = dict(pending)
         self.call_preservations = call_preservations
@@ -872,7 +933,7 @@ class _ProofRun8616:
         self.block_targets: dict[int, int] = {}
         self.admitted_invocations: dict[int, Real16InvocationDomain8616] = {}
         self.call_dependencies: dict[int, _ScopedCallDependency8616] = {}
-        self.invocation_scope: Real16InvocationDomain8616 | None = None
+        self.invocation_scope: Real16InvocationDomain8616 | None = offered_invocation_scope
         self.iterations = 0
         self.exhausted = False
         self.bound_callsites: set[int] = set()
@@ -1047,6 +1108,7 @@ class _ProofRun8616:
         patched_artifact = IRFunctionArtifact(
             function_addr=self.artifact.function_addr,
             blocks=patched_blocks,
+            source_revision=self.artifact.source_revision,
         )
         solution = solve_segment_state_8616(patched_artifact, None, ())
         entry_cs = solution.entry_states.get(
@@ -1109,6 +1171,7 @@ class _ProofRun8616:
 
     def _call_substitutes_8616(
         self, original_block: IRBlock, instr: IRInstr,
+        selector_admissions: tuple[EntryDomainCallPreservation8616, ...] | None = None,
     ) -> tuple[IRInstr, ...]:
         """Model one bound CS-preserving CALL as its proved segment writes.
 
@@ -1127,6 +1190,8 @@ class _ProofRun8616:
         unobserved ``ax`` keeps the typed instruction stream nonempty and
         mirrors the call boundary's general-register drop.
         """
+        if self.near_call_scope is not None:
+            return self._conditional_call_substitutes_8616(original_block, instr)
         candidates = tuple(
             proof
             for proof in self.call_preservations
@@ -1137,15 +1202,19 @@ class _ProofRun8616:
         proof = candidates[0]
         required = proof.required_scope
         scope: Real16InvocationDomain8616 | None = None
-        if required is not None:
+        if proof.selector_projection is not None:
+            scope = self.invocation_scope
+        elif required is not None:
             scope = self._consuming_scope_8616(
                 instr.addr if type(instr.addr) is int else -1, required,
             )
             if scope is None:
                 return (instr,)
-        if not proof.complete_for(scope):
-            return (instr,)
-        preserved = frozenset(proof.preserved_registers_for(scope))
+        if proof.selector_projection is not None and selector_admissions is not None:
+            preserved = (frozenset({"cs"}) if any(proof is item for item in selector_admissions)
+                         else frozenset())
+        else:
+            preserved = _call_preserved_registers_8616(proof, scope)
         if _CS_REGISTER_8616 not in preserved:
             return (instr,)
         if scope is not None and type(instr.addr) is int:
@@ -1165,6 +1234,34 @@ class _ProofRun8616:
                 "callee evidence"
                 + ("" if type(target_addr) is not int else f" targeting {target_addr:#x}"),
             )
+        return self._segment_surrogates_8616(instr, preserved)
+
+    def _conditional_call_substitutes_8616(
+        self, original_block: IRBlock, instr: IRInstr,
+    ) -> tuple[IRInstr, ...]:
+        """Project an authenticated conditional step under this run's entry."""
+        if self.near_call_scope is None:
+            return (instr,)
+        matches = tuple(
+            step for step in self.near_call_scope.preservations
+            if step.theorem is not None
+            and step.theorem.block is original_block
+            and step.theorem.instruction is instr
+        )
+        if len(matches) != 1 or not self.terms.consume(1):
+            return (instr,)
+        callee = matches[0].callee
+        if callee is None:
+            return (instr,)
+        preserved = frozenset(_callee_preserved_registers_8616(callee))
+        if "cs" not in preserved:
+            return (instr,)
+        return self._segment_surrogates_8616(instr, preserved)
+
+    def _segment_surrogates_8616(
+        self, instr: IRInstr, preserved: frozenset[str],
+    ) -> tuple[IRInstr, ...]:
+        """Project only authenticated segment preservation into the solver view."""
         surrogates = tuple(
             IRInstr(
                 "MOV",
@@ -1189,36 +1286,54 @@ class _ProofRun8616:
         return surrogates
 
     def _call_preservation_view_8616(
-        self, blocks: tuple[IRBlock, ...],
+        self, blocks: tuple[IRBlock, ...], *, propose_selectors: bool = False,
     ) -> tuple[IRBlock, ...]:
-        """Replace each bound CS-preserving CALL in the solver/gate view.
+        """Build solver proposals or consume selector CALLs in one final batch.
 
-        The patched block stream keeps identical instruction objects for
-        every non-CALL instruction, so a bound proof's recorded block and
-        instruction identities still point at this view's sources.
+        The admitted originals exist only during this synchronous view build;
+        a later proof application consumes its own fresh selector batch.
+        Fixpoint selector substitutions are proposals only: they create no
+        call dependency or call-bound ledger entry. Reverify must authenticate
+        every selector record and solve the final graph before publication.
         """
-        if not self.call_preservations:
+        if not self.call_preservations and self.near_call_scope is None:
             return blocks
+        selectors = tuple(record for record in self.call_preservations
+                          if record.selector_projection is not None)
         view: list[IRBlock] = []
         for original, block in zip(self.artifact.blocks, blocks, strict=True):
-            if not any(instr.op == "CALL" for instr in block.instrs):
-                view.append(block)
-                continue
             instrs: list[IRInstr] = []
             for instr in block.instrs:
-                if instr.op != "CALL":
+                if instr.op != "CALL" or any(
+                    record.block is original and record.instruction is instr for record in selectors
+                ):
                     instrs.append(instr)
-                    continue
-                instrs.extend(self._call_substitutes_8616(original, instr))
-            view.append(
-                IRBlock(
-                    addr=block.addr,
-                    instrs=tuple(instrs),
-                    refusals=block.refusals,
-                    successor_addrs=block.successor_addrs,
-                )
-            )
-        return tuple(view)
+                else:
+                    instrs.extend(self._call_substitutes_8616(original, instr))
+            view.append(replace(block, instrs=tuple(instrs)))
+        admitted = (() if propose_selectors else
+                    _selector_call_batch_8616(selectors, self.invocation_scope))
+        result: list[IRBlock] = []
+        for original, block in zip(self.artifact.blocks, view, strict=True):
+            instrs = []
+            for instr in block.instrs:
+                if instr.op == "CALL" and any(
+                    record.block is original and record.instruction is instr for record in selectors
+                ):
+                    if propose_selectors:
+                        matches = tuple(record for record in selectors
+                                        if record.block is original and record.instruction is instr)
+                        if (len(matches) == 1 and self.terms.consume(1)
+                                and _selector_call_root_bound_8616(matches[0], self.invocation_scope)):
+                            instrs.extend(self._segment_surrogates_8616(instr, frozenset({"cs"})))
+                        else:
+                            instrs.append(instr)
+                    else:
+                        instrs.extend(self._call_substitutes_8616(original, instr, admitted))
+                else:
+                    instrs.append(instr)
+            result.append(replace(block, instrs=tuple(instrs)))
+        return tuple(result)
 
     def _native_relift_8616(
         self, block: IRBlock, decoded: DecodedRelativeEdge,
@@ -1519,7 +1634,7 @@ class _ProofRun8616:
             current_blocks = _patched_blocks_8616(
                 self.artifact.blocks, self.block_targets,
             )
-            current_blocks = self._call_preservation_view_8616(current_blocks)
+            current_blocks = self._call_preservation_view_8616(current_blocks, propose_selectors=True)
             current_by_addr = {block.addr: block for block in current_blocks}
             region = _reachable_blocks_8616(
                 current_by_addr, self.artifact.function_addr,
@@ -1607,6 +1722,13 @@ class _ProofRun8616:
         deterministic term budget as the fixpoint. Any break revokes every
         admission with a typed refusal; nothing is silently kept because an
         earlier CS-state join happened to pass.
+
+        On a staged synchronous prove/apply chain the final conditional
+        near-call scope authentication and source-digest comparison are
+        deferred to the private synchronous application seal, which reruns
+        both against fresh state after application callbacks and before
+        publishing the result. Standalone proof and application retain
+        their own authentication.
         """
         if not self.admitted:
             return
@@ -1642,6 +1764,9 @@ class _ProofRun8616:
                     "published edge set no longer preserves entry "
                     "cs identity",
                 )
+        if failure is None and self._near_call_final_seal_refused_8616():
+            failure = (EntryJumpDomainRefusal8616.CALL_ON_PATH,
+                       "conditional near-call dependencies changed during proof")
         if failure is None:
             return
         reason, detail = failure
@@ -1656,6 +1781,28 @@ class _ProofRun8616:
             self.refuse(self.pending[block_addr], reason, detail, block_addr)
         self.admitted.clear()
         self.block_targets.clear()
+
+    def _near_call_final_seal_refused_8616(self) -> bool:
+        """Final scope authentication the staged seal defers or re-runs.
+
+        A staged synchronous run returns ``False`` here — its private
+        operation re-runs the identical authentication and digest inside
+        the application core's ``FINAL`` seal after every application
+        callback and solver; every other run keeps this final check.
+        """
+        if self._defer_near_call_final_seal or self.near_call_scope is None:
+            return False
+        return (
+            self.project is None
+            or not authenticate_near_call_jump_scope_8616(
+                self.near_call_scope,
+                project=self.project,
+                artifact=self.artifact,
+            )
+            or self.binding.digest != _source_digest_8616(
+                self.artifact.function_addr, self.artifact.blocks,
+            )
+        )
 
     def product(self) -> EntryJumpDomainProof8616:
         """Close the run into the frozen proof product.
@@ -1684,6 +1831,7 @@ class _ProofRun8616:
                     invocation=self.admitted_invocations.get(head),
                     call_dependencies=dependencies,
                     invocation_scope=self.invocation_scope,
+                    near_call_scope=self.near_call_scope,
                 )
                 for head, target in sorted(self.admitted.items())
             ),
@@ -1700,6 +1848,7 @@ class _ProofRun8616:
             iterations=self.iterations,
             call_preservations=self.call_preservations,
             invocation_scope=self.invocation_scope,
+            near_call_scope=self.near_call_scope,
         )
 
 
@@ -1713,8 +1862,21 @@ def prove_entry_jump_domains_8616(
     invocation_resolver: Callable[
         [int], Real16InvocationDomain8616 | None
     ] | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
+    offered_invocation_scope: Real16InvocationDomain8616 | None = None,
 ) -> EntryJumpDomainProof8616:
     """Prove pending terminal jumps against the function-entry fetch domain.
+
+    ``offered_invocation_scope`` is an explicit declared-root authority for
+    selector CALL records. It never makes selector evidence universal and
+    authorizes only CS preservation; full invocation effects remain separate.
+    Unoffered callers retain their existing resolver-based proof route.
+
+    The standalone public prove keeps its own complete final
+    re-verification — including the conditional near-call scope
+    authentication and source-digest comparison — before any product
+    returns; only the owner's private staged synchronous prove/apply
+    operation defers that seal into the application core.
 
     ``project`` is the required native source authority: each decoded
     carrier is bound to the real mapped bytes and re-lifted ``next``
@@ -1743,12 +1905,56 @@ def prove_entry_jump_domains_8616(
     effect closure — is revalidated at every consumption and again under
     final re-verification, each consult charged one deterministic term.
 
+    ``near_call_scope`` authenticates a complete conditional CALL census
+    under one native incoming near-call entry. CS identity is proved at every
+    reachable instruction using the existing segment solver; conditional call
+    effects are inductive steps. The root selector interval remains an explicit
+    premise on the proof and each admission. Mixing invocation and near-call
+    scopes refuses.
+
     ``invocation_resolver`` maps one pending jump head to a complete
     source-bound caller-domain premise (``Real16InvocationDomain8616``)
     or ``None``; it is consulted only when the joint fetch-window bound
     cannot keep the decoded target invariant. A premise that discharges is
     retained on the admission record and replayed end to end by
     ``apply_entry_jump_domain_8616``.
+    """
+    return _prove_entry_jump_domains_8616(
+        artifact,
+        evidence_by_block,
+        project=project,
+        budget=budget,
+        call_preservations=call_preservations,
+        invocation_resolver=invocation_resolver,
+        near_call_scope=near_call_scope,
+        offered_invocation_scope=offered_invocation_scope,
+        defer_near_call_final_seal=False,
+    )
+
+
+def _prove_entry_jump_domains_8616(
+    artifact: IRFunctionArtifact,
+    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    *,
+    project: object | None = None,
+    budget: EntryJumpDomainBudget8616 | None = None,
+    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    invocation_resolver: Callable[
+        [int], Real16InvocationDomain8616 | None
+    ] | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
+    defer_near_call_final_seal: bool = False,
+    offered_invocation_scope: Real16InvocationDomain8616 | None = None,
+) -> EntryJumpDomainProof8616:
+    """Run the shared proof core for the public and staged routes.
+
+    ``defer_near_call_final_seal`` is private to the prove/apply owner:
+    it suppresses only the run's final conditional near-call scope
+    authentication and source-digest comparison, and only because the
+    owner's staged synchronous operation re-runs both inside the
+    application core's final seal after every application callback and
+    solver. The returned proof is an intermediate of that private
+    operation and is never published on its own.
     """
     pending = collect_pending_terminal_jumps_8616(evidence_by_block)
     binding = EntryJumpDomainSourceBinding8616(
@@ -1767,8 +1973,20 @@ def prove_entry_jump_domains_8616(
         budget=budget or EntryJumpDomainBudget8616(),
         call_preservations=call_preservations,
         invocation_resolver=invocation_resolver,
+        near_call_scope=near_call_scope,
+        offered_invocation_scope=offered_invocation_scope,
+        defer_near_call_final_seal=defer_near_call_final_seal,
     )
-    if pending and not _native_source_available_8616(project):
+    if pending and near_call_scope is not None and (
+        bool(call_preservations or invocation_resolver is not None
+             or offered_invocation_scope is not None) or project is None
+        or not authenticate_near_call_jump_scope_8616(
+            near_call_scope, project=project, artifact=artifact,
+        )
+    ):
+        run.refuse_all(pending, EntryJumpDomainRefusal8616.CALL_ON_PATH,
+                       "conditional near-call scope failed full census authentication",)
+    elif pending and not _native_source_available_8616(project):
         run.refuse_all(
             pending,
             EntryJumpDomainRefusal8616.NATIVE_SOURCE_UNPROVED,
@@ -1840,13 +2058,131 @@ def _application_admission_failure_8616(
                 "admitted target does not match its decoded "
                 "entry-window transfer"
             )
-    if (
-        not proof.stats.closed
-        or len(proof.admitted) != proof.stats.materialized_count
-        or len(proof.refusals) != proof.stats.failure_count
-    ):
+    return _application_final_calls_failure_8616(proof, artifact_blocks)
+
+
+def _application_dependency_facts_8616(proof: EntryJumpDomainProof8616) -> object:
+    """Pin original edge/dependency fields across the final shared CALL callback."""
+    from .declared_selector_scoped_callee import _scope_facts
+
+    seen: set[int] = set()
+    return (
+        id(proof.invocation_scope), _scope_facts(proof.invocation_scope, seen),
+        tuple((id(jump), jump.block_addr, jump.head, jump.target,
+               id(jump.invocation), _scope_facts(jump.invocation, seen),
+               id(jump.invocation_scope), _scope_facts(jump.invocation_scope, seen),
+               id(jump.near_call_scope),
+               tuple((id(item), item.callsite_addr, id(item.record), id(item.scope),
+                      _scope_facts(item.scope, seen)) for item in jump.call_dependencies))
+              for jump in proof.admitted),
+    )
+
+
+def _application_final_calls_failure_8616(
+    proof: EntryJumpDomainProof8616, artifact_blocks: tuple[IRBlock, ...],
+) -> str | None:
+    """Run one fresh shared record consume after all edge/scope callbacks."""
+    if proof.admitted and proof.near_call_scope is None:
+        before = _application_dependency_facts_8616(proof)
+        expected = _source_call_dependencies_8616(proof, artifact_blocks, proof.invocation_scope)
+        if _application_dependency_facts_8616(proof) != before:
+            return "retained edge or invocation dependencies changed during CALL consumption"
+        for jump in proof.admitted:
+            failure = _call_dependency_records_failure_8616(jump, expected)
+            if failure is not None:
+                return failure
+    if (not proof.stats.closed or len(proof.admitted) != proof.stats.materialized_count
+            or len(proof.refusals) != proof.stats.failure_count):
         return "proof accounting does not close over its admissions and refusals"
     return None
+
+
+def _selector_call_root_bound_8616(
+    record: EntryDomainCallPreservation8616,
+    scope: Real16InvocationDomain8616 | None,
+) -> bool:
+    """Bind selector authority to the exact offered declared root and CALL."""
+    from .real16_invocation_domain import DeclaredFunctionEntryLink8616, Real16InvocationDomain8616
+
+    selector = record.selector_scope
+    projection = record.selector_projection
+    if type(scope) is not Real16InvocationDomain8616 or selector is None or projection is None:
+        return False
+    root = selector.root_link
+    source = selector.source
+    if type(root) is not DeclaredFunctionEntryLink8616 or source is None:
+        return False
+    return (
+        scope.chain is root and scope.project is selector.project
+        and scope.boot is source.boot and scope.boot_recompute is source.boot_recompute
+        and scope.declared_services is source.declared_services
+        and root.admission is selector.admission
+        and record.artifact is root.artifact and record.boundary is root.boundary
+        and root.boundary.project is scope.project and record.required_scope is None
+        and projection.incoming_cs == scope.entry_segment
+        and any(offered is record for offered in scope.entry_call_preservations)
+        and projection.block is record.block and projection.instruction is record.instruction
+        and any(block is record.block for block in root.artifact.blocks)
+        and any(row is record.instruction for row in record.block.instrs)
+    )
+
+
+def _selector_call_preserves_cs_8616(
+    record: EntryDomainCallPreservation8616,
+    scope: Real16InvocationDomain8616 | None,
+) -> bool:
+    """Consume only CS preservation, with exact root binding after callbacks."""
+    from .real16_invocation_domain import same_real16_entry_scope_8616
+
+    if not _selector_call_root_bound_8616(record, scope):
+        return False
+    selector = record.selector_scope
+    assert selector is not None
+    if not same_real16_entry_scope_8616(scope, scope):
+        return False
+    if not record.complete_for_selector(selector):
+        return False
+    return (same_real16_entry_scope_8616(scope, scope)
+            and _selector_call_root_bound_8616(record, scope))
+
+
+def _selector_call_batch_8616(
+    records: tuple[EntryDomainCallPreservation8616, ...],
+    scope: Real16InvocationDomain8616 | None,
+) -> tuple[EntryDomainCallPreservation8616, ...]:
+    """Consume exact selector records once and expose originals only synchronously."""
+    from .entry_domain_call_preservation import consume_entry_selector_call_preservation_batch_8616
+    from .real16_invocation_domain import same_real16_entry_scope_8616
+
+    if not records:
+        return ()
+    selector = records[0].selector_scope
+    if selector is None or not all(
+        record.selector_scope is selector and _selector_call_root_bound_8616(record, scope)
+        for record in records
+    ) or not same_real16_entry_scope_8616(scope, scope):
+        return ()
+    from .declared_selector_scoped_callee import _scope_facts
+
+    before = _scope_facts(scope, set())
+    verdicts = consume_entry_selector_call_preservation_batch_8616(records, selector)
+    if (len(verdicts) != len(records) or not same_real16_entry_scope_8616(scope, scope)
+            or _scope_facts(scope, set()) != before
+            or not all(_selector_call_root_bound_8616(record, scope) for record in records)):
+        return ()
+    return tuple(record for record, admitted in zip(records, verdicts, strict=True) if admitted)
+
+
+def _call_preserved_registers_8616(
+    record: EntryDomainCallPreservation8616,
+    scope: Real16InvocationDomain8616 | None,
+) -> frozenset[str]:
+    """Keep selector-only CS evidence distinct from full segment effects."""
+    if record.selector_projection is not None:
+        return frozenset({"cs"}) if _selector_call_preserves_cs_8616(record, scope) else frozenset()
+    if not record.complete_for(scope):
+        return frozenset()
+    return frozenset(record.preserved_registers_for(scope))
 
 
 def _source_call_dependencies_8616(
@@ -1876,13 +2212,30 @@ def _source_call_dependencies_8616(
             if record.callsite_addr != instruction.addr or id(record) in consumed:
                 return None
             consumed.add(id(record))
-            if not record.complete_for(scope) or "cs" not in record.preserved_registers_for(scope):
+            if (record.selector_projection is None
+                    and "cs" not in _call_preserved_registers_8616(record, scope)):
                 return None
-            if record.required_scope is not None:
+            if record.required_scope is not None or record.selector_projection is not None:
                 expected.append(record)
     if len(consumed) != len(proof.call_preservations):
         return None
+    selectors = tuple(record for record in expected if record.selector_projection is not None)
+    if len(_selector_call_batch_8616(selectors, scope)) != len(selectors):
+        return None
     return tuple(sorted(expected, key=lambda record: record.callsite_addr))
+
+
+def _near_scope_admission_failure_8616(
+    jump: AdmittedTerminalJump8616, proof: EntryJumpDomainProof8616,
+) -> str | None:
+    """Reject foreign near-call projections or mixed invocation premises."""
+    if proof.near_call_scope is None or jump.near_call_scope is not proof.near_call_scope:
+        return "admission retained a foreign near-call scope"
+    if any((jump.invocation is not None, jump.invocation_scope is not None,
+            proof.invocation_scope is not None, bool(proof.call_preservations),
+            bool(jump.call_dependencies))):
+        return "conditional near-call admission has mixed scope"
+    return None
 
 
 def _call_dependency_failure_8616(
@@ -1894,6 +2247,8 @@ def _call_dependency_failure_8616(
     """Replay the source census and require one common explicitly consumed scope."""
     from .real16_invocation_domain import same_real16_entry_scope_8616
 
+    if proof.near_call_scope is not None or jump.near_call_scope is not None:
+        return _near_scope_admission_failure_8616(jump, proof)
     scope = proof.invocation_scope
     if not same_real16_entry_scope_8616(jump.invocation_scope, scope):
         return "admission does not retain the common consuming entry"
@@ -1904,7 +2259,19 @@ def _call_dependency_failure_8616(
         and not same_real16_entry_scope_8616(jump.invocation, scope)
     ):
         return "jump transfer and conditional calls require different entries"
-    expected = _source_call_dependencies_8616(proof, blocks, scope)
+    for dependency in jump.call_dependencies:
+        if type(dependency) is not _ScopedCallDependency8616:
+            return "retained call dependency is not a typed scope projection"
+        if not same_real16_entry_scope_8616(dependency.scope, scope):
+            return "retained dependency does not share the consuming entry"
+    return None
+
+
+def _call_dependency_records_failure_8616(
+    jump: AdmittedTerminalJump8616,
+    expected: tuple[EntryDomainCallPreservation8616, ...] | None,
+) -> str | None:
+    """Match final source admissions to original dependency objects without callbacks."""
     if expected is None or len(expected) != len(jump.call_dependencies):
         return "retained dependencies do not close over the source CALL census"
     for record, dependency in zip(expected, jump.call_dependencies, strict=True):
@@ -1912,8 +2279,6 @@ def _call_dependency_failure_8616(
             return "retained call dependency is not a typed scope projection"
         if dependency.record is not record or dependency.callsite_addr != record.callsite_addr:
             return "retained dependency is duplicated, foreign, or out of census order"
-        if not same_real16_entry_scope_8616(dependency.scope, scope):
-            return "retained dependency does not share the consuming entry"
     return None
 
 
@@ -1941,20 +2306,173 @@ def _premise_redischarges_8616(
         return False
     if not premise.complete:
         return False
-    return real16_invocation_discharges_8616(
+    return bool(real16_invocation_discharges_8616(
         premise,
         project=premise.project,
         block=block,
         callsite_addr=jump.head,
         target_addr=jump.target,
+    ))
+
+
+def _admit_application_calls_8616(
+    artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
+    blocks: tuple[IRBlock, ...], scope: NearCallJumpScope8616,
+    seal: _ApplicationSealTiming8616,
+) -> tuple[AdmittedScopedCallTarget8616, ...] | ScopedCallTargetStatus8616:
+    """Discharge each exact callsite interval on the final application graph.
+
+    The authenticated conditional callee effects are induction steps; the
+    existing bounded solver must retain entry CS at every reachable
+    instruction. Every source CALL must be reachable. EAGER reauthenticates
+    native evidence after solving. FINAL defers this identical check to the
+    application core seal after all callbacks, before any result publishes.
+    """
+    pending = {row.block_addr: row for row in proof.source_binding.pending}
+    run = _ProofRun8616(
+        artifact, pending, raw_count=len(pending), normalized=len(pending),
+        project=scope.project, binding=proof.source_binding,
+        budget=EntryJumpDomainBudget8616(), near_call_scope=scope,
     )
+    if not run.stage_entry() or not run.stage_census():
+        return ScopedCallTargetStatus8616.UNPROVED
+    solver_blocks = run._call_preservation_view_8616(blocks)
+    by_addr = {block.addr: block for block in solver_blocks}
+    region = _reachable_blocks_8616(by_addr, artifact.function_addr)
+    if region is None or run.path_interference(
+        by_addr, region, frozenset(jump.block_addr for jump in proof.admitted),
+    ) is not None:
+        return ScopedCallTargetStatus8616.UNPROVED
+    solution, entry_cs = run.entry_cs_state(solver_blocks)
+    if (solution is None or entry_cs is None or entry_cs.origin is not SegmentOrigin.PROVEN
+            or not run.cs_invariant(solution, by_addr, region.reachable, entry_cs)):
+        return ScopedCallTargetStatus8616.UNPROVED
+    admitted: list[AdmittedScopedCallTarget8616] = []
+    for step in scope.preservations:
+        theorem = step.theorem
+        if theorem is None or theorem.block is None or theorem.instruction is None:
+            return ScopedCallTargetStatus8616.UNPROVED
+        if (theorem.block.addr not in region.reachable
+                or type(theorem.target_addr) is not int or type(theorem.next_addr) is not int
+                or theorem.selector_low != scope.context.selector_low
+                or theorem.selector_high != scope.context.selector_high):
+            return ScopedCallTargetStatus8616.UNPROVED
+        admitted.append(AdmittedScopedCallTarget8616(
+            theorem.block, theorem.instruction, scope, theorem.target_addr, theorem.next_addr,
+        ))
+    if seal is _ApplicationSealTiming8616.EAGER and (
+            not authenticate_near_call_jump_scope_8616(scope, project=scope.project, artifact=artifact)
+            or proof.source_binding.digest != _source_digest_8616(artifact.function_addr, artifact.blocks)):
+        return ScopedCallTargetStatus8616.STALE_SOURCE
+    return tuple(admitted)
+
+
+def _admit_declared_application_calls_8616(
+    artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
+    scope: Real16InvocationDomain8616,
+) -> tuple[AdmittedScopedCallTarget8616, ...] | ScopedCallTargetStatus8616:
+    """Project exact native targets after fresh declared-selector batch admission.
+
+    The original records bind the raw CALL operands, decoded native E8 bytes
+    and the declared root's selector induction. This is target authority only:
+    no callee return, register or stack effect is inferred. Returned targets
+    are synchronous application results; every later consumer replays the batch.
+    """
+    records = proof.call_preservations
+    if proof.invocation_scope is not scope or proof.near_call_scope is not None:
+        return ScopedCallTargetStatus8616.UNPROVED
+    calls = tuple((block, instruction) for block in artifact.blocks
+                  for instruction in block.instrs if instruction.op == "CALL")
+    if len(records) != len(calls) or any(
+        sum(record.block is block and record.instruction is instruction
+            and record.artifact is artifact for record in records) != 1
+        for block, instruction in calls
+    ):
+        return ScopedCallTargetStatus8616.UNPROVED
+    dependencies = _application_dependency_facts_8616(proof)
+    if len(_selector_call_batch_8616(records, scope)) != len(records):
+        return ScopedCallTargetStatus8616.UNPROVED
+    if (_application_dependency_facts_8616(proof) != dependencies
+            or proof.invocation_scope is not scope or proof.call_preservations is not records
+            or proof.source_binding.digest != _source_digest_8616(artifact.function_addr, artifact.blocks)):
+        return ScopedCallTargetStatus8616.STALE_SOURCE
+    admitted: list[AdmittedScopedCallTarget8616] = []
+    for record in records:
+        projection = record.selector_projection
+        if projection is None or type(record.target_addr) is not int:
+            return ScopedCallTargetStatus8616.UNPROVED
+        # The batch freshly reconstructed and compared the exact symbolic
+        # DirectNearCallTargetBinding, or authenticated an existing constant.
+        # Reading its coordinates now is pure and cannot introduce a new CALL.
+        admitted.append(AdmittedScopedCallTarget8616(
+            record.block, record.instruction, scope, record.target_addr, projection.next_addr))
+    return tuple(admitted)
+
+
+def _requested_application_calls_8616(
+    artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
+    blocks: tuple[IRBlock, ...], scope: NearCallJumpScope8616 | None,
+    mode: EntryProjectionMode8616,
+    seal: _ApplicationSealTiming8616,
+    invocation_scope: Real16InvocationDomain8616 | None,
+) -> tuple[AdmittedScopedCallTarget8616, ...] | ScopedCallTargetStatus8616:
+    """Run outgoing-call admission only for an explicit semantic consumer."""
+    if type(mode) is not EntryProjectionMode8616:
+        raise TypeError("projection mode must be an EntryProjectionMode8616")
+    if mode is EntryProjectionMode8616.CONTROL_ONLY:
+        return ScopedCallTargetStatus8616.NOT_REQUESTED
+    if scope is None:
+        if invocation_scope is None:
+            return ScopedCallTargetStatus8616.UNPROVED
+        return _admit_declared_application_calls_8616(artifact, proof, invocation_scope)
+    return _admit_application_calls_8616(artifact, proof, blocks, scope, seal)
+
+
+class _ApplicationSealTiming8616(Enum):
+    """When the application core runs the near-call scope seal.
+
+    ``EAGER`` is the standalone public route: the complete scope
+    authentication and source-digest comparison run at application
+    entry, before any admission callback. ``FINAL`` is the owner's
+    private staged synchronous prove/apply operation: the same
+    authentication and a fresh digest against the proof's original
+    binding run only after every application callback and solver has
+    finished, so a source surface moved inside those callbacks still
+    refuses instead of publishing.
+    """
+
+    EAGER = "eager"
+    FINAL = "final"
+
+
+@dataclass(frozen=True, slots=True)
+class _SealedEntryJumpDomain8616:
+    """A proof admitted inside one sealed synchronous prove/apply stage.
+
+    The pair never leaves the prove/apply owner unsealed: ``application``
+    already ran the final scope authentication and original-binding
+    digest after every application callback and solver, and a refused
+    seal is carried by its typed status — the proof is never published
+    on its own as admitted evidence.
+    """
+
+    proof: EntryJumpDomainProof8616
+    application: EntryJumpDomainApplication8616
 
 
 def apply_entry_jump_domain_8616(
     artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
     *, invocation_scope: Real16InvocationDomain8616 | None = None,
+    near_call_scope: NearCallJumpScope8616 | None = None,
+    projection_mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
 ) -> EntryJumpDomainApplication8616:
     """Materialize admitted targets into successors, operands, and refusals.
+
+    Control-only is the default and does not solve outgoing CALL obligations.
+    CALL_TARGETS explicitly requests their fresh bounded admission census.
+    Conditional near-call admissions additionally require the identical
+    ``near_call_scope`` supplied explicitly, reauthenticated over the complete
+    source CALL census. APPLIED retains that premise and is not universal proof.
 
     Application is bound to the exact input the proof consumed, and the
     consuming artifact supplies its own root: ``artifact.function_addr``
@@ -1976,35 +2494,164 @@ def apply_entry_jump_domain_8616(
     ``SELECTOR_WINDOW_UNPROVED`` refusal the proof discharged. No other
     refusal or instruction is touched.
     """
-    binding = proof.source_binding
-    stale_detail: str | None = None
+    return _apply_entry_jump_domain_core_8616(
+        artifact,
+        proof,
+        invocation_scope=invocation_scope,
+        near_call_scope=near_call_scope,
+        projection_mode=projection_mode,
+        seal=_ApplicationSealTiming8616.EAGER,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ApplicationInputPins8616:
+    """Original admission identities and scalar binding, retained across callbacks."""
+
+    binding: EntryJumpDomainSourceBinding8616
+    digest: str
+    root: int
+    admitted: tuple[AdmittedTerminalJump8616, ...]
+    scope: NearCallJumpScope8616 | None
+
+
+def _final_application_seal_refused_8616(
+    artifact: IRFunctionArtifact,
+    proof: EntryJumpDomainProof8616,
+    pins: _ApplicationInputPins8616,
+) -> bool:
+    """Reauthenticate after callbacks, then reconcile the original admission pins."""
+    scope = pins.scope
+    if scope is not None and not authenticate_near_call_jump_scope_8616(
+        scope, project=scope.project, artifact=artifact,
+    ):
+        return True
+    identities_match = (
+        proof.source_binding is pins.binding
+        and proof.near_call_scope is scope
+        and proof.admitted is pins.admitted
+    )
+    roots_match = (
+        artifact.function_addr == pins.root
+        and proof.function_addr == pins.root
+        and pins.binding.function_addr == pins.root
+    )
+    return (
+        not identities_match or not roots_match
+        or pins.binding.digest != pins.digest
+        or pins.digest != _source_digest_8616(artifact.function_addr, artifact.blocks)
+    )
+
+
+def _stale_sealed_application_8616(
+    artifact: IRFunctionArtifact,
+    unproved_call_stats: EntryJumpDomainStats8616,
+) -> EntryJumpDomainApplication8616:
+    """Typed non-result when the post-callback seal refuses the surface."""
+    return EntryJumpDomainApplication8616(
+        status=EntryJumpDomainApplicationStatus8616.STALE_INPUT,
+        call_target_status=ScopedCallTargetStatus8616.STALE_SOURCE,
+        call_target_stats=unproved_call_stats,
+        blocks=artifact.blocks,
+        applied=(),
+        refusals=(
+            IRRefusal(
+                EntryJumpDomainRefusal8616.APPLICATION_INPUT_STALE.value,
+                "native scope or source surface changed during "
+                "application admission",
+                None,
+            ),
+        ),
+    )
+
+
+def _application_stale_detail_8616(
+    artifact: IRFunctionArtifact,
+    proof: EntryJumpDomainProof8616,
+    binding: EntryJumpDomainSourceBinding8616,
+    invocation_scope: Real16InvocationDomain8616 | None,
+    near_call_scope: NearCallJumpScope8616 | None,
+    seal: _ApplicationSealTiming8616,
+) -> str | None:
+    """First refused input check, in order, else the admission callback.
+
+    Scope identity, root consistency, and block census run at entry under
+    both seal timings; only the full scope authentication and the digest
+    recomputation are timing-dependent — ``EAGER`` runs them here and
+    ``FINAL`` defers them to the post-callback seal.
+    """
+    if near_call_scope is not proof.near_call_scope or (
+        near_call_scope is not None and (
+            invocation_scope is not None
+            or (
+                seal is _ApplicationSealTiming8616.EAGER
+                and not authenticate_near_call_jump_scope_8616(
+                    near_call_scope,
+                    project=near_call_scope.project,
+                    artifact=artifact,
+                )
+            )
+        )
+    ):
+        return "conditional near-call proof requires its identical authenticated scope"
     if binding.function_addr != proof.function_addr:
-        stale_detail = (
+        return (
             f"proof root 0x{proof.function_addr:x} is inconsistent with "
             f"its recorded binding root 0x{binding.function_addr:x}"
         )
-    elif artifact.function_addr != binding.function_addr:
-        stale_detail = (
+    if artifact.function_addr != binding.function_addr:
+        return (
             f"consuming artifact root 0x{artifact.function_addr:x} does "
             f"not match the proved function root "
             f"0x{binding.function_addr:x}"
         )
-    elif (
-        binding.block_count != len(artifact.blocks)
-        or binding.digest
+    if binding.block_count != len(artifact.blocks) or (
+        seal is _ApplicationSealTiming8616.EAGER
+        and binding.digest
         != _source_digest_8616(artifact.function_addr, artifact.blocks)
     ):
-        stale_detail = (
+        return (
             "supplied blocks do not recompute the proof's recorded "
             "source binding"
         )
-    else:
-        stale_detail = _application_admission_failure_8616(
-            proof, artifact.function_addr, artifact.blocks, invocation_scope,
-        )
+    return _application_admission_failure_8616(
+        proof, artifact.function_addr, artifact.blocks, invocation_scope,
+    )
+
+
+def _apply_entry_jump_domain_core_8616(
+    artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
+    *, invocation_scope: Real16InvocationDomain8616 | None,
+    near_call_scope: NearCallJumpScope8616 | None,
+    projection_mode: EntryProjectionMode8616,
+    seal: _ApplicationSealTiming8616,
+) -> EntryJumpDomainApplication8616:
+    """Run the shared application admission under one seal timing.
+
+    ``EAGER`` reproduces the standalone public application exactly: the
+    complete near-call scope authentication and source-digest comparison
+    run at entry. ``FINAL`` is reserved for the owner's staged synchronous
+    prove/apply operation: scope identity and the cheap binding checks
+    still run at entry, but the full authentication and a fresh digest
+    against the proof's original ``source_binding`` are deferred until
+    after ``_application_admission_failure_8616`` and the outgoing-call
+    admission solver — a source surface moved inside those callbacks is
+    caught by the seal instead of publishing a stale application.
+    """
+    raw_calls = sum(instruction.op == "CALL" for block in artifact.blocks for instruction in block.instrs)
+    unproved_call_stats = EntryJumpDomainStats8616(raw_calls, 0, 0, 0, raw_calls)
+    binding = proof.source_binding
+    pins = _ApplicationInputPins8616(
+        binding, binding.digest, artifact.function_addr, proof.admitted, near_call_scope,
+    )
+    stale_detail = _application_stale_detail_8616(
+        artifact, proof, binding, invocation_scope, near_call_scope, seal,
+    )
     if stale_detail is not None:
         return EntryJumpDomainApplication8616(
             status=EntryJumpDomainApplicationStatus8616.STALE_INPUT,
+            call_target_status=ScopedCallTargetStatus8616.STALE_SOURCE,
+            call_target_stats=unproved_call_stats,
             blocks=artifact.blocks,
             applied=(),
             refusals=(
@@ -2015,9 +2662,18 @@ def apply_entry_jump_domain_8616(
                 ),
             ),
         )
-    if not proof.admitted:
+    if not proof.admitted and not raw_calls:
+        if seal is _ApplicationSealTiming8616.FINAL and (
+            _final_application_seal_refused_8616(
+                artifact, proof, pins,
+            )
+        ):
+            return _stale_sealed_application_8616(
+                artifact, unproved_call_stats,
+            )
         return EntryJumpDomainApplication8616(
             status=EntryJumpDomainApplicationStatus8616.EMPTY,
+            call_target_stats=unproved_call_stats,
             blocks=artifact.blocks,
             applied=(),
             refusals=(),
@@ -2030,19 +2686,14 @@ def apply_entry_jump_domain_8616(
             patched.append(block)
             continue
         instrs = tuple(
-            IRInstr(
-                op=instr.op,
-                dst=instr.dst,
-                args=(
-                    (IRValue(MemSpace.CONST, const=jump.target, size=4),)
-                    if instr.op == "JMP" and instr.addr == jump.head
-                    else instr.args
-                ),
-                size=instr.size,
-                addr=instr.addr,
-                call_stack_effect=instr.call_stack_effect,
-                origin=instr.origin,
+            replace(
+                instr,
+                args=(IRValue(MemSpace.CONST, const=jump.target, size=4),),
             )
+            if instr.op == "JMP" and instr.addr == jump.head
+            # CALL proof bindings require a distinct effective instruction.
+            # Other unchanged instructions can retain their shared identity.
+            else replace(instr) if instr.op == "CALL" else instr
             for instr in block.instrs
         )
         patched.append(IRBlock(
@@ -2061,10 +2712,86 @@ def apply_entry_jump_domain_8616(
                 {*block.successor_addrs, jump.target}
             )),
         ))
+    calls = _requested_application_calls_8616(
+        artifact, proof, tuple(patched), near_call_scope, projection_mode, seal, invocation_scope,
+    )
+    if calls is ScopedCallTargetStatus8616.STALE_SOURCE:
+        return EntryJumpDomainApplication8616(
+            EntryJumpDomainApplicationStatus8616.STALE_INPUT, artifact.blocks, (),
+            (IRRefusal(EntryJumpDomainRefusal8616.CS_IDENTITY_MISMATCH.value,
+                       "outgoing callsite source changed during admission", None),),
+            call_target_status=ScopedCallTargetStatus8616.STALE_SOURCE,
+            call_target_stats=unproved_call_stats,
+        )
+    if seal is _ApplicationSealTiming8616.FINAL and (
+        _final_application_seal_refused_8616(
+            artifact, proof, pins,
+        )
+    ):
+        return _stale_sealed_application_8616(artifact, unproved_call_stats)
+    admitted_calls = calls if isinstance(calls, tuple) else ()
+    call_stats = EntryJumpDomainStats8616(
+        raw_calls, raw_calls if isinstance(calls, tuple) else 0,
+        len(admitted_calls), len(admitted_calls),
+        0 if projection_mode is EntryProjectionMode8616.CONTROL_ONLY else raw_calls - len(admitted_calls),
+    )
     return EntryJumpDomainApplication8616(
-        status=EntryJumpDomainApplicationStatus8616.APPLIED,
+        status=(EntryJumpDomainApplicationStatus8616.APPLIED if proof.admitted
+                else EntryJumpDomainApplicationStatus8616.EMPTY),
         blocks=tuple(patched),
         applied=proof.admitted,
         refusals=(),
         invocation_scope=proof.invocation_scope,
+        near_call_scope=proof.near_call_scope,
+        call_targets=admitted_calls,
+        call_target_stats=call_stats,
+        call_target_status=(ScopedCallTargetStatus8616.ADMITTED
+                            if isinstance(calls, tuple) else calls),
     )
+
+
+def _staged_near_call_entry_domain_8616(
+    artifact: IRFunctionArtifact,
+    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    *,
+    project: object | None,
+    near_call_scope: NearCallJumpScope8616,
+    budget: EntryJumpDomainBudget8616 | None = None,
+    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    invocation_resolver: Callable[
+        [int], Real16InvocationDomain8616 | None
+    ] | None = None,
+    projection_mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
+) -> _SealedEntryJumpDomain8616:
+    """Prove then admit one near-call scope in a single synchronous stage.
+
+    The initial full scope authentication still runs inside the proof
+    before any fixpoint work. The proof's final scope authentication and
+    source-digest comparison are deferred — privately to this operation —
+    into the application core's ``FINAL`` seal, which re-authenticates the
+    complete native scope and recomputes the digest against the proof's
+    original ``source_binding`` only after every application callback and
+    solver has run. The intermediate proof is therefore never published
+    unsealed: the returned pair is the operation's only product, and a
+    refused seal surfaces as the application's typed ``STALE_INPUT``
+    non-result. Public standalone prove/apply routes are unchanged.
+    """
+    proof = _prove_entry_jump_domains_8616(
+        artifact,
+        evidence_by_block,
+        project=project,
+        budget=budget,
+        call_preservations=call_preservations,
+        invocation_resolver=invocation_resolver,
+        near_call_scope=near_call_scope,
+        defer_near_call_final_seal=True,
+    )
+    application = _apply_entry_jump_domain_core_8616(
+        artifact,
+        proof,
+        invocation_scope=None,
+        near_call_scope=near_call_scope,
+        projection_mode=projection_mode,
+        seal=_ApplicationSealTiming8616.FINAL,
+    )
+    return _SealedEntryJumpDomain8616(proof=proof, application=application)

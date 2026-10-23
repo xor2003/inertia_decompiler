@@ -75,6 +75,7 @@ def _install_fixture(
 ) -> tuple[Path, Path]:
     """Bind the fixture image to the driver's symbol/boundary sources."""
     oracle, candidate = _write_pair(tmp_path, code)
+    (tmp_path / "oracle.lst").write_text("")
     driver = lane.z3cmp32
     if lane.name == "msc8":
         monkeypatch.setattr(driver, "lst_functions", lambda _path: dict(boundaries))
