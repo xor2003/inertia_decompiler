@@ -8,7 +8,77 @@ package remains a thin facade re-exporting this surface.
 
 from __future__ import annotations as _future_annotations
 
+lazy import inertia.cli.corpus_recovery_artifact as corpus_recovery_artifact
+lazy import inertia.cli.corpus_scan as corpus_scan
+lazy import inertia.cli.targeted_recovery_artifact as targeted_recovery_artifact
+lazy import inertia.frontend.x86_16.bootstrap as bootstrap
+lazy import inertia.postprocess.decompiler_postprocess_inventory as decompiler_postprocess_inventory
+lazy import inertia.postprocess.decompiler_postprocess_stage as decompiler_postprocess_stage
+lazy import inertia.structuring.decompiler_structuring_stage as decompiler_structuring_stage
+lazy from inertia.postprocess.decompiler_postprocess_inventory import (
+    DecompilerPostprocessPassInventoryItem as DecompilerPostprocessPassInventoryItem,
+)
+lazy from inertia.postprocess.decompiler_postprocess_inventory import (
+    DecompilerPostprocessPassInventoryViolation as DecompilerPostprocessPassInventoryViolation,
+)
+lazy from inertia.postprocess.decompiler_postprocess_inventory import (
+    DecompilerPostprocessPassKind8616 as DecompilerPostprocessPassKind8616,
+)
+lazy from inertia.postprocess.decompiler_postprocess_inventory import (
+    DecompilerPostprocessPassMigrationStatus8616 as DecompilerPostprocessPassMigrationStatus8616,
+)
+lazy from inertia.postprocess.decompiler_postprocess_inventory import (
+    describe_x86_16_decompiler_postprocess_inventory_8616 as describe_x86_16_decompiler_postprocess_inventory_8616,
+)
+lazy from inertia.postprocess.decompiler_postprocess_inventory import (
+    validate_x86_16_decompiler_postprocess_inventory_8616 as validate_x86_16_decompiler_postprocess_inventory_8616,
+)
+lazy from inertia.postprocess.decompiler_postprocess_stage import (
+    DecompilerPostprocessPassSpec as DecompilerPostprocessPassSpec,
+)
+lazy from inertia.postprocess.decompiler_postprocess_stage import (
+    apply_x86_16_decompiler_postprocess as apply_x86_16_decompiler_postprocess,
+)
+lazy from inertia.postprocess.decompiler_postprocess_stage import (
+    describe_x86_16_decompiler_postprocess_stage as describe_x86_16_decompiler_postprocess_stage,
+)
+lazy from inertia.structuring.decompiler_structuring_stage import (
+    DecompilerStructuringPassSpec as DecompilerStructuringPassSpec,
+)
+lazy from inertia.structuring.decompiler_structuring_stage import (
+    apply_x86_16_decompiler_structuring as apply_x86_16_decompiler_structuring,
+)
+lazy from inertia.structuring.decompiler_structuring_stage import (
+    describe_x86_16_decompiler_structuring_stage as describe_x86_16_decompiler_structuring_stage,
+)
+
+from . import (
+    arch_86_16,
+    calling_convention_compat,
+    cod_extract,
+    compat,
+    decompiler_return_compat,
+    lift_86_16,
+    load_dos_mz,
+    load_dos_ne,
+    patch_dirty,
+    simos_86_16,
+    stack_compat,
+    typehoon_compat,
+)
+from .addressing_helpers import (
+    describe_x86_16_decode_width_matrix,
+    describe_x86_16_mixed_width_extension_surface,
+    describe_x86_16_mixed_width_instruction_surface,
+)
+from .calling_convention_compat import apply_x86_16_calling_convention_compatibility
+from .cod_known_objects import describe_x86_16_cod_known_objects
+from .compat import apply_x86_16_compatibility
+from .decompiler_return_compat import apply_x86_16_decompiler_return_compatibility
+from .instruction import describe_x86_16_instruction_metadata_surface
 from .lifter_backend_selection import VEX_BACKEND
+from .stack_compat import apply_x86_16_stack_compatibility
+lazy from .bootstrap import apply_x86_16_bootstrap as apply_x86_16_bootstrap
 
 try:
     import pyvex_compat
@@ -16,10 +86,6 @@ try:
     pyvex_compat.apply_pyvex_runtime_compatibility()
 except Exception:
     pass
-
-from collections.abc import Callable
-from importlib import import_module
-from typing import TYPE_CHECKING
 
 __all__ = [
     "COD_SOURCE_REWRITE_REGISTRY",
@@ -238,219 +304,8 @@ from inertia.widening import register_widening as widening_alias
 from inertia.widening import widening_model
 from inertia.widening.stack_widening import describe_x86_16_widening_pipeline
 
-from . import (
-    arch_86_16,
-    calling_convention_compat,
-    cod_extract,
-    compat,
-    decompiler_return_compat,
-    lift_86_16,
-    load_dos_mz,
-    load_dos_ne,
-    patch_dirty,
-    simos_86_16,
-    stack_compat,
-    typehoon_compat,
-)
-from .addressing_helpers import (
-    describe_x86_16_decode_width_matrix,
-    describe_x86_16_mixed_width_extension_surface,
-    describe_x86_16_mixed_width_instruction_surface,
-)
-from .calling_convention_compat import apply_x86_16_calling_convention_compatibility
-from .cod_known_objects import describe_x86_16_cod_known_objects
-from .compat import apply_x86_16_compatibility
-from .decompiler_return_compat import apply_x86_16_decompiler_return_compatibility
-from .instruction import describe_x86_16_instruction_metadata_surface
-from .stack_compat import apply_x86_16_stack_compatibility
-
-if TYPE_CHECKING:
-    from inertia.cli import (
-        corpus_recovery_artifact,
-        corpus_scan,
-        targeted_recovery_artifact,
-    )
-    from inertia.postprocess import (
-        decompiler_postprocess_inventory,
-        decompiler_postprocess_stage,
-    )
-    from inertia.postprocess.decompiler_postprocess_inventory import (
-        DecompilerPostprocessPassInventoryItem,
-        DecompilerPostprocessPassInventoryViolation,
-        DecompilerPostprocessPassKind8616,
-        DecompilerPostprocessPassMigrationStatus8616,
-        describe_x86_16_decompiler_postprocess_inventory_8616,
-        validate_x86_16_decompiler_postprocess_inventory_8616,
-    )
-    from inertia.postprocess.decompiler_postprocess_stage import (
-        DecompilerPostprocessPassSpec,
-        apply_x86_16_decompiler_postprocess,
-        describe_x86_16_decompiler_postprocess_stage,
-    )
-    from inertia.structuring import decompiler_structuring_stage
-    from inertia.structuring.decompiler_structuring_stage import (
-        DecompilerStructuringPassSpec,
-        describe_x86_16_decompiler_structuring_stage,
-    )
-
-    from . import bootstrap
-    from .bootstrap import apply_x86_16_bootstrap
-
-_LazyExportLoader = Callable[[], object]
-
-
-def _load_bootstrap_module() -> object:
-    return import_module(".bootstrap", __package__)
-
-
-def _load_corpus_scan_module() -> object:
-    """Load reporting after frontend initialization rather than inside lifting."""
-    return import_module("inertia.cli.corpus_scan")
-
-
-def _load_corpus_recovery_artifact_module() -> object:
-    """Load corpus reporting without requiring scans during frontend startup."""
-    return import_module("inertia.cli.corpus_recovery_artifact")
-
-
-def _load_targeted_recovery_artifact_module() -> object:
-    """Load targeted reporting after its frontend dependencies are initialized."""
-    return import_module("inertia.cli.targeted_recovery_artifact")
-
-
-def _load_apply_x86_16_bootstrap() -> object:
-    from .bootstrap import apply_x86_16_bootstrap
-
-    return apply_x86_16_bootstrap
-
-
-def _load_decompiler_postprocess_inventory_module() -> object:
-    return import_module("inertia.postprocess.decompiler_postprocess_inventory")
-
-
-def _load_decompiler_postprocess_stage_module() -> object:
-    return import_module("inertia.postprocess.decompiler_postprocess_stage")
-
-
-def _load_decompiler_structuring_stage_module() -> object:
-    return import_module("inertia.structuring.decompiler_structuring_stage")
-
-
-def _load_decompiler_postprocess_pass_inventory_item() -> object:
-    from inertia.postprocess.decompiler_postprocess_inventory import DecompilerPostprocessPassInventoryItem
-
-    return DecompilerPostprocessPassInventoryItem
-
-
-def _load_decompiler_postprocess_pass_kind_8616() -> object:
-    from inertia.postprocess.decompiler_postprocess_inventory import DecompilerPostprocessPassKind8616
-
-    return DecompilerPostprocessPassKind8616
-
-
-def _load_decompiler_postprocess_pass_migration_status_8616() -> object:
-    from inertia.postprocess.decompiler_postprocess_inventory import DecompilerPostprocessPassMigrationStatus8616
-
-    return DecompilerPostprocessPassMigrationStatus8616
-
-
-def _load_decompiler_postprocess_pass_inventory_violation() -> object:
-    from inertia.postprocess.decompiler_postprocess_inventory import DecompilerPostprocessPassInventoryViolation
-
-    return DecompilerPostprocessPassInventoryViolation
-
-
-def _load_decompiler_postprocess_pass_spec() -> object:
-    from inertia.postprocess.decompiler_postprocess_stage import DecompilerPostprocessPassSpec
-
-    return DecompilerPostprocessPassSpec
-
-
-def _load_apply_x86_16_decompiler_postprocess() -> object:
-    from inertia.postprocess.decompiler_postprocess_stage import apply_x86_16_decompiler_postprocess
-
-    return apply_x86_16_decompiler_postprocess
-
-
-def _load_describe_x86_16_decompiler_postprocess_inventory_8616() -> object:
-    from inertia.postprocess.decompiler_postprocess_inventory import (
-        describe_x86_16_decompiler_postprocess_inventory_8616,
-    )
-
-    return describe_x86_16_decompiler_postprocess_inventory_8616
-
-
-def _load_validate_x86_16_decompiler_postprocess_inventory_8616() -> object:
-    from inertia.postprocess.decompiler_postprocess_inventory import (
-        validate_x86_16_decompiler_postprocess_inventory_8616,
-    )
-
-    return validate_x86_16_decompiler_postprocess_inventory_8616
-
-
-def _load_describe_x86_16_decompiler_postprocess_stage() -> object:
-    from inertia.postprocess.decompiler_postprocess_stage import describe_x86_16_decompiler_postprocess_stage
-
-    return describe_x86_16_decompiler_postprocess_stage
-
-
-def _load_decompiler_structuring_pass_spec() -> object:
-    from inertia.structuring.decompiler_structuring_stage import DecompilerStructuringPassSpec
-
-    return DecompilerStructuringPassSpec
-
-
-def _load_apply_x86_16_decompiler_structuring() -> object:
-    from inertia.structuring.decompiler_structuring_stage import apply_x86_16_decompiler_structuring
-
-    return apply_x86_16_decompiler_structuring
-
-
-def _load_describe_x86_16_decompiler_structuring_stage() -> object:
-    from inertia.structuring.decompiler_structuring_stage import describe_x86_16_decompiler_structuring_stage
-
-    return describe_x86_16_decompiler_structuring_stage
-
-
-_LAZY_EXPORTS: dict[str, _LazyExportLoader] = {
-    "corpus_scan": _load_corpus_scan_module,
-    "corpus_recovery_artifact": _load_corpus_recovery_artifact_module,
-    "targeted_recovery_artifact": _load_targeted_recovery_artifact_module,
-    "bootstrap": _load_bootstrap_module,
-    "apply_x86_16_bootstrap": _load_apply_x86_16_bootstrap,
-    "decompiler_postprocess_inventory": _load_decompiler_postprocess_inventory_module,
-    "decompiler_postprocess_stage": _load_decompiler_postprocess_stage_module,
-    "DecompilerPostprocessPassInventoryItem": _load_decompiler_postprocess_pass_inventory_item,
-    "DecompilerPostprocessPassKind8616": _load_decompiler_postprocess_pass_kind_8616,
-    "DecompilerPostprocessPassMigrationStatus8616": _load_decompiler_postprocess_pass_migration_status_8616,
-    "DecompilerPostprocessPassInventoryViolation": _load_decompiler_postprocess_pass_inventory_violation,
-    "DecompilerPostprocessPassSpec": _load_decompiler_postprocess_pass_spec,
-    "apply_x86_16_decompiler_postprocess": _load_apply_x86_16_decompiler_postprocess,
-    "describe_x86_16_decompiler_postprocess_inventory_8616": (
-        _load_describe_x86_16_decompiler_postprocess_inventory_8616
-    ),
-    "validate_x86_16_decompiler_postprocess_inventory_8616": (
-        _load_validate_x86_16_decompiler_postprocess_inventory_8616
-    ),
-    "describe_x86_16_decompiler_postprocess_stage": _load_describe_x86_16_decompiler_postprocess_stage,
-    "decompiler_structuring_stage": _load_decompiler_structuring_stage_module,
-    "DecompilerStructuringPassSpec": _load_decompiler_structuring_pass_spec,
-    "apply_x86_16_decompiler_structuring": _load_apply_x86_16_decompiler_structuring,
-    "describe_x86_16_decompiler_structuring_stage": _load_describe_x86_16_decompiler_structuring_stage,
-}
-
-
-def __getattr__(name: str) -> object:
-    target = _LAZY_EXPORTS.get(name)
-    if target is None:
-        raise AttributeError(name)
-    value = target()
-    globals()[name] = value
-    return value
-
-
 try:
-    _bootstrap = __getattr__("apply_x86_16_bootstrap")
+    _bootstrap = apply_x86_16_bootstrap
     if callable(_bootstrap):
         _bootstrap()
 except Exception:

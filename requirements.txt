@@ -1,8 +1,8 @@
-angr==9.3.3
-archinfo==9.3.3
-cle==9.3.3
-claripy==9.3.3
-pyvex==9.3.3
+angr==9.3.4
+archinfo==9.3.4
+cle==9.3.4
+claripy==9.3.4
+pyvex==9.3.4
 capstone==5.0.9
 pycparser>=3,<3.12
 bitstring>=4,<5

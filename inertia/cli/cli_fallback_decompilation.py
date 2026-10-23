@@ -9,21 +9,28 @@ Guard: this CLI boundary must not become the owner of decompiler semantics.
 from __future__ import annotations
 
 import contextlib
-import functools
+import functools as functools
 import logging
 import os
 import re
 import sys
 import threading
 import typing
+import typing as _cli_compat_typing
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol as Protocol
+from typing import runtime_checkable as runtime_checkable
 
 import angr
 
-from inertia.cli import cli_string_timeout_fallback as _cli_string_timeout_fallback
+# Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_string_timeout_fallback as _cli_compat_export_cli_string_timeout_fallback
+    _cli_string_timeout_fallback = _cli_compat_export_cli_string_timeout_fallback
+else:
+    from inertia.cli import cli_string_timeout_fallback as _cli_string_timeout_fallback
 from inertia.cli.cli_decompilation import (
     _decompile_function_with_stats,
     _effective_decompile_timeout_8616,
@@ -43,15 +50,17 @@ from inertia.cli.disassembly_helpers import (
 )
 from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.non_optimized_fallback import (
-    bounded_non_optimized_attempt_timeout,
+    bounded_non_optimized_attempt_timeout as bounded_non_optimized_attempt_timeout,
 )
 from inertia.cli.project_evidence_transport import transfer_project_evidence_8616
 from inertia.cli.project_loading import (
     _build_project_cached,
     _build_project_from_bytes,
     _describe_exception,
-    _is_blob_only_input,
     declared_input_path_8616,
+)
+from inertia.cli.project_loading import (
+    _is_blob_only_input as _is_blob_only_input,
 )
 from inertia.cli.runtime_support import (
     run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
@@ -63,12 +72,22 @@ from inertia.cli.sidecar_metadata import (
     _lst_code_region,
 )
 from inertia.cli.slice_recovery import (
-    BoundedSliceVerdict,
-    SliceRecoverCallable,
+    BoundedSliceVerdict as BoundedSliceVerdict,
+)
+from inertia.cli.slice_recovery import (
+    SliceRecoverCallable as SliceRecoverCallable,
+)
+from inertia.cli.slice_recovery import (
     SliceRecoveryAttemptOutcome,
-    SliceRecoveryAttemptTrace,
-    build_default_slice_recovery_attempts,
-    run_bounded_slice_recovery,
+)
+from inertia.cli.slice_recovery import (
+    SliceRecoveryAttemptTrace as SliceRecoveryAttemptTrace,
+)
+from inertia.cli.slice_recovery import (
+    build_default_slice_recovery_attempts as build_default_slice_recovery_attempts,
+)
+from inertia.cli.slice_recovery import (
+    run_bounded_slice_recovery as run_bounded_slice_recovery,
 )
 from inertia.cli.tail_validation import (
     inherit_tail_validation_runtime_policy as _inherit_tail_validation_runtime_policy,
@@ -82,12 +101,14 @@ from inertia.cli.work_items import (
 from inertia.cli.x86_16_exact_slice import (
     X86ExactSlicePlan,
     mark_function_original_addr,
-    non_optimized_slice_codegen_policy,
     plan_x86_16_exact_slice,
+)
+from inertia.cli.x86_16_exact_slice import (
+    non_optimized_slice_codegen_policy as non_optimized_slice_codegen_policy,
 )
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
 from inertia.frontend.x86_16.frontend_function_instructions import (
-    collect_bounded_linear_instruction_inventory_8616,
+    collect_bounded_linear_instruction_inventory_8616 as collect_bounded_linear_instruction_inventory_8616,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)

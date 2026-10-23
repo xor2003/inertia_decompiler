@@ -57,6 +57,7 @@ from .word_projection_recomposition import (
     WordProjectionRecompositionStats8616,
     materialize_word_projection_recompositions_8616,
 )
+lazy from .widening_rules import run_typed_widening_pass_8616 as run_typed_widening_pass_8616
 
 __all__ = [
     "WIDENING_PIPELINE",
@@ -90,6 +91,7 @@ __all__ = [
     "merge_storage_slice_domains",
     "prove_adjacent_storage_slices",
     "prove_contained_stack_subview",
+    "run_typed_widening_pass_8616",
     "widen_carry_borrow_storage_8616",
     "widen_carry_borrow_values_8616",
 ]

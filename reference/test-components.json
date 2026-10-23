@@ -175,6 +175,7 @@
     "tests/cli/test_inertia_telemetry.py",
     "tools/dosunit/tests/test_invariant_retry_contracts.py",
     "tests/cli/test_metadata_evidence.py",
+    "tests/cli/test_native_lazy_facades.py",
     "tests/frontend/test_mz_invocation_source.py",
     "tests/ir/test_native_relift_scope.py",
     "tests/lowering/test_near_pointer_argument_values.py",

@@ -19744,3 +19744,14 @@ six plan areas retained.
 - Comparator admission passes all 1,509 tests with its pool serialized; copied MSC8/BC5 adapters now bootstrap their selected source layout before canonical imports.
 - The broad unit phase was interrupted around 10% after three native-call failures. An ordered serial replay passed 14 tests and failed one; an instrumented diagnostic replay passed all 15 with no recorded deadline-expired event. The earlier failures remain unresolved, and no proof budget or acceptance condition changed.
 - Full integration acceptance is carried into the Python 3.15.1 migration. Keep the existing work and migration in separate local commits and push them together after final verification.
+
+## Python 3.15.1 native lazy-import migration
+
+- Runtime selection, CI, Ruff, MyPy and Pyright target Python 3.15; the local default interpreter is 3.15.1.
+- Dependency pins use the compatible angr 9.3.4 family and Lark 1.3.1; pycparser, bitstring and Z3 compatibility bounds remain unchanged.
+- Native PEP 810 declarations replace the custom CLI, IR, Alias and frontend export loaders. Canonical identities, eager registration and CLI monkeypatch write-through remain explicit contracts.
+- Worker-policy imports defer NetworkX until graph ordering is requested. Native backend/source verification remains enabled.
+- Full-suite acceptance remains pending; delivery uses focused regressions and the configured lint gate first.
+
+All configured lint subgates pass across the initial run and serial recovery; the initial parallel invocation was interrupted by killed MyPy/Vulture processes. The focused test run records 145 passed, 6 skipped and 3 unresolved nested declared-callee failures; full-suite acceptance is not claimed.
+Thread-bound output flushing retains its closed-stream guard through Python interpreter finalization.

@@ -8,10 +8,10 @@ Dynamic angr boundary: sidecar probing reads loader/project/memory attributes su
 from __future__ import annotations
 
 import re
-import struct
+import struct as struct
 import tempfile
 import typing
-from bisect import bisect_right
+from bisect import bisect_right as bisect_right
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol, cast
@@ -19,22 +19,32 @@ from typing import Protocol, cast
 import angr
 
 from inertia.cli.codeview_nb00 import parse_codeview_nb00
-from inertia.cli.codeview_nb02_nb04 import parse_codeview_nb0204_bytes
-from inertia.cli.flair_extract import FlairStartupPattern, match_flair_startup_entry
+from inertia.cli.codeview_nb02_nb04 import parse_codeview_nb0204_bytes as parse_codeview_nb0204_bytes
+from inertia.cli.flair_extract import FlairStartupPattern as FlairStartupPattern
+from inertia.cli.flair_extract import match_flair_startup_entry as match_flair_startup_entry
 from inertia.frontend.x86_16.cod_extract import (
     CODListingMetadata,
     extract_cod_function_entries,
-    extract_cod_listing_metadata,
 )
-from inertia.frontend.x86_16.ne_exe_parse import parse_ne_exe
-from tools.signatures.flair_paths import flair_signature_root
+from inertia.frontend.x86_16.cod_extract import (
+    extract_cod_listing_metadata as extract_cod_listing_metadata,
+)
+from inertia.frontend.x86_16.ne_exe_parse import parse_ne_exe as parse_ne_exe
+from tools.signatures.flair_paths import flair_signature_root as flair_signature_root
 from tools.signatures.omf_pat import (
-    CachedPatRegexSpec,
-    LocalPatMatchResult,
-    load_cached_pat_regex_specs,
-    match_pat_modules,
+    CachedPatRegexSpec as CachedPatRegexSpec,
 )
-from tools.signatures.signature_catalog import match_signature_catalog, registered_pat_architecture
+from tools.signatures.omf_pat import (
+    LocalPatMatchResult as LocalPatMatchResult,
+)
+from tools.signatures.omf_pat import (
+    load_cached_pat_regex_specs as load_cached_pat_regex_specs,
+)
+from tools.signatures.omf_pat import (
+    match_pat_modules as match_pat_modules,
+)
+from tools.signatures.signature_catalog import match_signature_catalog as match_signature_catalog
+from tools.signatures.signature_catalog import registered_pat_architecture as registered_pat_architecture
 
 
 class _AngrMemoryLoader8616(Protocol):

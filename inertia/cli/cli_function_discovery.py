@@ -7,32 +7,38 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 
 from __future__ import annotations
 
-import builtins
+import builtins as builtins
 import contextlib
-import importlib
+import importlib as importlib
 import logging
 import os
 import sys
 import threading
 import time
 import typing
-from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
+import typing as _cli_compat_typing
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import MutableMapping as MutableMapping
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal, Self, cast
+from typing import Any, cast
+from typing import Literal as Literal
+from typing import Self as Self
 
 import angr
 
 from inertia.cli.cache import (
     _cache_key_lock,
     _load_cache_json,
-    _recovery_cache_key,
     _store_cache_json,
 )
-from inertia.cli.cache_source_manifest import RecoveryCacheSourceScope8616
-from inertia.cli.catalog_policy import DEFAULT_CATALOG_TIMEOUT
+from inertia.cli.cache import (
+    _recovery_cache_key as _recovery_cache_key,
+)
+from inertia.cli.cache_source_manifest import RecoveryCacheSourceScope8616 as RecoveryCacheSourceScope8616
+from inertia.cli.catalog_policy import DEFAULT_CATALOG_TIMEOUT as DEFAULT_CATALOG_TIMEOUT
 from inertia.cli.cli_output import (
     _timestamped_print,
 )
@@ -41,21 +47,37 @@ from inertia.cli.disassembly_helpers import (
 )
 from inertia.cli.discovery_cache_contract import (
     SourceRegionCatalogEvidence8616,
-    display_catalog_cache_payload_from_record_8616,
-    display_catalog_cache_record_8616,
-    source_region_catalog_evidence_comment_8616,
+)
+from inertia.cli.discovery_cache_contract import (
+    display_catalog_cache_payload_from_record_8616 as display_catalog_cache_payload_from_record_8616,
+)
+from inertia.cli.discovery_cache_contract import (
+    display_catalog_cache_record_8616 as display_catalog_cache_record_8616,
+)
+from inertia.cli.discovery_cache_contract import (
+    source_region_catalog_evidence_comment_8616 as source_region_catalog_evidence_comment_8616,
 )
 from inertia.cli.discovery_candidate_ranges import (
-    pre_entry_caller_ranges_8616,
-    pre_entry_candidate_ranges,
+    pre_entry_caller_ranges_8616 as pre_entry_caller_ranges_8616,
 )
-from inertia.cli.discovery_evidence_project import isolated_discovery_evidence_project_8616
+from inertia.cli.discovery_candidate_ranges import (
+    pre_entry_candidate_ranges as pre_entry_candidate_ranges,
+)
+from inertia.cli.discovery_evidence_project import (
+    isolated_discovery_evidence_project_8616 as isolated_discovery_evidence_project_8616,
+)
 from inertia.cli.exact_region_diagnostics import (
-    build_exact_region_diagnostics_8616,
-    classify_region_split_8616,
-    format_exact_region_diagnostics_8616,
+    build_exact_region_diagnostics_8616 as build_exact_region_diagnostics_8616,
 )
-from inertia.cli.function_graph_extent_repair import enforce_covered_transition_sources_8616
+from inertia.cli.exact_region_diagnostics import (
+    classify_region_split_8616 as classify_region_split_8616,
+)
+from inertia.cli.exact_region_diagnostics import (
+    format_exact_region_diagnostics_8616 as format_exact_region_diagnostics_8616,
+)
+from inertia.cli.function_graph_extent_repair import (
+    enforce_covered_transition_sources_8616 as enforce_covered_transition_sources_8616,
+)
 from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.project_loading import (
     _build_project_cached,
@@ -65,9 +87,17 @@ from inertia.cli.project_loading import (
 from inertia.cli.runtime_support import (
     AnalysisTimeout as _AnalysisTimeout,
 )
-from inertia.cli.runtime_support import (
-    analysis_timeout as _analysis_timeout,
-)
+
+# Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        analysis_timeout as _cli_compat_export_analysis_timeout,
+    )
+    _analysis_timeout = _cli_compat_export_analysis_timeout
+else:
+    from inertia.cli.runtime_support import (
+        analysis_timeout as _analysis_timeout,
+    )
 from inertia.cli.runtime_support import (
     run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
 )
@@ -89,41 +119,78 @@ from inertia.cli.work_items import (
     FunctionWorkResult,
 )
 from inertia.cli.x86_16_exact_slice import (
-    X86ExactSlicePlan,
+    X86ExactSlicePlan as X86ExactSlicePlan,
+)
+from inertia.cli.x86_16_exact_slice import (
     mark_function_original_addr,
-    plan_x86_16_exact_slice,
+)
+from inertia.cli.x86_16_exact_slice import (
+    plan_x86_16_exact_slice as plan_x86_16_exact_slice,
 )
 from inertia.frontend.x86_16.frontend_function_boundary import (
-    bounded_entry_function_boundary_8616,
+    bounded_entry_function_boundary_8616 as bounded_entry_function_boundary_8616,
 )
 from inertia.frontend.x86_16.frontend_indirect_jump_targets import (
-    collect_constant_indirect_jump_edges_8616,
+    collect_constant_indirect_jump_edges_8616 as collect_constant_indirect_jump_edges_8616,
 )
-from inertia.frontend.x86_16.frontend_instruction_reachability import (
-    collect_decoded_block_evidence_8616 as _collect_block_8616,
-)
-from inertia.frontend.x86_16.frontend_instruction_reachability import (
-    x86_16_block_successors_from_capstone_8616 as _x86_16_block_successors_from_capstone_8616,
-)
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.frontend.x86_16.frontend_instruction_reachability import (
+        collect_decoded_block_evidence_8616 as _cli_compat_export_collect_block_8616,
+    )
+    _collect_block_8616 = _cli_compat_export_collect_block_8616
+else:
+    from inertia.frontend.x86_16.frontend_instruction_reachability import (
+        collect_decoded_block_evidence_8616 as _collect_block_8616,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.frontend.x86_16.frontend_instruction_reachability import (
+        x86_16_block_successors_from_capstone_8616 as _cli_compat_export_x86_16_block_successors_from_capstone_8616,
+    )
+    _x86_16_block_successors_from_capstone_8616 = _cli_compat_export_x86_16_block_successors_from_capstone_8616
+else:
+    from inertia.frontend.x86_16.frontend_instruction_reachability import (
+        x86_16_block_successors_from_capstone_8616 as _x86_16_block_successors_from_capstone_8616,
+    )
 from inertia.lowering.analysis_helpers import (
     collect_neighbor_call_targets,
-    extend_cfg_for_far_calls,
-    extend_cfg_for_neighbor_calls,
-    infer_com_region,
-    patch_interrupt_service_call_sites,
-    seed_calling_conventions,
+)
+from inertia.lowering.analysis_helpers import (
+    extend_cfg_for_far_calls as extend_cfg_for_far_calls,
+)
+from inertia.lowering.analysis_helpers import (
+    extend_cfg_for_neighbor_calls as extend_cfg_for_neighbor_calls,
+)
+from inertia.lowering.analysis_helpers import (
+    infer_com_region as infer_com_region,
+)
+from inertia.lowering.analysis_helpers import (
+    patch_interrupt_service_call_sites as patch_interrupt_service_call_sites,
+)
+from inertia.lowering.analysis_helpers import (
+    seed_calling_conventions as seed_calling_conventions,
 )
 from inertia.lowering.proven_call_cfg_extension import (
-    ProvenCallExtensionReceipt8616,
-    extend_cfg_for_proven_calls_8616,
+    ProvenCallExtensionReceipt8616 as ProvenCallExtensionReceipt8616,
+)
+from inertia.lowering.proven_call_cfg_extension import (
+    extend_cfg_for_proven_calls_8616 as extend_cfg_for_proven_calls_8616,
 )
 from inertia.semantics.callsite_summary import (
     CallerReturnUseEvidence8616,
-    CallerReturnUseVerdict8616,
     caller_return_use_evidence_by_addr_8616,
-    caller_return_use_program_scope_8616,
-    collect_caller_return_use_evidence_8616,
-    record_caller_return_use_evidence_8616,
+)
+from inertia.semantics.callsite_summary import (
+    CallerReturnUseVerdict8616 as CallerReturnUseVerdict8616,
+)
+from inertia.semantics.callsite_summary import (
+    caller_return_use_program_scope_8616 as caller_return_use_program_scope_8616,
+)
+from inertia.semantics.callsite_summary import (
+    collect_caller_return_use_evidence_8616 as collect_caller_return_use_evidence_8616,
+)
+from inertia.semantics.callsite_summary import (
+    record_caller_return_use_evidence_8616 as record_caller_return_use_evidence_8616,
 )
 
 # Pseudo-callee DOS helper addresses (when materialized) live in a synthetic

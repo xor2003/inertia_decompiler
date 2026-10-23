@@ -24,7 +24,7 @@ from inertia.cli.cli_output import (
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
 from inertia.frontend.x86_16.cod_known_objects import known_cod_object_spec
 from inertia.lowering.analysis_helpers import preferred_known_helper_signature_decl
-from inertia.lowering.gp_word_runtime import runtime_gp_word_symbols_8616
+from inertia.lowering.gp_word_runtime import runtime_gp_word_symbols_8616 as runtime_gp_word_symbols_8616
 
 from .cli_c_ast_rewrites import (
     _cod_stack_alias_for_disp,
@@ -36,7 +36,7 @@ from .cli_c_ast_rewrites import (
     _make_unique_identifier,
     _normalize_16bit_signed_offset,
 )
-from .cli_interrupt_modeling import _interrupt_wrapper_call_text
+from .cli_interrupt_modeling import _interrupt_wrapper_call_text as _interrupt_wrapper_call_text
 
 print: Any = _timestamped_print
 __all__ = [

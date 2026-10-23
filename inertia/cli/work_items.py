@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from inertia.semantics.segment_program_layout_contract import SegmentProgramFunctionEvidence8616
 
 from inertia.cli.metadata_evidence import has_only_binary_signatures
-from inertia.cli.sidecar_cache import lst_metadata_content_digest_8616
+from inertia.cli.sidecar_cache import lst_metadata_content_digest_8616 as lst_metadata_content_digest_8616
 from inertia.cli.tail_validation import (
     emit_tail_validation_console_summary,
     tail_validation_display_status,

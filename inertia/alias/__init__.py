@@ -9,9 +9,10 @@ work here.
 
 from __future__ import annotations
 
-from importlib import import_module
-from types import ModuleType
-from typing import TYPE_CHECKING
+lazy import inertia.alias.alias_model as alias_model
+lazy import inertia.alias.domains as domains
+lazy import inertia.alias.state as state
+lazy import inertia.alias.transfer as transfer
 
 __all__ = (
     "alias_model",
@@ -19,18 +20,3 @@ __all__ = (
     "state",
     "transfer",
 )
-
-if TYPE_CHECKING:
-    from . import alias_model, domains, state, transfer
-
-
-def __getattr__(name: str) -> ModuleType:
-    if name == "alias_model":
-        return import_module(f"{__name__}.alias_model")
-    if name == "domains":
-        return import_module(f"{__name__}.domains")
-    if name == "state":
-        return import_module(f"{__name__}.state")
-    if name == "transfer":
-        return import_module(f"{__name__}.transfer")
-    raise AttributeError(name)

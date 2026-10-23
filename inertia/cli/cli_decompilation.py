@@ -19,15 +19,18 @@ import re
 import sys
 import threading
 import time
-import traceback
+import traceback as traceback
 import typing
-import weakref
-from collections import Counter
+import typing as _cli_compat_typing
+import weakref as weakref
+from collections import Counter as Counter
 from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
-from enum import Enum, StrEnum
+from enum import Enum
+from enum import StrEnum as StrEnum
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, cast
+from typing import TypedDict as TypedDict
 
 import angr
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -39,14 +42,22 @@ from inertia.cli.cli_output import (
     _timestamped_print,
 )
 from inertia.cli.cli_rollback_snapshot_8616 import (
-    PickledCfuncSnapshot8616,
-    pickled_trusted_cfunc_8616,
-    unpickle_trusted_cfunc_8616,
+    PickledCfuncSnapshot8616 as PickledCfuncSnapshot8616,
+)
+from inertia.cli.cli_rollback_snapshot_8616 import (
+    pickled_trusted_cfunc_8616 as pickled_trusted_cfunc_8616,
+)
+from inertia.cli.cli_rollback_snapshot_8616 import (
+    unpickle_trusted_cfunc_8616 as unpickle_trusted_cfunc_8616,
 )
 from inertia.cli.cli_semantic_rollback import (
-    TrustedCoreSnapshot8616,
-    rollback_final_semantic_drift_8616,
-    snapshot_trusted_cfunc_8616,
+    TrustedCoreSnapshot8616 as TrustedCoreSnapshot8616,
+)
+from inertia.cli.cli_semantic_rollback import (
+    rollback_final_semantic_drift_8616 as rollback_final_semantic_drift_8616,
+)
+from inertia.cli.cli_semantic_rollback import (
+    snapshot_trusted_cfunc_8616 as snapshot_trusted_cfunc_8616,
 )
 from inertia.cli.decompilation_quality import assess_decompiled_c_text
 from inertia.cli.generated_c_artifacts import conditional_tail_snapshot_8616
@@ -57,9 +68,11 @@ from inertia.cli.project_loading import (
     declared_input_path_8616,
 )
 from inertia.cli.recompile_check import check_c_recompiles_8616
-from inertia.cli.recovery_instruction_coverage import collect_exact_instruction_coverage_8616
+from inertia.cli.recovery_instruction_coverage import (
+    collect_exact_instruction_coverage_8616 as collect_exact_instruction_coverage_8616,
+)
 from inertia.cli.runtime_support import (
-    DECOMPILATION_PREP_LOCK,
+    DECOMPILATION_PREP_LOCK as DECOMPILATION_PREP_LOCK,
 )
 from inertia.cli.runtime_support import (
     AnalysisTimeout as _AnalysisTimeout,
@@ -67,39 +80,107 @@ from inertia.cli.runtime_support import (
 from inertia.cli.runtime_support import (
     analysis_timeout as _analysis_timeout,
 )
-from inertia.cli.runtime_support import (
-    guard_angr_ail_narrowing as _guard_angr_ail_narrowing,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_basepointeroffset_codegen_support as _guard_angr_basepointeroffset_codegen_support,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_clinic_stage_markers as _guard_angr_clinic_stage_markers,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_fast_post_ssa_8616 as _guard_angr_fast_post_ssa_8616,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_peephole_expr_bitwidth_assertion as _guard_angr_peephole_expr_bitwidth_assertion,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_pre_codegen_seqnode_probe as _guard_angr_pre_codegen_seqnode_probe,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_structurer_codegen_timing as _guard_angr_structurer_codegen_timing,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_structuring_codegen_internal_timing as _guard_angr_structuring_codegen_internal_timing,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_structuring_seqnode_stage_probe as _guard_angr_structuring_seqnode_stage_probe,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_tail_validation_collection_timing as _guard_angr_tail_validation_collection_timing,
-)
-from inertia.cli.runtime_support import (
-    guard_angr_variable_recovery_binop_sub_size_mismatch as _guard_angr_variable_recovery_binop_sub_size_mismatch,
-)
+
+# Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_ail_narrowing as _cli_compat_export_guard_angr_ail_narrowing,
+    )
+    _guard_angr_ail_narrowing = _cli_compat_export_guard_angr_ail_narrowing
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_ail_narrowing as _guard_angr_ail_narrowing,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_basepointeroffset_codegen_support as _cli_compat_export_guard_angr_basepointeroffset_codegen_support,
+    )
+    _guard_angr_basepointeroffset_codegen_support = _cli_compat_export_guard_angr_basepointeroffset_codegen_support
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_basepointeroffset_codegen_support as _guard_angr_basepointeroffset_codegen_support,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_clinic_stage_markers as _cli_compat_export_guard_angr_clinic_stage_markers,
+    )
+    _guard_angr_clinic_stage_markers = _cli_compat_export_guard_angr_clinic_stage_markers
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_clinic_stage_markers as _guard_angr_clinic_stage_markers,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_fast_post_ssa_8616 as _cli_compat_export_guard_angr_fast_post_ssa_8616,
+    )
+    _guard_angr_fast_post_ssa_8616 = _cli_compat_export_guard_angr_fast_post_ssa_8616
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_fast_post_ssa_8616 as _guard_angr_fast_post_ssa_8616,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_peephole_expr_bitwidth_assertion as _cli_compat_export_guard_angr_peephole_expr_bitwidth_assertion,
+    )
+    _guard_angr_peephole_expr_bitwidth_assertion = _cli_compat_export_guard_angr_peephole_expr_bitwidth_assertion
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_peephole_expr_bitwidth_assertion as _guard_angr_peephole_expr_bitwidth_assertion,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_pre_codegen_seqnode_probe as _cli_compat_export_guard_angr_pre_codegen_seqnode_probe,
+    )
+    _guard_angr_pre_codegen_seqnode_probe = _cli_compat_export_guard_angr_pre_codegen_seqnode_probe
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_pre_codegen_seqnode_probe as _guard_angr_pre_codegen_seqnode_probe,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_structurer_codegen_timing as _cli_compat_export_guard_angr_structurer_codegen_timing,
+    )
+    _guard_angr_structurer_codegen_timing = _cli_compat_export_guard_angr_structurer_codegen_timing
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_structurer_codegen_timing as _guard_angr_structurer_codegen_timing,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_structuring_codegen_internal_timing as _cli_compat_export_guard_angr_structuring_codegen_internal_timing,
+    )
+    _guard_angr_structuring_codegen_internal_timing = _cli_compat_export_guard_angr_structuring_codegen_internal_timing
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_structuring_codegen_internal_timing as _guard_angr_structuring_codegen_internal_timing,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_structuring_seqnode_stage_probe as _cli_compat_export_guard_angr_structuring_seqnode_stage_probe,
+    )
+    _guard_angr_structuring_seqnode_stage_probe = _cli_compat_export_guard_angr_structuring_seqnode_stage_probe
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_structuring_seqnode_stage_probe as _guard_angr_structuring_seqnode_stage_probe,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_tail_validation_collection_timing as _cli_compat_export_guard_angr_tail_validation_collection_timing,
+    )
+    _guard_angr_tail_validation_collection_timing = _cli_compat_export_guard_angr_tail_validation_collection_timing
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_tail_validation_collection_timing as _guard_angr_tail_validation_collection_timing,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        guard_angr_variable_recovery_binop_sub_size_mismatch as _cli_compat_export_guard_angr_variable_recovery_binop_sub_size_mismatch,
+    )
+    _guard_angr_variable_recovery_binop_sub_size_mismatch = _cli_compat_export_guard_angr_variable_recovery_binop_sub_size_mismatch
+else:
+    from inertia.cli.runtime_support import (
+        guard_angr_variable_recovery_binop_sub_size_mismatch as _guard_angr_variable_recovery_binop_sub_size_mismatch,
+    )
 from inertia.cli.runtime_support import (
     run_with_timeout_in_fork as _run_with_timeout_in_fork,
 )
@@ -127,199 +208,391 @@ from inertia.cli.x86_16_exact_slice import (
     function_original_addr,
     mark_function_original_addr,
 )
-from inertia.frontend.x86_16.analysis_failures import (
-    guard_angr_analysis_hard_failure_passthrough as _guard_angr_analysis_hard_failure_passthrough,
-)
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.frontend.x86_16.analysis_failures import (
+        guard_angr_analysis_hard_failure_passthrough as _cli_compat_export_guard_angr_analysis_hard_failure_passthrough,
+    )
+    _guard_angr_analysis_hard_failure_passthrough = _cli_compat_export_guard_angr_analysis_hard_failure_passthrough
+else:
+    from inertia.frontend.x86_16.analysis_failures import (
+        guard_angr_analysis_hard_failure_passthrough as _guard_angr_analysis_hard_failure_passthrough,
+    )
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata, extract_cod_proc_metadata
-from inertia.frontend.x86_16.cod_known_objects import known_cod_object_spec
-from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616
-from inertia.frontend.x86_16.render_compat import repair_cfunctioncall_render_targets_8616
-from inertia.ir.native_import_surface_cache import native_import_request_8616
-from inertia.ir.status_flag_lift_context import active_status_flag_lift_context_8616
+from inertia.frontend.x86_16.cod_known_objects import known_cod_object_spec as known_cod_object_spec
+from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616 as function_knowledge_base_8616
+from inertia.frontend.x86_16.render_compat import (
+    repair_cfunctioncall_render_targets_8616 as repair_cfunctioncall_render_targets_8616,
+)
+from inertia.ir.native_import_surface_cache import native_import_request_8616 as native_import_request_8616
+from inertia.ir.status_flag_lift_context import (
+    active_status_flag_lift_context_8616 as active_status_flag_lift_context_8616,
+)
 from inertia.lowering.analysis_helpers import (
-    sanitize_direct_call_sites_8616,
+    sanitize_direct_call_sites_8616 as sanitize_direct_call_sites_8616,
+)
+from inertia.lowering.analysis_helpers import (
     seed_calling_conventions,
-    seed_wide_stack_prototype_from_binary_address_8616,
+)
+from inertia.lowering.analysis_helpers import (
+    seed_wide_stack_prototype_from_binary_address_8616 as seed_wide_stack_prototype_from_binary_address_8616,
 )
 from inertia.lowering.annotations import (
-    _apply_known_helper_signatures,
-    annotate_function,
-    apply_x86_16_metadata_annotations,
+    _apply_known_helper_signatures as _apply_known_helper_signatures,
 )
-from inertia.lowering.c_ast_utils import _c_ast_cycle_path_8616
+from inertia.lowering.annotations import (
+    annotate_function,
+)
+from inertia.lowering.annotations import (
+    apply_x86_16_metadata_annotations as apply_x86_16_metadata_annotations,
+)
+from inertia.lowering.c_ast_utils import _c_ast_cycle_path_8616 as _c_ast_cycle_path_8616
 from inertia.lowering.callsite_prototype_declarations import (
-    materialize_callsite_prototype_declarations_8616,
+    materialize_callsite_prototype_declarations_8616 as materialize_callsite_prototype_declarations_8616,
 )
 from inertia.lowering.callsite_prototype_seeding import (
-    CallsitePrototypeSeedDecision8616,
-    seed_physical_callsite_prototype_8616,
+    CallsitePrototypeSeedDecision8616 as CallsitePrototypeSeedDecision8616,
+)
+from inertia.lowering.callsite_prototype_seeding import (
+    seed_physical_callsite_prototype_8616 as seed_physical_callsite_prototype_8616,
 )
 from inertia.lowering.codegen_metadata import (
-    GlobalDeclarationArrayExtent8616,
-    get_codegen_sequence_attr,
-    snapshot_stack_local_candidates_8616,
+    GlobalDeclarationArrayExtent8616 as GlobalDeclarationArrayExtent8616,
 )
-from inertia.lowering.fact_transfer import transfer_semantic_alias_facts_to_codegen_8616
+from inertia.lowering.codegen_metadata import (
+    get_codegen_sequence_attr as get_codegen_sequence_attr,
+)
+from inertia.lowering.codegen_metadata import (
+    snapshot_stack_local_candidates_8616 as snapshot_stack_local_candidates_8616,
+)
+from inertia.lowering.fact_transfer import (
+    transfer_semantic_alias_facts_to_codegen_8616 as transfer_semantic_alias_facts_to_codegen_8616,
+)
 from inertia.lowering.function_pointer_parameters import (
-    materialize_function_pointer_parameters_8616,
+    materialize_function_pointer_parameters_8616 as materialize_function_pointer_parameters_8616,
 )
 from inertia.lowering.gp_word_runtime import (
-    gp_runtime_replaced_declaration_names_8616,
-    project_gp_runtime_declarations_8616,
+    gp_runtime_replaced_declaration_names_8616 as gp_runtime_replaced_declaration_names_8616,
+)
+from inertia.lowering.gp_word_runtime import (
+    project_gp_runtime_declarations_8616 as project_gp_runtime_declarations_8616,
 )
 from inertia.lowering.near_pointer_argument_values import (
-    is_near_pointer_argument_helper_call_8616,
+    is_near_pointer_argument_helper_call_8616 as is_near_pointer_argument_helper_call_8616,
 )
 from inertia.lowering.real_mode_linear import (
-    DirectStackMoveSourceKind8616,
-    lower_stable_ss_linear_stack_dereferences_8616,
-    materialize_direct_stack_mov_instructions_8616,
+    DirectStackMoveSourceKind8616 as DirectStackMoveSourceKind8616,
+)
+from inertia.lowering.real_mode_linear import (
+    lower_stable_ss_linear_stack_dereferences_8616 as lower_stable_ss_linear_stack_dereferences_8616,
+)
+from inertia.lowering.real_mode_linear import (
+    materialize_direct_stack_mov_instructions_8616 as materialize_direct_stack_mov_instructions_8616,
 )
 from inertia.lowering.segment_global_materialization import (
-    run_segment_global_materialization_8616,
+    run_segment_global_materialization_8616 as run_segment_global_materialization_8616,
 )
-from inertia.lowering.segment_register_state import runtime_segment_name_for_variable_8616
+from inertia.lowering.segment_register_state import (
+    runtime_segment_name_for_variable_8616 as runtime_segment_name_for_variable_8616,
+)
 from inertia.lowering.segmented_global_loads import (
-    SegmentedGlobalLoadStats8616,
-    materialize_compare_register_global_carriers_8616,
-    materialize_direct_global_symbol_stores_8616,
-    materialize_indexed_segmented_global_loads_8616,
-    materialize_named_segmented_global_loads_8616,
-    reapply_proven_named_global_aggregate_types_8616,
-    reapply_proven_stack_aggregate_field_projections_8616,
-    reapply_proven_stack_aggregate_types_8616,
-    reconcile_registered_named_global_aggregate_declarations_8616,
+    SegmentedGlobalLoadStats8616 as SegmentedGlobalLoadStats8616,
 )
-from inertia.lowering.segmented_memory_lowering import apply_runtime_segment_lowering_8616
-from inertia.lowering.segmented_memory_reasoning import apply_x86_16_segmented_memory_reasoning
+from inertia.lowering.segmented_global_loads import (
+    materialize_compare_register_global_carriers_8616 as materialize_compare_register_global_carriers_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    materialize_direct_global_symbol_stores_8616 as materialize_direct_global_symbol_stores_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    materialize_indexed_segmented_global_loads_8616 as materialize_indexed_segmented_global_loads_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    materialize_named_segmented_global_loads_8616 as materialize_named_segmented_global_loads_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    reapply_proven_named_global_aggregate_types_8616 as reapply_proven_named_global_aggregate_types_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    reapply_proven_stack_aggregate_field_projections_8616 as reapply_proven_stack_aggregate_field_projections_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    reapply_proven_stack_aggregate_types_8616 as reapply_proven_stack_aggregate_types_8616,
+)
+from inertia.lowering.segmented_global_loads import (
+    reconcile_registered_named_global_aggregate_declarations_8616 as reconcile_registered_named_global_aggregate_declarations_8616,
+)
+from inertia.lowering.segmented_memory_lowering import (
+    apply_runtime_segment_lowering_8616 as apply_runtime_segment_lowering_8616,
+)
+from inertia.lowering.segmented_memory_reasoning import (
+    apply_x86_16_segmented_memory_reasoning as apply_x86_16_segmented_memory_reasoning,
+)
 from inertia.lowering.stack_aggregate_objects import (
-    reapply_stack_aggregate_object_facts_8616,
+    reapply_stack_aggregate_object_facts_8616 as reapply_stack_aggregate_object_facts_8616,
 )
-from inertia.lowering.stack_lowering import run_stack_lowering_pass_8616
+from inertia.lowering.stack_lowering import run_stack_lowering_pass_8616 as run_stack_lowering_pass_8616
 from inertia.lowering.stack_lowering_from_facts import (
-    attach_cod_stack_alias_annotations_8616,
-    lower_stack_accesses_from_alias_facts_8616,
+    attach_cod_stack_alias_annotations_8616 as attach_cod_stack_alias_annotations_8616,
 )
-from inertia.lowering.stack_probe_return_facts import build_typed_stack_probe_return_facts_8616
+from inertia.lowering.stack_lowering_from_facts import (
+    lower_stack_accesses_from_alias_facts_8616 as lower_stack_accesses_from_alias_facts_8616,
+)
+from inertia.lowering.stack_probe_return_facts import (
+    build_typed_stack_probe_return_facts_8616 as build_typed_stack_probe_return_facts_8616,
+)
 from inertia.lowering.stack_prototype_materialization import (
-    reconcile_exact_stack_argument_prototype_8616,
+    reconcile_exact_stack_argument_prototype_8616 as reconcile_exact_stack_argument_prototype_8616,
 )
 from inertia.lowering.terminal_register_return_types import (
-    materialize_terminal_register_return_type_8616,
+    materialize_terminal_register_return_type_8616 as materialize_terminal_register_return_type_8616,
 )
 from inertia.pipeline.architecture_guard import (
-    assert_final_c_quality_8616,
-    final_c_has_unreachable_call_after_return_8616,
+    assert_final_c_quality_8616 as assert_final_c_quality_8616,
 )
-from inertia.pipeline.contracts import assert_pipeline_contracts_8616
+from inertia.pipeline.architecture_guard import (
+    final_c_has_unreachable_call_after_return_8616 as final_c_has_unreachable_call_after_return_8616,
+)
+from inertia.pipeline.contracts import assert_pipeline_contracts_8616 as assert_pipeline_contracts_8616
 from inertia.pipeline.errors import PipelineHardError
-from inertia.pipeline.recovery_coverage_guard import assert_exact_instruction_coverage_8616
+from inertia.pipeline.recovery_coverage_guard import (
+    assert_exact_instruction_coverage_8616 as assert_exact_instruction_coverage_8616,
+)
 from inertia.pipeline.render_authority import (
-    CodegenRenderAuthority8616,
-    codegen_render_authority_8616,
-    require_codegen_render_integrity_8616,
+    CodegenRenderAuthority8616 as CodegenRenderAuthority8616,
+)
+from inertia.pipeline.render_authority import (
+    codegen_render_authority_8616 as codegen_render_authority_8616,
+)
+from inertia.pipeline.render_authority import (
+    require_codegen_render_integrity_8616 as require_codegen_render_integrity_8616,
 )
 from inertia.postprocess.decompiler_postprocess_calls import (
-    _replay_bound_callsite_argument_consumer_8616,
-    replay_callsite_stack_arguments_after_regeneration_8616,
+    _replay_bound_callsite_argument_consumer_8616 as _replay_bound_callsite_argument_consumer_8616,
 )
-from inertia.postprocess.decompiler_postprocess_simplify import _simplify_structured_expressions_8616
+from inertia.postprocess.decompiler_postprocess_calls import (
+    replay_callsite_stack_arguments_after_regeneration_8616 as replay_callsite_stack_arguments_after_regeneration_8616,
+)
+from inertia.postprocess.decompiler_postprocess_simplify import (
+    _simplify_structured_expressions_8616 as _simplify_structured_expressions_8616,
+)
 from inertia.postprocess.decompiler_postprocess_stage import (
-    _dead_code_elimination_after_flag_prune_8616,
-    _materialize_missing_terminal_ax_return_8616,
-    _repair_missing_cnode_codegen_metadata_8616,
-    finalize_late_ast_cleanup_8616,
-    finalize_post_switch_cleanup_after_seqnode_replacement_8616,
-    run_callsite_stack_fact_materialization_8616,
+    _dead_code_elimination_after_flag_prune_8616 as _dead_code_elimination_after_flag_prune_8616,
 )
-from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616
-from inertia.postprocess.optimization.dce import _dead_code_elimination_8616
-from inertia.semantics.callee_name_normalization import normalize_callee_name_8616
+from inertia.postprocess.decompiler_postprocess_stage import (
+    _materialize_missing_terminal_ax_return_8616 as _materialize_missing_terminal_ax_return_8616,
+)
+from inertia.postprocess.decompiler_postprocess_stage import (
+    _repair_missing_cnode_codegen_metadata_8616 as _repair_missing_cnode_codegen_metadata_8616,
+)
+from inertia.postprocess.decompiler_postprocess_stage import (
+    finalize_late_ast_cleanup_8616 as finalize_late_ast_cleanup_8616,
+)
+from inertia.postprocess.decompiler_postprocess_stage import (
+    finalize_post_switch_cleanup_after_seqnode_replacement_8616 as finalize_post_switch_cleanup_after_seqnode_replacement_8616,
+)
+from inertia.postprocess.decompiler_postprocess_stage import (
+    run_callsite_stack_fact_materialization_8616 as run_callsite_stack_fact_materialization_8616,
+)
+from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616 as _iter_c_nodes_deep_8616
+from inertia.postprocess.optimization.dce import _dead_code_elimination_8616 as _dead_code_elimination_8616
+from inertia.semantics.callee_name_normalization import normalize_callee_name_8616 as normalize_callee_name_8616
 from inertia.semantics.compiler_helpers import (
-    CompilerHelperEvidence8616,
-    hook_x86_16_compiler_helper_at_8616,
-    identify_x86_16_compiler_helper_at_8616,
-    is_x86_16_stack_probe_evidence_kind_8616,
+    CompilerHelperEvidence8616 as CompilerHelperEvidence8616,
+)
+from inertia.semantics.compiler_helpers import (
+    hook_x86_16_compiler_helper_at_8616 as hook_x86_16_compiler_helper_at_8616,
+)
+from inertia.semantics.compiler_helpers import (
+    identify_x86_16_compiler_helper_at_8616 as identify_x86_16_compiler_helper_at_8616,
+)
+from inertia.semantics.compiler_helpers import (
+    is_x86_16_stack_probe_evidence_kind_8616 as is_x86_16_stack_probe_evidence_kind_8616,
+)
+from inertia.semantics.compiler_helpers import (
     is_x86_16_stack_probe_name_8616,
 )
 from inertia.semantics.stack_probe_fact_trace import (
-    callsite_stack_probe_evidence_8616,
-    format_stack_probe_fact_stats_8616,
+    callsite_stack_probe_evidence_8616 as callsite_stack_probe_evidence_8616,
 )
-from inertia.structuring.clinic_option_policy import enforce_x86_16_clinic_options_8616
+from inertia.semantics.stack_probe_fact_trace import (
+    format_stack_probe_fact_stats_8616 as format_stack_probe_fact_stats_8616,
+)
+from inertia.structuring.clinic_option_policy import (
+    enforce_x86_16_clinic_options_8616 as enforce_x86_16_clinic_options_8616,
+)
 from inertia.structuring.compare32_recovery import recover_32bit_compare_c_8616
 from inertia.structuring.condition_provenance import (
-    replay_codegen_structured_condition_segment_provenance_8616,
+    replay_codegen_structured_condition_segment_provenance_8616 as replay_codegen_structured_condition_segment_provenance_8616,
 )
 from inertia.structuring.decompiler_structuring_stage import (
-    active_structuring_function_8616,
-    finalize_seqnode_switch_replay_after_replacement_8616,
-    finalize_shared_call_occurrences_8616,
-    finalize_typed_edge_switch_replacement_if_enabled_8616,
-    prune_redundant_loop_break_carriers_after_lowering_8616,
-    record_typed_edge_switch_replacement_diagnostics_8616,
-    recover_structuring_canonical_for_loops_8616,
-    run_direct_instruction_materialization_8616,
-    seqnode_switch_replacement_changed_for_codegen_8616,
+    active_structuring_function_8616 as active_structuring_function_8616,
 )
-from inertia.structuring.loop_body_repair import repair_empty_counted_loop_body_from_evidence_8616
+from inertia.structuring.decompiler_structuring_stage import (
+    finalize_seqnode_switch_replay_after_replacement_8616 as finalize_seqnode_switch_replay_after_replacement_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    finalize_shared_call_occurrences_8616 as finalize_shared_call_occurrences_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    finalize_typed_edge_switch_replacement_if_enabled_8616 as finalize_typed_edge_switch_replacement_if_enabled_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    prune_redundant_loop_break_carriers_after_lowering_8616 as prune_redundant_loop_break_carriers_after_lowering_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    record_typed_edge_switch_replacement_diagnostics_8616 as record_typed_edge_switch_replacement_diagnostics_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    recover_structuring_canonical_for_loops_8616 as recover_structuring_canonical_for_loops_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    run_direct_instruction_materialization_8616 as run_direct_instruction_materialization_8616,
+)
+from inertia.structuring.decompiler_structuring_stage import (
+    seqnode_switch_replacement_changed_for_codegen_8616 as seqnode_switch_replacement_changed_for_codegen_8616,
+)
+from inertia.structuring.loop_body_repair import (
+    repair_empty_counted_loop_body_from_evidence_8616 as repair_empty_counted_loop_body_from_evidence_8616,
+)
 from inertia.structuring.simple_loop_recovery import recover_counted_stack_loop_c_8616
 from inertia.validation.tail_validation import (
-    X86_16TailValidationSummary,
-    collect_x86_16_tail_validation_summary,
-    compare_x86_16_tail_validation_summaries,
-    refresh_x86_16_final_semantic_validation_8616,
-    x86_16_tail_validation_result_passed,
+    X86_16TailValidationSummary as X86_16TailValidationSummary,
+)
+from inertia.validation.tail_validation import (
+    collect_x86_16_tail_validation_summary as collect_x86_16_tail_validation_summary,
+)
+from inertia.validation.tail_validation import (
+    compare_x86_16_tail_validation_summaries as compare_x86_16_tail_validation_summaries,
+)
+from inertia.validation.tail_validation import (
+    refresh_x86_16_final_semantic_validation_8616 as refresh_x86_16_final_semantic_validation_8616,
+)
+from inertia.validation.tail_validation import (
+    x86_16_tail_validation_result_passed as x86_16_tail_validation_result_passed,
+)
+from inertia.validation.tail_validation import (
     x86_16_tail_validation_snapshot_passed,
 )
 
 from .cli_c_ast_rewrites import (
-    _attach_access_trait_field_names,
-    _attach_cod_global_declaration_names,
-    _attach_cod_global_declaration_types,
-    _attach_cod_global_names,
-    _attach_cod_variable_names,
-    _attach_lst_data_names,
-    _attach_pointer_member_names,
-    _attach_register_names,
-    _attach_segment_register_names,
-    _attach_ss_stack_variables,
-    _canonicalize_stack_cvars,
-    _coalesce_cod_word_global_loads,
-    _coalesce_cod_word_global_statements,
-    _coalesce_far_pointer_stack_expressions,
-    _coalesce_linear_recurrence_statements,
-    _coalesce_segmented_word_load_expressions,
-    _collect_access_traits,
-    _dedupe_codegen_variable_names_8616,
-    _elide_redundant_segment_pointer_dereferences,
-    _iter_c_nodes_deep,
-    _materialize_missing_register_local_declarations,
-    _materialize_missing_stack_local_declarations,
-    _normalize_scalar_byte_register_types,
-    _prune_dead_local_assignments,
-    _prune_tiny_wrapper_staging_locals,
-    _prune_unused_local_declarations,
-    _prune_unused_unnamed_memory_declarations,
-    _prune_void_function_return_values,
-    _rewrite_ss_stack_byte_offsets,
-    _run_typed_widening_pass,
-    _simplify_basic_algebraic_identities,
-    _simplify_nested_mk_fp_calls,
-    _simplify_structured_c_expressions,
+    _attach_access_trait_field_names as _attach_access_trait_field_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_cod_global_declaration_names as _attach_cod_global_declaration_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_cod_global_declaration_types as _attach_cod_global_declaration_types,
+)
+from .cli_c_ast_rewrites import (
+    _attach_cod_global_names as _attach_cod_global_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_cod_variable_names as _attach_cod_variable_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_lst_data_names as _attach_lst_data_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_pointer_member_names as _attach_pointer_member_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_register_names as _attach_register_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_segment_register_names as _attach_segment_register_names,
+)
+from .cli_c_ast_rewrites import (
+    _attach_ss_stack_variables as _attach_ss_stack_variables,
+)
+from .cli_c_ast_rewrites import (
+    _canonicalize_stack_cvars as _canonicalize_stack_cvars,
+)
+from .cli_c_ast_rewrites import (
+    _coalesce_cod_word_global_loads as _coalesce_cod_word_global_loads,
+)
+from .cli_c_ast_rewrites import (
+    _coalesce_cod_word_global_statements as _coalesce_cod_word_global_statements,
+)
+from .cli_c_ast_rewrites import (
+    _coalesce_far_pointer_stack_expressions as _coalesce_far_pointer_stack_expressions,
+)
+from .cli_c_ast_rewrites import (
+    _coalesce_linear_recurrence_statements as _coalesce_linear_recurrence_statements,
+)
+from .cli_c_ast_rewrites import (
+    _coalesce_segmented_word_load_expressions as _coalesce_segmented_word_load_expressions,
+)
+from .cli_c_ast_rewrites import (
+    _collect_access_traits as _collect_access_traits,
+)
+from .cli_c_ast_rewrites import (
+    _dedupe_codegen_variable_names_8616 as _dedupe_codegen_variable_names_8616,
+)
+from .cli_c_ast_rewrites import (
+    _elide_redundant_segment_pointer_dereferences as _elide_redundant_segment_pointer_dereferences,
+)
+from .cli_c_ast_rewrites import (
+    _iter_c_nodes_deep as _iter_c_nodes_deep,
+)
+from .cli_c_ast_rewrites import (
+    _materialize_missing_register_local_declarations as _materialize_missing_register_local_declarations,
+)
+from .cli_c_ast_rewrites import (
+    _materialize_missing_stack_local_declarations as _materialize_missing_stack_local_declarations,
+)
+from .cli_c_ast_rewrites import (
+    _normalize_scalar_byte_register_types as _normalize_scalar_byte_register_types,
+)
+from .cli_c_ast_rewrites import (
+    _prune_dead_local_assignments as _prune_dead_local_assignments,
+)
+from .cli_c_ast_rewrites import (
+    _prune_tiny_wrapper_staging_locals as _prune_tiny_wrapper_staging_locals,
+)
+from .cli_c_ast_rewrites import (
+    _prune_unused_local_declarations as _prune_unused_local_declarations,
+)
+from .cli_c_ast_rewrites import (
+    _prune_unused_unnamed_memory_declarations as _prune_unused_unnamed_memory_declarations,
+)
+from .cli_c_ast_rewrites import (
+    _prune_void_function_return_values as _prune_void_function_return_values,
+)
+from .cli_c_ast_rewrites import (
+    _rewrite_ss_stack_byte_offsets as _rewrite_ss_stack_byte_offsets,
+)
+from .cli_c_ast_rewrites import (
+    _run_typed_widening_pass as _run_typed_widening_pass,
+)
+from .cli_c_ast_rewrites import (
+    _simplify_basic_algebraic_identities as _simplify_basic_algebraic_identities,
+)
+from .cli_c_ast_rewrites import (
+    _simplify_nested_mk_fp_calls as _simplify_nested_mk_fp_calls,
+)
+from .cli_c_ast_rewrites import (
+    _simplify_structured_c_expressions as _simplify_structured_c_expressions,
 )
 from .cli_c_text_postprocess import (
-    _annotate_cod_proc_output,
-    _collapse_annotated_stack_aliases_text,
-    _collapse_duplicate_type_keywords_text,
-    _dedupe_adjacent_prototype_lines,
-    _dedupe_conflicting_extern_variable_declarations_text,
+    _annotate_cod_proc_output as _annotate_cod_proc_output,
+)
+from .cli_c_text_postprocess import (
+    _collapse_annotated_stack_aliases_text as _collapse_annotated_stack_aliases_text,
+)
+from .cli_c_text_postprocess import (
+    _collapse_duplicate_type_keywords_text as _collapse_duplicate_type_keywords_text,
+)
+from .cli_c_text_postprocess import (
+    _dedupe_adjacent_prototype_lines as _dedupe_adjacent_prototype_lines,
+)
+from .cli_c_text_postprocess import (
+    _dedupe_conflicting_extern_variable_declarations_text as _dedupe_conflicting_extern_variable_declarations_text,
+)
+from .cli_c_text_postprocess import (
     _dedupe_duplicate_local_declarations_text,
-    _format_known_helper_calls,
     _hoist_c89_local_declarations_text,
-    _materialize_annotated_cod_declarations_text,
     _materialize_missing_direct_call_prototypes_text,
-    _materialize_missing_g_hex_externs_text,
     _materialize_missing_generic_local_declarations_text,
     _materialize_missing_segment_macro_locals_text,
     _materialize_missing_synthetic_global_declarations_text,
@@ -327,33 +600,78 @@ from .cli_c_text_postprocess import (
     _materialize_stack_base_placeholder_declaration_text,
     _normalize_anonymous_call_targets,
     _normalize_boolean_conditions,
-    _normalize_concat_zero_text,
     _normalize_function_signature_arg_names,
-    _normalize_integer_dereference_stores_text,
-    _normalize_msc_signed_int_function_signature_text,
-    _normalize_portable_flat_main_signature_text,
-    _normalize_scalar_assigned_extern_arrays_text,
     _normalize_scalar_gb_array_declarations_text,
     _normalize_seg_offset_void_pointer_args_text,
-    _normalize_shift_add_precedence_in_assignments,
-    _normalize_signed_char_function_signature_text,
-    _normalize_spurious_duplicate_local_suffixes,
-    _normalize_unary_not_shift_precedence_text,
-    _prune_dead_stack_base_assignments_text,
     _prune_invalid_simple_function_prototypes_text,
-    _prune_non_lvalue_arithmetic_assignments,
     _prune_parameter_shadow_declarations_text,
-    _prune_trailing_generic_return_text,
     _prune_undefined_fragment_carrier_assignments_text,
     _prune_unused_local_declarations_text,
-    _prune_unused_staging_assignments,
     _prune_void_call_assignments_text,
-    _prune_void_function_return_values_text,
-    _prune_weaker_conflicting_prototypes_text,
-    _rewrite_known_helper_signature_text,
-    _sanitize_mangled_autonames_text,
-    _simplify_x86_16_stack_byte_pointers,
     _strip_register_fragment_suffixes_text,
+)
+from .cli_c_text_postprocess import (
+    _format_known_helper_calls as _format_known_helper_calls,
+)
+from .cli_c_text_postprocess import (
+    _materialize_annotated_cod_declarations_text as _materialize_annotated_cod_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_missing_g_hex_externs_text as _materialize_missing_g_hex_externs_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_concat_zero_text as _normalize_concat_zero_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_integer_dereference_stores_text as _normalize_integer_dereference_stores_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_msc_signed_int_function_signature_text as _normalize_msc_signed_int_function_signature_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_portable_flat_main_signature_text as _normalize_portable_flat_main_signature_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_scalar_assigned_extern_arrays_text as _normalize_scalar_assigned_extern_arrays_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_shift_add_precedence_in_assignments as _normalize_shift_add_precedence_in_assignments,
+)
+from .cli_c_text_postprocess import (
+    _normalize_signed_char_function_signature_text as _normalize_signed_char_function_signature_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_spurious_duplicate_local_suffixes as _normalize_spurious_duplicate_local_suffixes,
+)
+from .cli_c_text_postprocess import (
+    _normalize_unary_not_shift_precedence_text as _normalize_unary_not_shift_precedence_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_dead_stack_base_assignments_text as _prune_dead_stack_base_assignments_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_non_lvalue_arithmetic_assignments as _prune_non_lvalue_arithmetic_assignments,
+)
+from .cli_c_text_postprocess import (
+    _prune_trailing_generic_return_text as _prune_trailing_generic_return_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_unused_staging_assignments as _prune_unused_staging_assignments,
+)
+from .cli_c_text_postprocess import (
+    _prune_void_function_return_values_text as _prune_void_function_return_values_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_weaker_conflicting_prototypes_text as _prune_weaker_conflicting_prototypes_text,
+)
+from .cli_c_text_postprocess import (
+    _rewrite_known_helper_signature_text as _rewrite_known_helper_signature_text,
+)
+from .cli_c_text_postprocess import (
+    _sanitize_mangled_autonames_text as _sanitize_mangled_autonames_text,
+)
+from .cli_c_text_postprocess import (
+    _simplify_x86_16_stack_byte_pointers as _simplify_x86_16_stack_byte_pointers,
 )
 from .cli_function_discovery import (
     _addr_in_ranges,
@@ -361,20 +679,31 @@ from .cli_function_discovery import (
     _recover_candidate_function_pair,
 )
 from .cli_interrupt_modeling import (
-    _attach_dos_pseudo_callees,
-    _attach_interrupt_wrapper_callees,
-    _lower_interrupt_wrapper_result_reads,
+    _attach_dos_pseudo_callees as _attach_dos_pseudo_callees,
+)
+from .cli_interrupt_modeling import (
+    _attach_interrupt_wrapper_callees as _attach_interrupt_wrapper_callees,
+)
+from .cli_interrupt_modeling import (
+    _lower_interrupt_wrapper_result_reads as _lower_interrupt_wrapper_result_reads,
 )
 from .direct_addr_failure_family import (
     FailureFamilyState,
-    advance_failure_family_state,
     build_failure_family_snapshot,
-    record_failure_family_retry_stop,
-    remember_failure_family_candidate,
 )
-from .direct_addr_stage_bundle import DirectAddrStageBundleInput, write_direct_addr_stage_bundle
+from .direct_addr_failure_family import (
+    advance_failure_family_state as advance_failure_family_state,
+)
+from .direct_addr_failure_family import (
+    record_failure_family_retry_stop as record_failure_family_retry_stop,
+)
+from .direct_addr_failure_family import (
+    remember_failure_family_candidate as remember_failure_family_candidate,
+)
+from .direct_addr_stage_bundle import DirectAddrStageBundleInput as DirectAddrStageBundleInput
+from .direct_addr_stage_bundle import write_direct_addr_stage_bundle as write_direct_addr_stage_bundle
 from .disassembly_helpers import _format_asm_range, _infer_linear_disassembly_window
-from .msc51_local_hash import emit_msc51_diagnostic
+from .msc51_local_hash import emit_msc51_diagnostic as emit_msc51_diagnostic
 
 print: Callable[..., None] = _timestamped_print
 __all__ = [

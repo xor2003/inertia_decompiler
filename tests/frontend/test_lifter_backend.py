@@ -360,7 +360,8 @@ builtins.__import__ = import_without_cython
 """
     for mode, prefix in (("python", ""), ("cython", ""), ("cython", without_cython)):
         env = dict(os.environ, INERTIA_VEX_BACKEND=mode, PYTHON_JIT="1", PYTHONPATH=str(ROOT))
-        result = subprocess.run([sys.executable, "-c", prefix + code], cwd=ROOT, env=env, capture_output=True, text=True, check=True, timeout=180)
+        result = subprocess.run([sys.executable, "-c", prefix + code], cwd=ROOT, env=env, capture_output=True, text=True, check=False, timeout=180)
+        assert result.returncode == 0, result.stdout + result.stderr
         results.append(json.loads(result.stdout))
     assert results[0]["backend"] == "python"
     assert results[1]["backend"] == "cython"

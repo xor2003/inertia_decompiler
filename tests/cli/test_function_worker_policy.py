@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from dataclasses import dataclass
 
 from inertia.cli.function_worker_policy import (
@@ -159,3 +161,24 @@ def test_dependency_order_uses_explicit_native_hints_for_placeholders() -> None:
     ordered = dependency_ordered_function_work_8616(items, caller_targets={100: (200, 300)})
     assert tuple(item.index for item in ordered) == (2, 3, 1)
     assert tuple(item.index for item in items) == (1, 2, 3)
+
+
+def test_cold_worker_policy_defers_graph_dependency() -> None:
+    """Basic worker policy stays light; dependency ordering loads its graph owner."""
+    script = """
+import sys
+import inertia.cli.function_worker_policy as policy
+assert "networkx" not in sys.modules
+assert policy.clean_process_override_8616(None) is policy.CleanProcessOverride8616.DEFAULT
+assert "networkx" not in sys.modules
+assert policy.dependency_ordered_function_work_8616(()) == ()
+assert "networkx" in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

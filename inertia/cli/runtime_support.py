@@ -10,36 +10,46 @@ angr/codegen compatibility hooks and diagnostic state attached to angr project o
 from __future__ import annotations
 
 import contextlib
-import faulthandler
+import faulthandler as faulthandler
 import io
 import logging
 import os
 import re
-import resource
+import resource as resource
 import sys
 import threading
 import time
 import traceback
 import typing
+import typing as _cli_compat_typing
 import weakref
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as _FuturesTimeoutError
-from concurrent.futures.thread import _threads_queues, _worker
-from dataclasses import dataclass, field
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor as ThreadPoolExecutor
 
-from inertia.ir.condition_ir import ConditionEdgeEvidence
+# Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
+if _cli_compat_typing.TYPE_CHECKING:
+    from concurrent.futures import TimeoutError as _cli_compat_export_FuturesTimeoutError
+    _FuturesTimeoutError = _cli_compat_export_FuturesTimeoutError
+else:
+    from concurrent.futures import TimeoutError as _FuturesTimeoutError
+from concurrent.futures.thread import _threads_queues as _threads_queues
+from concurrent.futures.thread import _worker as _worker
+from dataclasses import dataclass, field
+from datetime import datetime as datetime
+
+from inertia.ir.condition_ir import ConditionEdgeEvidence as ConditionEdgeEvidence
 
 from .analysis_timeout import AnalysisTimeout as AnalysisTimeout
 from .analysis_timeout import analysis_timeout as analysis_timeout
-from .angr_codegen_tags import normalize_codegen_node_tags_8616
+from .angr_codegen_tags import normalize_codegen_node_tags_8616 as normalize_codegen_node_tags_8616
 from .cli_terminal_status import CliTerminalStatus, emit_terminal_status
 from .fork_timeout import run_with_timeout_in_fork as run_with_timeout_in_fork
 from .prefork_job_pool import PreforkJobPool as PreforkJobPool
 from .variable_recovery_sub_guard import (
-    build_guarded_handle_binop_mul_8616,
-    build_guarded_handle_binop_sub_8616,
+    build_guarded_handle_binop_mul_8616 as build_guarded_handle_binop_mul_8616,
+)
+from .variable_recovery_sub_guard import (
+    build_guarded_handle_binop_sub_8616 as build_guarded_handle_binop_sub_8616,
 )
 
 DEFAULT_FREE_RAM_BUDGET_FRACTION: float = 0.45
@@ -3011,8 +3021,11 @@ class ThreadBoundTextIO(io.TextIOBase):
     """Delegate text output to a typed per-thread stream when one is active."""
 
     def __init__(self, fallback: typing.TextIO) -> None:
+        """Bind the fallback stream and the closed-flush guard on the instance."""
         self._fallback = fallback
         self._local = _ThreadStreamState()
+        # IOBase finalization can run after interpreter teardown clears module globals.
+        self._suppress_closed_flush: type[contextlib.suppress] = contextlib.suppress
 
     @contextlib.contextmanager
     def target(self, stream: typing.TextIO) -> Iterator[None]:
@@ -3033,7 +3046,7 @@ class ThreadBoundTextIO(io.TextIOBase):
 
     def flush(self) -> None:
         """Flush the active stream unless it has already closed."""
-        with contextlib.suppress(ValueError):
+        with self._suppress_closed_flush(ValueError):
             self._stream().flush()
 
     def isatty(self) -> bool:

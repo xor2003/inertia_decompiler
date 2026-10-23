@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-import networkx as nx
+lazy import networkx as nx
 
 CLEAN_PROCESS_WORKER_CAP_8616: int = 4
 """Conservative aggregate-memory cap for isolated x86-16 workers.

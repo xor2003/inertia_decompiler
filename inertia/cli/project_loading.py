@@ -6,7 +6,7 @@ Responsibility: construct angr project objects and binary byte views without own
 
 from __future__ import annotations
 
-import io
+import io as io
 import os
 import re
 import sys
@@ -18,26 +18,36 @@ from typing import Any, Protocol, cast
 
 import angr
 
-from inertia.cli.mz_static_intake import MzStaticIntakeRequest8616
+from inertia.cli.mz_static_intake import MzStaticIntakeRequest8616 as MzStaticIntakeRequest8616
 from inertia.cli.real16_declared_project import (
-    build_declared_project_8616,
+    build_declared_project_8616 as build_declared_project_8616,
 )
 from inertia.cli.real16_declared_project import (
     declared_input_path_8616 as declared_input_path_8616,
 )
 from inertia.cli.telemetry import trace_function
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.exepack import unpack_exepack
-from inertia.frontend.x86_16.mz_image import UnpackedMZImage
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16 as Arch86_16
+from inertia.frontend.x86_16.exepack import unpack_exepack as unpack_exepack
+from inertia.frontend.x86_16.mz_image import UnpackedMZImage as UnpackedMZImage
 from inertia.frontend.x86_16.packed_mz import (
-    PackedMZError,
-    PackerDetection,
-    PackerType,
-    detect_packer,
-    unpack_lzexe_091,
+    PackedMZError as PackedMZError,
 )
-from inertia.frontend.x86_16.pklite import unpack_pklite
-from inertia.semantics.compiler_helpers import hook_x86_16_known_compiler_helpers_8616
+from inertia.frontend.x86_16.packed_mz import (
+    PackerDetection as PackerDetection,
+)
+from inertia.frontend.x86_16.packed_mz import (
+    PackerType as PackerType,
+)
+from inertia.frontend.x86_16.packed_mz import (
+    detect_packer as detect_packer,
+)
+from inertia.frontend.x86_16.packed_mz import (
+    unpack_lzexe_091 as unpack_lzexe_091,
+)
+from inertia.frontend.x86_16.pklite import unpack_pklite as unpack_pklite
+from inertia.semantics.compiler_helpers import (
+    hook_x86_16_known_compiler_helpers_8616 as hook_x86_16_known_compiler_helpers_8616,
+)
 
 _IDA_BASE_ADDRESS_RE = re.compile(r"Base Address:\s*([0-9A-Fa-f]+)h", re.IGNORECASE)
 _TRACE_FUNCTION: Any = cast(Any, trace_function)

@@ -55,11 +55,11 @@ to 60 seconds. See [catalog, unpacking and DOS-tool setup](reference/pr1-adoptio
 for limitations and installation hints. Required compiler checks are not
 silently skipped.
 
-The repo is tested against the angr stack pinned in [pyproject.toml](pyproject.toml).
+The repo is tested against the angr stack pinned in [pyproject.toml](pyproject.toml). Python 3.15.1 is required; .python-version and CI select the same interpreter.
 
 ```bash
 git submodule update --init --recursive
-python3.11 -m venv .venv
+python3.15 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt

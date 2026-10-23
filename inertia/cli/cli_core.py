@@ -8,403 +8,916 @@ Dynamic attributes in this CLI boundary are limited to third-party angr/codegen 
 from __future__ import annotations
 
 import contextlib
-import copy
-import hashlib
-import json
-import logging
+import copy as copy
+import hashlib as hashlib
+import json as json
+import logging as logging
 import os
-import re
-import subprocess
+import re as re
+import subprocess as subprocess
 import sys
-import tempfile
-import threading
-import time
-import typing
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
-from concurrent.futures import FIRST_COMPLETED, wait
-from concurrent.futures import TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass, field, replace
-from enum import Enum
-from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
+import tempfile as tempfile
+import threading as threading
+import time as time
+import typing as _cli_compat_typing
+import typing as typing
+from collections.abc import Callable
+from collections.abc import Iterable as Iterable
+from collections.abc import Iterator as Iterator
+from collections.abc import Mapping as Mapping
+from collections.abc import Sequence as Sequence
+from collections.abc import Sized as Sized
+from concurrent.futures import FIRST_COMPLETED as FIRST_COMPLETED
+from concurrent.futures import wait as wait
 
-import angr
+# Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
+if _cli_compat_typing.TYPE_CHECKING:
+    from concurrent.futures import TimeoutError as _cli_compat_export_FuturesTimeoutError
+    FuturesTimeoutError = _cli_compat_export_FuturesTimeoutError
+else:
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+from dataclasses import dataclass as dataclass
+from dataclasses import field as field
+from dataclasses import replace as replace
+from enum import Enum as Enum
+from pathlib import Path as Path
+from types import SimpleNamespace
+from typing import Any as Any
+from typing import cast
+
+import angr as angr
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from inertia.cli.accepted_payload_integrity import (
-    AcceptedPayloadIntegrity8616,
-    AcceptedPayloadIntegrityVerdict8616,
-    verify_function_work_result_payload_integrity_8616,
+    AcceptedPayloadIntegrity8616 as AcceptedPayloadIntegrity8616,
+)
+from inertia.cli.accepted_payload_integrity import (
+    AcceptedPayloadIntegrityVerdict8616 as AcceptedPayloadIntegrityVerdict8616,
+)
+from inertia.cli.accepted_payload_integrity import (
+    verify_function_work_result_payload_integrity_8616 as verify_function_work_result_payload_integrity_8616,
 )
 from inertia.cli.architecture_runtime_guard import (
-    ARCHITECTURE_GUARD_VERIFIED_PARENT_PID_ENV,
+    ARCHITECTURE_GUARD_VERIFIED_PARENT_PID_ENV as ARCHITECTURE_GUARD_VERIFIED_PARENT_PID_ENV,
+)
+from inertia.cli.architecture_runtime_guard import (
     DecompilerArchitectureGuardError,
     assert_decompiler_architecture_clean,
 )
-from inertia.cli.binary_signature_metadata import load_binary_signature_metadata
-from inertia.cli.c_text_cleanup import normalize_unresolved_c_text
+from inertia.cli.binary_signature_metadata import load_binary_signature_metadata as load_binary_signature_metadata
+from inertia.cli.c_text_cleanup import normalize_unresolved_c_text as normalize_unresolved_c_text
 from inertia.cli.cache import (
-    DECOMPILATION_CACHE_SOURCE_FILES,
-    _cache_key_lock,
-    _cache_source_digest,
-    _load_cache_json,
-    _store_cache_json,
+    DECOMPILATION_CACHE_SOURCE_FILES as DECOMPILATION_CACHE_SOURCE_FILES,
 )
-from inertia.cli.cli_arg_parser import CliArguments, parse_cli_arguments
-from inertia.cli.cli_batch_c_output import BatchCOutputStatus8616, build_batch_c_output_8616
-from inertia.cli.cli_c_text_postprocess import _prune_invalid_simple_function_prototypes_text
+from inertia.cli.cache import (
+    _cache_key_lock as _cache_key_lock,
+)
+from inertia.cli.cache import (
+    _cache_source_digest as _cache_source_digest,
+)
+from inertia.cli.cache import (
+    _load_cache_json as _load_cache_json,
+)
+from inertia.cli.cache import (
+    _store_cache_json as _store_cache_json,
+)
+from inertia.cli.cli_arg_parser import CliArguments as CliArguments
+from inertia.cli.cli_arg_parser import parse_cli_arguments as parse_cli_arguments
+from inertia.cli.cli_batch_c_output import BatchCOutputStatus8616 as BatchCOutputStatus8616
+from inertia.cli.cli_batch_c_output import build_batch_c_output_8616 as build_batch_c_output_8616
+from inertia.cli.cli_c_text_postprocess import (
+    _prune_invalid_simple_function_prototypes_text as _prune_invalid_simple_function_prototypes_text,
+)
 from inertia.cli.cli_output import (
-    _print_asm_fallback_text,
-    _print_diagnostic_text,
-    _timestamped_print,
+    _print_asm_fallback_text as _print_asm_fallback_text,
 )
-from inertia.cli.cli_terminal_status import CliTerminalStatus, emit_terminal_status, read_terminal_status
+from inertia.cli.cli_output import (
+    _print_diagnostic_text as _print_diagnostic_text,
+)
+from inertia.cli.cli_output import (
+    _timestamped_print as _timestamped_print,
+)
+from inertia.cli.cli_terminal_status import CliTerminalStatus as CliTerminalStatus
+from inertia.cli.cli_terminal_status import emit_terminal_status as emit_terminal_status
+from inertia.cli.cli_terminal_status import read_terminal_status as read_terminal_status
 from inertia.cli.cli_timeout import (
-    PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
-    _AdaptivePerByteTimeoutModel,
-    _default_recovery_timeout,
-    _stdout_is_interactive,
-    build_parallel_clean_worker_timeout_model,
-    retry_timeout_after_failed_attempt,
+    PARALLEL_CLEAN_WORKER_TIMEOUT_CAP as PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
 )
-from inertia.cli.cod_module_caller_evidence import record_cod_module_caller_return_use_evidence_8616
+from inertia.cli.cli_timeout import (
+    _AdaptivePerByteTimeoutModel as _AdaptivePerByteTimeoutModel,
+)
+from inertia.cli.cli_timeout import (
+    _default_recovery_timeout as _default_recovery_timeout,
+)
+from inertia.cli.cli_timeout import (
+    _stdout_is_interactive as _stdout_is_interactive,
+)
+from inertia.cli.cli_timeout import (
+    build_parallel_clean_worker_timeout_model as build_parallel_clean_worker_timeout_model,
+)
+from inertia.cli.cli_timeout import (
+    retry_timeout_after_failed_attempt as retry_timeout_after_failed_attempt,
+)
+from inertia.cli.cod_module_caller_evidence import (
+    record_cod_module_caller_return_use_evidence_8616 as record_cod_module_caller_return_use_evidence_8616,
+)
 from inertia.cli.declared_call_transport import (
-    declared_call_diagnostic_lines_8616,
-    declared_call_receipts_current_8616,
+    declared_call_diagnostic_lines_8616 as declared_call_diagnostic_lines_8616,
+)
+from inertia.cli.declared_call_transport import (
+    declared_call_receipts_current_8616 as declared_call_receipts_current_8616,
 )
 from inertia.cli.declared_function_discovery import (
-    DeclaredDiscoveryStatus8616,
-    DeclaredFunctionDiscovery8616,
-    discover_declared_function_closure_8616,
+    DeclaredDiscoveryStatus8616 as DeclaredDiscoveryStatus8616,
 )
-from inertia.cli.decompilation_quality import assess_decompiled_c_text, assess_final_generated_c_text
-from inertia.cli.decompile_file_summary import emit_file_decompilation_summary
-from inertia.cli.default_signature_catalog import default_signature_catalog_path
+from inertia.cli.declared_function_discovery import (
+    DeclaredFunctionDiscovery8616 as DeclaredFunctionDiscovery8616,
+)
+from inertia.cli.declared_function_discovery import (
+    discover_declared_function_closure_8616 as discover_declared_function_closure_8616,
+)
+from inertia.cli.decompilation_quality import assess_decompiled_c_text as assess_decompiled_c_text
+from inertia.cli.decompilation_quality import assess_final_generated_c_text as assess_final_generated_c_text
+from inertia.cli.decompile_file_summary import emit_file_decompilation_summary as emit_file_decompilation_summary
+from inertia.cli.default_signature_catalog import default_signature_catalog_path as default_signature_catalog_path
 from inertia.cli.direct_addr_failure_family import (
-    FailureFamilySnapshot,
-    FailureFamilyState,
-    build_failure_family_snapshot,
+    FailureFamilySnapshot as FailureFamilySnapshot,
+)
+from inertia.cli.direct_addr_failure_family import (
+    FailureFamilyState as FailureFamilyState,
+)
+from inertia.cli.direct_addr_failure_family import (
+    build_failure_family_snapshot as build_failure_family_snapshot,
 )
 from inertia.cli.direct_request_cache import (
-    DirectRequestCacheArtifact8616,
-    DirectRequestCacheLookup8616,
-    DirectRequestCacheVerdict8616,
-    load_direct_request_cache_8616,
-    render_direct_request_tail_snapshot_diagnostic_8616,
-    store_direct_request_cache_8616,
+    DirectRequestCacheArtifact8616 as DirectRequestCacheArtifact8616,
+)
+from inertia.cli.direct_request_cache import (
+    DirectRequestCacheLookup8616 as DirectRequestCacheLookup8616,
+)
+from inertia.cli.direct_request_cache import (
+    DirectRequestCacheVerdict8616 as DirectRequestCacheVerdict8616,
+)
+from inertia.cli.direct_request_cache import (
+    load_direct_request_cache_8616 as load_direct_request_cache_8616,
+)
+from inertia.cli.direct_request_cache import (
+    render_direct_request_tail_snapshot_diagnostic_8616 as render_direct_request_tail_snapshot_diagnostic_8616,
+)
+from inertia.cli.direct_request_cache import (
+    store_direct_request_cache_8616 as store_direct_request_cache_8616,
 )
 from inertia.cli.direct_request_identity import (
-    DirectRequestCacheInputs8616,
-    build_direct_request_cache_key_8616,
-    direct_request_cache_enabled_8616,
+    DirectRequestCacheInputs8616 as DirectRequestCacheInputs8616,
+)
+from inertia.cli.direct_request_identity import (
+    build_direct_request_cache_key_8616 as build_direct_request_cache_key_8616,
+)
+from inertia.cli.direct_request_identity import (
+    direct_request_cache_enabled_8616 as direct_request_cache_enabled_8616,
 )
 from inertia.cli.disassembly_helpers import (
-    _format_asm_range,
-    _format_first_block_asm,
-    _infer_linear_disassembly_window,
+    _format_asm_range as _format_asm_range,
+)
+from inertia.cli.disassembly_helpers import (
+    _format_first_block_asm as _format_first_block_asm,
+)
+from inertia.cli.disassembly_helpers import (
+    _infer_linear_disassembly_window as _infer_linear_disassembly_window,
+)
+from inertia.cli.disassembly_helpers import (
     _probe_lift_break,
 )
-from inertia.cli.fork_timeout import run_captured_subprocess_tree
-from inertia.cli.function_cache_context import function_decompilation_cache_key_8616
+from inertia.cli.fork_timeout import run_captured_subprocess_tree as run_captured_subprocess_tree
+from inertia.cli.function_cache_context import (
+    function_decompilation_cache_key_8616 as function_decompilation_cache_key_8616,
+)
 from inertia.cli.function_worker_policy import (
-    FunctionWorkerMode8616,
-    clean_process_override_8616,
-    dependency_ordered_function_work_8616,
-    prioritize_clean_function_work_8616,
-    requires_isolated_function_decompilation,
-    select_function_worker_policy_8616,
+    FunctionWorkerMode8616 as FunctionWorkerMode8616,
+)
+from inertia.cli.function_worker_policy import (
+    clean_process_override_8616 as clean_process_override_8616,
+)
+from inertia.cli.function_worker_policy import (
+    dependency_ordered_function_work_8616 as dependency_ordered_function_work_8616,
+)
+from inertia.cli.function_worker_policy import (
+    prioritize_clean_function_work_8616 as prioritize_clean_function_work_8616,
+)
+from inertia.cli.function_worker_policy import (
+    requires_isolated_function_decompilation as requires_isolated_function_decompilation,
+)
+from inertia.cli.function_worker_policy import (
+    select_function_worker_policy_8616 as select_function_worker_policy_8616,
 )
 from inertia.cli.generated_c_artifacts import (
-    conditional_tail_snapshot_8616,
-    write_conditional_function_c_8616,
-    write_generated_function_c,
-    write_generated_translation_unit_c,
+    conditional_tail_snapshot_8616 as conditional_tail_snapshot_8616,
 )
-from inertia.cli.generated_c_function_extraction import relabel_generated_function_definition
+from inertia.cli.generated_c_artifacts import (
+    write_conditional_function_c_8616 as write_conditional_function_c_8616,
+)
+from inertia.cli.generated_c_artifacts import (
+    write_generated_function_c as write_generated_function_c,
+)
+from inertia.cli.generated_c_artifacts import (
+    write_generated_translation_unit_c as write_generated_translation_unit_c,
+)
+from inertia.cli.generated_c_function_extraction import (
+    relabel_generated_function_definition as relabel_generated_function_definition,
+)
 from inertia.cli.library_function_classifier import (
-    filter_code_labels_for_library_policy,
-    is_library_like_function_name,
+    filter_code_labels_for_library_policy as filter_code_labels_for_library_policy,
 )
-from inertia.cli.lst_extract import LSTMetadata
-from inertia.cli.metadata_evidence import has_only_binary_signatures
+from inertia.cli.library_function_classifier import (
+    is_library_like_function_name as is_library_like_function_name,
+)
+from inertia.cli.lst_extract import LSTMetadata as LSTMetadata
+from inertia.cli.metadata_evidence import has_only_binary_signatures as has_only_binary_signatures
 from inertia.cli.non_optimized_fallback import (
-    allows_heavy_fallbacks_for_run,
-    describe_non_optimized_unavailable,
-    sidecar_verdict_closes_non_optimized_lane,
+    allows_heavy_fallbacks_for_run as allows_heavy_fallbacks_for_run,
+)
+from inertia.cli.non_optimized_fallback import (
+    describe_non_optimized_unavailable as describe_non_optimized_unavailable,
+)
+from inertia.cli.non_optimized_fallback import (
+    sidecar_verdict_closes_non_optimized_lane as sidecar_verdict_closes_non_optimized_lane,
 )
 from inertia.cli.project_argument_evidence_ranges import (
-    attach_project_argument_evidence_ranges_8616,
+    attach_project_argument_evidence_ranges_8616 as attach_project_argument_evidence_ranges_8616,
 )
 from inertia.cli.project_evidence_transport import (
-    transfer_project_evidence_8616,
+    transfer_project_evidence_8616 as transfer_project_evidence_8616,
 )
 from inertia.cli.project_loading import (
-    PackedExecutableRefusedError,
-    _build_project,
-    _build_project_cached,
-    _build_project_from_bytes,
-    _describe_exception,
-    declared_input_path_8616,
+    PackedExecutableRefusedError as PackedExecutableRefusedError,
 )
-from inertia.cli.recompile_check import RecompileCheckResult, check_c_recompiles_8616
+from inertia.cli.project_loading import (
+    _build_project as _build_project,
+)
+from inertia.cli.project_loading import (
+    _build_project_cached as _build_project_cached,
+)
+from inertia.cli.project_loading import (
+    _build_project_from_bytes as _build_project_from_bytes,
+)
+from inertia.cli.project_loading import (
+    _describe_exception as _describe_exception,
+)
+from inertia.cli.project_loading import (
+    declared_input_path_8616 as declared_input_path_8616,
+)
+from inertia.cli.recompile_check import RecompileCheckResult as RecompileCheckResult
+from inertia.cli.recompile_check import check_c_recompiles_8616 as check_c_recompiles_8616
 from inertia.cli.rizin_discovery import (
-    RizinDiscoveryResult,
-    RizinDiscoveryStatus,
-    discover_rizin_function_entries,
+    RizinDiscoveryResult as RizinDiscoveryResult,
 )
-from inertia.cli.rizin_evidence import RizinEvidence, RizinEvidenceStatus, collect_rizin_evidence
-from inertia.cli.runtime_support import (
-    FORCE_SERIAL_FUNCTION_DECOMP_ENV as _FORCE_SERIAL_FUNCTION_DECOMP_ENV,
+from inertia.cli.rizin_discovery import (
+    RizinDiscoveryStatus as RizinDiscoveryStatus,
 )
-from inertia.cli.runtime_support import (
-    AnalysisTimeout as _AnalysisTimeout,
+from inertia.cli.rizin_discovery import (
+    discover_rizin_function_entries as discover_rizin_function_entries,
 )
+from inertia.cli.rizin_evidence import RizinEvidence as RizinEvidence
+from inertia.cli.rizin_evidence import RizinEvidenceStatus as RizinEvidenceStatus
+from inertia.cli.rizin_evidence import collect_rizin_evidence as collect_rizin_evidence
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        FORCE_SERIAL_FUNCTION_DECOMP_ENV as _cli_compat_export_FORCE_SERIAL_FUNCTION_DECOMP_ENV,
+    )
+    _FORCE_SERIAL_FUNCTION_DECOMP_ENV = _cli_compat_export_FORCE_SERIAL_FUNCTION_DECOMP_ENV
+else:
+    from inertia.cli.runtime_support import (
+        FORCE_SERIAL_FUNCTION_DECOMP_ENV as _FORCE_SERIAL_FUNCTION_DECOMP_ENV,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        AnalysisTimeout as _cli_compat_export_AnalysisTimeout,
+    )
+    _AnalysisTimeout = _cli_compat_export_AnalysisTimeout
+else:
+    from inertia.cli.runtime_support import (
+        AnalysisTimeout as _AnalysisTimeout,
+    )
 from inertia.cli.runtime_support import (
-    DaemonThreadPoolExecutor,
+    DaemonThreadPoolExecutor as DaemonThreadPoolExecutor,
 )
-from inertia.cli.runtime_support import (
-    apply_memory_limit as _apply_memory_limit,
-)
-from inertia.cli.runtime_support import (
-    capture_thread_output as _capture_thread_output,
-)
-from inertia.cli.runtime_support import (
-    choose_function_parallelism as _choose_function_parallelism,
-)
-from inertia.cli.runtime_support import (
-    default_exe_showcase_cap as _default_exe_showcase_cap,
-)
-from inertia.cli.runtime_support import (
-    emit_timeout_and_exit as _emit_timeout_and_exit,
-)
-from inertia.cli.runtime_support import (
-    lower_process_priority as _lower_process_priority,
-)
-from inertia.cli.runtime_support import (
-    prefer_low_memory_path as _prefer_low_memory_path,
-)
-from inertia.cli.runtime_support import (
-    run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
-)
-from inertia.cli.runtime_support import (
-    run_with_timeout_in_fork as _run_with_timeout_in_fork,
-)
-from inertia.cli.runtime_support import (
-    should_force_serial_supplemental_decompilation as _should_force_serial_supplemental_decompilation,
-)
-from inertia.cli.runtime_support import (
-    timing_output_enabled as _timing_output_enabled,
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        apply_memory_limit as _cli_compat_export_apply_memory_limit,
+    )
+    _apply_memory_limit = _cli_compat_export_apply_memory_limit
+else:
+    from inertia.cli.runtime_support import (
+        apply_memory_limit as _apply_memory_limit,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        capture_thread_output as _cli_compat_export_capture_thread_output,
+    )
+    _capture_thread_output = _cli_compat_export_capture_thread_output
+else:
+    from inertia.cli.runtime_support import (
+        capture_thread_output as _capture_thread_output,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        choose_function_parallelism as _cli_compat_export_choose_function_parallelism,
+    )
+    _choose_function_parallelism = _cli_compat_export_choose_function_parallelism
+else:
+    from inertia.cli.runtime_support import (
+        choose_function_parallelism as _choose_function_parallelism,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        default_exe_showcase_cap as _cli_compat_export_default_exe_showcase_cap,
+    )
+    _default_exe_showcase_cap = _cli_compat_export_default_exe_showcase_cap
+else:
+    from inertia.cli.runtime_support import (
+        default_exe_showcase_cap as _default_exe_showcase_cap,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        emit_timeout_and_exit as _cli_compat_export_emit_timeout_and_exit,
+    )
+    _emit_timeout_and_exit = _cli_compat_export_emit_timeout_and_exit
+else:
+    from inertia.cli.runtime_support import (
+        emit_timeout_and_exit as _emit_timeout_and_exit,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        lower_process_priority as _cli_compat_export_lower_process_priority,
+    )
+    _lower_process_priority = _cli_compat_export_lower_process_priority
+else:
+    from inertia.cli.runtime_support import (
+        lower_process_priority as _lower_process_priority,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        prefer_low_memory_path as _cli_compat_export_prefer_low_memory_path,
+    )
+    _prefer_low_memory_path = _cli_compat_export_prefer_low_memory_path
+else:
+    from inertia.cli.runtime_support import (
+        prefer_low_memory_path as _prefer_low_memory_path,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        run_with_timeout_in_daemon_thread as _cli_compat_export_run_with_timeout_in_daemon_thread,
+    )
+    _run_with_timeout_in_daemon_thread = _cli_compat_export_run_with_timeout_in_daemon_thread
+else:
+    from inertia.cli.runtime_support import (
+        run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        run_with_timeout_in_fork as _cli_compat_export_run_with_timeout_in_fork,
+    )
+    _run_with_timeout_in_fork = _cli_compat_export_run_with_timeout_in_fork
+else:
+    from inertia.cli.runtime_support import (
+        run_with_timeout_in_fork as _run_with_timeout_in_fork,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        should_force_serial_supplemental_decompilation as _cli_compat_export_should_force_serial_supplemental_decompilation,
+    )
+    _should_force_serial_supplemental_decompilation = _cli_compat_export_should_force_serial_supplemental_decompilation
+else:
+    from inertia.cli.runtime_support import (
+        should_force_serial_supplemental_decompilation as _should_force_serial_supplemental_decompilation,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.runtime_support import (
+        timing_output_enabled as _cli_compat_export_timing_output_enabled,
+    )
+    _timing_output_enabled = _cli_compat_export_timing_output_enabled
+else:
+    from inertia.cli.runtime_support import (
+        timing_output_enabled as _timing_output_enabled,
+    )
+from inertia.cli.segment_program_layout_reporting import (
+    attach_segment_program_layout_8616 as attach_segment_program_layout_8616,
 )
 from inertia.cli.segment_program_layout_reporting import (
-    attach_segment_program_layout_8616,
-    segment_program_function_evidence_for_function_8616,
-    segment_program_function_evidence_matches_item_8616,
-    with_segment_program_function_evidence_8616,
+    segment_program_function_evidence_for_function_8616 as segment_program_function_evidence_for_function_8616,
+)
+from inertia.cli.segment_program_layout_reporting import (
+    segment_program_function_evidence_matches_item_8616 as segment_program_function_evidence_matches_item_8616,
+)
+from inertia.cli.segment_program_layout_reporting import (
+    with_segment_program_function_evidence_8616 as with_segment_program_function_evidence_8616,
 )
 from inertia.cli.serial_clean_worker_evidence import (
-    _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616,
-    _hydrate_serial_clean_worker_evidence_8616,
+    _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616 as _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616,
+)
+from inertia.cli.serial_clean_worker_evidence import (
+    _hydrate_serial_clean_worker_evidence_8616 as _hydrate_serial_clean_worker_evidence_8616,
+)
+from inertia.cli.serial_clean_worker_evidence import (
     _read_serial_clean_worker_evidence_8616,
-    _write_serial_clean_worker_evidence_8616,
+)
+from inertia.cli.serial_clean_worker_evidence import (
+    _write_serial_clean_worker_evidence_8616 as _write_serial_clean_worker_evidence_8616,
 )
 from inertia.cli.serial_worker_cache import (
-    SerialWorkerCacheLookup8616,
-    SerialWorkerCacheVerdict8616,
-    load_serial_worker_cache_8616,
-    serial_worker_cache_inputs_8616,
-    store_serial_worker_cache_8616,
+    SerialWorkerCacheLookup8616 as SerialWorkerCacheLookup8616,
+)
+from inertia.cli.serial_worker_cache import (
+    SerialWorkerCacheVerdict8616 as SerialWorkerCacheVerdict8616,
+)
+from inertia.cli.serial_worker_cache import (
+    load_serial_worker_cache_8616 as load_serial_worker_cache_8616,
+)
+from inertia.cli.serial_worker_cache import (
+    serial_worker_cache_inputs_8616 as serial_worker_cache_inputs_8616,
+)
+from inertia.cli.serial_worker_cache import (
+    store_serial_worker_cache_8616 as store_serial_worker_cache_8616,
 )
 from inertia.cli.sidecar_metadata import (
-    _function_discovery_code_labels,
-    _load_lst_metadata,
-    _lst_code_label,
-    _lst_code_region,
-    _recovery_code_labels,
-    _signature_matched_code_addrs,
-    _visible_code_labels,
-    attach_lst_metadata_to_project,
+    _function_discovery_code_labels as _function_discovery_code_labels,
 )
-from inertia.cli.sidecar_policy import metadata_has_precise_code_regions
+from inertia.cli.sidecar_metadata import (
+    _load_lst_metadata as _load_lst_metadata,
+)
+from inertia.cli.sidecar_metadata import (
+    _lst_code_label as _lst_code_label,
+)
+from inertia.cli.sidecar_metadata import (
+    _lst_code_region as _lst_code_region,
+)
+from inertia.cli.sidecar_metadata import (
+    _recovery_code_labels as _recovery_code_labels,
+)
+from inertia.cli.sidecar_metadata import (
+    _signature_matched_code_addrs as _signature_matched_code_addrs,
+)
+from inertia.cli.sidecar_metadata import (
+    _visible_code_labels as _visible_code_labels,
+)
+from inertia.cli.sidecar_metadata import (
+    attach_lst_metadata_to_project as attach_lst_metadata_to_project,
+)
+from inertia.cli.sidecar_policy import metadata_has_precise_code_regions as metadata_has_precise_code_regions
 from inertia.cli.slice_recovery import (
-    SliceRecoveryAttemptOutcome,
+    SliceRecoveryAttemptOutcome as SliceRecoveryAttemptOutcome,
 )
-from inertia.cli.tail_validation import (
-    emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
-)
-from inertia.cli.tail_validation import (
-    format_tail_validation_diagnostic as _format_tail_validation_diagnostic,
-)
-from inertia.cli.tail_validation import (
-    inherit_tail_validation_runtime_policy as _inherit_tail_validation_runtime_policy,
-)
-from inertia.cli.tail_validation import (
-    set_tail_validation_runtime_enabled as _set_tail_validation_runtime_enabled,
-)
-from inertia.cli.tail_validation import tail_validation_display_status as _tail_validation_display_status
-from inertia.cli.tail_validation import (
-    tail_validation_enabled_for_run as _tail_validation_enabled_for_run,
-)
-from inertia.cli.tail_validation import (
-    tail_validation_fallback_allows_project_snapshot as _tail_validation_fallback_allows_project_snapshot,
-)
-from inertia.cli.tail_validation import (
-    tail_validation_runtime_enabled as _tail_validation_runtime_enabled,
-)
-from inertia.cli.tail_validation import (
-    tail_validation_snapshot_for_fallback as _tail_validation_snapshot_for_fallback,
-)
-from inertia.cli.tail_validation import (
-    tail_validation_snapshot_for_function_run as _tail_validation_snapshot_for_function_run,
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        emit_tail_validation_console_summary as _cli_compat_export_emit_tail_validation_console_summary,
+    )
+    _emit_tail_validation_console_summary = _cli_compat_export_emit_tail_validation_console_summary
+else:
+    from inertia.cli.tail_validation import (
+        emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        format_tail_validation_diagnostic as _cli_compat_export_format_tail_validation_diagnostic,
+    )
+    _format_tail_validation_diagnostic = _cli_compat_export_format_tail_validation_diagnostic
+else:
+    from inertia.cli.tail_validation import (
+        format_tail_validation_diagnostic as _format_tail_validation_diagnostic,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        inherit_tail_validation_runtime_policy as _cli_compat_export_inherit_tail_validation_runtime_policy,
+    )
+    _inherit_tail_validation_runtime_policy = _cli_compat_export_inherit_tail_validation_runtime_policy
+else:
+    from inertia.cli.tail_validation import (
+        inherit_tail_validation_runtime_policy as _inherit_tail_validation_runtime_policy,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        set_tail_validation_runtime_enabled as _cli_compat_export_set_tail_validation_runtime_enabled,
+    )
+    _set_tail_validation_runtime_enabled = _cli_compat_export_set_tail_validation_runtime_enabled
+else:
+    from inertia.cli.tail_validation import (
+        set_tail_validation_runtime_enabled as _set_tail_validation_runtime_enabled,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        tail_validation_display_status as _cli_compat_export_tail_validation_display_status,
+    )
+    _tail_validation_display_status = _cli_compat_export_tail_validation_display_status
+else:
+    from inertia.cli.tail_validation import tail_validation_display_status as _tail_validation_display_status
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        tail_validation_enabled_for_run as _cli_compat_export_tail_validation_enabled_for_run,
+    )
+    _tail_validation_enabled_for_run = _cli_compat_export_tail_validation_enabled_for_run
+else:
+    from inertia.cli.tail_validation import (
+        tail_validation_enabled_for_run as _tail_validation_enabled_for_run,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        tail_validation_fallback_allows_project_snapshot as _cli_compat_export_tail_validation_fallback_allows_project_snapshot,
+    )
+    _tail_validation_fallback_allows_project_snapshot = _cli_compat_export_tail_validation_fallback_allows_project_snapshot
+else:
+    from inertia.cli.tail_validation import (
+        tail_validation_fallback_allows_project_snapshot as _tail_validation_fallback_allows_project_snapshot,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        tail_validation_runtime_enabled as _cli_compat_export_tail_validation_runtime_enabled,
+    )
+    _tail_validation_runtime_enabled = _cli_compat_export_tail_validation_runtime_enabled
+else:
+    from inertia.cli.tail_validation import (
+        tail_validation_runtime_enabled as _tail_validation_runtime_enabled,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        tail_validation_snapshot_for_fallback as _cli_compat_export_tail_validation_snapshot_for_fallback,
+    )
+    _tail_validation_snapshot_for_fallback = _cli_compat_export_tail_validation_snapshot_for_fallback
+else:
+    from inertia.cli.tail_validation import (
+        tail_validation_snapshot_for_fallback as _tail_validation_snapshot_for_fallback,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.tail_validation import (
+        tail_validation_snapshot_for_function_run as _cli_compat_export_tail_validation_snapshot_for_function_run,
+    )
+    _tail_validation_snapshot_for_function_run = _cli_compat_export_tail_validation_snapshot_for_function_run
+else:
+    from inertia.cli.tail_validation import (
+        tail_validation_snapshot_for_function_run as _tail_validation_snapshot_for_function_run,
+    )
+from inertia.cli.telemetry import (
+    annotate_current_span as annotate_current_span,
 )
 from inertia.cli.telemetry import (
-    annotate_current_span,
-    configure_telemetry_from_env,
-    emit_compact_summary,
-    span,
-    trace_function,
+    configure_telemetry_from_env as configure_telemetry_from_env,
+)
+from inertia.cli.telemetry import (
+    emit_compact_summary as emit_compact_summary,
+)
+from inertia.cli.telemetry import (
+    span as span,
+)
+from inertia.cli.telemetry import (
+    trace_function as trace_function,
 )
 from inertia.cli.work_items import (
-    FunctionWorkExecutionOrigin8616,
-    FunctionWorkItem,
-    FunctionWorkResult,
-    TerminalDecompileFailure8616,
-    WorkItemStatus,
+    FunctionWorkExecutionOrigin8616 as FunctionWorkExecutionOrigin8616,
 )
 from inertia.cli.work_items import (
-    emit_tail_validation_for_function_run_or_uncollected as _emit_tail_validation_for_function_run_or_uncollected,
+    FunctionWorkItem as FunctionWorkItem,
 )
 from inertia.cli.work_items import (
-    emit_tail_validation_snapshot_or_uncollected as _emit_tail_validation_snapshot_or_uncollected,
+    FunctionWorkResult as FunctionWorkResult,
 )
 from inertia.cli.work_items import (
-    function_attempt_display_status as _function_attempt_display_status,
+    TerminalDecompileFailure8616 as TerminalDecompileFailure8616,
 )
 from inertia.cli.work_items import (
-    print_function_attempt_status as _print_function_attempt_status,
+    WorkItemStatus as WorkItemStatus,
 )
-from inertia.cli.work_items import (
-    recovery_evidence_line as _recovery_evidence_line,
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.work_items import (
+        emit_tail_validation_for_function_run_or_uncollected as _cli_compat_export_emit_tail_validation_for_function_run_or_uncollected,
+    )
+    _emit_tail_validation_for_function_run_or_uncollected = _cli_compat_export_emit_tail_validation_for_function_run_or_uncollected
+else:
+    from inertia.cli.work_items import (
+        emit_tail_validation_for_function_run_or_uncollected as _emit_tail_validation_for_function_run_or_uncollected,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.work_items import (
+        emit_tail_validation_snapshot_or_uncollected as _cli_compat_export_emit_tail_validation_snapshot_or_uncollected,
+    )
+    _emit_tail_validation_snapshot_or_uncollected = _cli_compat_export_emit_tail_validation_snapshot_or_uncollected
+else:
+    from inertia.cli.work_items import (
+        emit_tail_validation_snapshot_or_uncollected as _emit_tail_validation_snapshot_or_uncollected,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.work_items import (
+        function_attempt_display_status as _cli_compat_export_function_attempt_display_status,
+    )
+    _function_attempt_display_status = _cli_compat_export_function_attempt_display_status
+else:
+    from inertia.cli.work_items import (
+        function_attempt_display_status as _function_attempt_display_status,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.work_items import (
+        print_function_attempt_status as _cli_compat_export_print_function_attempt_status,
+    )
+    _print_function_attempt_status = _cli_compat_export_print_function_attempt_status
+else:
+    from inertia.cli.work_items import (
+        print_function_attempt_status as _print_function_attempt_status,
+    )
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.work_items import (
+        recovery_evidence_line as _cli_compat_export_recovery_evidence_line,
+    )
+    _recovery_evidence_line = _cli_compat_export_recovery_evidence_line
+else:
+    from inertia.cli.work_items import (
+        recovery_evidence_line as _recovery_evidence_line,
+    )
+from inertia.cli.x86_16_exact_slice import (
+    function_original_addr as function_original_addr,
 )
 from inertia.cli.x86_16_exact_slice import (
-    function_original_addr,
-    mark_function_original_addr,
+    mark_function_original_addr as mark_function_original_addr,
 )
-from inertia.frontend.x86_16.cod_analysis_image import build_cod_analysis_image_8616
+from inertia.frontend.x86_16.cod_analysis_image import build_cod_analysis_image_8616 as build_cod_analysis_image_8616
 from inertia.frontend.x86_16.cod_extract import (
-    CODProcMetadata,
-    extract_cod_function_entries,
-    extract_cod_proc_metadata,
-    extract_simple_cod_logic_entries,
-    extract_small_two_arg_cod_logic_entries,
-    infer_cod_logic_start,
+    CODProcMetadata as CODProcMetadata,
+)
+from inertia.frontend.x86_16.cod_extract import (
+    extract_cod_function_entries as extract_cod_function_entries,
+)
+from inertia.frontend.x86_16.cod_extract import (
+    extract_cod_proc_metadata as extract_cod_proc_metadata,
+)
+from inertia.frontend.x86_16.cod_extract import (
+    extract_simple_cod_logic_entries as extract_simple_cod_logic_entries,
+)
+from inertia.frontend.x86_16.cod_extract import (
+    extract_small_two_arg_cod_logic_entries as extract_small_two_arg_cod_logic_entries,
+)
+from inertia.frontend.x86_16.cod_extract import (
+    infer_cod_logic_start as infer_cod_logic_start,
 )
 from inertia.frontend.x86_16.declared_external_call_evidence import (
-    admit_declared_external_call_files_8616,
+    admit_declared_external_call_files_8616 as admit_declared_external_call_files_8616,
 )
-from inertia.frontend.x86_16.synthetic_call_stub_evidence import record_synthetic_call_stubs_8616
-from inertia.lowering.analysis_helpers import collect_neighbor_call_targets
-from inertia.lowering.annotations import annotate_function
-from inertia.lowering.c_runtime_header import render_c_runtime_header_8616
+from inertia.frontend.x86_16.synthetic_call_stub_evidence import (
+    record_synthetic_call_stubs_8616 as record_synthetic_call_stubs_8616,
+)
+from inertia.lowering.analysis_helpers import collect_neighbor_call_targets as collect_neighbor_call_targets
+from inertia.lowering.annotations import annotate_function as annotate_function
+from inertia.lowering.c_runtime_header import render_c_runtime_header_8616 as render_c_runtime_header_8616
 from inertia.lowering.scalar_interface_transport import (
-    ScalarInterface8616,
-    attach_scalar_interface_8616,
-    scalar_interface_for_result_8616,
-    scalar_interface_from_record_8616,
+    ScalarInterface8616 as ScalarInterface8616,
 )
-from inertia.pipeline.errors import PipelineHardError
+from inertia.lowering.scalar_interface_transport import (
+    attach_scalar_interface_8616 as attach_scalar_interface_8616,
+)
+from inertia.lowering.scalar_interface_transport import (
+    scalar_interface_for_result_8616 as scalar_interface_for_result_8616,
+)
+from inertia.lowering.scalar_interface_transport import (
+    scalar_interface_from_record_8616 as scalar_interface_from_record_8616,
+)
+from inertia.pipeline.errors import PipelineHardError as PipelineHardError
 from inertia.semantics.callsite_summary import (
-    CallerReturnUseEvidence8616,
-    caller_return_use_evidence_by_addr_8616,
+    CallerReturnUseEvidence8616 as CallerReturnUseEvidence8616,
 )
-from inertia.semantics.compiler_helpers import is_x86_16_stack_probe_name_8616
-from inertia.semantics.segment_program_layout_codec import segment_program_function_evidence_from_record_8616
-from inertia.semantics.segment_program_layout_contract import SegmentProgramFunctionEvidence8616
-from inertia.structuring.compare32_recovery import recover_32bit_compare_c_8616
-from inertia.structuring.simple_loop_recovery import recover_counted_stack_loop_c_8616
+from inertia.semantics.callsite_summary import (
+    caller_return_use_evidence_by_addr_8616 as caller_return_use_evidence_by_addr_8616,
+)
+from inertia.semantics.compiler_helpers import is_x86_16_stack_probe_name_8616 as is_x86_16_stack_probe_name_8616
+from inertia.semantics.segment_program_layout_codec import (
+    segment_program_function_evidence_from_record_8616 as segment_program_function_evidence_from_record_8616,
+)
+from inertia.semantics.segment_program_layout_contract import (
+    SegmentProgramFunctionEvidence8616 as SegmentProgramFunctionEvidence8616,
+)
+from inertia.structuring.compare32_recovery import recover_32bit_compare_c_8616 as recover_32bit_compare_c_8616
+from inertia.structuring.simple_loop_recovery import (
+    recover_counted_stack_loop_c_8616 as recover_counted_stack_loop_c_8616,
+)
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.validation.tail_validation import (
+        extract_x86_16_tail_validation_snapshot as _cli_compat_export_extract_x86_16_tail_validation_snapshot,
+    )
+    _extract_x86_16_tail_validation_snapshot = _cli_compat_export_extract_x86_16_tail_validation_snapshot
+else:
+    from inertia.validation.tail_validation import (
+        extract_x86_16_tail_validation_snapshot as _extract_x86_16_tail_validation_snapshot,
+    )
 from inertia.validation.tail_validation import (
-    extract_x86_16_tail_validation_snapshot as _extract_x86_16_tail_validation_snapshot,
+    x86_16_tail_validation_snapshot_passed as x86_16_tail_validation_snapshot_passed,
 )
-from inertia.validation.tail_validation import x86_16_tail_validation_snapshot_passed
 
 from .cli_c_text_postprocess import (
-    _coalesce_redundant_split_global_incdec_text,
-    _dedupe_duplicate_local_declarations_text,
-    _hoist_c89_local_declarations_text,
-    _materialize_missing_direct_call_prototypes_text,
-    _materialize_missing_generic_local_declarations_text,
-    _materialize_missing_segment_macro_locals_text,
-    _materialize_missing_synthetic_global_declarations_text,
-    _materialize_opaque_pointer_typedefs_text,
-    _materialize_stack_base_placeholder_declaration_text,
-    _normalize_anonymous_call_targets,
-    _normalize_boolean_conditions,
-    _normalize_function_signature_arg_names,
-    _normalize_scalar_gb_array_declarations_text,
-    _normalize_seg_offset_void_pointer_args_text,
-    _normalize_unsupported_computed_goto_text,
-    _prune_parameter_shadow_declarations_text,
-    _prune_standalone_memory_helper_reads_text,
-    _prune_undefined_fragment_carrier_assignments_text,
-    _prune_unused_local_declarations_text,
-    _prune_void_call_assignments_text,
-    _strip_register_fragment_suffixes_text,
+    _coalesce_redundant_split_global_incdec_text as _coalesce_redundant_split_global_incdec_text,
+)
+from .cli_c_text_postprocess import (
+    _dedupe_duplicate_local_declarations_text as _dedupe_duplicate_local_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _hoist_c89_local_declarations_text as _hoist_c89_local_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_missing_direct_call_prototypes_text as _materialize_missing_direct_call_prototypes_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_missing_generic_local_declarations_text as _materialize_missing_generic_local_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_missing_segment_macro_locals_text as _materialize_missing_segment_macro_locals_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_missing_synthetic_global_declarations_text as _materialize_missing_synthetic_global_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_opaque_pointer_typedefs_text as _materialize_opaque_pointer_typedefs_text,
+)
+from .cli_c_text_postprocess import (
+    _materialize_stack_base_placeholder_declaration_text as _materialize_stack_base_placeholder_declaration_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_anonymous_call_targets as _normalize_anonymous_call_targets,
+)
+from .cli_c_text_postprocess import (
+    _normalize_boolean_conditions as _normalize_boolean_conditions,
+)
+from .cli_c_text_postprocess import (
+    _normalize_function_signature_arg_names as _normalize_function_signature_arg_names,
+)
+from .cli_c_text_postprocess import (
+    _normalize_scalar_gb_array_declarations_text as _normalize_scalar_gb_array_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_seg_offset_void_pointer_args_text as _normalize_seg_offset_void_pointer_args_text,
+)
+from .cli_c_text_postprocess import (
+    _normalize_unsupported_computed_goto_text as _normalize_unsupported_computed_goto_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_parameter_shadow_declarations_text as _prune_parameter_shadow_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_standalone_memory_helper_reads_text as _prune_standalone_memory_helper_reads_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_undefined_fragment_carrier_assignments_text as _prune_undefined_fragment_carrier_assignments_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_unused_local_declarations_text as _prune_unused_local_declarations_text,
+)
+from .cli_c_text_postprocess import (
+    _prune_void_call_assignments_text as _prune_void_call_assignments_text,
+)
+from .cli_c_text_postprocess import (
+    _strip_register_fragment_suffixes_text as _strip_register_fragment_suffixes_text,
 )
 from .cli_decompilation import (
-    _apply_binary_specific_annotations,
-    _apply_function_annotations_for_active_and_original_8616,
-    _decompile_function_with_stats,
-    _effective_decompile_timeout_8616,
-    _emit_optional_source_sidecar_c_block,
-    _function_complexity,
+    _apply_binary_specific_annotations as _apply_binary_specific_annotations,
+)
+from .cli_decompilation import (
+    _apply_function_annotations_for_active_and_original_8616 as _apply_function_annotations_for_active_and_original_8616,
+)
+from .cli_decompilation import (
+    _decompile_function_with_stats as _decompile_function_with_stats,
+)
+from .cli_decompilation import (
+    _effective_decompile_timeout_8616 as _effective_decompile_timeout_8616,
+)
+from .cli_decompilation import (
+    _emit_optional_source_sidecar_c_block as _emit_optional_source_sidecar_c_block,
+)
+from .cli_decompilation import (
+    _function_complexity as _function_complexity,
 )
 from .cli_fallback_decompilation import (
-    NonOptimizedSliceOutcome,
-    _non_optimized_slice_failure_detail,
-    _non_optimized_slice_rendered,
-    _try_decompile_non_optimized_known_function,
-    _try_decompile_non_optimized_slice,
-    _try_decompile_sidecar_slice,
-    _try_emit_known_runtime_helper_c,
-    _try_emit_string_intrinsic_c,
-    _try_emit_trivial_sidecar_c,
+    NonOptimizedSliceOutcome as NonOptimizedSliceOutcome,
+)
+from .cli_fallback_decompilation import (
+    _non_optimized_slice_failure_detail as _non_optimized_slice_failure_detail,
+)
+from .cli_fallback_decompilation import (
+    _non_optimized_slice_rendered as _non_optimized_slice_rendered,
+)
+from .cli_fallback_decompilation import (
+    _try_decompile_non_optimized_known_function as _try_decompile_non_optimized_known_function,
+)
+from .cli_fallback_decompilation import (
+    _try_decompile_non_optimized_slice as _try_decompile_non_optimized_slice,
+)
+from .cli_fallback_decompilation import (
+    _try_decompile_sidecar_slice as _try_decompile_sidecar_slice,
+)
+from .cli_fallback_decompilation import (
+    _try_emit_known_runtime_helper_c as _try_emit_known_runtime_helper_c,
+)
+from .cli_fallback_decompilation import (
+    _try_emit_string_intrinsic_c as _try_emit_string_intrinsic_c,
+)
+from .cli_fallback_decompilation import (
+    _try_emit_trivial_sidecar_c as _try_emit_trivial_sidecar_c,
 )
 from .cli_function_discovery import (
-    _X86_16_EXACT_REGION_PADDING_SCAN_LIMIT,
-    DisplayCatalogCachePolicy8616,
-    _catalog_address_cache_key_8616,
-    _configure_display_catalog_cache_policy_8616,
-    _expanded_exe_discovery_limit,
-    _format_sidecar_function_catalog,
-    _function_binary_exact_region_8616,
-    _interesting_functions,
-    _load_catalog_address_cache,
-    _lookup_persistent_recovery_timeout,
-    _make_placeholder_function,
-    _rank_exe_function_seeds,
-    _rank_function_cfg_pairs_for_display,
-    _rank_labeled_function_entries_cached,
-    _recover_cached_function_pairs,
-    _recover_candidate_function_pair,
-    _recover_cfg,
-    _recover_direct_addr_function,
-    _recover_fast_exe_catalog,
-    _recover_fast_seed_functions,
-    _recover_lst_function,
-    _recover_partial_cfg,
-    _recover_ranked_binary_function,
-    _recover_seeded_exe_functions,
-    _resolve_x86_16_function_start,
-    _source_region_catalog_evidence_8616,
-    _store_catalog_address_cache,
-    _supplement_cached_seeded_recovery,
-    _supplement_functions_from_prologue_scan,
-    attach_direct_target_argument_evidence_context_8616,
-    record_direct_target_caller_return_use_evidence_8616,
+    _X86_16_EXACT_REGION_PADDING_SCAN_LIMIT as _X86_16_EXACT_REGION_PADDING_SCAN_LIMIT,
+)
+from .cli_function_discovery import (
+    DisplayCatalogCachePolicy8616 as DisplayCatalogCachePolicy8616,
+)
+from .cli_function_discovery import (
+    _catalog_address_cache_key_8616 as _catalog_address_cache_key_8616,
+)
+from .cli_function_discovery import (
+    _configure_display_catalog_cache_policy_8616 as _configure_display_catalog_cache_policy_8616,
+)
+from .cli_function_discovery import (
+    _expanded_exe_discovery_limit as _expanded_exe_discovery_limit,
+)
+from .cli_function_discovery import (
+    _format_sidecar_function_catalog as _format_sidecar_function_catalog,
+)
+from .cli_function_discovery import (
+    _function_binary_exact_region_8616 as _function_binary_exact_region_8616,
+)
+from .cli_function_discovery import (
+    _interesting_functions as _interesting_functions,
+)
+from .cli_function_discovery import (
+    _load_catalog_address_cache as _load_catalog_address_cache,
+)
+from .cli_function_discovery import (
+    _lookup_persistent_recovery_timeout as _lookup_persistent_recovery_timeout,
+)
+from .cli_function_discovery import (
+    _make_placeholder_function as _make_placeholder_function,
+)
+from .cli_function_discovery import (
+    _rank_exe_function_seeds as _rank_exe_function_seeds,
+)
+from .cli_function_discovery import (
+    _rank_function_cfg_pairs_for_display as _rank_function_cfg_pairs_for_display,
+)
+from .cli_function_discovery import (
+    _rank_labeled_function_entries_cached as _rank_labeled_function_entries_cached,
+)
+from .cli_function_discovery import (
+    _recover_cached_function_pairs as _recover_cached_function_pairs,
+)
+from .cli_function_discovery import (
+    _recover_candidate_function_pair as _recover_candidate_function_pair,
+)
+from .cli_function_discovery import (
+    _recover_cfg as _recover_cfg,
+)
+from .cli_function_discovery import (
+    _recover_direct_addr_function as _recover_direct_addr_function,
+)
+from .cli_function_discovery import (
+    _recover_fast_exe_catalog as _recover_fast_exe_catalog,
+)
+from .cli_function_discovery import (
+    _recover_fast_seed_functions as _recover_fast_seed_functions,
+)
+from .cli_function_discovery import (
+    _recover_lst_function as _recover_lst_function,
+)
+from .cli_function_discovery import (
+    _recover_partial_cfg as _recover_partial_cfg,
+)
+from .cli_function_discovery import (
+    _recover_ranked_binary_function as _recover_ranked_binary_function,
+)
+from .cli_function_discovery import (
+    _recover_seeded_exe_functions as _recover_seeded_exe_functions,
+)
+from .cli_function_discovery import (
+    _resolve_x86_16_function_start as _resolve_x86_16_function_start,
+)
+from .cli_function_discovery import (
+    _source_region_catalog_evidence_8616 as _source_region_catalog_evidence_8616,
+)
+from .cli_function_discovery import (
+    _store_catalog_address_cache as _store_catalog_address_cache,
+)
+from .cli_function_discovery import (
+    _supplement_cached_seeded_recovery as _supplement_cached_seeded_recovery,
+)
+from .cli_function_discovery import (
+    _supplement_functions_from_prologue_scan as _supplement_functions_from_prologue_scan,
+)
+from .cli_function_discovery import (
+    attach_direct_target_argument_evidence_context_8616 as attach_direct_target_argument_evidence_context_8616,
+)
+from .cli_function_discovery import (
+    record_direct_target_caller_return_use_evidence_8616 as record_direct_target_caller_return_use_evidence_8616,
 )
 from .indexed_alias_program_context import (
-    prepare_direct_indexed_alias_program_context_8616,
-    publish_discovered_indexed_alias_program_8616,
+    prepare_direct_indexed_alias_program_context_8616 as prepare_direct_indexed_alias_program_context_8616,
+)
+from .indexed_alias_program_context import (
+    publish_discovered_indexed_alias_program_8616 as publish_discovered_indexed_alias_program_8616,
 )
 
 print: Callable[..., object] = _timestamped_print

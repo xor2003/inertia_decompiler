@@ -1,3 +1,4 @@
+import io
 import json
 import sys
 from concurrent.futures.process import BrokenProcessPool
@@ -6,11 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import inertia.cli.runtime_support as _runtime_support
 import inertia.cli.tail_validation as _tail_validation
+import tools.dev.decompile_cod_dir as _script
 from inertia.cli.work_items import WorkItemStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-import tools.dev.decompile_cod_dir as _script
 
 
 def _tail_validation_metadata_payload(stderr_text: str) -> dict[str, object]:
@@ -56,6 +58,16 @@ def test_thread_bound_text_io_ignores_closed_fallback_flush():
     wrapped = _script._ThreadBoundTextIO(ClosedFallback())
 
     wrapped.flush()
+
+
+@pytest.mark.parametrize("closed", [False, True], ids=["open-fallback", "closed-fallback"])
+def test_thread_bound_text_io_flush_survives_cleared_module_globals(monkeypatch, closed):
+    fallback = io.StringIO()
+    if closed:
+        fallback.close()
+    wrapped = _runtime_support.ThreadBoundTextIO(fallback)
+    monkeypatch.setattr(_runtime_support, "contextlib", None)
+    assert wrapped.flush() is None
 
 
 def test_worker_failure_formatting_is_deterministic_for_broken_pools():

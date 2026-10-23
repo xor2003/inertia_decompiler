@@ -18,13 +18,19 @@ from typing import cast
 
 from inertia.cli.generated_c_artifacts import conditional_tail_snapshot_8616
 from inertia.cli.milestone_report import (
-    cache_x86_16_tail_validation_detail_artifact,
-    render_x86_16_tail_validation_console_summary,
+    cache_x86_16_tail_validation_detail_artifact as cache_x86_16_tail_validation_detail_artifact,
+)
+from inertia.cli.milestone_report import (
+    render_x86_16_tail_validation_console_summary as render_x86_16_tail_validation_console_summary,
 )
 from inertia.cli.telemetry import annotate_current_span, trace_function
 from inertia.validation.tail_validation import (
-    build_x86_16_tail_validation_aggregate,
-    extract_x86_16_tail_validation_snapshot,
+    build_x86_16_tail_validation_aggregate as build_x86_16_tail_validation_aggregate,
+)
+from inertia.validation.tail_validation import (
+    extract_x86_16_tail_validation_snapshot as extract_x86_16_tail_validation_snapshot,
+)
+from inertia.validation.tail_validation import (
     x86_16_tail_validation_snapshot_passed,
 )
 

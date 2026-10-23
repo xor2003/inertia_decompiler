@@ -32,6 +32,7 @@ result.txt
 .corpus
 node_modules/
 .venv/
+/.venv
 build/
 *.egg-info/
 *.prof

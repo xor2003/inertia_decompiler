@@ -867,6 +867,9 @@ def test_x86_16_widening_package_exports_explicit_contracts():
     assert "WideningCandidate" in widening.__all__
     assert "describe_x86_16_widening_pipeline" in widening.__all__
     assert "run_typed_widening_pass_8616" in widening.__all__
+    from inertia.widening import widening_rules
+
+    assert widening.run_typed_widening_pass_8616 is widening_rules.run_typed_widening_pass_8616
     assert widening.describe_x86_16_widening_pipeline() == tuple(
         (spec.name, spec.purpose, spec.helpers) for spec in widening.WIDENING_PIPELINE
     )

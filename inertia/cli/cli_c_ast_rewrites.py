@@ -15,7 +15,9 @@ import contextlib
 import copy
 import logging
 import re
-from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, MutableMapping
+import typing as _cli_compat_typing
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Hashable as Hashable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -25,77 +27,232 @@ from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimVariable
 
 from inertia.alias.alias_model_impl import (
-    _CopyAliasState,
-    _derived_stack_high_byte_follows_slot,
-    _stack_slot_identity_for_variable,
-    _StackPointerAliasState,
+    _CopyAliasState as _CopyAliasState,
 )
-from inertia.alias.domains import DomainKey, register_pair_name
-from inertia.alias.state import AliasState
-from inertia.cli import cli_access_rewrite_artifact as _cli_access_rewrite_artifact
-from inertia.cli import cli_access_trait_rewrite as _cli_access_trait_rewrite
-from inertia.cli import cli_access_traits as _cli_access_traits
-from inertia.cli import cli_cod_global_statements as _cli_cod_global_statements
-from inertia.cli import cli_cod_globals as _cli_cod_globals
-from inertia.cli import cli_dead_local_prune as _cli_dead_local_prune
-from inertia.cli import cli_far_pointer_stack as _cli_far_pointer_stack
-from inertia.cli import cli_helper_modeling as _cli_helper_modeling
-from inertia.cli import cli_linear_aliases as _cli_linear_aliases
-from inertia.cli import cli_linear_recurrence as _cli_linear_recurrence
-from inertia.cli import cli_linear_recurrence_rules as _cli_linear_recurrence_rules
-from inertia.cli import cli_local_prune as _cli_local_prune
-from inertia.cli import cli_local_rewrites as _cli_local_rewrites
-from inertia.cli import cli_memory_prune as _cli_memory_prune
-from inertia.cli import cli_mkfp_simplify as _cli_mkfp_simplify
-from inertia.cli import cli_segmented_compare as _cli_segmented_compare
-from inertia.cli import cli_segmented_elision as _cli_segmented_elision
-from inertia.cli import cli_segmented_load_coalesce as _cli_segmented_load_coalesce
-from inertia.cli import cli_stack_byte_offsets as _cli_stack_byte_offsets
-from inertia.cli import cli_stack_locals as _cli_stack_locals
-from inertia.cli import cli_word_global_helpers as _cli_word_global_helpers
+from inertia.alias.alias_model_impl import (
+    _derived_stack_high_byte_follows_slot as _derived_stack_high_byte_follows_slot,
+)
+from inertia.alias.alias_model_impl import (
+    _stack_slot_identity_for_variable as _stack_slot_identity_for_variable,
+)
+from inertia.alias.alias_model_impl import (
+    _StackPointerAliasState as _StackPointerAliasState,
+)
+from inertia.alias.domains import DomainKey as DomainKey
+from inertia.alias.domains import register_pair_name as register_pair_name
+from inertia.alias.state import AliasState as AliasState
+
+# Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_access_rewrite_artifact as _cli_compat_export_cli_access_rewrite_artifact
+    _cli_access_rewrite_artifact = _cli_compat_export_cli_access_rewrite_artifact
+else:
+    from inertia.cli import cli_access_rewrite_artifact as _cli_access_rewrite_artifact
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_access_trait_rewrite as _cli_compat_export_cli_access_trait_rewrite
+    _cli_access_trait_rewrite = _cli_compat_export_cli_access_trait_rewrite
+else:
+    from inertia.cli import cli_access_trait_rewrite as _cli_access_trait_rewrite
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_access_traits as _cli_compat_export_cli_access_traits
+    _cli_access_traits = _cli_compat_export_cli_access_traits
+else:
+    from inertia.cli import cli_access_traits as _cli_access_traits
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_cod_global_statements as _cli_compat_export_cli_cod_global_statements
+    _cli_cod_global_statements = _cli_compat_export_cli_cod_global_statements
+else:
+    from inertia.cli import cli_cod_global_statements as _cli_cod_global_statements
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_cod_globals as _cli_compat_export_cli_cod_globals
+    _cli_cod_globals = _cli_compat_export_cli_cod_globals
+else:
+    from inertia.cli import cli_cod_globals as _cli_cod_globals
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_dead_local_prune as _cli_compat_export_cli_dead_local_prune
+    _cli_dead_local_prune = _cli_compat_export_cli_dead_local_prune
+else:
+    from inertia.cli import cli_dead_local_prune as _cli_dead_local_prune
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_far_pointer_stack as _cli_compat_export_cli_far_pointer_stack
+    _cli_far_pointer_stack = _cli_compat_export_cli_far_pointer_stack
+else:
+    from inertia.cli import cli_far_pointer_stack as _cli_far_pointer_stack
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_helper_modeling as _cli_compat_export_cli_helper_modeling
+    _cli_helper_modeling = _cli_compat_export_cli_helper_modeling
+else:
+    from inertia.cli import cli_helper_modeling as _cli_helper_modeling
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_linear_aliases as _cli_compat_export_cli_linear_aliases
+    _cli_linear_aliases = _cli_compat_export_cli_linear_aliases
+else:
+    from inertia.cli import cli_linear_aliases as _cli_linear_aliases
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_linear_recurrence as _cli_compat_export_cli_linear_recurrence
+    _cli_linear_recurrence = _cli_compat_export_cli_linear_recurrence
+else:
+    from inertia.cli import cli_linear_recurrence as _cli_linear_recurrence
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_linear_recurrence_rules as _cli_compat_export_cli_linear_recurrence_rules
+    _cli_linear_recurrence_rules = _cli_compat_export_cli_linear_recurrence_rules
+else:
+    from inertia.cli import cli_linear_recurrence_rules as _cli_linear_recurrence_rules
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_local_prune as _cli_compat_export_cli_local_prune
+    _cli_local_prune = _cli_compat_export_cli_local_prune
+else:
+    from inertia.cli import cli_local_prune as _cli_local_prune
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_local_rewrites as _cli_compat_export_cli_local_rewrites
+    _cli_local_rewrites = _cli_compat_export_cli_local_rewrites
+else:
+    from inertia.cli import cli_local_rewrites as _cli_local_rewrites
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_memory_prune as _cli_compat_export_cli_memory_prune
+    _cli_memory_prune = _cli_compat_export_cli_memory_prune
+else:
+    from inertia.cli import cli_memory_prune as _cli_memory_prune
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_mkfp_simplify as _cli_compat_export_cli_mkfp_simplify
+    _cli_mkfp_simplify = _cli_compat_export_cli_mkfp_simplify
+else:
+    from inertia.cli import cli_mkfp_simplify as _cli_mkfp_simplify
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_segmented_compare as _cli_compat_export_cli_segmented_compare
+    _cli_segmented_compare = _cli_compat_export_cli_segmented_compare
+else:
+    from inertia.cli import cli_segmented_compare as _cli_segmented_compare
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_segmented_elision as _cli_compat_export_cli_segmented_elision
+    _cli_segmented_elision = _cli_compat_export_cli_segmented_elision
+else:
+    from inertia.cli import cli_segmented_elision as _cli_segmented_elision
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_segmented_load_coalesce as _cli_compat_export_cli_segmented_load_coalesce
+    _cli_segmented_load_coalesce = _cli_compat_export_cli_segmented_load_coalesce
+else:
+    from inertia.cli import cli_segmented_load_coalesce as _cli_segmented_load_coalesce
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_stack_byte_offsets as _cli_compat_export_cli_stack_byte_offsets
+    _cli_stack_byte_offsets = _cli_compat_export_cli_stack_byte_offsets
+else:
+    from inertia.cli import cli_stack_byte_offsets as _cli_stack_byte_offsets
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_stack_locals as _cli_compat_export_cli_stack_locals
+    _cli_stack_locals = _cli_compat_export_cli_stack_locals
+else:
+    from inertia.cli import cli_stack_locals as _cli_stack_locals
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli import cli_word_global_helpers as _cli_compat_export_cli_word_global_helpers
+    _cli_word_global_helpers = _cli_compat_export_cli_word_global_helpers
+else:
+    from inertia.cli import cli_word_global_helpers as _cli_word_global_helpers
 from inertia.cli.cli_output import (
     _timestamped_print,
 )
-from inertia.cli.cod_source_rewrites import rewrite_cod_proc_from_source as _rewrite_cod_proc_from_source
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.cli.cod_source_rewrites import (
+        rewrite_cod_proc_from_source as _cli_compat_export_rewrite_cod_proc_from_source,
+    )
+    _rewrite_cod_proc_from_source = _cli_compat_export_rewrite_cod_proc_from_source
+else:
+    from inertia.cli.cod_source_rewrites import rewrite_cod_proc_from_source as _rewrite_cod_proc_from_source
 from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.sidecar_metadata import (
-    _lst_data_label,
+    _lst_data_label as _lst_data_label,
 )
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
-from inertia.lowering import access_profiles as _cli_access_profiles
-from inertia.lowering import object_lowering as _cli_access_object_hints
-from inertia.lowering import object_lowering as _cli_segmented_lowering
-from inertia.lowering import segmented_lowering as _cli_segmented
-from inertia.lowering import stack_lowering as _cli_stack_cvars
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.lowering import access_profiles as _cli_compat_export_cli_access_profiles
+    _cli_access_profiles = _cli_compat_export_cli_access_profiles
+else:
+    from inertia.lowering import access_profiles as _cli_access_profiles
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.lowering import object_lowering as _cli_compat_export_cli_access_object_hints
+    _cli_access_object_hints = _cli_compat_export_cli_access_object_hints
+else:
+    from inertia.lowering import object_lowering as _cli_access_object_hints
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.lowering import object_lowering as _cli_compat_export_cli_segmented_lowering
+    _cli_segmented_lowering = _cli_compat_export_cli_segmented_lowering
+else:
+    from inertia.lowering import object_lowering as _cli_segmented_lowering
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.lowering import segmented_lowering as _cli_compat_export_cli_segmented
+    _cli_segmented = _cli_compat_export_cli_segmented
+else:
+    from inertia.lowering import segmented_lowering as _cli_segmented
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.lowering import stack_lowering as _cli_compat_export_cli_stack_cvars
+    _cli_stack_cvars = _cli_compat_export_cli_stack_cvars
+else:
+    from inertia.lowering import stack_lowering as _cli_stack_cvars
 from inertia.lowering.access_profiles import AccessTraitStrideEvidence as _AccessTraitStrideEvidence
 from inertia.lowering.analysis_helpers import (
-    collect_dos_int21_calls,
-    collect_interrupt_service_calls,
-    dos_helper_declarations,
-    interrupt_service_addr,
-    interrupt_service_name,
-    preferred_known_helper_signature_decl,
-    render_dos_int21_call,
-    render_interrupt_call,
+    collect_dos_int21_calls as collect_dos_int21_calls,
 )
-from inertia.lowering.annotations import _normalize_bp_disp
+from inertia.lowering.analysis_helpers import (
+    collect_interrupt_service_calls as collect_interrupt_service_calls,
+)
+from inertia.lowering.analysis_helpers import (
+    dos_helper_declarations as dos_helper_declarations,
+)
+from inertia.lowering.analysis_helpers import (
+    interrupt_service_addr as interrupt_service_addr,
+)
+from inertia.lowering.analysis_helpers import (
+    interrupt_service_name as interrupt_service_name,
+)
+from inertia.lowering.analysis_helpers import (
+    preferred_known_helper_signature_decl as preferred_known_helper_signature_decl,
+)
+from inertia.lowering.analysis_helpers import (
+    render_dos_int21_call as render_dos_int21_call,
+)
+from inertia.lowering.analysis_helpers import (
+    render_interrupt_call as render_interrupt_call,
+)
+from inertia.lowering.annotations import _normalize_bp_disp as _normalize_bp_disp
 from inertia.lowering.c_ast_utils import (
-    _structured_codegen_node_8616,
-    _structured_slot_names_for_type_8616,
+    _structured_codegen_node_8616 as _structured_codegen_node_8616,
+)
+from inertia.lowering.c_ast_utils import (
+    _structured_slot_names_for_type_8616 as _structured_slot_names_for_type_8616,
 )
 from inertia.lowering.c_runtime_header import (
-    interrupt_helper_declarations_8616,
+    interrupt_helper_declarations_8616 as interrupt_helper_declarations_8616,
 )
-from inertia.lowering.segmented_lowering import _SegmentedAccess
-from inertia.lowering.semantic_cast import CSemanticCast8616, is_identity_semantic_variable_cast_8616
-from inertia.postprocess.bitwise_terms import flatten_bitwise_terms_8616
+from inertia.lowering.segmented_lowering import _SegmentedAccess as _SegmentedAccess
+from inertia.lowering.semantic_cast import CSemanticCast8616 as CSemanticCast8616
+from inertia.lowering.semantic_cast import (
+    is_identity_semantic_variable_cast_8616 as is_identity_semantic_variable_cast_8616,
+)
+from inertia.postprocess.bitwise_terms import flatten_bitwise_terms_8616 as flatten_bitwise_terms_8616
 from inertia.semantics.alias_query import (
-    _storage_domain_for_expr,
+    _storage_domain_for_expr as _storage_domain_for_expr,
+)
+from inertia.semantics.alias_query import (
     describe_alias_storage,
 )
-from inertia.widening import store_width as _cli_word_loads
-from inertia.widening import widening_rules as _cli_segmented_store_coalesce
-from inertia.widening import widening_rules as _cli_stack_coalesce
+
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.widening import store_width as _cli_compat_export_cli_word_loads
+    _cli_word_loads = _cli_compat_export_cli_word_loads
+else:
+    from inertia.widening import store_width as _cli_word_loads
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.widening import widening_rules as _cli_compat_export_cli_segmented_store_coalesce
+    _cli_segmented_store_coalesce = _cli_compat_export_cli_segmented_store_coalesce
+else:
+    from inertia.widening import widening_rules as _cli_segmented_store_coalesce
+if _cli_compat_typing.TYPE_CHECKING:
+    from inertia.widening import widening_rules as _cli_compat_export_cli_stack_coalesce
+    _cli_stack_coalesce = _cli_compat_export_cli_stack_coalesce
+else:
+    from inertia.widening import widening_rules as _cli_stack_coalesce
 from inertia.widening.register_widening import (
     can_join_adjacent_register_slices,
     join_adjacent_register_slices,

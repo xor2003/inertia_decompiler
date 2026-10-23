@@ -22,6 +22,12 @@ importlib.import_module(sys.argv[1])
 import angr
 from angr.analyses.calling_convention.fact_collector import FactCollector
 from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+# A lowering-first import no longer starts the frontend implicitly; register
+# the lifter and apply the platform bootstrap before building the project.
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16
+from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+apply_x86_16_bootstrap()
 
 project = angr.Project(
     io.BytesIO(bytes.fromhex("ca 06 00")), auto_load_libs=False,

@@ -14,42 +14,84 @@ from typing import Any, cast
 
 import angr
 
-from inertia.cli.codeview_nb00 import parse_codeview_nb00
-from inertia.cli.codeview_nb02_nb04 import parse_codeview_nb0204
+from inertia.cli.codeview_nb00 import parse_codeview_nb00 as parse_codeview_nb00
+from inertia.cli.codeview_nb02_nb04 import parse_codeview_nb0204 as parse_codeview_nb0204
 from inertia.cli.lst_extract import (
-    DebugEnumMemberEvidence,
-    DebugSymbolEvidence,
-    DebugTypeDescriptorEvidence,
-    DebugTypeMemberEvidence,
-    DebugTypeReferenceEvidence,
+    DebugEnumMemberEvidence as DebugEnumMemberEvidence,
+)
+from inertia.cli.lst_extract import (
+    DebugSymbolEvidence as DebugSymbolEvidence,
+)
+from inertia.cli.lst_extract import (
+    DebugTypeDescriptorEvidence as DebugTypeDescriptorEvidence,
+)
+from inertia.cli.lst_extract import (
+    DebugTypeMemberEvidence as DebugTypeMemberEvidence,
+)
+from inertia.cli.lst_extract import (
+    DebugTypeReferenceEvidence as DebugTypeReferenceEvidence,
+)
+from inertia.cli.lst_extract import (
     LSTMetadata,
-    extract_lst_metadata,
+)
+from inertia.cli.lst_extract import (
+    extract_lst_metadata as extract_lst_metadata,
 )
 from inertia.cli.project_loading import _probe_ida_base_linear
 from inertia.cli.sidecar_cache import (
-    _attach_debug_evidence_attrs,
-    _ProjectLike,
-    apply_cached_sidecar_metadata,
-    emit_sidecar_metadata_debug,
-    load_cached_sidecar_metadata,
-    store_cached_sidecar_metadata,
+    _attach_debug_evidence_attrs as _attach_debug_evidence_attrs,
+)
+from inertia.cli.sidecar_cache import (
+    _ProjectLike as _ProjectLike,
+)
+from inertia.cli.sidecar_cache import (
+    apply_cached_sidecar_metadata as apply_cached_sidecar_metadata,
+)
+from inertia.cli.sidecar_cache import (
+    emit_sidecar_metadata_debug as emit_sidecar_metadata_debug,
+)
+from inertia.cli.sidecar_cache import (
+    load_cached_sidecar_metadata as load_cached_sidecar_metadata,
+)
+from inertia.cli.sidecar_cache import (
+    store_cached_sidecar_metadata as store_cached_sidecar_metadata,
 )
 from inertia.cli.sidecar_parsers import (
-    _detect_flair_metadata,
-    _parse_cod_sidecar_metadata,
-    _parse_ida_lst_proc_metadata,
-    _parse_ida_lst_proc_ranges,
-    _parse_ida_map_metadata,
-    _parse_idc_metadata,
-    _parse_inc_struct_names,
-    _parse_mzre_map_metadata,
-    _parse_ne_exe_metadata,
-    _reconcile_cod_listing_with_codeview,
-    _synthesize_code_ranges,
+    _detect_flair_metadata as _detect_flair_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_cod_sidecar_metadata as _parse_cod_sidecar_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_ida_lst_proc_metadata as _parse_ida_lst_proc_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_ida_lst_proc_ranges as _parse_ida_lst_proc_ranges,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_ida_map_metadata as _parse_ida_map_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_idc_metadata as _parse_idc_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_inc_struct_names as _parse_inc_struct_names,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_mzre_map_metadata as _parse_mzre_map_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _parse_ne_exe_metadata as _parse_ne_exe_metadata,
+)
+from inertia.cli.sidecar_parsers import (
+    _reconcile_cod_listing_with_codeview as _reconcile_cod_listing_with_codeview,
+)
+from inertia.cli.sidecar_parsers import (
+    _synthesize_code_ranges as _synthesize_code_ranges,
 )
 from inertia.cli.telemetry import trace_function
-from inertia.cli.turbo_debug_tdinfo import parse_tdinfo_exe
-from inertia.frontend.x86_16.cod_extract import CODListingMetadata
+from inertia.cli.turbo_debug_tdinfo import parse_tdinfo_exe as parse_tdinfo_exe
+from inertia.frontend.x86_16.cod_extract import CODListingMetadata as CODListingMetadata
 
 _TRACE_FUNCTION: Any = cast(Any, trace_function)
 

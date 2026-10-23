@@ -13,13 +13,14 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 import angr
-from angr.analyses.decompiler import structured_codegen
+from angr.analyses.decompiler import structured_codegen as structured_codegen
 from angr.sim_type import SimTypeShort
 
 from inertia.cli.cli_output import (
     _timestamped_print,
 )
-from inertia.lowering.analysis_helpers import InterruptCall, collect_dos_int21_calls, interrupt_service_name
+from inertia.lowering.analysis_helpers import InterruptCall as InterruptCall
+from inertia.lowering.analysis_helpers import collect_dos_int21_calls, interrupt_service_name
 
 from .cli_c_ast_rewrites import _c_constant_value, _same_c_expression, _unwrap_c_casts
 
