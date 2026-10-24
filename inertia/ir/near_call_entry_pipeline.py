@@ -5,6 +5,8 @@ Responsibility: compose existing native entry, target, preservation and scoped
 view proofs into a typed pipeline input. The installed source supplies lookup
 facts only; no boot reachability, universal registry publication, whole-function
 validation or callee termination is inferred.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

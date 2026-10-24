@@ -14,6 +14,8 @@ publication takes the pass's error path, the probe stays applicable so the
 real pass owns error reporting and its semantic-validation record.
 
 Scheduling preconditions belong to the structuring stage, not this probe.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations

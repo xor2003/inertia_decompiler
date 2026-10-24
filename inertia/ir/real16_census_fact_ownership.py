@@ -7,6 +7,8 @@ through owned row transitions and detecting subsequent mutation without scans.
 The contract covers pinned owned producers using normal set methods. Calling
 builtin base descriptors directly bypasses subclass accounting and is outside
 this ownership contract. Receipts never replace native or source admission.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

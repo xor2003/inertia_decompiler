@@ -2,6 +2,9 @@
 
 Responsibility: materialize typed storage-object records from accepted hints and retained access evidence.
 No new storage identity or semantic proof is inferred from names.
+Layer: Types/Lowering
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations

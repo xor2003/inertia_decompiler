@@ -17,6 +17,8 @@ callers or recursively discharges callees: unknown calls and transfers that
 need invocation premises retain the existing proof owner's honest refusal. A deadline expiry or an in-flight
 native census re-derivation returns a typed refusal product rather than a
 partial proof. This is a narrow transport seam, not a second proof engine.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

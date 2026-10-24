@@ -3,6 +3,8 @@ Responsibility: reuse authenticated native import surfaces within one request.
 
 This cache retains no proof verdict. Every consumer still performs its native
 census and consumed-row equality checks. Unknown mutable metadata disables reuse.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 
@@ -69,7 +71,7 @@ def _decoded_instruction_key_8616(row: object) -> tuple[object, ...] | None:
     """Snapshot canonical Capstone detail without admitting unknown decoders."""
     if type(row) is not DirectCapstoneInstruction8616:
         return None
-    decoded = cast(DirectCapstoneInstruction8616, row)
+    decoded = row
     if type(decoded.insn) is not CsInsn:
         return None
     native = cast(Any, decoded.insn)  # Capstone ctypes details are an external mutable contract.

@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: preserve argument evaluation, invoke the original call once,
 and publish its proved caller-after word through the canonical register owner.
 Unknown positions, effects or remaining unowned ESP uses keep the input tree.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

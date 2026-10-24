@@ -4,6 +4,8 @@ Responsibility: collect conditional CALL records from a declared selector proof.
 Universal callee closures produce selector-bound records. Invocation-bound
 records retained by the selector proof preserve their original exact scope;
 the batch reauthenticates them without publishing universal summaries.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 
@@ -508,7 +510,7 @@ def _callee_facts_match_8616(prepared: _PreparedCall8616) -> bool:
         return False
     try:
         if prepared.scoped_facts is not None:
-            return prepared.scoped_facts == cast(object, scoped_selector_record_facts_8616(prepared.record))
+            return prepared.scoped_facts == scoped_selector_record_facts_8616(prepared.record)
         if not _fresh_universal_closure_8616(callee):
             return False
         return prepared.callee_facts == _callee_facts_8616(callee)

@@ -7,6 +7,8 @@ restarts. Only primitive structural keys live here; the frontend adapter lowers
 native manager/AIL state into these contracts, and the CLI runtime drives the
 policy at the native stage boundary. No rendered text participates in
 comparisons.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations

@@ -5,6 +5,8 @@ Responsibility: own typed producer publications, validated maturity and refusal
 state shared by raw IR, SSA and later projections. These are evidence contracts;
 this module neither recovers semantics nor observes mutable backend objects.
 Pipeline consumers evaluate currency and report their observations here.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

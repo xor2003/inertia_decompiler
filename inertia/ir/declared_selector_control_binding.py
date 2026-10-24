@@ -4,6 +4,8 @@ Layer: IR.
 Responsibility: consume byte-derived coordinates only against the original CFG
 and retained native census. CALL continuation and RET shape are checked here;
 callee return offset, stack and memory effects remain ordinary proof obligations.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

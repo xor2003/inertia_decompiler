@@ -2,6 +2,9 @@
 
 Responsibility: transport call occurrence identities through exact rollback clones.
 This transports existing evidence; it never discovers a target or matches names.
+Layer: Rewrite/Postprocess cleanup
+Consumes already-proven IR, alias, widening, typed, and structuring facts
+Do not recover new semantics, storage identity, types, call signatures, control flow, or facts from rendered text, COD, source, or CLI/reporting evidence here
 """
 
 from __future__ import annotations

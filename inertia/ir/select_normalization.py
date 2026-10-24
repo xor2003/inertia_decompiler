@@ -7,6 +7,8 @@ identities and external capture pins. Typed match/proof/action, per-pattern
 policy and audited per-row decisions live in ``canonical_patterns``; the
 known-bits owner supplies numeric semantics. No entry register, memory or
 environment assumptions are introduced, and no instruction is deleted here.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

@@ -9,6 +9,8 @@ single-flight reentry refusal. Numeric authority stays with the scalar
 dispatcher and the known-bits owner; this module only binds their outputs
 into auditable proof tokens. No guessing, no deletion, no environment or
 entry-state assumptions are introduced here.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

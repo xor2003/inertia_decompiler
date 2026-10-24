@@ -5,6 +5,8 @@ Responsibility: snapshot actual third-party C-AST data and output-facing type
 context without rendering C or deriving semantics. Generator and variable-manager
 backreferences are execution context, not AST fields; manager-provided declaration
 types are captured explicitly. Unsupported boundary data remains a typed non-result.
+Owns runtime ordering, invariant checks, hard failures, and final emission gates
+Do not recover semantic facts or perform IR, alias, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

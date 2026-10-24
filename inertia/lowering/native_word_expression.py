@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: check current typed C evaluation and exact leaf identity;
 storage, captured-memory versions, dominance and freshness belong to callers.
 No loads are introduced, and no source identity is inferred from coordinates.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations

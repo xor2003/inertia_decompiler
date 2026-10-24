@@ -6,6 +6,8 @@ and preflight every ordered write without committing memory or register state.
 The caller authenticates environment/service identity and supplies complete
 code and interrupt/save-frame spans. Applicability budgets below bound staging
 work only; they never change the frontend allocator model's supported chains.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

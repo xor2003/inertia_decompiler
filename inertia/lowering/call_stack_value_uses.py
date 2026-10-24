@@ -3,6 +3,8 @@
 Layer: Types/Lowering.
 Responsibility: retain required call results while recognizing statement-only
 and explicitly discarded expressions. No instruction or rendered-text recovery.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

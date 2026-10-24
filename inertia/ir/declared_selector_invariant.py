@@ -23,6 +23,8 @@ only; it is never a Real16InvocationDomain, a SegmentCallPreservationResult,
 or a full-state call-chain authorization. GP/SP/memory/return effects stay
 ordinary obligations. Anything the induction cannot close is a typed open
 obligation, never a silently dropped fact.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 
@@ -2426,8 +2428,8 @@ def _selector_certificate_fact_work_8616(
     return (1 + len(projections) + len(scope.instruction_states) + len(scope.consumed_pairs)
             + len(scope.store_rows) + len(scope.call_edges) + len(scope.terminal_edges)
             + len(scope.geometry_rows) + len(scope.obligations)
-            + 3 * cast(int, scoped_selector_facts_work_8616(
-                scoped_selector_records_facts_8616(scope.scoped_call_preservations))))
+            + 3 * scoped_selector_facts_work_8616(
+                scoped_selector_records_facts_8616(scope.scoped_call_preservations)))
 
 
 def _selector_batch_members_8616(

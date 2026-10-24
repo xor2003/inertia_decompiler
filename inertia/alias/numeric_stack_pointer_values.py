@@ -5,6 +5,8 @@ Responsibility: consume the canonical CFG stack transfer and exact captured
 operand views to publish entry-SP-relative scalar values. These are values,
 not SS addresses, and do not authorize reading a mutable native ESP after CALL.
 Consumers must reprove against current IR before materializing a saved result.
+Owns storage identity
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

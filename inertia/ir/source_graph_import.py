@@ -3,6 +3,8 @@
 Responsibility: select the verified native source-graph binding only when its
 module is requested. The authoritative Python source remains interpretable;
 compiled use is optional acceleration through the shared bundle verifier.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

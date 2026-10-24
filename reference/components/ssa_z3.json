@@ -322,7 +322,16 @@
     "tools/dosunit/tests/test_model_memory.py",
     "tools/dosunit/tests/test_flat32_identity_edges.py",
     "tools/dosunit/tests/test_flat32_predecessor_edges.py",
-    "tools/dosunit/tests/test_control_view_model_hash.py"
+    "tools/dosunit/tests/test_control_view_model_hash.py",
+    "tools/dosunit/tests/test_flat32_entry_inputs.py",
+    "tools/dosunit/tests/test_flat32_external_read_frame.py",
+    "tools/dosunit/tests/test_flat32_indirect_cell_premises.py",
+    "tools/dosunit/tests/test_flat32_indirect_retry_evidence.py",
+    "tools/dosunit/tests/test_flat32_small_dag_stores.py",
+    "tools/dosunit/tests/test_repeat_scan_flag_dependencies.py",
+    "tools/dosunit/tests/test_ssa_compact_memory.py",
+    "tools/dosunit/tests/test_unread_projection_choices.py",
+    "tools/dosunit/tests/test_z3_repeat_memory.py"
   ],
   "focus": [
     "tools/dosunit/tests/test_contract_boundaries.py",

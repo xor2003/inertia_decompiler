@@ -14,6 +14,8 @@ Context-free accessors stay closed: a scoped result can never publish a
 universal displacement or feed a universal scalar field.
 Owns call-effect semantics. Do not perform alias-state, IR projection,
 frontend decode, lowering, rewrite, postprocess, or CLI/reporting work here.
+Owns instruction effects, flags, branch meaning, and expression interpretation
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

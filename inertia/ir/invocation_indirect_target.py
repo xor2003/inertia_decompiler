@@ -4,6 +4,8 @@ Layer: IR.
 Responsibility: evaluate an acyclic native prefix using the existing scalar and
 path-memory semantics. A result is conditional discovery, never closed function
 coverage or permission to register a universal successor.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

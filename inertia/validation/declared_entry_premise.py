@@ -3,6 +3,8 @@
 Responsibility: transport a checked conditional entry without replaying during reporting.
 The serialized receipt is diagnostic evidence, never authority to mint an IR scope.
 Dynamic boundary: reads third-party angr/codegen attachments through getattr.
+Owns canonical equivalence checking and validation diagnostics
+Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-backed proof
 """
 from __future__ import annotations
 

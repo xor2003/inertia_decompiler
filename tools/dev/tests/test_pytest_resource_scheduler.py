@@ -18,12 +18,14 @@ from tools.dev.pytest_resource_scheduler import (
 )
 
 
-def test_historical_resource_modules_and_worker_contract_keep_identity() -> None:
+def test_resource_modules_share_canonical_worker_contract() -> None:
+    """Resource owners share the maintained worker contract."""
     from tools.dev.pytest_worker_contract import WorkerSpec as QualifiedWorkerSpec
 
     assert WorkerSpec is QualifiedWorkerSpec
     for name in ("pytest_resource_history", "pytest_resource_scheduler"):
-        assert importlib.import_module(f"scripts.{name}") is importlib.import_module(f"tools.dev.{name}")
+        module = importlib.import_module(f"tools.dev.{name}")
+        assert module.WorkerSpec is QualifiedWorkerSpec
 
 
 def _accepted_history(

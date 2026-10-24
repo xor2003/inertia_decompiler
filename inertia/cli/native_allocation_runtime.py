@@ -1,6 +1,6 @@
 """Native-hook orchestration for restartable variable allocation.
 
-Layer: CLI/runtime.
+Layer: CLI/fallback/reporting.
 Responsibility: drive the real angr Clinic ``_stage_recover_variables`` boundary
 through the Lowering-owned convergence session using the Frontend adapter's
 native snapshot/reset/restore operations. Recovery always executes on first

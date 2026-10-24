@@ -19755,3 +19755,14 @@ six plan areas retained.
 
 All configured lint subgates pass across the initial run and serial recovery; the initial parallel invocation was interrupted by killed MyPy/Vulture processes. The focused test run records 145 passed, 6 skipped and 3 unresolved nested declared-callee failures; full-suite acceptance is not claimed.
 Thread-bound output flushing retains its closed-stream guard through Python interpreter finalization.
+The three previously failing nested-callee tests pass in one serial Python 3.15.1 verification run; the earlier refusal cause remains unproven.
+The development MyPy gate retains promoted dependency contracts under skipped imports and passes a cold check of 1,616 source files.
+Native lazy-import guard ordering passes 44 focused checks, including rejection of eager binding reads before the guard.
+
+## Native-import governance and angr compatibility follow-up
+
+- Promoted MyPy dependency context, native lazy-import guard ordering, reviewed ownership headers, and component/Make projections are synchronized without changing the compiled cohort or proof budgets.
+- Stable first-occurrence pipeline deduplication removes four repeated targets; the selected test set and budgeted/relational lanes remain unchanged, with every component routine target represented once.
+- The original 18 infrastructure failures pass the focused rerun. The mandatory infrastructure run records 1,117 passed and one documentation-marker failure; that sole marker check passes after the wording repair, with the root guidance still at 140 lines.
+- angr 9.3.4 uses a zero-argument AIL Manager. The constructor adaptation passes 115 focused cases and all 69 cases observed failing in the interrupted broad run. The small repeat-state extraction passes the same 110 semantic controls before and after, and scoped lint passes.
+- Overall hard-gate/default-pipeline acceptance remains pending: the earlier hard run was interrupted after the Manager failures, and the default pipeline has not started. Expanded slow-audit acceptance is not claimed.

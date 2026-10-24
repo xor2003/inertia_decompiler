@@ -4,6 +4,8 @@ Responsibility: consume a native invocation proof as a conditional CFG partition
 The backward cone of a returning path is insufficient: full entry reachability
 after removing proved-dead edges must equal that cone. Raw blocks remain owned
 by the native artifact; nothing here publishes a universal body or deletes code.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

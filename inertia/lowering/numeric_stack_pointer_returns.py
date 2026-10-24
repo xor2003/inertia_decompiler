@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: capture architectural entry SP once and consume source Alias
 and return-path proofs as unsigned word expressions. Does not infer native
 SSA inputs, repair signatures, recover semantics from text, or remove calls.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

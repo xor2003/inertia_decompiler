@@ -12,6 +12,8 @@ dependency and native snapshots precede callbacks; staged steps never
 publish authority; fresh final observations precede owned-fact
 reconciliation; promotion happens last. No persistent cache, no new
 registry, no budget change.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

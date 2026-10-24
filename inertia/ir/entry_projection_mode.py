@@ -3,6 +3,8 @@
 Layer: IR.
 Responsibility: distinguish control-only projections from fresh outgoing CALL
 selector discharge. A mode requests work; it conveys no evidence or trust.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

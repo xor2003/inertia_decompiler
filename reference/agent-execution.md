@@ -125,6 +125,12 @@ in logs; report scope, exit status, counts and actionable failures only.
 
 ### Clear Code
 
+Required four-question review:
+1. What layer? Why earliest correct layer?
+2. What invariant does it fix? What test proves it?
+3. What corpus result improved? What might regress?
+4. Architectural or temporary rescue? If temporary, what replaces it?
+
 - Prefer descriptive domain names and straightforward control flow. Code should
   communicate intent without requiring readers to reconstruct the algorithm.
 - Add comments where they explain non-obvious reasoning, invariants, constraints,

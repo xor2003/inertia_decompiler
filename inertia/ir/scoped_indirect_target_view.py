@@ -3,6 +3,8 @@
 Layer: IR.
 Responsibility: retain conditional raw input and expose a freshly authenticated
 CFG projection only under its exact consuming call-chain entry.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

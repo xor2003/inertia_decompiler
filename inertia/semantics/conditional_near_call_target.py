@@ -37,6 +37,8 @@ The only new arithmetic is closed-interval membership on the retained
 selector bounds plus the sub-1 MiB physical limit. This theorem proves no
 CS preservation, reachability, ABI, stack/memory or callee preservation,
 and publishes nothing to any registry.
+Owns instruction effects, flags, branch meaning, and expression interpretation
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

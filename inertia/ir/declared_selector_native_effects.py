@@ -13,6 +13,8 @@ for CALL/MEMORY/CONTROL rows, and never consumes names, rendered text,
 or raw opcodes. Rows must already be source-bound by the canonical
 fresh-import binding (``_scoped_native_failure_8616``); synthetic rows
 exercise this classifier but can never satisfy a native census.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

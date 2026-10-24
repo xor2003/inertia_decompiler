@@ -3,6 +3,8 @@
 Responsibility: keep consumed argument PUSH storage while structured reads still
 observe its typed stack range. This is a conservative DCE veto, not an alias
 producer or a proof that unknown memory reads cannot alias the stack.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

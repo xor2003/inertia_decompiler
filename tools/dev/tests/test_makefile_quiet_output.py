@@ -178,6 +178,23 @@ def test_comparator_pool_override_does_not_reduce_following_test_pool(
     assert workers == ["2", selected, "6"]
 
 
+def test_mypy_dev_keeps_promoted_dependency_context_once() -> None:
+    """Skipped imports must retain the canonical promoted dependency contracts."""
+    dependency = "inertia/alias/alias_model.py"
+    command = [
+        "make",
+        "-n",
+        "mypy-dev",
+        f"PYTHON={sys.executable}",
+        f"QA_TYPED_FILES={dependency} {dependency}",
+    ]
+    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=True)
+    recipes = [line for line in result.stdout.splitlines() if " -m mypy " in line]
+    assert len(recipes) == 1
+    files = [argument for argument in shlex.split(recipes[0]) if argument.endswith(".py")]
+    assert files.count(dependency) == 1
+
+
 @pytest.mark.parametrize("override", (False, True))
 def test_mypy_dev_checks_each_inventory_file_once_without_dropping_scope(override):
     """Repeated promotions or explicit overrides must not make MyPy reject its inputs."""

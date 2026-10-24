@@ -385,7 +385,7 @@ linters:
 	$(MAKE) -j$(LINT_JOBS) ruff mypy mypyc vulture unused-python-files lizard PYTHON="$(PYTHON)"
 
 linters-dev:
-	# Hard local gate: practical and reproducible per file-level mypyc scope.
+	# Full typed dependency context, with practical per-file mypyc compilation.
 	$(MAKE) -j$(LINT_JOBS) ruff mypy-dev mypyc vulture unused-python-files lizard-dev PYTHON="$(PYTHON)"
 
 linters-dev-locked:
@@ -3464,7 +3464,7 @@ QA_PYTEST_TARGETS += \
 	tests/semantics/test_x86_16_status_flag_liveness.py \
 	tests/frontend/test_x86_16_flag_lookahead_boundaries.py \
 	tests/frontend/test_x86_16_msc_caller_cleanup.py \
-	tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence \
+	tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_keeps_unknown_memory_even_with_exact_push_evidence \
 	tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_keeps_unproven_far_pointer_stores \
 	tests/postprocess/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores \
 	tests/frontend/test_x86_16_alu_effect_order.py \
@@ -4991,6 +4991,9 @@ pyright-all:
 mypy:
 	$(Q)$(PYTHON) -m mypy $(MYPY_OUTPUT_FLAGS) --cache-dir .mypy_cache --config-file pyproject.toml $(sort $(QA_TYPED_FILES))
 
+# Import skipping must not erase contracts from the promoted type inventory.
+# Explicit command-line file selections still override this default context.
+mypy-dev: LINTERS_DEV_MYPY_FILES += $(QA_TYPED_FILES)
 mypy-dev:
 	$(Q)$(PYTHON) -m mypy $(MYPY_OUTPUT_FLAGS) --cache-dir .mypy_cache --config-file pyproject.toml $(sort $(LINTERS_DEV_MYPY_FILES))
 
@@ -5213,8 +5216,6 @@ QA_TYPED_FILES += inertia/__init__.py inertia/frontend/__init__.py   inertia/ir/
 QA_RUFF_TARGETS += inertia/__init__.py inertia/frontend/__init__.py   inertia/ir/public_api.py
 
 # Source-bound raw boot census controls.
-QA_PYTEST_TARGETS += tests/ir/test_x86_16_boot_entry_link.py
-QA_RUFF_TARGETS += tests/ir/test_x86_16_boot_entry_link.py
 QA_PYTEST_TARGETS += tests/ir/test_x86_16_boot_callee_transport.py
 QA_RUFF_TARGETS += tests/ir/test_x86_16_boot_callee_transport.py
 

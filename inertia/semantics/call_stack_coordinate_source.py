@@ -4,6 +4,8 @@ Layer: Semantics.
 Responsibility: bind immutable coordinate projections to their admitted caller
 IR and original evidence inputs. Counters or copied integers cannot replace
 this source binding, including when downstream Alias consumes a partial proof.
+Owns instruction effects, flags, branch meaning, and expression interpretation
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

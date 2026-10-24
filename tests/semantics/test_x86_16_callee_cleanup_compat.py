@@ -22,7 +22,7 @@ def _fixture(encoded="c2 08 00"):
         io.BytesIO(bytes.fromhex(encoded)), auto_load_libs=False,
         main_opts={"backend": "blob", "arch": Arch86_16(), "base_addr": 0x2000, "entry_point": 0x2000},
     )
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     target = ailment.Expr.Const(manager.next_atom(), 0x2000, 16)
     argument = ailment.Expr.Register(manager.next_atom(), project.arch.sp_offset, 16)
     call = ailment.Stmt.SideEffectStatement(

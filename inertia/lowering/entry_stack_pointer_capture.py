@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: own the dominating immutable word capture, exact runtime input
 expression and source-bound use census shared by return and call consumers.
 Every retained use is freshly reproduced; a marker never supplies authority.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 
@@ -366,13 +368,13 @@ def _use_is_current(
     """Delegate current authority to the owning source proof, never the marker."""
     if isinstance(use, NumericStackPointerReturn8616):
         current = prove_numeric_stack_pointer_return_8616(source, use.assignment.block_addr, use.path.return_addr)
-        return cast(bool, current == use)
+        return current == use
     if isinstance(use, ScopedCallPositionAuthority8616):
         return use.is_current_for(source, scoped_context=scoped_context,
                                   scoped_caller_scope=scoped_caller_scope)
     if not isinstance(use, CallStackPosition8616):
         return False
-    return cast(bool, call_stack_position_is_current_8616(source, use))
+    return call_stack_position_is_current_8616(source, use)
 
 
 def _retained_uses(captures: list[c.CAssignment]) -> tuple[EntryStackPointerUse8616, ...] | None:

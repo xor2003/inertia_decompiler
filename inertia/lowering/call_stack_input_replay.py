@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: expose authenticated original arguments to a source-backed
 Lowering consumer, then bind its actual arguments before any validation.
 Unknown or corrupted contexts refuse before invoking that consumer.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

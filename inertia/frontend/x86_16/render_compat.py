@@ -132,6 +132,7 @@ def _iter_c_nodes_8616(root: object) -> Iterator[object]:
 
 def _kb_function_for_addr_8616(project: object, addr: int) -> object | None:
     """Find an existing function without discovery or mutating the native KB."""
+    # Dynamic boundary: angr/plugin projects and KBs are not owned Inertia contracts.
     kb_functions = getattr(getattr(project, "kb", None), "functions", None)
     if kb_functions is None:
         return None

@@ -1,6 +1,6 @@
 """Export MZ-EXE embedded debug info (NBxx CodeView / TDINFO) as an ELF32 symbol file.
 
-Layer: cli/reporting. Responsibility: translate parsed debug metadata into a
+Layer: CLI/fallback/reporting. Responsibility: translate parsed debug metadata into a
 gdb-loadable ``.symtab`` so remote real-mode debugging gets named functions and
 data labels. Optional evidence only — never required for decompilation.
 

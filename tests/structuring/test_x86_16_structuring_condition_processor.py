@@ -20,7 +20,7 @@ def test_condition_processor_multibit_must_bool_becomes_nonzero_bool_predicate()
     reg = ailment.Expr.Register(None, 0, 16)
 
     with _guard_condition_processor_multibit_bool_predicates_8616(project):
-        processor = ConditionProcessor(arch, Manager(arch=arch))
+        processor = ConditionProcessor(arch, Manager())
         predicate = processor.claripy_ast_from_ail_condition(reg, must_bool=True, ins_addr=0x4010)
 
     assert isinstance(predicate, claripy.ast.Bool)
@@ -30,7 +30,7 @@ def test_condition_processor_multibit_must_bool_becomes_nonzero_bool_predicate()
 
 def test_equal_predicates_keep_distinct_branch_origins():
     arch = archinfo.ArchX86()
-    processor = ConditionProcessor(arch, Manager(arch=arch))
+    processor = ConditionProcessor(arch, Manager())
     operands = (ailment.Expr.Tmp(None, 1, 16), ailment.Expr.Const(None, 40, 16))
     predicates = [
         ailment.Expr.BinaryOp(None, "CmpGT", operands, True, bits=1,
@@ -60,7 +60,7 @@ def test_incomplete_branch_origin_is_not_invented(tags):
 
 def test_ite_predicates_preserve_distinct_callsite_results():
     arch = archinfo.ArchX86()
-    processor = ConditionProcessor(arch, Manager(arch=arch))
+    processor = ConditionProcessor(arch, Manager())
     const = ailment.Expr.Const
     predicates = []
     for address in (0x4010, 0x4020):
@@ -76,7 +76,7 @@ def test_ite_predicates_preserve_distinct_callsite_results():
 @pytest.mark.parametrize("must_bool", [False, True])
 def test_opaque_ite_roundtrip_preserves_source_and_reuses_identity(must_bool):
     arch = archinfo.ArchX86()
-    processor = ConditionProcessor(arch, Manager(arch=arch))
+    processor = ConditionProcessor(arch, Manager())
     const = ailment.Expr.Const
     expression = ailment.Expr.ITE(None, const(None, 1, 16),
                                  const(None, 0x8000, 16), const(None, 0x100, 16))

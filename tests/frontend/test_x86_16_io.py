@@ -94,7 +94,7 @@ def test_out_dirty_helper_has_complete_ail_effect_metadata(encoding: str, width:
     assert dirty.mFx == "Ifx_None"
     assert dirty.mSize == 0
     assert dirty.nFxState == 0
-    ail = IRSBConverter.convert(irsb, Manager(arch=arch))
+    ail = IRSBConverter.convert(irsb, Manager())
     assert any("x86g_dirtyhelper_OUT" in repr(statement) for statement in ail.statements)
 
     ail, raw, normalized, materialized, failures = _normalize_x86_16_io_dirty_statements(ail)

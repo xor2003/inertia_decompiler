@@ -10,6 +10,8 @@ coordinate derives and validates that projection instead of competing with it.
 ``None`` is absent evidence, never a proven zero, and every unproven field
 keeps a typed refusal naming the missing proof. The closed evidence census
 reconciles all seven coordinate slots; ``complete`` requires every slot proven.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

@@ -105,53 +105,26 @@ Every semantic improvement needs closed evidence loop: `raw_fact_count`, `normal
   3) output is closer to original C than previous baseline.
 - Any DCE candidate without full evidence is `UNKNOWN_REFUSE` and must be kept.
 
-## Review checklist
-
-1. What layer? Why earliest correct layer?
-2. What invariant does it fix? What test proves it?
-3. What corpus result improved? What might regress?
-4. Architectural or temporary rescue? If temporary, what replaces it?
+Follow the required [four-question review](reference/agent-execution.md#clear-code).
 
 ## Tool output limits (mandatory)
 
-- Limit the visible text returned by **every tool invocation**, including shell,
-  search, MCP and batched calls, to **20 lines and 2 KiB in total**. Apply the
-  limit before returning output to the conversation; a token limit alone is
-  insufficient. Use smaller limits when the result is simple.
-- Capture the full raw output, including stderr and overflow, in an ignored
-  file under `.cache/agent-tool-output/`. Reuse `latest.log` and **overwrite it
-  on each invocation**, rather than appending or accumulating routine logs.
-  Concurrent calls must use separate fixed `latest-<tool-or-task>.log` paths.
-- Return the exit status or typed result, a short actionable summary, and the
-  log path. Read additional details from the saved file in bounded chunks only
-  when needed. Preserve task-specific evidence logs when required for a
-  regression or acceptance claim; these are separate from routine output.
-- Prefer native tool limits and filters. If a tool cannot bound its response,
-  call it through an orchestration wrapper that saves the complete response
-  and returns only the bounded summary. This applies to structured results too.
-- Preserve the producer's real exit status and complete diagnostics. Never
-  pipe a running producer into `head` or otherwise truncate its execution;
-  limit the display after capture. Do not expose secrets in summaries or logs.
+- Bound **every tool response**, including structured and batched output, to
+  **20 lines and 2 KiB in total** before display; tokens alone are insufficient.
+- Save complete raw stdout/stderr and real exit status in ignored
+  `.cache/agent-tool-output/` logs; retain required regression/acceptance evidence.
+- Never truncate a live producer or expose secrets. Follow the mandatory
+  [capture, reuse, overflow and wrapper rules](reference/agent-execution.md#token-efficient-command-output).
 
 ## Improving code
 
-- Fast iteration per coherent Python edit on explicit owned paths:
-  `rtk proxy nice -n 10 make lint-iteration PYTHON=./.venv/bin/python FILES="owned.py test_owned.py"`
-  (Ruff + type/doc/access ratchet), then the focused regression. Scoped
-  MyPy/Pyright/Basta/Vulture/Lizard, Cython builds, broad scans and repeat-check policy:
-  [Linter cadence](reference/agent-execution.md#linter-cadence). Documentation-only edits need no Python lint.
+- Follow [Linter cadence](reference/agent-execution.md#linter-cadence): scoped
+  `lint-iteration`, then the focused regression. Documentation-only edits need no Python lint.
 - Run Python/pytest at nice 10 with `PYTHON_JIT=1`; share at most six test workers; retain
   full logs and report scope, exit status, counts and actionable failures.
-- Bound every tool response to 20 lines and 2 KiB, including combined output from
-  batched commands. Save complete command logs before displaying a summary. When
-  raw output exceeds the display limit, overwrite
-  `.cache/agent-tool-output/latest.log` with the full raw output and report its
-  path; retain required test and acceptance logs separately. Follow the detailed
-  [output rules](reference/agent-execution.md#token-efficient-command-output).
-- Mandatory guidance: read and follow
-  [reference/agent-execution.md](reference/agent-execution.md) at startup and after compaction
-  (regression, performance, delegation, token-output, progress, compaction-handoff rules). This file
-  remains the canonical architecture and acceptance contract; `CLAUDE.md` supplements and never overrides either file.
+- Mandatory guidance: read and follow [reference/agent-execution.md](reference/agent-execution.md) at startup and after compaction:
+  regression, performance, delegation, output, progress and handoff rules are mandatory.
+  This file remains canonical; `CLAUDE.md` supplements and never overrides either file.
 - Regular local gate: `make quality-fast PYTHON=./.venv/bin/python`.
   `make test-pipeline PYTHON=./.venv/bin/python` before claiming semantic decompiler improvements.
   `make test-pipeline-expanded PYTHON=./.venv/bin/python` for broad slow audits.
@@ -163,5 +136,5 @@ Every semantic improvement needs closed evidence loop: `raw_fact_count`, `normal
   `reference/decompiler-map.md`, `reference/agent-rules.md`, `reference/real-mode-edge-policy.md` and
   `reference/frontend-backend-migration-policy.md`. `reference/agent-rules.md` provides supplemental
   glossary and long-running-agent guidance. Independent tools need their domain guides when crossing those boundaries; root invariants always apply.
-- Devin delegation (user-authorized only): baseline, sandbox boundary, launch, prompt template and
-  parent review: [reference/devin-handoff.md](reference/devin-handoff.md). Compaction handoff spec: [agent-execution.md](reference/agent-execution.md#context--compaction-handoff).
+- [Devin delegation](reference/devin-handoff.md) is user-authorized only;
+  [compaction handoff requirements](reference/agent-execution.md#context--compaction-handoff) are mandatory.

@@ -3,6 +3,9 @@
 Responsibility: transport an accepted scalar callee interface, bound to its
 source binary, native function bytes and generated payload, through worker IPC.
 No inference from names, rendered C or source; pointer/aggregate types refuse.
+Layer: Types/Lowering
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

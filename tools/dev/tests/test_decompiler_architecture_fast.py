@@ -89,7 +89,7 @@ def test_full_guard_requires_external_gp_runtime_control(tier: str) -> None:
 def _contract_gate_fixture(root: Path, name: str, body: str) -> None:
     """Write a minimal stage containing an explicit pipeline-contract owner."""
     (root / "decompiler_postprocess_stage.py").write_text(
-        "from .pipeline.contracts import assert_pipeline_contracts_8616\n"
+        "from inertia.pipeline.contracts import assert_pipeline_contracts_8616\n"
         f"def {name}(codegen, function):\n    {body}\n",
     )
 

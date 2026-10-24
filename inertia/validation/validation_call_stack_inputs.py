@@ -5,6 +5,8 @@ Responsibility: independently prove ordered call contexts and their word writes,
 then expose only those proved protocol nodes as logical calls to existing tail
 observation. Malformed or missing contexts remain explicit semantic failures.
 No emitted tree is changed, and no tag alone authorizes normalization.
+Owns canonical equivalence checking and validation diagnostics
+Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-backed proof
 """
 from __future__ import annotations
 

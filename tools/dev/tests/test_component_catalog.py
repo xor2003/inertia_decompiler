@@ -1,6 +1,7 @@
 """Component declarations, derived compatibility views and task routing."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,11 +11,58 @@ from tools.dev.component_catalog import (
     derive_test_catalog,
     load_components,
     make_quality_projection,
+    quality_projection_prefix,
     validate_component_paths,
 )
+from tools.dev.makefile_inventory import makefile_variable_words
 from tools.dev.task_context import build_task_context, components_for_files
 
 pytestmark = pytest.mark.tooling
+
+
+def test_quality_projection_keeps_legacy_targets_in_order(tmp_path: Path) -> None:
+    component = replace(
+        load_components()[0],
+        quality_sources=("shared.py", "new.py"),
+        routine_tests=("shared_test.py::test_shared", "new_test.py::test_new"),
+    )
+    prefix = (
+        "QA_TYPED_FILES = first.py shared.py\n"
+        "QA_RUFF_TARGETS = first.py shared.py shared_test.py\n"
+        "QA_PYTEST_TARGETS = first_test.py::test_first shared_test.py::test_shared\n"
+    )
+    projected = make_quality_projection((component,), legacy_prefix=prefix, base_dir=tmp_path)
+    expected = {
+        "QA_TYPED_FILES": ("first.py", "shared.py", "new.py"),
+        "QA_RUFF_TARGETS": ("first.py", "shared.py", "shared_test.py", "new.py", "new_test.py"),
+        "QA_PYTEST_TARGETS": (
+            "first_test.py::test_first", "shared_test.py::test_shared", "new_test.py::test_new",
+        ),
+    }
+    for variable, targets in expected.items():
+        assert makefile_variable_words(prefix + projected, variable) == targets
+
+
+def test_quality_projection_refuses_unresolved_legacy_scope(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unresolved legacy quality scope"):
+        make_quality_projection(
+            load_components(),
+            legacy_prefix="QA_TYPED_FILES = $(UNKNOWN)\n",
+            base_dir=tmp_path,
+        )
+
+
+def test_quality_projection_prefix_stops_at_the_projection() -> None:
+    prefix = "QA_TYPED_FILES = before.py\n"
+    assert quality_projection_prefix(
+        prefix + "include reference/components.mk\nQA_TYPED_FILES += after.py\n",
+    ) == prefix
+
+
+@pytest.mark.parametrize("text", ("QA_TYPED_FILES = before.py\n", "include reference/components.mk\n" * 2))
+def test_quality_projection_prefix_requires_one_include(text: str) -> None:
+    with pytest.raises(ValueError, match="exactly one include"):
+        quality_projection_prefix(text)
 
 
 def _declaration(name: str = "tooling") -> dict[str, object]:
@@ -37,7 +85,8 @@ def test_split_catalog_matches_export_and_paths():
     components = load_components()
     exported = json.loads((ROOT / "reference/test-components.json").read_text())
     assert derive_test_catalog(components) == exported
-    assert make_quality_projection(components) == (ROOT / "reference/components.mk").read_text()
+    prefix = quality_projection_prefix((ROOT / "Makefile").read_text())
+    assert make_quality_projection(components, legacy_prefix=prefix) == (ROOT / "reference/components.mk").read_text()
     assert not validate_component_paths(components)
 
 

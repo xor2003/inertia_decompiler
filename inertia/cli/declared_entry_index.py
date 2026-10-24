@@ -1,4 +1,4 @@
-"""Layer: CLI intake.
+"""Layer: CLI/fallback/reporting.
 
 Responsibility: bind explicit entry extents and collect bounded native descendant edges.
 A partial entry index never certifies whole-program reachability or CRT startup.

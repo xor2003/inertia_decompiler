@@ -3607,6 +3607,112 @@ _PROMOTED_TYPED_FILES = (
     "inertia/frontend/x86_16/verification_80286.py",
     "inertia/frontend/x86_16/verification_80386.py",
     "inertia/widening/widening_model.py",
+    "inertia/alias/call_register_roles.py",
+    "inertia/alias/call_stack_positions.py",
+    "inertia/alias/callee_stack_pointer.py",
+    "inertia/alias/numeric_stack_pointer_values.py",
+    "inertia/alias/scoped_call_stack_context.py",
+    "inertia/alias/scoped_call_stack_positions.py",
+    "inertia/alias/scoped_callee_stack_pointer.py",
+    "inertia/alias/stack_pointer_alias_map.py",
+    "inertia/cli/declared_entry_index.py",
+    "inertia/cli/declared_function_discovery.py",
+    "inertia/cli/gdb_symbol_export.py",
+    "inertia/cli/native_allocation_runtime.py",
+    "inertia/cli/real16_declared_project.py",
+    "inertia/frontend/real16_dosbox_entry_policy.py",
+    "inertia/frontend/real16_dosbox_int21_frame.py",
+    "inertia/frontend/real16_dosbox_resize.py",
+    "inertia/frontend/real16_vector_response8616.py",
+    "inertia/frontend/x86_16/allocation_publication.py",
+    "inertia/frontend/x86_16/analysis_failures.py",
+    "inertia/frontend/x86_16/clinic_conversion_source.py",
+    "inertia/frontend/x86_16/clinic_entry_jump_transport.py",
+    "inertia/frontend/x86_16/clinic_scoped_control.py",
+    "inertia/frontend/x86_16/control_transfer_geometry.py",
+    "inertia/frontend/x86_16/declared_entry_document.py",
+    "inertia/frontend/x86_16/declared_function_entry.py",
+    "inertia/frontend/x86_16/instruction_fetch_geometry.py",
+    "inertia/frontend/x86_16/near_call_entry_context.py",
+    "inertia/frontend/x86_16/near_call_selector_window.py",
+    "inertia/frontend/x86_16/variable_allocation_convergence.py",
+    "inertia/ir/call_stack_coordinates.py",
+    "inertia/ir/canonical_patterns.py",
+    "inertia/ir/declared_entry_pipeline.py",
+    "inertia/ir/declared_selector_call_preservation.py",
+    "inertia/ir/declared_selector_control_binding.py",
+    "inertia/ir/declared_selector_invariant.py",
+    "inertia/ir/declared_selector_native_effects.py",
+    "inertia/ir/declared_selector_scoped_callee.py",
+    "inertia/ir/entry_jump_transport.py",
+    "inertia/ir/entry_projection_mode.py",
+    "inertia/ir/function_lifecycle.py",
+    "inertia/ir/function_readiness_contracts.py",
+    "inertia/ir/invocation_indirect_target.py",
+    "inertia/ir/native_copy_memo.py",
+    "inertia/ir/native_import_capture.py",
+    "inertia/ir/native_import_surface_cache.py",
+    "inertia/ir/near_call_census.py",
+    "inertia/ir/near_call_entry_pipeline.py",
+    "inertia/ir/near_call_jump_scope.py",
+    "inertia/ir/near_call_preservation.py",
+    "inertia/ir/raw_boot_blocked_prefix.py",
+    "inertia/ir/raw_boot_native_surface_cache.py",
+    "inertia/ir/raw_boot_route_admission.py",
+    "inertia/ir/real16_boot_entry_link.py",
+    "inertia/ir/real16_census_fact_ownership.py",
+    "inertia/ir/real16_dosbox_resize_effects.py",
+    "inertia/ir/real16_fused_callee_transfer.py",
+    "inertia/ir/real16_fused_caller_prefix.py",
+    "inertia/ir/real16_persistent_bytes8616.py",
+    "inertia/ir/real16_prefix_cut.py",
+    "inertia/ir/real16_prefix_transcript.py",
+    "inertia/ir/real16_scratch_protection.py",
+    "inertia/ir/scoped_call_stack_coordinates.py",
+    "inertia/ir/scoped_indirect_target_view.py",
+    "inertia/ir/scoped_return_reachability.py",
+    "inertia/ir/select_normalization.py",
+    "inertia/ir/source_graph_binding.py",
+    "inertia/ir/source_graph_import.py",
+    "inertia/ir/source_graph_json.py",
+    "inertia/lowering/allocation_convergence.py",
+    "inertia/lowering/array_matching_applicability_8616.py",
+    "inertia/lowering/call_stack_input_contracts.py",
+    "inertia/lowering/call_stack_input_replay.py",
+    "inertia/lowering/call_stack_inputs.py",
+    "inertia/lowering/call_stack_value_uses.py",
+    "inertia/lowering/consumed_push_stack_liveness.py",
+    "inertia/lowering/entry_stack_pointer_capture.py",
+    "inertia/lowering/gp_register_read_order.py",
+    "inertia/lowering/gp_stack_addressed_byte.py",
+    "inertia/lowering/native_word_expression.py",
+    "inertia/lowering/numeric_stack_pointer_returns.py",
+    "inertia/lowering/proven_call_cfg_extension.py",
+    "inertia/lowering/scalar_interface_transport.py",
+    "inertia/native_bundle.py",
+    "inertia/pipeline/call_stack_input_outcome.py",
+    "inertia/pipeline/function_readiness.py",
+    "inertia/pipeline/structured_ast_output.py",
+    "inertia/postprocess/call_summary_rollback.py",
+    "inertia/postprocess/optimization/rule_runtime.py",
+    "inertia/semantics/call_register_role_contracts.py",
+    "inertia/semantics/call_register_roles.py",
+    "inertia/semantics/call_stack_coordinate_source.py",
+    "inertia/semantics/call_stack_coordinates.py",
+    "inertia/semantics/callee_stack_effects.py",
+    "inertia/semantics/conditional_near_call_target.py",
+    "inertia/semantics/numeric_stack_pointer_returns.py",
+    "inertia/semantics/scoped_call_projection.py",
+    "inertia/semantics/scoped_call_stack_coordinates.py",
+    "inertia/semantics/scoped_callee_stack_effects.py",
+    "inertia/structuring/condition_comparison_polarity.py",
+    "inertia/structuring/scalar_return_arm_ownership.py",
+    "inertia/validation/declared_entry_premise.py",
+    "inertia/validation/gp_capture_values.py",
+    "inertia/validation/typed_constant_values.py",
+    "inertia/validation/validation_call_stack_inputs.py",
+    "inertia/widening/pair_type_contracts.py",
+    "inertia/widening/widening_subview_copyprop_applicability_8616.py",
 )
 
 _INERTIA_TYPED_PROMOTION_DEBT_FILES = ()
@@ -9046,27 +9152,65 @@ def _first_non_definition_statement(function: ast.FunctionDef | ast.AsyncFunctio
     return None
 
 
-def _first_protected_runtime_import_line(tree: ast.Module) -> int | None:
-    """Return the first decompiler/angr import that must be after runtime guard."""
+def _eager_module_name_uses_8616(node: ast.AST) -> tuple[ast.Name, ...]:
+    """Find name reads without entering deferred bodies or annotations."""
+    if isinstance(node, ast.Name):
+        return (node,) if isinstance(node.ctx, ast.Load) else ()
+    children: list[ast.AST]
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        children = [*node.args.defaults, *(item for item in node.args.kw_defaults if item is not None)]
+        if not isinstance(node, ast.Lambda):
+            children.extend(node.decorator_list)
+    elif isinstance(node, ast.ClassDef):
+        children = [*node.bases, *node.keywords, *node.decorator_list, *node.body]
+    elif isinstance(node, ast.TypeAlias):
+        return ()
+    elif isinstance(node, ast.AnnAssign):
+        children = [node.target]
+        if node.value is not None:
+            children.append(node.value)
+    elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+        return (node.target, *_eager_module_name_uses_8616(node.value))
+    else:
+        children = list(ast.iter_child_nodes(node))
+    return tuple(name for child in children for name in _eager_module_name_uses_8616(child))
 
+
+def _protected_runtime_import_names_8616(stmt: ast.Import | ast.ImportFrom) -> tuple[str, ...]:
+    """Identify bindings whose loading must follow the entrypoint guard."""
     protected_prefixes = ("angr", "angr_platforms", "inertia.cli")
     allowed_modules = {
         "inertia.cli.architecture_runtime_guard",
     }
+    if isinstance(stmt, ast.Import):
+        return tuple(
+            alias.asname or alias.name.split(".", 1)[0]
+            for alias in stmt.names
+            if alias.name not in allowed_modules and alias.name.startswith(protected_prefixes)
+        )
+    module = stmt.module or ""
+    if module in allowed_modules or module == "architecture_runtime_guard":
+        return ()
+    if module.startswith(protected_prefixes) or (stmt.level > 0 and module != "architecture_runtime_guard"):
+        return tuple(alias.asname or alias.name for alias in stmt.names)
+    return ()
+
+
+def _first_protected_runtime_import_line(tree: ast.Module) -> int | None:
+    """Find eager protected imports or direct reads of protected lazy bindings."""
     protected_lines: list[int] = []
+    lazy_names: set[str] = set()
     for stmt in tree.body:
-        if isinstance(stmt, ast.Import):
-            for alias in stmt.names:
-                if alias.name in allowed_modules:
-                    continue
-                if alias.name.startswith(protected_prefixes):
-                    protected_lines.append(stmt.lineno)
-        elif isinstance(stmt, ast.ImportFrom):
-            module = stmt.module or ""
-            if module in allowed_modules or module == "architecture_runtime_guard":
-                continue
-            if module.startswith(protected_prefixes) or (stmt.level > 0 and module != "architecture_runtime_guard"):
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            names = _protected_runtime_import_names_8616(stmt)
+            if stmt.is_lazy:
+                lazy_names.update(names)
+            elif names:
                 protected_lines.append(stmt.lineno)
+        else:
+            protected_lines.extend(
+                name.lineno for name in _eager_module_name_uses_8616(stmt) if name.id in lazy_names
+            )
     return min(protected_lines) if protected_lines else None
 
 

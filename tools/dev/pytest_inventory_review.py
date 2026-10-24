@@ -82,7 +82,11 @@ RETIRED_TEST_CONTRACTS: Final[Mapping[str, RetiredTestContract]] = MappingProxyT
             for previous, replacement in (
                 (
                     "test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_push_arg_sources",
+                    "test_materialize_callsite_stack_arguments_keeps_unknown_memory_even_with_exact_push_evidence",
+                ),
+                (
                     "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
+                    "test_materialize_callsite_stack_arguments_keeps_unknown_memory_even_with_exact_push_evidence",
                 ),
                 (
                     "test_materialize_callsite_stack_arguments_prunes_direct_push_source_far_pointer_stores",

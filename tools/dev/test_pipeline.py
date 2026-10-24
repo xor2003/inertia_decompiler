@@ -80,7 +80,8 @@ GNU_MAKE_ORACLE_CASE_COUNTS: dict[str, int] = {
 }
 GNU_MAKE_ORACLE_PYTEST_TARGETS: tuple[str, ...] = tuple(GNU_MAKE_ORACLE_CASE_COUNTS)
 
-_UNIT_PYTEST_CANDIDATES: tuple[str, ...] = (
+# Keep component/legacy overlap once, preserving its first execution position.
+_UNIT_PYTEST_CANDIDATES: tuple[str, ...] = tuple(dict.fromkeys((
     "tests/ir/test_real16_census_fact_ownership.py",
     *routine_test_targets(),
     "tools/dev/tests/test_compact_paths.py",
@@ -885,7 +886,7 @@ _UNIT_PYTEST_CANDIDATES: tuple[str, ...] = (
     "tests/frontend/test_x86_16_direction_flag_execution.py",
     "tests/frontend/test_x86_16_stack_helpers.py",
     "tests/frontend/test_x86_16_memory.py",
-)
+)))
 
 # Measured actual-binary SMT/replay controls run in default/expanded tiers.
 # Keep admission/projection contracts in the fast unit lane.

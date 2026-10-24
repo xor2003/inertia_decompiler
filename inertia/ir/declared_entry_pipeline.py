@@ -3,6 +3,8 @@ Responsibility: consume explicit entry premises at initial pipeline attachment.
 
 The project intake remains the only declaration registry. Codegen retains the
 identical raw surface and consumed scope; conditional bodies are never published.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

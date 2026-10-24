@@ -12,6 +12,8 @@ reimplement their criteria. Probe execution is read-only on the AST, alias
 facts, scopes, and codegen diagnostic counters; only a proven no-op publishes
 the same zero-work diagnostics an executed no-op pass would have left.
 
+Consumes alias-proven storage identity
+Do not join values from rendered text, cosmetic shape, postprocess, or CLI/reporting evidence
 """
 
 from __future__ import annotations

@@ -29,6 +29,8 @@ Cache invalidation: the recorded ``root`` is the ``cfunc.statements`` object
 compared by identity. Replacing the root invalidates an entry, but in-place
 AST mutation does not, so the explicit postprocess invalidation hooks that
 clear the shared slot remain required.
+Owns storage identity
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

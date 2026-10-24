@@ -3242,7 +3242,8 @@ def test_architecture_check_requires_root_contract_responsibility_headers(tmp_pa
     root, cli = _write_minimal_tree(tmp_path)
     _write_project_awareness_docs(tmp_path)
     (tmp_path / "Makefile").write_text("", encoding="utf-8")
-    (tmp_path / "tools/signatures/signature_catalog/py.py").write_text(
+    (tmp_path / "tools" / "signatures").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tools/signatures/signature_catalog.py").write_text(
         '"""Optional signature catalog.\n\nLayer: Optional evidence/reporting.\n"""\n'
         "from __future__ import annotations\n",
         encoding="utf-8",
@@ -3252,7 +3253,7 @@ def test_architecture_check_requires_root_contract_responsibility_headers(tmp_pa
 
     assert any(
         item.rule == "root-contract-layer-header"
-        and "tools/signatures/signature_catalog/py.py" in item.path
+        and "tools/signatures/signature_catalog.py" in item.path
         and "Responsibility:" in item.detail
         for item in violations
     )
@@ -5289,7 +5290,7 @@ def test_architecture_check_requires_script_module_docstrings(tmp_path):
     (tmp_path / "Makefile").write_text("architecture-check:\n\tpython tools/dev/check_decompiler_architecture.py\n", encoding="utf-8")
     scripts = tmp_path / "tools" / "dev"
     scripts.mkdir(parents=True, exist_ok=True)
-    (scripts / "build_tools/signatures/signature_catalog/py.py").write_text(
+    (scripts / "example_tool.py").write_text(
         "from __future__ import annotations\n",
         encoding="utf-8",
     )
@@ -5304,7 +5305,7 @@ def test_architecture_check_requires_script_module_layer_headers(tmp_path):
     _write_project_awareness_docs(tmp_path)
     scripts = tmp_path / "tools" / "dev"
     scripts.mkdir(parents=True, exist_ok=True)
-    (scripts / "build_tools/signatures/signature_catalog/py.py").write_text(
+    (scripts / "example_tool.py").write_text(
         '"""Documented tool without a layer marker."""\n'
         "from __future__ import annotations\n",
         encoding="utf-8",
@@ -5319,7 +5320,7 @@ def test_architecture_check_requires_script_module_layer_headers(tmp_path):
     violations = arch_check.check_decompiler_architecture(root, cli, tmp_path)
 
     assert any(
-        item.rule == "script-module-layer-header" and item.path.endswith("tools/dev/build_tools/signatures/signature_catalog/py.py")
+        item.rule == "script-module-layer-header" and item.path.endswith("tools/dev/example_tool.py")
         for item in violations
     )
     assert not any(
@@ -5332,7 +5333,8 @@ def test_architecture_check_requires_root_contract_docstrings(tmp_path):
     root, cli = _write_minimal_tree(tmp_path)
     _write_project_awareness_docs(tmp_path)
     (tmp_path / "Makefile").write_text("architecture-check:\n\tpython tools/dev/check_decompiler_architecture.py\n", encoding="utf-8")
-    (tmp_path / "tools/signatures/signature_catalog/py.py").write_text(
+    (tmp_path / "tools" / "signatures").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tools/signatures/signature_catalog.py").write_text(
         "from __future__ import annotations\n",
         encoding="utf-8",
     )
@@ -5346,7 +5348,8 @@ def test_architecture_check_requires_root_contract_layer_headers(tmp_path):
     root, cli = _write_minimal_tree(tmp_path)
     _write_project_awareness_docs(tmp_path)
     (tmp_path / "Makefile").write_text("architecture-check:\n\tpython tools/dev/check_decompiler_architecture.py\n", encoding="utf-8")
-    (tmp_path / "tools/signatures/signature_catalog/py.py").write_text(
+    (tmp_path / "tools" / "signatures").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tools/signatures/signature_catalog.py").write_text(
         '"""Documented root contract without a layer marker."""\n'
         "from __future__ import annotations\n",
         encoding="utf-8",
@@ -5355,7 +5358,7 @@ def test_architecture_check_requires_root_contract_layer_headers(tmp_path):
     violations = arch_check.check_decompiler_architecture(root, cli, tmp_path)
 
     assert any(
-        item.rule == "root-contract-layer-header" and item.path == "tools/signatures/signature_catalog/py.py"
+        item.rule == "root-contract-layer-header" and item.path == "tools/signatures/signature_catalog.py"
         for item in violations
     )
 
@@ -5728,7 +5731,7 @@ def test_architecture_check_rejects_stale_inertia_decompiler_typed_promotion_deb
 
 
 def test_architecture_check_rejects_untracked_x86_16_typed_promotion_file(tmp_path, monkeypatch):
-    package_root = tmp_path / "angr_platforms" / "angr_platforms" / "X86_16"
+    package_root = tmp_path / "inertia" / "frontend" / "x86_16"
     package_root.mkdir(parents=True)
     tracked_file = package_root / "tracked.py"
     tracked_file.write_text('"""Tracked."""\nfrom __future__ import annotations\n', encoding="utf-8")
@@ -5737,7 +5740,7 @@ def test_architecture_check_rejects_untracked_x86_16_typed_promotion_file(tmp_pa
     monkeypatch.setattr(
         arch_check,
         "_PROMOTED_TYPED_FILES",
-        ("angr_platforms/angr_platforms/X86_16/tracked.py",),
+        ("inertia/frontend/x86_16/tracked.py",),
     )
     monkeypatch.setattr(arch_check, "_X86_16_TYPED_PROMOTION_DEBT_FILES", ())
 
@@ -5745,32 +5748,32 @@ def test_architecture_check_rejects_untracked_x86_16_typed_promotion_file(tmp_pa
 
     assert any(
         item.rule == "x86-16-typed-promotion-coverage"
-        and item.path == "angr_platforms/angr_platforms/X86_16/new_module.py"
+        and item.path == "inertia/frontend/x86_16/new_module.py"
         for item in violations
     )
 
 
 def test_architecture_check_rejects_stale_x86_16_typed_promotion_debt(tmp_path, monkeypatch):
-    package_root = tmp_path / "angr_platforms" / "angr_platforms" / "X86_16"
+    package_root = tmp_path / "inertia" / "frontend" / "x86_16"
     package_root.mkdir(parents=True)
     promoted_file = package_root / "promoted.py"
     promoted_file.write_text('"""Promoted."""\nfrom __future__ import annotations\n', encoding="utf-8")
     monkeypatch.setattr(
         arch_check,
         "_PROMOTED_TYPED_FILES",
-        ("angr_platforms/angr_platforms/X86_16/promoted.py",),
+        ("inertia/frontend/x86_16/promoted.py",),
     )
     monkeypatch.setattr(
         arch_check,
         "_X86_16_TYPED_PROMOTION_DEBT_FILES",
-        ("angr_platforms/angr_platforms/X86_16/promoted.py",),
+        ("inertia/frontend/x86_16/promoted.py",),
     )
 
     violations = arch_check._check_x86_16_typed_promotion_coverage(tmp_path)
 
     assert any(
         item.rule == "x86-16-typed-promotion-debt-stale"
-        and item.path == "angr_platforms/angr_platforms/X86_16/promoted.py"
+        and item.path == "inertia/frontend/x86_16/promoted.py"
         for item in violations
     )
 
@@ -6775,7 +6778,7 @@ def test_architecture_check_requires_ownership_manifest_fallback_reason(tmp_path
                 '"""Focused ownership manifest."""',
                 "TestOwnershipRule(",
                 '    owner="ir-layer-fallback",',
-                '    paths=("angr_platforms/angr_platforms/X86_16/ir",),',
+                '    paths=("inertia/ir",),',
                 '    tests=("tests/ir/test_x86_16_ir_core.py",),',
                 "    fallback=True,",
                 ")",
@@ -7722,11 +7725,92 @@ def test_architecture_check_requires_cli_core_main_runtime_guard(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("body", "expected_order_violation"),
+    [
+        (
+            "lazy import angr\n"
+            "lazy from inertia.cli.cli_core import main\n"
+            "assert_decompiler_architecture_clean()\n",
+            False,
+        ),
+        (
+            "lazy import angr\n"
+            "factory = angr.Project\n"
+            "assert_decompiler_architecture_clean()\n",
+            True,
+        ),
+        (
+            "lazy from angr import Project\n"
+            "factory = Project\n"
+            "assert_decompiler_architecture_clean()\n",
+            True,
+        ),
+        (
+            "lazy import angr\n"
+            "def factory():\n"
+            "    return angr.Project\n"
+            "assert_decompiler_architecture_clean()\n",
+            False,
+        ),
+        (
+            "lazy import angr\n"
+            "def factory(ctor=angr.Project):\n"
+            "    return ctor\n"
+            "assert_decompiler_architecture_clean()\n",
+            True,
+        ),
+        (
+            "lazy import angr\n"
+            "assert_decompiler_architecture_clean()\n"
+            "factory = angr.Project\n",
+            False,
+        ),
+        (
+            "lazy import angr\n"
+            "factory = lambda: angr.Project\n"
+            "assert_decompiler_architecture_clean()\n",
+            False,
+        ),
+        (
+            "lazy import angr\n"
+            "type Factory = angr.Project\n"
+            "assert_decompiler_architecture_clean()\n",
+            False,
+        ),
+        (
+            "lazy import angr\n"
+            "@angr.decorator\n"
+            "def factory():\n"
+            "    pass\n"
+            "assert_decompiler_architecture_clean()\n",
+            True,
+        ),
+        (
+            "lazy import angr\n"
+            "class Factory(angr.Project):\n"
+            "    pass\n"
+            "assert_decompiler_architecture_clean()\n",
+            True,
+        ),
+    ],
+)
+def test_runtime_guard_orders_native_lazy_binding_use(
+    tmp_path: Path, body: str, expected_order_violation: bool
+) -> None:
+    """Declarations defer loading, but eager binding use still requires the guard."""
+    path = tmp_path / "decompile.py"
+    path.write_text(body, encoding="utf-8")
+    violations = arch_check._runtime_guard_entrypoint_file_violations_8616(path, tmp_path)
+    expected = ["runtime-architecture-guard-order"] if expected_order_violation else []
+    assert [item.rule for item in violations] == expected
+
+
 def test_architecture_check_requires_entrypoint_guard_before_decompiler_imports(tmp_path):
     (tmp_path / "decompile.py").write_text(
         '"""Entrypoint."""\n'
         "from __future__ import annotations\n"
-        "from inertia_decompiler import cli as _cli\n"
+        "from inertia.cli import cli as _cli\n"
         "assert_decompiler_architecture_clean()\n",
         encoding="utf-8",
     )

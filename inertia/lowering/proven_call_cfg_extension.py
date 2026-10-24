@@ -15,6 +15,9 @@ The returned CFG owns an independent ``KnowledgeBase`` so the previously
 selected candidate pair survives intact; the caller is re-bound by address
 inside the new KB, never copied across KBs, and the project-global KB is
 never mutated.
+Layer: Types/Lowering
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

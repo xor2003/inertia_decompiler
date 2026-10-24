@@ -933,12 +933,12 @@ def test_optimization_pass_separates_function_and_variable_knowledge(native):
         force_smart_scan=False, seed_calling_conventions_enabled=False,
     )
     variable_kb = angr.KnowledgeBase(project)
-    optimization = OptimizationPass(function, Manager(arch=project.arch), kb=variable_kb, graph=function.graph)
+    optimization = OptimizationPass(function, Manager(), kb=variable_kb, graph=function.graph)
     assert optimization._dvars_kb is variable_kb
     assert optimization.kb is (cfg.kb if native else project_kb)
     if native:
         real_pass = SwitchDefaultCaseDuplicator(
-            function, Manager(arch=project.arch), kb=variable_kb, graph=function.graph,
+            function, Manager(), kb=variable_kb, graph=function.graph,
         )
         assert real_pass.kb is cfg.kb
         assert real_pass._dvars_kb is variable_kb
@@ -959,7 +959,7 @@ def test_native_optimization_refuses_absent_or_foreign_function_manager(missing)
     project = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
     other = angr.load_shellcode(b"\xc3", arch=Arch86_16(), load_address=0x1000)
     function = SimpleNamespace(project=project, _function_manager=None if missing else other.kb.functions)
-    optimization = BaseOptimizationPass(function, Manager(arch=project.arch))
+    optimization = BaseOptimizationPass(function, Manager())
     with pytest.raises(ValueError, match="originating function manager" if missing else "different project"):
         _ = optimization.kb
 

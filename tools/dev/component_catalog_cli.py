@@ -14,6 +14,7 @@ from .component_catalog import (
     derive_test_catalog,
     load_components,
     make_quality_projection,
+    quality_projection_prefix,
     validate_component_paths,
 )
 
@@ -31,7 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     expected = derive_test_catalog(components)
     exported = ROOT / "reference" / "test-components.json"
     make_path = ROOT / "reference" / "components.mk"
-    make_text = make_quality_projection(components)
+    prefix = quality_projection_prefix((ROOT / "Makefile").read_text(encoding="utf-8"))
+    make_text = make_quality_projection(components, legacy_prefix=prefix)
     if args.write:
         exported.write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")
         make_path.write_text(make_text, encoding="utf-8")

@@ -1,4 +1,4 @@
-"""Layer: CLI discovery.
+"""Layer: CLI/fallback/reporting.
 
 Responsibility: select an explicit declared root's bounded native call closure.
 This scope is conditional and never claims discovery of every program function.

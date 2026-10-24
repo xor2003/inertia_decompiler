@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: recognize an exact SS-based byte read of a referenced stack
 object. Coordinate and native save/restore ownership remain with the caller;
 this syntax projection alone grants no storage or value proof.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations

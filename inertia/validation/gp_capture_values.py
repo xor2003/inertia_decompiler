@@ -4,6 +4,9 @@ Layer: Tail validation.
 Responsibility: consume the Lowering capture marker and independently prove a
 current, uniquely defined, dominating constant value. Never infer aliases from
 names, cached writer maps, or a capture tag alone.
+Layer: Validation
+Owns canonical equivalence checking and validation diagnostics
+Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-backed proof
 """
 
 from __future__ import annotations

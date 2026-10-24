@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: classify assignment evaluation order without changing the AST or
 granting register provenance. Calls, nested stores, unsupported operators and
 cyclic expression graphs remain unknown.
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
 

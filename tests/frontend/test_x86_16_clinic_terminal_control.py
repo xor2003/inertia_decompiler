@@ -42,7 +42,7 @@ def _clinic_stub(project: angr.Project) -> SimpleNamespace:
     """Expose the Clinic surfaces the conversion wrapper requires."""
     return SimpleNamespace(
         project=project,
-        _ail_manager=ailment.Manager(arch=project.arch),
+        _ail_manager=ailment.Manager(),
         _convert_vex_fast=lambda _block: None,
     )
 
@@ -107,7 +107,7 @@ def test_raw_conversion_without_transport_keeps_symbolic_terminal() -> None:
     """The pre-transport converter emits the symbolic ``Goto(tmp)`` shape."""
     project = _x86_16_project(bytes.fromhex("90e90500c3"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
 
     converted = ailment.IRSBConverter.convert(block.vex, manager)
 
@@ -148,7 +148,7 @@ def test_stale_terminal_bytes_keep_symbolic() -> None:
     """Bytes that do not decode to the marked terminal jump are not retained."""
     project = _x86_16_project(bytes.fromhex("90e90500c3"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     stale = SimpleNamespace(
         addr=block.addr, size=block.size,
@@ -172,7 +172,7 @@ def test_conflicting_constant_next_is_a_typed_refusal() -> None:
     """A literal ``next`` disagreeing with the decoded edge is not bound."""
     project = _x86_16_project(bytes.fromhex("eb00"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     fake_vex = SimpleNamespace(
         addr=block.vex.addr,
@@ -207,7 +207,7 @@ def test_ail_terminal_with_different_tmp_is_not_rewritten() -> None:
     """A terminal Jump bound to another operand is never repointed."""
     project = _x86_16_project(bytes.fromhex("90e90500c3"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     jump = _terminal(converted)
     foreign_tmp = cast(pyvex.expr.RdTmp, block.vex.next).tmp + 1000
@@ -233,7 +233,7 @@ def test_unbound_next_operand_kind_keeps_symbolic() -> None:
     """A proven target still refuses when ``next`` has no AIL identity."""
     project = _x86_16_project(bytes.fromhex("eb00"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     fake_vex = SimpleNamespace(
         addr=block.vex.addr,
@@ -262,7 +262,7 @@ def test_non_boring_terminal_is_not_examined() -> None:
     """Call and return block tails never enter the terminal-jump transport."""
     project = _x86_16_project(bytes.fromhex("c3"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
 
     report = transport_terminal_direct_jump_8616(
@@ -316,7 +316,7 @@ def test_record_helper_appends_to_existing_tuple() -> None:
     clinic = SimpleNamespace()
     project = _x86_16_project(bytes.fromhex("eb00"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     first = transport_terminal_direct_jump_8616(
         block, converted, next_atom=manager.next_atom,
@@ -331,7 +331,7 @@ def test_same_tmp_with_wrong_width_keeps_symbolic() -> None:
     """Temporary index equality never permits truncating loaded control."""
     project = _x86_16_project(bytes.fromhex("90e90500c3"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     jump = _terminal(converted)
     rows = list(converted.statements)
@@ -350,7 +350,7 @@ def test_foreign_converted_block_keeps_symbolic() -> None:
     """Reused temporary indices from another block carry no binding proof."""
     project = _x86_16_project(bytes.fromhex("90e90500c3"))
     block = project.factory.block(FUNCTION_ADDR)
-    manager = ailment.Manager(arch=project.arch)
+    manager = ailment.Manager()
     converted = ailment.IRSBConverter.convert(block.vex, manager)
     foreign = ailment.Block(FUNCTION_ADDR + 16, block.size, list(converted.statements))
     report = transport_terminal_direct_jump_8616(block, foreign, next_atom=manager.next_atom)

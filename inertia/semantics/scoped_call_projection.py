@@ -3,6 +3,8 @@ Responsibility: authenticate conditional raw-IR to call-Semantics projections.
 
 The original native source and its scoped control proof remain authoritative.
 Projected IR/SSA belongs to one consuming codegen, never a universal registry.
+Owns instruction effects, flags, branch meaning, and expression interpretation
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

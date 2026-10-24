@@ -31,14 +31,11 @@ def test_build_mypyc_uses_canonical_inertia_module_identity() -> None:
     )
 
 
-def test_build_mypyc_rejects_nested_alias_target() -> None:
-    """Refuse native modules that would duplicate public runtime type identity."""
-    try:
-        build_mypyc._module_to_path("inertia.validation.validation_calls")
-    except ValueError as exc:
-        assert "split runtime type identity" in str(exc)
-    else:
-        raise AssertionError("nested mypyc target unexpectedly accepted")
+def test_build_mypyc_resolves_canonical_nested_target() -> None:
+    """Resolve the maintained nested owner without a historical forwarding module."""
+    path = "inertia/validation/validation_calls.py"
+    assert build_mypyc._module_to_path("inertia.validation.validation_calls") == path
+    assert build_mypyc._module_to_path(path) == path
 
 
 def test_build_mypyc_requires_main_and_native_helper_artifacts(

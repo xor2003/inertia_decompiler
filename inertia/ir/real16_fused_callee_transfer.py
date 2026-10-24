@@ -3,6 +3,8 @@ Responsibility: bind and transfer pure source-backed leaf rows in one walk.
 
 Semantic operations and exact provenance comparison remain owned by the invocation
 census. This synchronous transaction publishes no path state before full binding.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

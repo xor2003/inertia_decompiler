@@ -2,6 +2,8 @@
 Responsibility: bind native caller rows while privately transferring scalar prefixes.
 
 CALL effects remain in the ordinary census walker, after complete native binding.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

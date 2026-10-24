@@ -4,6 +4,8 @@ Responsibility: decline record-free startup routes behind an ordinary call.
 This is only admission to the initial raw route, never an unreachability proof.
 Call-backed retries retain their existing semantics. Unknown control keeps the
 original attempt; live bytes are decoded again rather than trusting sidecars.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

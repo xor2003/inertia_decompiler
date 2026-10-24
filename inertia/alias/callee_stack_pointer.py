@@ -5,6 +5,8 @@ Responsibility: consume authoritative instruction/CFG coverage and the existing
 stack-state solver, retaining the SP displacement on every returning edge.
 The displacement includes the machine RET updates already present in the IR.
 It is not inferred from a return immediate or a calling-convention name.
+Owns storage identity
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

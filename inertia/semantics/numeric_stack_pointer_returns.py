@@ -4,6 +4,8 @@ Layer: Semantics.
 Responsibility: prove that one exact word assignment supplies a particular RET
 without intervening register effects. Consumes Alias coordinates; does not
 infer native SSA inputs, C variables, or ownership across shared epilogues.
+Owns instruction effects, flags, branch meaning, and expression interpretation
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

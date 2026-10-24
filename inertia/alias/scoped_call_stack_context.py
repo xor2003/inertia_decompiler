@@ -14,6 +14,7 @@ source, target and frame. One unprovable binding refuses the whole map
 rather than guessing zero.
 Owns storage identity. Do not perform semantics decoding, IR production,
 lowering, structuring, rewrite, postprocess, or CLI/reporting work here.
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

@@ -97,6 +97,7 @@ from tools.dosunit.ssa.materialization import (
     materialize_term as _materialize_json_term,
 )
 from tools.dosunit.ssa.obligation_codec import decode_obligation
+from tools.dosunit.ssa.repeat_counted import counted_repeat_outputs as _counted_repeat_outputs
 from tools.dosunit.ssa.ssa_constant_terms import constant_bitvector
 from tools.dosunit.ssa.ssa_control_flow import ControlIndexRefusal, closed_block_index
 from tools.dosunit.ssa.translation import TranslationContext
@@ -3175,6 +3176,27 @@ def _repeat_string_family_versions(
     return None
 
 
+def _apply_flat32_repeat_versions(
+    family: str,
+    *,
+    width: int,
+    architecture: RepeatArchitecture,
+    before_repeat: dict[str, SsaExpr],
+    reg_versions: dict[str, SsaExpr],
+    ax_value: SsaExpr,
+) -> None:
+    """Apply flat32 counted and scan effects before zero-count restoration."""
+    if family in {"movs", "stos"} and architecture is RepeatArchitecture.FLAT32:
+        _counted_repeat_outputs(before_repeat, reg_versions, family=family, width=width)
+    if family in {"scas", "cmps"} and architecture is RepeatArchitecture.FLAT32:
+        # Every completed nonempty scan compares by subtraction. Zero count
+        # restores incoming state in preserve_zero_count below.
+        reg_versions["cc_op"] = SsaExpr("const", 32, value={1: 4, 2: 5, 4: 6}[width])
+        reg_versions["cc_ndep"] = SsaExpr("const", 32, value=0)
+        if family == "scas":
+            reg_versions["cc_dep1"] = _coerce_width(ax_value, 32)
+
+
 def _lower_repeat_string_summary(
     instructions: list[dict[str, Any]],
     *,
@@ -3209,17 +3231,14 @@ def _lower_repeat_string_summary(
     if family_state is None:
         return None
     mem_version, memory_touched = family_state
-    if family in {"movs", "stos"} and names["architecture"] is RepeatArchitecture.FLAT32:
-        from tools.dosunit.ssa.repeat_counted import counted_repeat_outputs
-
-        counted_repeat_outputs(before_repeat, reg_versions, family=family, width=width)
-    if family in {"scas", "cmps"} and names["architecture"] is RepeatArchitecture.FLAT32:
-        # Every completed nonempty scan compares by subtraction. Zero count
-        # restores incoming state in preserve_zero_count below.
-        reg_versions["cc_op"] = SsaExpr("const", 32, value={1: 4, 2: 5, 4: 6}[width])
-        reg_versions["cc_ndep"] = SsaExpr("const", 32, value=0)
-        if family == "scas":
-            reg_versions["cc_dep1"] = _coerce_width(ax_value, 32)
+    _apply_flat32_repeat_versions(
+        family,
+        width=width,
+        architecture=names["architecture"],
+        before_repeat=before_repeat,
+        reg_versions=reg_versions,
+        ax_value=ax_value,
+    )
     from tools.dosunit.ssa.repeat_zero_count import preserve_zero_count
 
     mem_version = preserve_zero_count(
@@ -4198,10 +4217,11 @@ def _register_width(name: str) -> int:
 
 
 def _vex_irsb_to_ail_block(*, project: Any, irsb: Any) -> Any:  # noqa: ANN401
+    """Convert VEX with the current zero-argument AIL manager."""
     from angr.ailment.converter_vex import VEXIRSBConverter
     from angr.ailment.manager import Manager
 
-    return VEXIRSBConverter.convert(irsb, Manager(arch=project.arch))
+    return VEXIRSBConverter.convert(irsb, Manager())
 
 
 def _lower_ail_block(

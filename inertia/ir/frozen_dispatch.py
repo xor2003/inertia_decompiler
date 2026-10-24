@@ -5,6 +5,8 @@ Responsibility: provide a tuple-based dispatch contract with no mutable backing
 container or derived cache. Owners retain the sole authoritative entry tuple.
 This freezes entry membership, not the objects stored as keys or handlers;
 owners must authenticate their supported key and callable identities separately.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

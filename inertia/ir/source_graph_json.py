@@ -5,6 +5,8 @@ Responsibility: preserve stdlib canonical JSON bytes while accelerating their
 emission. The graph encoder owns input validation: payloads contain only its
 scalar, list and dictionary records, not arbitrary JSON-serializable objects.
 Schema, source digests and refusal policy remain owned by source_graph_binding.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

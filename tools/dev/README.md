@@ -6,6 +6,16 @@ FILE`. Make uses this command; the historical script still forwards to it.
 Repository navigation, ownership and test-runner support lives here. It must
 not introduce decompiler or proof semantics.
 
+`mypy-dev` retains the full promoted `QA_TYPED_FILES` dependency context by
+default, so skipped imports do not erase known contracts. Explicit command-line
+`LINTERS_DEV_MYPY_FILES` selections remain authoritative for scoped checks.
+This type-checking context does not expand the practical mypyc build cohort.
+
+The entrypoint architecture check distinguishes native lazy import declarations
+from direct eager reads of their bindings. Guards must precede those reads,
+including decorators, defaults and class bodies; deferred function, lambda and
+type-alias bodies do not force the bindings.
+
 `pytest_test_record` owns the profiling record schema;
 `pytest_profile_merge` merges xdist fragments, and `pytest_profile_rankings`
 orders measured costs. Collection and profiling consumers import these owners

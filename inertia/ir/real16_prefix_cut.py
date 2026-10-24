@@ -3,6 +3,8 @@
 Layer: IR.
 Responsibility: bind exact CALL rows to a closed acyclic CFG and establish
 dominance without granting semantic proof, state reuse or callback reuse.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

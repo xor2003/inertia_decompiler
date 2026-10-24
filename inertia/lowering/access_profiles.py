@@ -2,6 +2,9 @@
 
 Responsibility: group existing access-trait evidence into typed profiles, induction candidates, and naming hints.
 No new storage identity or semantic proof is inferred from names.
+Layer: Types/Lowering
+Consumes alias, widening, and typed facts
+Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations

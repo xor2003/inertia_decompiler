@@ -5,6 +5,8 @@ Records own private copies. A consumer receives another copy, so condition
 captures, terminal maps and frozen IR nodes cannot poison a later consumer.
 Copiers must detach owned graph objects; opaque payloads are not admitted. Source
 authorities are checked before every reuse; unsupported backends simply relift.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

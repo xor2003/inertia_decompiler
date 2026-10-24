@@ -5,6 +5,8 @@ Responsibility: derive caller-before, callee-entry and caller-after positions
 from the canonical must-state stack solver and authenticated CALL effects.
 Frame/effect decomposition remains owned by IRCallStackCoordinates8616.
 These scalar offsets do not flatten segmented memory or authorize C lowering.
+Owns storage identity
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations
@@ -15,7 +17,8 @@ from enum import StrEnum
 from inertia.ir.call_stack_coordinates import IRCallStackCoordinates8616
 from inertia.ir.core import IRFunctionArtifact, IRInstr, IRValue, MemSpace
 
-from .segment_stack_restore import _predecessor_map, _solve_stack_states, _transfer_block
+from .segment_stack_restore import _predecessor_map as _predecessor_map
+from .segment_stack_restore import _solve_stack_states, _transfer_block
 from .stack_restore_state import StackRestoreState8616, join_stack_restore_states_8616
 
 

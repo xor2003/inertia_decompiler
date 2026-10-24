@@ -9,6 +9,8 @@ of truncating a wider register into a narrower domain.
 Owns canonical register-domain and slice identities plus the consumer
 decision. Do not perform semantic recovery, lowering, structuring, rewrite,
 postprocess, or CLI/reporting work here.
+Owns storage identity
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations

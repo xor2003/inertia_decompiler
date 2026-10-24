@@ -3,6 +3,8 @@ Responsibility: retain invocation-bound callee proofs during selector induction.
 
 Only unresolved native callees demand the existing scoped collection route.
 The original records remain conditional and are never published as summaries.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
 

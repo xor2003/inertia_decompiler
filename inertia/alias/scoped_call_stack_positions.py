@@ -11,6 +11,7 @@ scopes re-authenticate and its physical source still matches this exact
 CALL; SP-only evidence never upgrades BP or stack-byte proof.
 Owns storage identity. Do not perform semantics decoding, IR production,
 lowering, structuring, rewrite, postprocess, or CLI/reporting work here.
+Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 
 from __future__ import annotations
@@ -284,7 +285,7 @@ def prove_scoped_call_stack_position_8616(
     block, call, call_failure = _scoped_call_target_8616(
         artifact, block_addr, instruction_index,
     )
-    if call_failure is not None or block is None or call is None:
+    if call_failure is not None or block is None or call is None or call.addr is None:
         return _failure_result_8616(
             artifact, call, block_addr, instruction_index,
             call_failure or ScopedCallStackPositionFailure8616.INVALID_CALL,

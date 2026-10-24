@@ -3,6 +3,9 @@
 Layer: Tail validation.
 Responsibility: evaluate bounded pure integer expressions only when C promotions
 and the declared storage types preserve their mathematical values.
+Layer: Validation
+Owns canonical equivalence checking and validation diagnostics
+Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-backed proof
 """
 
 from __future__ import annotations

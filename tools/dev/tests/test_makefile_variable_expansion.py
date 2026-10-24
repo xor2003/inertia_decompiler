@@ -157,10 +157,13 @@ SCOPED_IR_OWNERS = (
     "tools/dosunit/catalog/real16_scoped_invocation.py",
     "inertia/frontend/x86_16/frontend_invocation_inventory.py",
     "inertia/ir/entry_domain_call_preservation.py",
+    "inertia/ir/real16_boot_entry_link.py",
     "inertia/ir/scoped_function_ir_view.py",
 )
 SCOPED_IR_CONTRACT_TESTS = (
     "tests/ir/test_x86_16_premise_collection_budget.py",
+    "tests/ir/test_entry_collection_sibling_freshness.py",
+    "tests/ir/test_native_feasibility_map_binding.py",
     "tests/integration/test_x86_16_invocation_pending_inventory.py",
     "tests/integration/test_x86_16_near_call_frame_width.py",
     "tests/integration/test_x86_16_invocation_inventory_budgets.py",
