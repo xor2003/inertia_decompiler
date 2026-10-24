@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
+
+import pytest
 
 import inertia.cli.cli_core as cli_core
+from inertia.cli.analysis_timeout import AnalysisTimeout
 from inertia.cli.cli_core import (
     DirectClinicPolicy8616,
     _clinic_policy_needs_callsite_count_8616,
@@ -207,3 +211,104 @@ void menu(int key)
 
     assert result.status == "ok"
     assert result.blocker is None
+
+
+def _direct_probe_state(timeout: int) -> SimpleNamespace:
+    """Build a receiver namespace for the optional sidecar re-recovery seam."""
+    return SimpleNamespace(
+        precise_sidecar_regions=True,
+        lst_metadata=SimpleNamespace(absolute_addrs=True),
+        project=SimpleNamespace(arch=SimpleNamespace(name="86_16"), entry=0x10000),
+        direct_addr=0x12340,
+        cfg=SimpleNamespace(name="original_cfg"),
+        func=SimpleNamespace(name="original_func"),
+        args=SimpleNamespace(timeout=timeout, window=128),
+        low_memory_path=False,
+    )
+
+
+@pytest.mark.parametrize(("cli_timeout", "probe_timeout"), [(2, 2), (30, 6)])
+def test_optional_sidecar_probe_expiry_keeps_original_function(
+    monkeypatch: pytest.MonkeyPatch, cli_timeout: int, probe_timeout: int
+) -> None:
+    """AnalysisTimeout in the optional re-recovery keeps the original CFG/func."""
+    state = _direct_probe_state(cli_timeout)
+    seen: dict[str, object] = {}
+    marked: list[tuple[object, object]] = []
+
+    def fake_recover(*args: object, **kwargs: object) -> tuple[object, object]:
+        seen["timeout"] = kwargs["timeout"]
+        seen["window"] = kwargs["window"]
+        raise AnalysisTimeout
+
+    monkeypatch.setattr(cli_core, "_lst_code_region", lambda metadata, addr: (0x12340, 0x12380))
+    monkeypatch.setattr(cli_core, "_function_complexity", lambda func: (2, 16))
+    monkeypatch.setattr(cli_core, "_lst_code_label", lambda metadata, addr, entry: "add_sc")
+    monkeypatch.setattr(cli_core, "_recover_lst_function", fake_recover)
+    monkeypatch.setattr(cli_core, "mark_function_original_addr", lambda func, addr: marked.append((func, addr)))
+
+    original_cfg, original_func = state.cfg, state.func
+    result = cli_core._DirectAddrCliRun8616._phase_direct_probe_setup_8616(
+        cast(cli_core._DirectAddrCliRun8616, state)
+    )
+
+    assert result is None
+    assert state.cfg is original_cfg
+    assert state.func is original_func
+    assert seen["timeout"] == probe_timeout
+    assert seen["window"] == state.args.window
+    assert marked == []
+
+
+def test_optional_sidecar_probe_unexpected_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected defects in the optional re-recovery are not swallowed."""
+    state = _direct_probe_state(30)
+    cause = ValueError("stub metadata")
+    failure = RuntimeError("sidecar decode failed")
+    failure.__cause__ = cause
+
+    def fake_recover(*args: object, **kwargs: object) -> tuple[object, object]:
+        raise failure
+
+    monkeypatch.setattr(cli_core, "_lst_code_region", lambda metadata, addr: (0x12340, 0x12380))
+    monkeypatch.setattr(cli_core, "_function_complexity", lambda func: (2, 16))
+    monkeypatch.setattr(cli_core, "_lst_code_label", lambda metadata, addr, entry: "add_sc")
+    monkeypatch.setattr(cli_core, "_recover_lst_function", fake_recover)
+
+    original_cfg, original_func = state.cfg, state.func
+    with pytest.raises(RuntimeError) as excinfo:
+        cli_core._DirectAddrCliRun8616._phase_direct_probe_setup_8616(
+            cast(cli_core._DirectAddrCliRun8616, state)
+        )
+
+    assert excinfo.value is failure
+    assert excinfo.value.__cause__ is cause
+    assert state.cfg is original_cfg
+    assert state.func is original_func
+
+
+def test_optional_sidecar_probe_refinement_still_applies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful optional re-recovery still refines CFG/func and marks origin."""
+    state = _direct_probe_state(30)
+    new_cfg = SimpleNamespace(name="refined_cfg")
+    new_func = SimpleNamespace(name="refined_func")
+    marked: list[tuple[object, object]] = []
+
+    monkeypatch.setattr(cli_core, "_lst_code_region", lambda metadata, addr: (0x12340, 0x12380))
+    monkeypatch.setattr(cli_core, "_function_complexity", lambda func: (2, 16))
+    monkeypatch.setattr(cli_core, "_lst_code_label", lambda metadata, addr, entry: "add_sc")
+    monkeypatch.setattr(cli_core, "_recover_lst_function", lambda *args, **kwargs: (new_cfg, new_func))
+    monkeypatch.setattr(cli_core, "mark_function_original_addr", lambda func, addr: marked.append((func, addr)))
+
+    result = cli_core._DirectAddrCliRun8616._phase_direct_probe_setup_8616(
+        cast(cli_core._DirectAddrCliRun8616, state)
+    )
+
+    assert result is None
+    assert state.cfg is new_cfg
+    assert state.func is new_func
+    assert marked == [(new_func, 0x12340)]

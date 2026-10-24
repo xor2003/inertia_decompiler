@@ -6976,7 +6976,12 @@ class _DirectAddrCliRun8616:
         return None
 
     def _phase_direct_probe_setup_8616(self) -> int | None:
-        """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        """Run the optional precise-sidecar refinement; return an exit code to abort.
+
+        Sidecar re-recovery is an optional refinement over the already built
+        CFG/function. Its expiration (`AnalysisTimeout`) keeps the original
+        CFG/function; unexpected errors propagate instead of being swallowed.
+        """
         if (
             self.precise_sidecar_regions
             and self.lst_metadata is not None
@@ -7006,7 +7011,7 @@ class _DirectAddrCliRun8616:
                     if self.func2 is not None:
                         self.cfg, self.func = self.cfg2, self.func2
                         mark_function_original_addr(self.func, self.direct_addr)
-            except Exception:
+            except _AnalysisTimeout:
                 pass
         return None
 
