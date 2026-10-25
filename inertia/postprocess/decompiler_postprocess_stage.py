@@ -178,6 +178,7 @@ from inertia.lowering.stack_variable_display_names import (
 )
 from inertia.pipeline.call_stack_input_outcome import (
     CallStackInputFailure8616,
+    CallStackInputResult8616,
     CallStackInputStatus8616,
     call_stack_input_lowering_result_8616,
 )
@@ -12036,6 +12037,20 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
         _debug_pointer_surface_8616(codegen, "entry")
 
         _reset_postprocess_run_flags_8616(codegen)
+        if _call_stack_input_position_refusal_8616(codegen) is not None:
+            codegen._inertia_postprocess_validation_failed = True
+            codegen._inertia_postprocess_validation_failure_pass = None
+            codegen._inertia_postprocess_validation_failure_error = (
+                "call_interfaces: call stack input positions unproven"
+            )
+            transaction_state = PostprocessPassTransactionState8616(
+                baseline_summary=None,
+                known_cycle_path=_c_ast_cycle_path_8616(getattr(cfunc, "statements", None)),
+            )
+            codegen._inertia_postprocess_optimization_witness_stats_8616 = (
+                PostprocessMutationWitnessCache8616[tuple[object, object]]().stats()
+            )
+            return _postprocess_set_completion_state_8616(project, codegen, transaction_state)
         pass_specs = _decompiler_postprocess_passes_for_function(project, codegen)
         pass_timeout_seconds, validation_enabled, per_pass_validation_enabled, skip_names, initial_baseline_summary = (
             _postprocess_runtime_config_8616(project, codegen, pass_specs)
@@ -18861,6 +18876,24 @@ class _DiscardSalvageResult8616:
     callsite_args: bool = False
 
 
+def _call_stack_input_position_refusal_8616(codegen: StructuredAstValue) -> CallStackInputResult8616 | None:
+    """Return the published call-input outcome when it refused unproven positions.
+
+    A POSITION_UNPROVEN refusal means call-input lowering could not prove the
+    architectural stack positions of call arguments, so cleanup cannot fabricate
+    the required call-input wrappers and postprocess validation must reject the
+    tree. Every other outcome leaves the normal guarded path unchanged.
+    """
+    outcome = call_stack_input_lowering_result_8616(codegen)
+    if (
+        outcome is not None
+        and outcome.status is CallStackInputStatus8616.REFUSED
+        and outcome.failure is CallStackInputFailure8616.POSITION_UNPROVEN
+    ):
+        return outcome
+    return None
+
+
 def _collect_discard_salvages_8616(
     self: StructuredAstValue,
     *,
@@ -18878,12 +18911,7 @@ def _collect_discard_salvages_8616(
             "Skipped postprocess rollback salvage because Structuring validation already failed"
         )
         return salvages
-    call_inputs = call_stack_input_lowering_result_8616(self.codegen)
-    if (
-        call_inputs is not None
-        and call_inputs.status is CallStackInputStatus8616.REFUSED
-        and call_inputs.failure is CallStackInputFailure8616.POSITION_UNPROVEN
-    ):
+    if _call_stack_input_position_refusal_8616(self.codegen) is not None:
         log.warning(
             "Skipped postprocess rollback salvage because architectural call positions remain unproven"
         )
