@@ -15,4 +15,14 @@ if not sys.path or sys.path[0] != _SOURCE_ROOT:
 
 from tools.comparator import msc8_compat  # noqa: E402
 
+# runpy consumers read this file's namespace; mirror the compat surface so the
+# same names resolve whether the adapter was imported or executed by path.
+globals().update(
+    {
+        name: value
+        for name, value in msc8_compat.__dict__.items()
+        if not name.startswith("__")
+    }
+)
+
 sys.modules[__name__] = msc8_compat
