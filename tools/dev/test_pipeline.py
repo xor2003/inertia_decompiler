@@ -1248,6 +1248,10 @@ def _unit_lane(workers: int = PYTEST_WORKER_COUNT) -> LaneResult:
             str(workers),
             "--dist",
             "loadgroup",
+            # External kills (OOM/cgroup) must not fail the whole lane; a
+            # genuinely crashing test still refails on the restarted worker.
+            "--max-worker-restart",
+            "2",
             "--durations=10",
             "--durations-min=1.0",
             *FOCUSED_PYTEST_TARGETS,
