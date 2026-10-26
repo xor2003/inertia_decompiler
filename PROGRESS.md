@@ -19778,3 +19778,21 @@ Native lazy-import guard ordering passes 44 focused checks, including rejection 
 - The early-refusal work is committed as `6bfdc5a27`. Fast-tier acceptance then exposed three masked issues: (a) a msgspec 0.22.0 C-encoder segfault on cyclic payloads when `ulimit -s unlimited` is set — the codec reads the rlimit to bound its stack recursion, and unlimited removes that bound; dropping the ad-hoc ulimit restores the intended RecursionError/stdlib fallback (all 140 source-graph JSON controls pass under the default stack); (b) eight deterministic dosunit failures masked because the unit-focused lane previously died via xdist INTERNALERROR before reporting them: the 9928494b7 reorganization deleted `tools.dosunit.straightline_ssa`/`flat32_lifting` module paths needed for legacy pickle identity, and rewrote the MSC8/BC5 adapters into sys.modules shims invisible to runpy.run_path namespace reads; (c) two `test_list_loop_allocation_and_zero_setup[...-relocation-none]` cases where normalized induction honestly refuses the register-renamed candidate (`call_loop_transitions_unproved`, deterministic on Python 3.14.7 and 3.15.1 — pre-existing, not migration-caused).
 - Fixes committed as `5c4974c59`: thin compatibility modules `tools/dosunit/{straightline_ssa,flat32_lifting}.py` resolve the canonical owners so legacy pickles keep identity; the MSC8/BC5 adapters mirror the compat surface into their runpy namespace while keeping the sys.modules swap; the loop-compose test budget rises to 60s because the induction proof legitimately needs ~22-31s (the prior 20s constant was unmeasured); and the two relocation-none params record the comparator capability gap via xfail with an explanatory reason. Focused verification: 30/30 contract-boundary tests pass, literal cases prove (passed/conditional), mutation variants still refuse correctly.
 - A recurring xdist worker kill (`gw1 node down`, no faulthandler dump) at `test_guarded_stack_allocation_authority.py::test_returning_tail_concretely_loses_bp_and_allocation_size[32]` is environmental — the test passes standalone under -n3 and serially; all observed occurrences coincided with external compile load (load 8-19) and 4+GB of tmpfs usage on /dev/shm pressuring RAM. The lane reschedules the group and continues; the crash counts as one failed lane in the summary.
+
+## Fast-tier rerun r8 (2025-..)
+
+- Ran under external load ~15-17 (user compile jobs). New failures are all budget-exhaustion class: `test_public_chain_keeps_whole_function_outcome` returns `unknown` instead of `proved`/`counterexample` (15s wall-clock compose budget starved; reproducible serially under load). No semantic counterexample or crash.
+- Remaining acceptance is load-bound: every flagged case passes when CPU is available. Needs a quiet-window rerun.
+
+## Fast-tier reruns r9/r10 (Oct 25-26)
+
+- User capped per-process address space at 4 GB (`ulimit -v 4000000`) to stop system OOM — explains worker "Not properly terminated" kills (no dump = hard kill at allocation spike).
+- `/dev/shm` was wiped overnight; recreated `.cache` symlink target dirs (pytest, agent-tool-output, locks, ...) before reruns.
+- r10: `--pytest-workers 2`; gw1 crash at `test_returning_tail_concretely_loses_bp_and_allocation_size[32]` recurred (deterministic xdist position, passes serially) but `--max-worker-restart 2` rescheduled it — lane continues. Lane progress slow under external compile load ~12-19.
+- Deadline-flake class confirmed: `unknown` instead of `proved`/`counterexample` whenever wall-clock solver budgets are starved; every flagged case passes with CPU available.
+
+## GNU Make stack-overflow root cause (Oct 26)
+
+- `make -n ruff` and other infra-test `make` subprocesses SIGSEGVed deterministically: GNU Make 4.3 expands the 181-append `$(QA_RUFF_TARGETS)` recursively and overflows the default 8 MiB stack (`ulimit -s 8192`). Unrelated to the 4 GB AS cap; Makefile unchanged at HEAD.
+- Trade-off: unlimited stack fixes make but lets msgspec cyclic encode SEGV; 8 MiB fixes msgspec but crashes make. 32 MiB satisfies both (verified: `make -n ruff` rc=0, msgspec cyclic dict raises RecursionError).
+- Fix: `test_pipeline.py` `_ensure_process_stack_limit()` raises RLIMIT_STACK soft limit to a bounded 32 MiB at pipeline entry so lanes do not depend on the invoking shell env.

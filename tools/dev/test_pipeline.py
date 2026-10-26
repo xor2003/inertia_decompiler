@@ -1836,9 +1836,39 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+_MIN_STACK_BYTES = 32 * 1024 * 1024
+
+
+def _ensure_process_stack_limit() -> None:
+    """Raise the stack soft limit so GNU make can expand deep variable lists.
+
+    GNU Make 4.3 expands long ``+=`` accumulations (e.g. ``QA_RUFF_TARGETS``)
+    recursively and overflows the default 8 MiB stack during ``make -n``. A
+    bounded 32 MiB limit leaves enough headroom while staying finite so
+    msgspec's cyclic-encode guard still raises ``RecursionError`` instead of
+    recursing into a SIGSEGV the way an unlimited stack allows.
+    """
+
+    try:
+        import resource
+    except ImportError:  # pragma: no cover - non-POSIX platforms
+        return
+    soft, hard = resource.getrlimit(resource.RLIMIT_STACK)
+    if soft != resource.RLIM_INFINITY and soft >= _MIN_STACK_BYTES:
+        return
+    target = _MIN_STACK_BYTES
+    if hard != resource.RLIM_INFINITY and target > hard:
+        target = hard
+    try:
+        resource.setrlimit(resource.RLIMIT_STACK, (target, hard))
+    except (OSError, ValueError):  # pragma: no cover - platform refusal
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run selected pipeline lanes and write the structured summary report."""
 
+    _ensure_process_stack_limit()
     args = _parse_args(argv)
     if args.print_host_controls:
         print(" ".join(target for target in FOCUSED_PYTEST_TARGETS if target.partition("::")[0] in SPLIT_CONTROL_TEST_FILES))
