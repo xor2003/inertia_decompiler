@@ -814,9 +814,25 @@ def _process_callsite_declaration_8616(
     ambiguous_names: set[str],
 ) -> int:
     """Process one resolved call; returns 1 when a summary was consumed."""
-    if summary is None or summary.stack_probe_helper:
-        if summary is None:
-            _debug_callsite_unmatched_8616(node)
+    if summary is not None and summary.stack_probe_helper:
+        probe_name = _call_name_8616(node)
+        probe_declaration = (
+            preferred_known_helper_signature_decl(probe_name)
+            if probe_name is not None
+            else None
+        )
+        if probe_declaration is None:
+            return 0
+        # Probe helpers stay emitted as real calls; their declaration is the
+        # exact owned ABI entry, never caller-use inference.
+        _record_call_declaration_8616(
+            codegen, node, summary, probe_declaration, None, None,
+            desired_by_name, fallback_declarations_by_name,
+            required_forward_decls, ambiguous_names,
+        )
+        return 1
+    if summary is None:
+        _debug_callsite_unmatched_8616(node)
         return 0
     _debug_callsite_declaration_evidence_8616(node, summary)
     call_name = _call_name_8616(node)

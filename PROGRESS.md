@@ -19862,3 +19862,41 @@ contract; ~25 corpus-validation tests plausibly blocked on this class.
 refusal path emits correct compilable C with `aNchkstk()` preserved — failure
 mode is serial retry-lane budget (~40s across 3 worker lanes vs 30s) ending in
 asm fallback. Committed-state debt, load-sensitive.
+
+=== probe-helper position proof implemented (this session) ===
+
+Implemented the helper-aware path recorded above. Two changes:
+
+1. `inertia/alias/call_stack_positions.py` — new
+   `_stack_probe_helper_position_8616` + shared `_observed_call_positions_8616`
+   (the must-state stack-state solver extracted from the main proof). When
+   `prove_call_stack_position_8616` finds coordinates without a proven
+   `net_sp_delta`, it now tries the helper path before refusing
+   UNPROVEN_EFFECT. Gates: byte-matched STACK_PROBE/STACK_PROBE_FAR identity at
+   the authenticated `coordinates.target_addr`, frame width match, a census
+   candidate with integer `allocation_size` in 0..0xFFFF, then the physical
+   frame push re-verified on the observed positions. Returning SP effect is
+   `caller_after = before - allocation`. Verified gate-2/gate-3 blocker: the
+   lifted CALL target is a TMP `Iop_Add32` expression, so the census' CONST-arg
+   gate was blind; the helper binds the coordinate's already-authenticated
+   target into a CONST operand view (same pattern as the frontend's
+   `_bind_proven_call_target_8616`) before census. Both lowering and
+   validation consume the same `prove_call_stack_position_8616`, so they
+   agree.
+
+2. `inertia/lowering/callsite_prototype_declarations.py` —
+   `_process_callsite_declaration_8616` no longer drops probe calls entirely:
+   when the emitted probe call has an exact owned ABI declaration
+   (`preferred_known_helper_signature_decl`, e.g. `void aNchkstk(void);` from
+   KNOWN_HELPER_ABIS_8616), it records it; unknown probes keep the previous
+   skip. Previously `aNchkstk()` emitted undeclared → gcc
+   implicit-function-declaration -Werror.
+
+Verified: `decompile.py TYPES.EXE --proc add_sc` now completes rc=0 with
+`validation=passed` and compilable C (`void aNchkstk(void);` declared, call
+preserved). `tests/cli/test_rendered_call_preservation.py` passes (~35s, was
+committed-red in the r8 lane). 110 focused alias/semantics/integration/
+callsite-declaration tests pass; postprocess callsite-prototype suite 10/10.
+
+Still red (different families): sortd corpus tests hit the 180s
+recovery-budget timeout, not this refusal class.

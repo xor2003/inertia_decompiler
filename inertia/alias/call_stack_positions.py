@@ -11,11 +11,11 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 
 from inertia.ir.call_stack_coordinates import IRCallStackCoordinates8616
-from inertia.ir.core import IRFunctionArtifact, IRInstr, IRValue, MemSpace
+from inertia.ir.core import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 
 from .segment_stack_restore import _predecessor_map as _predecessor_map
 from .segment_stack_restore import _solve_stack_states, _transfer_block
@@ -135,6 +135,94 @@ def _call_coordinates(call: IRInstr) -> IRCallStackCoordinates8616 | None:
     return coordinates
 
 
+def _observed_call_positions_8616(
+    artifact: IRFunctionArtifact, block: IRBlock, instruction_index: int, call: IRInstr,
+) -> tuple[int, int] | None:
+    """Solve the caller's stack state through one exact CALL instruction."""
+    states = _solve_stack_states(artifact)
+    predecessors = _predecessor_map(artifact)
+    incoming = tuple(states[pred] for pred in predecessors[block.addr])
+    if block.addr == artifact.function_addr:
+        incoming = (StackRestoreState8616(0), *incoming)
+    if not incoming:
+        return None
+    observer = _CallObserver(call)
+    _transfer_block(
+        block.addr, block.instrs[:instruction_index + 1], join_stack_restore_states_8616(incoming),
+        call_observer=observer.observe,
+    )
+    before, entry = observer.caller_before, observer.callee_entry
+    if before is None or entry is None:
+        return None
+    return before, entry
+
+
+def _stack_probe_helper_position_8616(
+    artifact: IRFunctionArtifact, block: IRBlock, instruction_index: int, call: IRInstr,
+) -> CallStackPosition8616 | None:
+    """Prove one CALL position against a byte-matched stack-probe helper.
+
+    The helper template certifies that its guarded failure exits branch past
+    the returning tail into the runtime's non-returning error path, so the
+    only stack pointer the caller observes at the return address is
+    ``+frame - request`` where ``request`` is the reaching constant AX write.
+    An unidentified helper, a dynamic request, or an unbound frame keeps the
+    generic refusal. Semantics imports stay function-local: the helper census
+    is needed only on the refused path.
+    """
+    from inertia.semantics.call_stack_allocation import (
+        collect_call_stack_allocation_candidates_8616,
+    )
+    from inertia.semantics.compiler_helpers import (
+        CompilerHelperEvidenceKind8616,
+        identify_x86_16_compiler_helper_at_8616,
+    )
+
+    effect = call.call_stack_effect
+    coordinates = effect.stack_coordinates if effect is not None else None
+    source = coordinates.source if coordinates is not None else None
+    project = source.project if source is not None else None
+    if coordinates is None or project is None or coordinates.callsite_addr != call.addr:
+        return None
+    if (type(coordinates.return_addr) is not int
+            or type(coordinates.return_frame_bytes) is not int
+            or type(coordinates.target_addr) is not int):
+        return None
+    evidence = identify_x86_16_compiler_helper_at_8616(project, coordinates.target_addr)
+    expected_frame = (
+        {CompilerHelperEvidenceKind8616.STACK_PROBE: 2,
+         CompilerHelperEvidenceKind8616.STACK_PROBE_FAR: 4}.get(evidence.kind)
+        if evidence is not None
+        else None
+    )
+    if expected_frame is None or expected_frame != coordinates.return_frame_bytes:
+        return None
+    # The lifted CALL target is a TMP expression; bind the coordinate's
+    # already-authenticated target into a CONST view so the semantics census
+    # sees the same proven call it records for summary-fed consumers.
+    bound_call = replace(
+        call, args=(IRValue(MemSpace.CONST, const=coordinates.target_addr, size=4),))
+    bound_artifact = replace(artifact, blocks=(replace(
+        block, instrs=tuple(bound_call if entry is call else entry
+                            for entry in block.instrs)),))
+    candidate = collect_call_stack_allocation_candidates_8616(
+        project, bound_artifact).get(call.addr)
+    allocation = candidate.allocation_size if candidate is not None else None
+    if type(allocation) is not int or not 0 <= allocation <= 0xFFFF:
+        return None
+    positions = _observed_call_positions_8616(artifact, block, instruction_index, call)
+    if positions is None:
+        return None
+    before, entry = positions
+    if (entry - before) & 0xffff != (-coordinates.return_frame_bytes) & 0xffff:
+        return None
+    return CallStackPosition8616(
+        artifact.function_addr, block.addr, instruction_index, call.addr,
+        coordinates.target_addr, coordinates.return_addr,
+        coordinates.return_frame_bytes, before, entry, before - allocation,
+    )
+
+
 def prove_call_stack_position_8616(
     artifact: IRFunctionArtifact, block_addr: int, instruction_index: int,
 ) -> CallStackPositionResult8616:
@@ -143,6 +231,8 @@ def prove_call_stack_position_8616(
     Authenticated current frame/body SP effects prove the boundary transfer;
     uncertain memory, arguments and caller cleanup do not prevent this
     independent proof. Conflicting incoming paths and unmodeled SP writes refuse.
+    Byte-matched stack-probe helpers carry their returning effect in the
+    caller's proven allocation request instead of a body transfer.
     """
     blocks = {block.addr: block for block in artifact.blocks}
     if (artifact.refusals or len(blocks) != len(artifact.blocks)
@@ -160,22 +250,15 @@ def prove_call_stack_position_8616(
     if (coordinates is None or coordinates.return_addr is None
             or coordinates.return_frame_bytes is None or coordinates.net_sp_delta is None
             or coordinates.target_addr is None):
+        helper_position = _stack_probe_helper_position_8616(
+            artifact, block, instruction_index, call)
+        if helper_position is not None:
+            return CallStackPositionResult8616(helper_position, None)
         return CallStackPositionResult8616(None, CallStackPositionRefusal8616.UNPROVEN_EFFECT)
-    states = _solve_stack_states(artifact)
-    predecessors = _predecessor_map(artifact)
-    incoming = tuple(states[pred] for pred in predecessors[block_addr])
-    if block_addr == artifact.function_addr:
-        incoming = (StackRestoreState8616(0), *incoming)
-    if not incoming:
+    positions = _observed_call_positions_8616(artifact, block, instruction_index, call)
+    if positions is None:
         return CallStackPositionResult8616(None, CallStackPositionRefusal8616.UNKNOWN_POSITION)
-    observer = _CallObserver(call)
-    _transfer_block(
-        block_addr, block.instrs[:instruction_index + 1], join_stack_restore_states_8616(incoming),
-        call_observer=observer.observe,
-    )
-    before, entry = observer.caller_before, observer.callee_entry
-    if before is None or entry is None:
-        return CallStackPositionResult8616(None, CallStackPositionRefusal8616.UNKNOWN_POSITION)
+    before, entry = positions
     if (entry - before) & 0xffff != (-coordinates.return_frame_bytes) & 0xffff:
         return CallStackPositionResult8616(None, CallStackPositionRefusal8616.FRAME_MISMATCH)
     proof = CallStackPosition8616(
