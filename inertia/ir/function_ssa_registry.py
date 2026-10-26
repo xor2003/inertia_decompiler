@@ -17,7 +17,12 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol, cast
 
-from .function_ir_registry import FunctionIRArtifactVerdict8616, publish_function_ir_artifact_8616
+from .function_artifact import IRFunctionArtifact
+from .function_ir_registry import (
+    FunctionIRArtifactVerdict8616,
+    publish_function_ir_artifact_8616,
+    registered_function_ir_artifact_8616,
+)
 from .function_lifecycle import (
     FunctionStageFailure8616,
     bind_function_lifecycle_8616,
@@ -484,6 +489,30 @@ def _attest_ssa_derivation_8616(
         )
 
 
+def _canonical_registered_ir_artifact_8616(
+    project: object,
+    function_addr: int,
+    ir_artifact: IRFunctionArtifact,
+) -> IRFunctionArtifact:
+    """Reuse the registered IR object when the rebuild is content-identical.
+
+    Republishing an equal but distinct object must supersede the stored one so
+    identity-checking consumers observe revocation. Re-deriving the same IR
+    during SSA resolution is not a republication decision, though: adopting the
+    canonical registered object keeps registry identity stable while retaining
+    the latest-wins store for genuine republishers.
+    """
+    registered_ir = registered_function_ir_artifact_8616(project, function_addr)
+    artifact = registered_ir.artifact
+    if (
+        registered_ir.verdict is FunctionIRArtifactVerdict8616.PROVEN
+        and artifact is not None
+        and artifact == ir_artifact
+    ):
+        return artifact
+    return ir_artifact
+
+
 def function_ssa_artifact_for_boundary_8616(
     project: object,
     function_addr: int,
@@ -540,6 +569,7 @@ def function_ssa_artifact_for_boundary_8616(
     )
     if revision is not None:
         ir_artifact = replace(ir_artifact, source_revision=revision)
+    ir_artifact = _canonical_registered_ir_artifact_8616(project, function_addr, ir_artifact)
     try:
         function_ssa = build_x86_16_function_ssa(ir_artifact)
     except (AttributeError, KeyError, TypeError, ValueError):

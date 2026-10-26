@@ -2311,7 +2311,47 @@ def _finalize_regenerated_noncall_ast_8616(codegen: object) -> bool:
     )
 
 
+def _republish_rewrite_evidence_after_regen_8616(codegen: object) -> None:
+    """Republish the Rewrite output version after regen replay lanes ran.
+
+    Emission-time regeneration replays producer-owned lowering effects onto the
+    live AST. When the AST actually changed, the prior Rewrite publication no
+    longer describes the current output; re-record the real final version so
+    the emission contract observes the produced output, not a stale snapshot.
+    """
+    # Dynamic third-party angr/codegen boundary.
+    project = getattr(codegen, "project", None)
+    cfunc = getattr(codegen, "cfunc", None)
+    function_addr = getattr(cfunc, "addr", None)
+    if project is None or not isinstance(function_addr, int):
+        return
+    from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
+    from inertia.pipeline.function_readiness import (
+        function_stage_evidence_map_8616,
+        record_function_rewrite_completion_8616,
+    )
+
+    if function_stage_evidence_map_8616(project, function_addr).get(
+        FunctionLifecycleStage8616.REWRITE
+    ) is None:
+        return
+    record_function_rewrite_completion_8616(
+        project,
+        function_addr,
+        codegen,
+        producer="x86_16_emission_regen",
+    )
+
+
 def _regenerate_codegen_text_safely(codegen: object, *, context: str) -> tuple[str, bool]:
+    """Render the live C AST while preserving evidence-backed semantic materialization."""
+    try:
+        return _regenerate_codegen_text_safely_impl(codegen, context=context)
+    finally:
+        _republish_rewrite_evidence_after_regen_8616(codegen)
+
+
+def _regenerate_codegen_text_safely_impl(codegen: object, *, context: str) -> tuple[str, bool]:
     """Render the live C AST while preserving evidence-backed semantic materialization."""
     ctx = _RegenRunCtx8616.build(codegen, context)
     ctx.trace_dump("regen-fallback-text", ctx.fallback_text)

@@ -35,42 +35,47 @@ class _Codegen(SimpleNamespace):
         return name
 
 
+class _DetachedCallee(SimpleNamespace):
+    """Stand-in for a copied native Function that lost its project."""
+
+
+_DetachedCallee.__module__ = Function.__module__
+
+
+def _detached_callee() -> _DetachedCallee:
+    return _DetachedCallee(project=None, addr=0x1234, name="helper")
+
+
+def _assert_dropped(call: CFunctionCall, repaired: int) -> None:
+    assert repaired == 1
+    assert call.callee_func is None
+    assert call.callee_target == "helper"
+
+
 def test_render_compat_disables_disambiguation_for_projectless_callee():
     codegen = _Codegen(project=_NoKbProject())
-    callee = SimpleNamespace(project=None, addr=0x1234, name="helper")
-    call = CFunctionCall("helper", callee, [], codegen=codegen)
+    call = CFunctionCall("helper", _detached_callee(), [], codegen=codegen)
     codegen.cfunc = SimpleNamespace(statements=CStatements([call], codegen=codegen))
 
-    repaired = repair_cfunctioncall_render_targets_8616(codegen)
-
-    assert repaired == 1
-    assert call.show_disambiguated_name is False
+    _assert_dropped(call, repair_cfunctioncall_render_targets_8616(codegen))
 
 
 def test_render_compat_repairs_return_value_call_targets():
     codegen = _Codegen(project=_NoKbProject())
-    callee = SimpleNamespace(project=None, addr=0x1234, name="helper")
-    call = CFunctionCall("helper", callee, [], codegen=codegen)
+    call = CFunctionCall("helper", _detached_callee(), [], codegen=codegen)
     codegen.cfunc = SimpleNamespace(statements=CStatements([CReturn(call, codegen=codegen)], codegen=codegen))
 
-    repaired = repair_cfunctioncall_render_targets_8616(codegen)
-
-    assert repaired == 1
-    assert call.show_disambiguated_name is False
+    _assert_dropped(call, repair_cfunctioncall_render_targets_8616(codegen))
 
 
 def test_render_compat_repairs_switch_case_call_targets():
     codegen = _Codegen(project=_NoKbProject())
-    callee = SimpleNamespace(project=None, addr=0x1234, name="helper")
-    call = CFunctionCall("helper", callee, [], codegen=codegen)
+    call = CFunctionCall("helper", _detached_callee(), [], codegen=codegen)
     case_body = CStatements([CReturn(call, codegen=codegen)], codegen=codegen)
     switch = CSwitchCase(SimpleNamespace(), [(69, case_body)], None, codegen=codegen)
     codegen.cfunc = SimpleNamespace(statements=CStatements([switch], codegen=codegen))
 
-    repaired = repair_cfunctioncall_render_targets_8616(codegen)
-
-    assert repaired == 1
-    assert call.show_disambiguated_name is False
+    _assert_dropped(call, repair_cfunctioncall_render_targets_8616(codegen))
 
 
 def _detached_native_call() -> tuple[angr.Project, Function, Function, _Codegen, CFunctionCall]:
@@ -152,12 +157,11 @@ def test_render_name_cannot_promote_an_unmatched_target(foreign_project):
 
 def test_unresolved_render_target_keeps_semantic_metadata():
     """An absent KB disables name disambiguation without inventing target proof."""
-    _project, _canonical, detached, codegen, call = _detached_native_call()
+    _project, _canonical, _detached, codegen, call = _detached_native_call()
     codegen.project = _NoKbProject()
     assert repair_cfunctioncall_render_targets_8616(codegen) == 1
-    assert call.callee_func is detached and detached.project is None
-    assert call.type is detached.prototype.returnty
-    assert not call.show_disambiguated_name
+    assert call.callee_func is None
+    assert call.callee_target == 'helper'
 
 
 def test_render_target_lookup_preserves_unexpected_exception():

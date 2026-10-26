@@ -66,7 +66,7 @@ def test_generic_type_inference(tmp_path: Path) -> None:
         [
             sys.executable, "-m", "mypy", "--no-error-summary", "--no-pretty",
             "--cache-dir", str(tmp_path / "mypy"),
-            "inertia.cli/fork_timeout.py", "inertia.cli/telemetry.py",
+            "inertia/cli/fork_timeout.py", "inertia/cli/telemetry.py",
             "inertia/frontend/x86_16/regs.py",
             "inertia/lowering/type_array_matching.py", __file__,
         ],

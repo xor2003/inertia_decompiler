@@ -344,6 +344,9 @@ class _StructuredASTEncoder8616:
         # Runtime import keeps native materialization independent of snapshot
         # initialization while admitting only this explicit owned contract.
         from inertia.lowering.call_stack_input_contracts import CallStackInputBinding8616
+        from inertia.lowering.condition_stack_projection_contracts import (
+            ConditionStackProjectionFact8616,
+        )
         from inertia.lowering.entry_stack_pointer_capture import (
             EntryStackPointerCapture8616,
             ScopedCallPositionAuthority8616,
@@ -391,6 +394,8 @@ class _StructuredASTEncoder8616:
                 "high_block_addr": value.high_block_addr,
                 "high_ins_addr": value.high_ins_addr,
             }}
+        if type(value) is ConditionStackProjectionFact8616:
+            return {"condition_stack_projection": self.encode(asdict(value), path)}
         return None
 
     def _node(self, value: structured_c.CConstruct, path: tuple[str, ...]) -> object:

@@ -1558,6 +1558,12 @@ def scan_function(
         has_far_call_reloc=b"\x9a\x00\x00\x00\x00" in code,
     )
 
+    # Scan workers run the pipeline in-process and cannot rely on the CLI
+    # entrypoint to have installed the frontend compatibility shims.
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
+
     old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
     _SCAN_ACTIVE = True
     signal.alarm(timeout_sec)

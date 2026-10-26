@@ -786,6 +786,7 @@ def compare_functions_with_calls(
     _mask_lazy_flag_counterexample(
         comparison, oracle_summary, candidate_summary, limits.max_term_nodes
     )
+    _record_external_premises(comparison, external_contracts, oracle_summary, candidate_summary)
     _record_caller_premises(
         comparison, normalization=normalization, entry_domain=entry_domain
     )
@@ -797,7 +798,6 @@ def compare_functions_with_calls(
     _record_x87_premises(comparison, oracle_summary, candidate_summary)
     _record_indirect_cell_premises(comparison, oracle_summary, candidate_summary)
     record_abi_observation(comparison, abi_premise)
-    _record_external_premises(comparison, external_contracts, oracle_summary, candidate_summary)
     if time.monotonic() >= deadline:
         return _domain_labelled_refusal("compose_budget_exceeded", entry_domain)
     encoded: dict[str, Any] = encode_bound_predicates({

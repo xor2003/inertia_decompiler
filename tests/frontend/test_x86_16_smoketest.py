@@ -15,17 +15,20 @@ from angr.sim_type import (
     SimTypeShort,
 )
 from angr.sim_variable import SimStackVariable
-from inertia.frontend.x86_16.arch_86_16 import Arch86_16
-from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
-from inertia.frontend.x86_16.simos_86_16 import SimCC8616MSCsmall  # noqa: F401
 from pyvex.expr import Const as VexConst
 from pyvex.stmt import Exit as VexExit
 
 from decompile import _resolve_stack_cvar_at_offset
+from inertia.frontend.x86_16.arch_86_16 import Arch86_16
+from inertia.frontend.x86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from inertia.frontend.x86_16.simos_86_16 import SimCC8616MSCsmall  # noqa: F401
 from inertia.lowering.annotations import apply_x86_16_metadata_annotations, decompile_function
 
 
 def _project_from_bytes(code: bytes):
+    from inertia.frontend.x86_16.bootstrap import apply_x86_16_bootstrap
+
+    apply_x86_16_bootstrap()
     return angr.Project(
         io.BytesIO(code),
         main_opts={

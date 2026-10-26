@@ -157,6 +157,30 @@ def _copy_function_render_context_8616(function: Function, context: Function) ->
     return restored
 
 
+def _detached_native_callee_8616(call: structured_c.CFunctionCall) -> object | None:
+    """Return the callee only when it is a detached native Function-like object.
+
+    Dynamic boundary: ``CFunctionCall`` and its callee are third-party angr
+    nodes; the callee may lack ``project`` or raise on attribute access, so
+    detection probes the dynamic surface rather than owned fields.
+    """
+    callee: object | None = getattr(call, "callee_func", None)
+    if callee is None:
+        return None
+    module = getattr(type(callee), "__module__", "")
+    if not isinstance(module, str) or "knowledge_plugins.functions" not in module:
+        return None
+    try:
+        callee_project = getattr(callee, "project", None)
+    except AssertionError:
+        callee_project = None
+    except Exception:
+        callee_project = None
+    if callee_project is not None:
+        return None
+    return callee
+
+
 def repair_cfunctioncall_render_target_8616(project: object | None, call: structured_c.CFunctionCall) -> bool:
     """Restore native render context while preserving the call's selected ABI.
 
@@ -167,19 +191,8 @@ def repair_cfunctioncall_render_target_8616(project: object | None, call: struct
     resolvable project, retain all semantic metadata and disable name ambiguity
     rendering. This does not prove an unresolved target for any semantic owner.
     """
-    callee = getattr(call, "callee_func", None)
+    callee = _detached_native_callee_8616(call)
     if callee is None:
-        return False
-    module = getattr(type(callee), "__module__", "")
-    if not isinstance(module, str) or "knowledge_plugins.functions" not in module:
-        return False
-    try:
-        callee_project = getattr(callee, "project", None)
-    except AssertionError:
-        callee_project = None
-    except Exception:
-        callee_project = None
-    if callee_project is not None:
         return False
     if isinstance(callee, Function) and project is not None:
         canonical = _kb_function_for_addr_8616(project, callee.addr)

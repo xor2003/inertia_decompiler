@@ -36,8 +36,10 @@ class _Memory(Protocol):
 class _Object(Protocol):
     """Original native source identity boundary."""
 
-    binary: str
+    binary: str | None
     mapped_base: int
+    min_addr: int
+    max_addr: int
 
 
 class _Loader(Protocol):
@@ -121,7 +123,14 @@ class ScalarInterface8616:
 
 def _source(project: _Project) -> str:
     """Bind the original file bytes, not a mutable filename alone."""
-    return hashlib.sha256(Path(project.loader.main_object.binary).read_bytes()).hexdigest()
+    main_object = project.loader.main_object
+    binary = main_object.binary
+    if binary is not None:
+        return hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+    # Stream-backed loads (blob COD images) carry no file path: bind the loaded
+    # image bytes, which are the same bytes the decompile consumed.
+    size = main_object.max_addr - main_object.min_addr + 1
+    return hashlib.sha256(project.loader.memory.load(main_object.min_addr, size)).hexdigest()
 
 
 def _scalar(value: object) -> ScalarType8616 | None:

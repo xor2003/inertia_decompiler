@@ -115,9 +115,9 @@ def test_runtime_gate_cache_key_tracks_gate_content(tmp_path: Path) -> None:
 def test_runtime_gate_cache_ignores_test_edits_but_tracks_decompiler_source(tmp_path: Path) -> None:
     """Acceptance edits recheck existing artifacts; runtime edits rebuild them."""
     repository = tmp_path / "repository"
-    (repository / "inertia_decompiler").mkdir(parents=True)
+    (repository / "inertia").mkdir(parents=True)
     (repository / "angr_platforms" / "tests").mkdir(parents=True)
-    runtime_source = repository / "inertia_decompiler" / "runtime.py"
+    runtime_source = repository / "inertia" / "runtime.py"
     test_source = repository / "angr_platforms" / "tests" / "test_runtime.py"
     runtime_source.write_text("VALUE = 1\n", encoding="utf-8")
     test_source.write_text("assert True\n", encoding="utf-8")

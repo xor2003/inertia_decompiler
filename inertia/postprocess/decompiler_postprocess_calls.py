@@ -12427,6 +12427,7 @@ class _CallsiteStackArgsMaterializer8616:
         args_after: StructuredAstValue,
         exact_register_args: bool,
         exact_stack_address_mismatch: bool,
+        exact_literal_args: bool = False,
     ) -> bool:
         """Refuse replacement when materialized args score worse without exact evidence."""
         before_score = sum(self._arg_semantic_quality_8616(call_name, idx, arg) for idx, arg in enumerate(args_before))
@@ -12434,6 +12435,7 @@ class _CallsiteStackArgsMaterializer8616:
         if (
             after_score < before_score
             and not exact_register_args
+            and not exact_literal_args
             and not exact_stack_address_mismatch
         ):
             if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
@@ -12541,9 +12543,28 @@ class _CallsiteStackArgsMaterializer8616:
             args_before,
             ordered_summary_sources,
         )
+        literal_source_indices = {
+            idx
+            for idx, source in enumerate(ordered_summary_sources)
+            if isinstance(source, tuple)
+            and len(source) == 2
+            and source[0] == CallsitePushSourceKind8616.IMMEDIATE.value
+            and isinstance(source[1], int)
+            and not isinstance(source[1], bool)
+        }
+        exact_literal_args = (
+            bool(literal_source_indices)
+            and bool(args_after)
+            and len(args_after) == len(ordered_summary_sources)
+            and all(
+                self._expr_matches_push_source_value_8616(args_after[idx], ordered_summary_sources[idx])
+                for idx in literal_source_indices
+            )
+        )
         if args_before and (not force_replace) and self._materialization_quality_refused_8616(
             call_name, args_before, args_after,
             exact_register_args, exact_stack_address_mismatch,
+            exact_literal_args=exact_literal_args,
         ):
             return refused_call_argument_mutation_8616(target_changed=target_changed)
         if not args_before and len(args_after) > 1:

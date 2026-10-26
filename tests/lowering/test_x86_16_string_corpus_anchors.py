@@ -18,7 +18,7 @@ from tests.fixtures.x86_16_timeout_support import scaled_decompile_timeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MONOPRIN_COD = REPO_ROOT / "cod" / "f14" / "MONOPRIN.COD"
-SCRIPT_PATH = REPO_ROOT / "scripts" / "decompile_cod_dir.py"
+SCRIPT_PATH = REPO_ROOT / "tools" / "dev" / "decompile_cod_dir.py"
 
 _RUNTIME_HEADER = render_c_runtime_header_8616("portable-flat", gp_runtime_abi=DEFAULT_GP_RUNTIME_ABI_8616)
 _PRELUDE = _RUNTIME_HEADER + coherent_gp_runtime_definitions_8616() + """

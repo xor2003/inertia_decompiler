@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import tools.compiler_toolchain.build_msc6_examples as harness
+import tools.compiler_toolchain.compiler_profile as compiler_profile
 from tools.compiler_toolchain.msc6_memory_model import MSCMemoryModel
 
 DOS_TMP_OVERRIDE = "--env=TMP=C:\\"
@@ -74,7 +75,7 @@ def test_msc6_compile_commands_select_writable_dos_tmp(
     source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
     monkeypatch.setenv("TMP", inherited_tmp)
     commands: list[list[str]] = []
-    monkeypatch.setattr(harness, "_run", _observed_toolchain(commands, out_dir))
+    monkeypatch.setattr(compiler_profile, "_run", _observed_toolchain(commands, out_dir))
 
     built, *_ = harness._compile_and_link_unlocked(
         source_path,
