@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast
@@ -120,6 +120,7 @@ from .segment_state import build_x86_16_segment_state_artifact
 from .segment_state_transfer import SEGMENT_REGISTERS
 
 if TYPE_CHECKING:
+    from inertia.semantics.compiler_helpers import CompilerHelperEvidence8616
     from inertia.semantics.direct_near_call_target_binding import (
         DirectNearCallTargetBinding8616,
     )
@@ -333,7 +334,11 @@ class EntryDomainCallPreservation8616:
     native callsite index entry; ``binding`` is the Semantics-owned symbolic
     operand binding when the operand is not an exact full-width constant;
     ``callee`` is the callee's complete segment-effect closure over the
-    registered artifact and closed boundary coverage.
+    registered artifact and closed boundary coverage. A byte-matched
+    stack-probe helper cannot produce a RET-based closure (its returning
+    tail is ``jmp cx``); ``helper_evidence`` then retains the binary-proven
+    template identity that certifies segment preservation on its only
+    returning path, and ``callee`` stays ``None``.
     """
 
     artifact: IRFunctionArtifact
@@ -354,6 +359,7 @@ class EntryDomainCallPreservation8616:
     failure_count: int
     invocation_scope: Real16InvocationDomain8616 | None = None
     selector_binding: DeclaredSelectorCallsite8616 | None = None
+    helper_evidence: CompilerHelperEvidence8616 | None = None
 
     @property
     def selector_projection(self) -> DeclaredSelectorCallsite8616 | None:
@@ -444,6 +450,9 @@ class EntryDomainCallPreservation8616:
         """Project retained effects under the separately authenticated domain."""
         if not self.complete_for(invocation_scope):
             return ()
+        if self.callee is None:
+            # The matched probe template writes no segment register.
+            return SEGMENT_REGISTERS if self.helper_evidence is not None else ()
         return _callee_preserved_registers_8616(self.callee)
 
     def to_dict(self) -> dict[str, object]:
@@ -456,6 +465,12 @@ class EntryDomainCallPreservation8616:
             "preserved_registers": list(self.preserved_registers),
             "complete": self.complete,
             "selector_entry": None if self.selector_scope is None else self.selector_scope.declared_entry,
+            "helper": (
+                None if self.helper_evidence is None
+                else {"name": self.helper_evidence.name,
+                      "kind": self.helper_evidence.kind.value,
+                      "pattern": self.helper_evidence.pattern_name}
+            ),
         }
 
 
@@ -2009,6 +2024,7 @@ def _selector_batch_record_facts_8616(record: EntryDomainCallPreservation8616) -
             id(record.selector_binding), id(record.invocation_scope), record.callsite_addr,
             record.target_addr, record.failure, record.raw_fact_count, record.normalized_fact_count,
             record.classified_fact_count, record.materialized_count, record.failure_count,
+            id(record.helper_evidence),
             _binding_facts(record.binding, set()))
 
 
@@ -2160,6 +2176,66 @@ def _callee_complete_in_scope_8616(
     ) and callee.complete_for(callee_scope)
 
 
+def _stack_probe_helper_evidence_8616(
+    project: object, result: EntryDomainCallPreservation8616,
+) -> CompilerHelperEvidence8616 | None:
+    """Re-verify byte-proven stack-probe identity for a callee-less callsite.
+
+    The matched template's literal guarded-branch displacement bytes certify
+    that its failure exits bypass the returning ``mov sp, bx; jmp cx`` /
+    far-return tail, and the body writes no segment register, so every
+    segment identity survives the call on the only returning path. The
+    helper's caller-visible stack effect is owned separately by the
+    call-stack position proof; this certificate covers segment
+    preservation only.
+    """
+    from inertia.semantics.compiler_helpers import (
+        CompilerHelperEvidenceKind8616,
+        identify_x86_16_compiler_helper_at_8616,
+    )
+
+    entry = result.entry
+    target = result.target_addr
+    if entry is None or type(target) is not int:
+        return None
+    window = _callsite_window_8616(project, entry)
+    if window is None or target not in window[2]:
+        return None
+    evidence = identify_x86_16_compiler_helper_at_8616(project, target)
+    if evidence is None or evidence.addr != target:
+        return None
+    expected_far = {
+        CompilerHelperEvidenceKind8616.STACK_PROBE: False,
+        CompilerHelperEvidenceKind8616.STACK_PROBE_FAR: True,
+    }.get(evidence.kind)
+    if expected_far is None or entry.is_far != expected_far:
+        return None
+    return evidence
+
+
+def _helper_chain_failure_8616(
+    result: EntryDomainCallPreservation8616,
+) -> EntryDomainCallPreservationFailure8616 | None:
+    """Revalidate the retained probe identity and byte-bound call target.
+
+    A near ``E8 rel16`` call's linear target is selector-invariant: every CS
+    that fetches the callsite at its decoded linear address lands the call
+    on the same ``callsite + 3 + rel16`` coordinate. The retained decoded
+    entry therefore authenticates the call's callee at machine level without
+    the lifted-operand selector discharge, which remains the Semantics
+    binding owner's separate obligation for the IR operand itself.
+    """
+    fresh = _stack_probe_helper_evidence_8616(result.boundary.project, result)
+    if fresh is None or fresh != result.helper_evidence:
+        return EntryDomainCallPreservationFailure8616.CALLEE_UNRESOLVED
+    entry = result.entry
+    assert entry is not None  # bound by the callsite-entry check above
+    coordinates = entry.bound_near_coordinates(result.boundary)
+    if coordinates is None:
+        return EntryDomainCallPreservationFailure8616.TARGET_MISMATCH
+    return None
+
+
 def _callee_chain_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
@@ -2167,6 +2243,8 @@ def _callee_chain_failure_8616(
     entry = cast(DecodedDirectCallsite8616, result.entry)
     callee = result.callee
     if type(callee) is not SegmentEffectClosureResult8616:
+        if callee is None and result.helper_evidence is not None:
+            return _helper_chain_failure_8616(result)
         return EntryDomainCallPreservationFailure8616.CALLEE_UNRESOLVED
     if callee.coverage.boundary.project is not result.boundary.project:
         return EntryDomainCallPreservationFailure8616.CALLEE_UNRESOLVED
@@ -4210,6 +4288,15 @@ def prove_entry_domain_call_preservation_8616(
         and callee_refusal is not None
     ):
         failure = callee_refusal
+    if failure is not None and candidate.callee is None:
+        helper = _stack_probe_helper_evidence_8616(project, candidate)
+        if helper is not None:
+            # A byte-matched probe helper carries segment preservation in its
+            # template identity instead of a RET-based callee closure.
+            helper_candidate = replace(candidate, helper_evidence=helper)
+            with segment_call_dependency_traversal_scope_8616():
+                if _preservation_failure_8616(helper_candidate) is None:
+                    return helper_candidate
     if failure is None:
         return candidate
     return EntryDomainCallPreservation8616(

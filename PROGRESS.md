@@ -19900,3 +19900,23 @@ callsite-declaration tests pass; postprocess callsite-prototype suite 10/10.
 
 Still red (different families): sortd corpus tests hit the 180s
 recovery-budget timeout, not this refusal class.
+
+`inertia/ir/entry_domain_call_preservation.py` — `aNchkstk` helper-aware
+preservation: when the callee-closure route refuses and the callsite target is
+byte-identified as a STACK_PROBE/STACK_PROBE_FAR template (pop cx; ...; jmp cx —
+no RET, so a body closure can never exist), the record now retains
+`helper_evidence` instead of `callee`. Revalidation re-identifies the helper
+from bytes, re-decodes the entry callsite bytes, and checks target/window/
+far-ness. `preserved_registers_for` exposes all SEGMENT_REGISTERS only after
+the helper leg passes (the template writes no segment registers). to_dict
+serializes helper name/kind/pattern; selector-batch facts include
+id(helper_evidence). Verified: sortd caller 0x108d0's 0x108d6->0x11222 record
+now completes (was CALL_ON_PATH callee_unresolved). 131 focused invocation/
+premise/entry tests pass; 1 failure (`test_collect_route_reports_pending_
+not_unresolved`) is identical at committed HEAD — pre-existing, unrelated.
+
+Remaining sortd blocker (separate declared-input family): premise chain dies
+at entry root 0x10f9a with `declared_service_unproven` — `declared_services`
+is empty for the static MZ intake; callers' surfaces still refuse because the
+upstream caller artifacts cannot build. Next: declared DOS interrupt-service
+evidence for the startup path's `int` crossings.
