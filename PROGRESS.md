@@ -19808,3 +19808,57 @@ Native lazy-import guard ordering passes 44 focused checks, including rejection 
 - `test_rendered_call_preservation` TYPES.EXE:add_sc confirmed committed-state at HEAD with cold cache: `call_interfaces: call stack input positions unproven` + `Rewrite evidence is stale` — a warm direct-request cache had masked it. Same documented call-interface blocker class as the selector-domain gap.
 - Identity resolution: `d8b070b65`'s restored latest-wins republish broke `is raw` identity because the SSA lane republished its rebuilt-but-equal artifact. Fix: `_canonical_registered_ir_artifact_8616` in `function_ssa_registry` adopts the registered object when content-equal, keeping registry identity stable while genuine republishers still supersede (verified: readiness identity tests + stack-word supersession test both green, 97 focused tests pass).
 - Fixed also: `test_generic_type_inference` stale `inertia.cli/` paths from the reorganization; smoketest fixture now applies `apply_x86_16_bootstrap()` (production compat surface; the two pointer-signature tests then reach real codegen and expose the pre-existing `PTR_U16` return-wrap issue instead of crashing on `is_prototype_guessed`).
+
+## Call-interface refusal trace (Oct 26, continued)
+
+- `call_interfaces: call stack input positions unproven` refusal point: `decompiler_postprocess_stage.py:12040` → `_call_stack_input_position_refusal_8616` (line 18879) refuses early in `_postprocess_codegen_8616` when `call_stack_input_lowering_result_8616(codegen)` reports `status=REFUSED, failure=POSITION_UNPROVEN` — the call-input lowering could not prove architectural stack positions of call arguments.
+- TYPES.EXE:add_sc has `call 0x10656`; positions unproven → whole postprocess refused → validation=failed → rc=4; exceeds 30s recovery under load → asm fallback (uncompilable) → `test_rendered_call_preservation` red at committed HEAD with cold cache (warm direct-request cache had masked it).
+- Same blocker family as `test_sortd_swaps`/`caller_targets` (declared-input / DOS-service premise gap in the `1f280d754` evidence tightening).
+- Committed+pushed `4f1f2a407` (verified batch: republish-after-regen, canonical IR reuse, blob `_source`, owned-fact admission, corpus_scan bootstrap, comparator ordering, facade modules, stale-test repairs). quality-fast still honestly red on committed-state families; r8 classification logged above.
+- Next: `call_stack_input_lowering_result_8616` — why positions are unproven for add_sc's near call (premise chain vs lowering gap).
+
+## Probe-guard / call-position refusal root cause (Oct 26, traced end-to-end)
+
+The `call_interfaces: call stack input positions unproven` postprocess refusal
+(decompiler_postprocess_stage.py:12040, gate from 6bfdc5a27) is traced for
+TYPES.EXE:add_sc call@0x10016→0x10656 and is the SAME verdict class in SORTD's
+tail-validation details — likely the whole corpus-validation family shares it.
+
+Chain: `prove_call_stack_position_8616` → UNPROVEN_EFFECT →
+`call.call_stack_effect.stack_coordinates.net_sp_delta=None` with refusals
+CALLEE_STACK_EFFECT_UNPROVEN + CALLEE_TERMINAL_EVIDENCE_INCOMPLETE +
+CALLER_CLEANUP_UNPROVEN + ARGUMENT_ZERO_ARITY_UNPROVEN →
+`callee_sp_proof.failure=BOUNDARY_MISSING` → `_exact_boundary_8616` returns None
+→ `mapped_entry_function_boundary_8616(project, 0x10656)` returns None →
+`collect_instruction_reachability_8616` inventory_complete=False.
+
+Reason: the callee is the MS C stack-probe helper (`pop cx; mov bx,sp;
+sub bx,ax; jb <fail>; ...; jmp cx`). Its register-indirect `jmp cx` return can
+only close via `prove_near_return_continuations_8616`, which requires the
+caller's `NearCallFramePremise8616` — and every target-only boundary caller
+(`_exact_boundary_8616`, frontend_local_call_evidence,
+segment_call_preservation_stage, frontend_invocation_inventory) calls
+`mapped_entry_function_boundary_8616` WITHOUT the premise. But even with the
+boundary, `prove_callee_stack_pointer_8616` cannot yield a constant
+return_sp_delta: the helper's effect is `+return_frame - ax` (dynamic).
+
+The designed consumer `resolve_call_stack_allocation_8616`
+(call_stack_allocation.py:58) ALREADY refuses every binary-backed probe
+candidate with STACK_ALLOCATION_UNPROVEN: "No authenticated owner discharges
+the probe's failure guards" — carry/DS-limit guard exits are conditional
+failure paths, so an unconditional position proof is unsound. This is a
+documented missing owner, not a bug: same honest-refusal class as the
+manifest-pinned selector-domain blocker (declared-input evidence gap).
+
+Fix direction (real feature, semantics layer): helper-aware callee effect —
+for a binary-matched STACK_PROBE target, prove (a) the guard-failure exits are
+non-returning continuations and (b) the reaching AX write is a proven constant
+(CallStackAllocationCandidate8616.allocation_size); then the only returning SP
+effect is `+return_frame_bytes - allocation_size`, dischargeable as a constant
+net_sp_delta. Needs the conditional-exit evidence plus a guarded coordinate
+contract; ~25 corpus-validation tests plausibly blocked on this class.
+
+`test_rendered_call_preservation` (NOT manifest-pinned): accepts rc=4 and its
+refusal path emits correct compilable C with `aNchkstk()` preserved — failure
+mode is serial retry-lane budget (~40s across 3 worker lanes vs 30s) ending in
+asm fallback. Committed-state debt, load-sensitive.
