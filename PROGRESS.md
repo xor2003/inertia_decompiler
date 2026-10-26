@@ -19920,3 +19920,31 @@ at entry root 0x10f9a with `declared_service_unproven` — `declared_services`
 is empty for the static MZ intake; callers' surfaces still refuse because the
 upstream caller artifacts cannot build. Next: declared DOS interrupt-service
 evidence for the startup path's `int` crossings.
+
+Declared-input family — root cause pinned for
+`test_sortd_swaps_materializes_pointer_outputs_through_storage_pipeline`:
+`caller_targets.complete` needs all 9 SWAPS callers' SSA; each caller's
+entry-domain proof hits `terminal_jump_selector_window_unproved` on
+selector-dependent `jmp rel16` terminators, so every caller needs a
+transported premise chained caller-of-caller to the MZ entry 0x10f9a.
+The entry's boot-path census must cross three `int 21h` sites —
+0x10f9c (AH=30h get version), 0x10fd1, 0x11011 — each requiring a
+`DeclaredInterruptService8616` relation bound to a declared environment.
+The test builds via `_build_project` (scoped source:
+`declared_services=()`, `function_entries=()`), so every crossing
+refuses `declared_service_unproven`/`call_boundary_unproven` and the
+whole premise chain collapses.
+
+Designed route (from `inertia/cli/real16_declared_project.py`):
+`build_declared_project_8616(binary, declaration_path)` consumes a
+`dosunit.real16_program_environment.v1` declaration via
+`tools/dosunit/catalog/real16_declared_input.py` carrying boot,
+environment (psp_segment + allocation_hex DOS memory image) and
+per-callsite service relations. Environments are captured through the
+dosbox/kvikdos runtime (`tools/dosunit` `import-libdosbox` lane).
+Work item: author/capture a SORTD declared environment covering the
+three int21 crossings plus the caller-chain function_entries, then
+migrate the pinned test's project construction to the declared route.
+No weakening of the census contract is correct: `int 21h` genuinely
+has environment-visible effects that cannot be derived from binary
+bytes alone.
