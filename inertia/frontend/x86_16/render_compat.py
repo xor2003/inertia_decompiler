@@ -14,6 +14,8 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.knowledge_plugins.functions.function import Function
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
+from inertia.semantics.callee_name_normalization import normalize_callee_name_8616
+
 __all__ = ["install_structured_codegen_sort_compat_8616", "repair_cfunctioncall_render_target_8616", "repair_cfunctioncall_render_targets_8616", "set_cfunctioncall_render_name_8616"]
 
 
@@ -165,18 +167,36 @@ def repair_cfunctioncall_render_target_8616(project: object | None, call: struct
     resolvable project, retain all semantic metadata and disable name ambiguity
     rendering. This does not prove an unresolved target for any semantic owner.
     """
-    callee = call.callee_func
-    if callee is None or callee.project is not None:
+    callee = getattr(call, "callee_func", None)
+    if callee is None:
+        return False
+    module = getattr(type(callee), "__module__", "")
+    if not isinstance(module, str) or "knowledge_plugins.functions" not in module:
+        return False
+    try:
+        callee_project = getattr(callee, "project", None)
+    except AssertionError:
+        callee_project = None
+    except Exception:
+        callee_project = None
+    if callee_project is not None:
         return False
     if isinstance(callee, Function) and project is not None:
         canonical = _kb_function_for_addr_8616(project, callee.addr)
         if isinstance(canonical, Function) and canonical.project is project:
             call.callee_func = _copy_function_render_context_8616(callee, canonical)
             return True
-    if call.show_disambiguated_name:
-        call.show_disambiguated_name = False
-        return True
-    return False
+    replacement = normalize_callee_name_8616(getattr(callee, "name", None))
+    if not isinstance(replacement, str) or not replacement:
+        replacement = normalize_callee_name_8616(getattr(call, "callee_target", None))
+    changed = False
+    if isinstance(replacement, str) and replacement and getattr(call, "callee_target", None) != replacement:
+        call.callee_target = replacement
+        changed = True
+    if getattr(call, "callee_func", None) is not None:
+        call.callee_func = None
+        changed = True
+    return changed
 
 
 def set_cfunctioncall_render_name_8616(
