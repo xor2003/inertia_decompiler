@@ -89,12 +89,14 @@ def _project(
     )
     caller = SimpleNamespace(
         addr=CALLER_ADDR,
+        size=len(caller_code),
         block_addrs_set=caller_blocks,
         blocks=tuple(lifted.factory.block(address, opt_level=0) for address in sorted(caller_blocks)),
         info={},
     )
     callee = SimpleNamespace(
         addr=CALLEE_ADDR,
+        size=len(callee_code),
         block_addrs_set={CALLEE_ADDR},
         info={},
     )

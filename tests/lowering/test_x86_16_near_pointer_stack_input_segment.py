@@ -36,14 +36,17 @@ def _inputs(equal_segments=True):
     boundaries = (exact_function_range_boundary_8616(project, 0x1000, 0x1013),
                   exact_function_range_boundary_8616(project, 0x1013, 0x101b))
     assert all(boundary is not None for boundary in boundaries)
+    callee_ir = build_x86_16_ir_function_artifact(project, boundaries[1])
+    publish_function_ir_artifact_8616(project, callee_ir)
     ssa = semantic_function_ssa_artifact_at_address_8616(
         project, 0x1000, function=boundaries[0]
     ).artifact
     assert ssa is not None
     caller_ir = registered_function_ir_artifact_8616(project, 0x1000).artifact
     assert caller_ir is not None
-    callee_ir = build_x86_16_ir_function_artifact(project, boundaries[1])
-    publish_function_ir_artifact_8616(project, callee_ir)
+    registered = registered_function_ir_artifact_8616(project, callee_ir.function_addr)
+    if registered.artifact is not None:
+        callee_ir = registered.artifact
     coverage = (prove_ir_boundary_coverage_8616(project, boundaries[0], caller_ir),
                 prove_ir_boundary_coverage_8616(project, boundaries[1], callee_ir))
     index = build_boundary_direct_callsite_index_8616(boundaries[0],

@@ -2624,7 +2624,12 @@ def codegen_function_8616(project: object, codegen: object) -> tuple[object, int
     else:
         return _retained_codegen_function_8616(retained_function, project, func_addr), func_addr
     project_boundary = cast(_ProjectBoundary, project)
-    function = project_boundary.kb.functions.function(addr=func_addr, create=False)
+    try:
+        function = project_boundary.kb.functions.function(addr=func_addr, create=False)
+    except AttributeError:
+        # Lightweight third-party fakes may expose ``kb`` without a function
+        # manager; absent metadata is the honest non-result, not a crash.
+        return None
     if function is None:
         return None
     return function, func_addr

@@ -16,13 +16,9 @@ from inertia.frontend.x86_16.frontend_direct_callsite_index import (
 from inertia.frontend.x86_16.frontend_function_boundary import exact_function_range_boundary_8616
 from inertia.ir import IRFunctionArtifact, IRValue, MemSpace
 from inertia.ir.core import IRActiveUnary8616
-from inertia.ir.function_ir_registry import publish_function_ir_artifact_8616
-from inertia.ir.function_ssa_registry import (
-    FunctionSSAArtifactStage8616,
-    publish_function_ssa_artifact_8616,
-)
+from inertia.ir.function_ir_registry import registered_function_ir_artifact_8616
+from inertia.ir.function_ssa_registry import function_ssa_artifact_for_boundary_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
-from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.lowering.call_target_projection_integrity import (
     CallProducerIntegrityFailure8616,
@@ -47,8 +43,9 @@ from inertia.lowering.interprocedural_storage_return_defs import (
 )
 from inertia.semantics.call_stack_effect_pipeline import (
     CallSemanticProjection8616,
-    build_semantic_function_ssa_8616,
+    semantic_function_ssa_artifact_at_address_8616,
 )
+from inertia.semantics.call_target_evidence_8616 import resolve_call_target_evidence_8616
 from inertia.semantics.callsite_summary import CallsitePushSourceKind8616, CallsiteSummary8616
 
 
@@ -74,21 +71,23 @@ def _evidence(semantic: bool, code: bytes | None = None) -> _Evidence:
     )
     boundary = exact_function_range_boundary_8616(project, 0x1000, 0x1000 + len(code))
     assert boundary is not None
-    raw = build_x86_16_ir_function_artifact(project, boundary)
-    assert not raw.refusals
-    publish_function_ir_artifact_8616(project, raw)
+    project._inertia_caller_function_ranges_8616 = ((0x1000, 0x1000 + len(code)),)
     if semantic:
-        effects, outputs, ssa = build_semantic_function_ssa_8616(project, boundary, ir_artifact=raw)
-        projection = CallSemanticProjection8616(raw, effects, outputs, ssa)
-        stage = FunctionSSAArtifactStage8616.SEMANTIC
+        resolution = semantic_function_ssa_artifact_at_address_8616(
+            project, 0x1000, function=boundary
+        )
     else:
-        ssa = build_x86_16_function_ssa(raw)
-        projection = None
-        stage = FunctionSSAArtifactStage8616.IR
-    publish_function_ssa_artifact_8616(project, ssa, stage)
+        resolution = function_ssa_artifact_for_boundary_8616(project, 0x1000, boundary)
+    assert resolution.artifact is not None
+    ssa = resolution.artifact
+    raw = registered_function_ir_artifact_8616(project, 0x1000).artifact
+    assert raw is not None and not raw.refusals
     index = build_boundary_direct_callsite_index_8616(
         boundary,
         direct_target_resolver=lambda instruction: resolve_direct_call_target_from_instruction_8616(project, instruction),
+    )
+    projection = (
+        resolve_call_target_evidence_8616(project, 0x1000).projection if semantic else None
     )
     return _Evidence(project, raw, ssa, index, projection)
 

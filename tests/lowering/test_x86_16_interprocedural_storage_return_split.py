@@ -321,10 +321,11 @@ def _lifted_classification(
         auto_load_libs=False,
     )
     caller = SimpleNamespace(
-        addr=caller_addr, block_addrs_set=block_addrs, info={},
+        addr=caller_addr, size=len(code), block_addrs_set=block_addrs, info={},
         blocks=tuple(lifted.factory.block(address, opt_level=0) for address in sorted(block_addrs)),
     )
-    callee = SimpleNamespace(addr=callee_addr, block_addrs_set={callee_addr}, info={})
+    callee = SimpleNamespace(addr=callee_addr, size=len(bytes.fromhex("b80100ba0200c3")),
+                             block_addrs_set={callee_addr}, info={})
     functions = SimpleNamespace(
         function=lambda addr, create=False: (
             caller if addr == caller_addr else callee if addr == callee_addr else None

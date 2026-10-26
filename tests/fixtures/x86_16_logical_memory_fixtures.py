@@ -18,6 +18,15 @@ from inertia.ir import (
     MemSpace,
     SegmentOrigin,
 )
+from inertia.ir.function_ir_registry import (
+    FunctionIRArtifactResolution8616,
+    publish_function_ir_artifact_8616,
+)
+from inertia.ir.function_readiness_contracts import (
+    function_artifact_body_digest_8616,
+    observed_function_artifact_source_revision_8616,
+    record_function_build_attestation_8616,
+)
 from inertia.ir.logical_memory_capture import (
     IRLogicalMemoryCaptureRecord8616,
 )
@@ -110,9 +119,9 @@ def resolve_logical_memory(
     return block, result
 
 
-def lift_ir_artifact(code: bytes) -> IRFunctionArtifact:
+def lift_ir_artifact(code: bytes, *, project: angr.Project | None = None) -> IRFunctionArtifact:
     """Lift one real-mode blob through the public VEX artifact builder."""
-    return lift_ir_artifact_with_blocks(code, (BLOCK_ADDR,), ())
+    return lift_ir_artifact_with_blocks(code, (BLOCK_ADDR,), (), project=project)
 
 
 def lift_ir_artifact_with_blocks(
@@ -121,31 +130,68 @@ def lift_ir_artifact_with_blocks(
     edges: tuple[tuple[int, int], ...],
     *,
     prelift: bool = False,
+    project: angr.Project | None = None,
 ) -> IRFunctionArtifact:
     """Lift a blob through an explicit possibly overlapping function graph."""
-    project = angr.Project(
-        io.BytesIO(code),
-        main_opts={
-            "backend": "blob",
-            "arch": Arch86_16(),
-            "base_addr": FUNCTION_ADDR,
-            "entry_point": FUNCTION_ADDR,
-        },
-        auto_load_libs=False,
-    )
+    if project is None:
+        project = angr.Project(
+            io.BytesIO(code),
+            main_opts={
+                "backend": "blob",
+                "arch": Arch86_16(),
+                "base_addr": FUNCTION_ADDR,
+                "entry_point": FUNCTION_ADDR,
+            },
+            auto_load_libs=False,
+        )
     nodes = {address: SimpleNamespace(addr=address) for address in block_addrs}
     function = SimpleNamespace(
         addr=FUNCTION_ADDR,
+        size=len(code),
         block_addrs_set=set(block_addrs),
         graph=SimpleNamespace(
             edges=tuple((nodes[source], nodes[target]) for source, target in edges)
         ),
         info={},
     )
+    function.function = lambda addr=None, create=False, _fn=function: _fn
+    owners = getattr(project, "_inertia_function_source_owners_8616", None)
+    if not isinstance(owners, dict):
+        owners = {}
+        project._inertia_function_source_owners_8616 = owners
+    owners.setdefault(FUNCTION_ADDR, SimpleNamespace(function=lambda addr=None, create=False, _fn=function: _fn))
     if prelift:
         for block_addr in block_addrs:
             _ = project.factory.block(block_addr, opt_level=0).vex
     return build_x86_16_ir_function_artifact(project, function)
+
+
+def publish_derived_ir_artifact(
+    project: angr.Project,
+    parent: IRFunctionArtifact,
+    derived: IRFunctionArtifact,
+) -> FunctionIRArtifactResolution8616:
+    """Attest a test-substituted body as a derived artifact and publish it.
+
+    A mutated body has no build attestation of its own, so publication cannot
+    bind it. Record that it consumed the attested parent body, matching the
+    derived-artifact flow used by production registries.
+    """
+    parent_digest = function_artifact_body_digest_8616(parent)
+    body_digest = function_artifact_body_digest_8616(derived)
+    observed = observed_function_artifact_source_revision_8616(
+        project, derived.function_addr, derived
+    )
+    if body_digest is not None and observed is not None:
+        record_function_build_attestation_8616(
+            project,
+            derived.function_addr,
+            body_digest,
+            observed,
+            "x86_16_vex_ir",
+            inputs=() if parent_digest is None else (parent_digest,),
+        )
+    return publish_function_ir_artifact_8616(project, derived)
 
 
 def assert_closed_single_refusal(
@@ -173,5 +219,6 @@ __all__ = [
     "logical_address",
     "logical_capture",
     "memory_instruction",
+    "publish_derived_ir_artifact",
     "resolve_logical_memory",
 ]

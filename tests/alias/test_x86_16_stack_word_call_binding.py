@@ -22,7 +22,10 @@ from inertia.ir.ir_boundary_cfg import IRBoundaryCoverageResult8616, prove_ir_bo
 from inertia.ir.logical_constant_word_receipt import prove_logical_constant_word_write_8616
 from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
 from inertia.ir.ssa_function import build_x86_16_function_ssa
-from tests.fixtures.x86_16_logical_memory_fixtures import lift_ir_artifact
+from tests.fixtures.x86_16_logical_memory_fixtures import (
+    lift_ir_artifact,
+    publish_derived_ir_artifact,
+)
 
 
 def _fixture(*, omit_frame_lane: bool = False) -> tuple[IRBoundaryCoverageResult8616, StackWordCallWindowReceipt8616]:
@@ -30,8 +33,9 @@ def _fixture(*, omit_frame_lane: bool = False) -> tuple[IRBoundaryCoverageResult
     code = bytes.fromhex("b8 03 00 50 b8 01 00 50 e8 00 00 c3")
     project = angr.Project(io.BytesIO(code), main_opts={"backend": "blob", "arch": Arch86_16(),
                            "base_addr": 0x1000, "entry_point": 0x1000}, auto_load_libs=False)
-    raw = lift_ir_artifact(code)
+    raw = lift_ir_artifact(code, project=project)
     if omit_frame_lane:
+        parent = raw
         block = raw.blocks[0]
         index = next(index for index, item in enumerate(block.instrs)
                      if item.op == "STORE" and item.addr == 0x1008)
@@ -39,10 +43,13 @@ def _fixture(*, omit_frame_lane: bool = False) -> tuple[IRBoundaryCoverageResult
                              (IRValue(MemSpace.CONST, const=0, size=1),), size=1, addr=0x1008)
         raw = replace(raw, blocks=(replace(block, instrs=(*block.instrs[:index], substitute,
                                                          *block.instrs[index + 1:])),))
-    publish_function_ir_artifact_8616(project, raw)
+        publish_derived_ir_artifact(project, parent, raw)
+    else:
+        publish_function_ir_artifact_8616(project, raw)
     boundary = ExactFunctionRangeBoundary8616(
         project, 0x1000, 11, frozenset({0x1000}),
         frozenset({0x1000, 0x1003, 0x1004, 0x1007, 0x1008}), (),
+        blocks=(project.factory.block(0x1000),),
     )
     coverage = prove_ir_boundary_coverage_8616(project, boundary, raw)
     ssa = build_x86_16_function_ssa(raw)

@@ -291,6 +291,7 @@ def publish_function_ir_artifact_8616(
                     function_addr,
                     FunctionIRArtifactFailure8616.SOURCE_REVISION_CONFLICT,
                 )
+            registry[function_addr] = artifact
             _bind_accepted_ir_lifecycle_8616(project, artifact, observed)
             return FunctionIRArtifactResolution8616(
                 function_addr,
