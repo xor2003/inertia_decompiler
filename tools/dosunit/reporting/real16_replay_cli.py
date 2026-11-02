@@ -38,6 +38,7 @@ def add_replay16_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("--candidate-exe", required=True, type=Path)
     parser.add_argument("--vectors", required=True, type=Path)
     parser.add_argument("--instruction-limit", type=int, default=100000)
+    parser.add_argument("--max-patch-bytes", type=int, default=0x10000)
     parser.add_argument("--out", required=True, type=Path)
     parser.set_defaults(func=cmd_replay_real16)
 
@@ -101,6 +102,8 @@ def cmd_replay_real16(args: argparse.Namespace) -> int:
         raise DosUnitError(f"real16 execution backend unavailable: {error}") from error
     if args.instruction_limit <= 0:
         raise DosUnitError("real16 instruction limit must be positive")
+    if args.max_patch_bytes <= 0:
+        raise DosUnitError("real16 max patch bytes must be positive")
     manifest = _manifest(args.vectors)
     paths: tuple[Path, Path] = (args.oracle_exe, args.candidate_exe)
     snapshots = tuple(_read_bytes(path, "binary") for path in paths)
@@ -112,7 +115,7 @@ def cmd_replay_real16(args: argparse.Namespace) -> int:
     # bytes that were relocated and will be executed; the post-run check
     # verifies the on-disk files still hash to it.
     digests = (images[0].file_sha256, images[1].file_sha256)
-    policy = Real16ReplayPolicy()
+    policy = Real16ReplayPolicy(max_patch_bytes=args.max_patch_bytes)
     rows: list[Real16ReplayRow] = []
     agreements: list[Real16Agreement] = []
     for selected in manifest.vectors:

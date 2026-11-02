@@ -182,7 +182,10 @@ class CallerFrame:
     in the entry segment can hold the trap (a loaded image >= 64K spans
     every reachable in-CS offset).  The target bytes are still pushed —
     the frame is real — but the target is never required to be fetchable,
-    so the trap-overlap check does not apply.
+    so the trap-overlap check does not apply.  A ``NEAR16`` frame pushes
+    only the target offset, so under ``sp_guard`` its segment is dead
+    metadata: oracle and candidate entries may live in different code
+    segments, and the entry-segment check is skipped for such frames.
     """
 
     kind: FrameKind

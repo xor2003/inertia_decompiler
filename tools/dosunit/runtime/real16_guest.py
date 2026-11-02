@@ -98,7 +98,8 @@ def _checked_register_contract(
 def _checked_frame(vector: Real16Vector, entry: SegOffset, regs: dict[str, int],
                    segments: dict[str, int], policy: Real16ReplayPolicy) -> None:
     """Validate the caller frame against the entry contract and policies."""
-    if vector.frame.kind is FrameKind.NEAR16 and vector.frame.target.segment != entry.segment:
+    if (vector.frame.kind is FrameKind.NEAR16 and not vector.frame.sp_guard
+            and vector.frame.target.segment != entry.segment):
         raise ValueError("near16 frame target must share the entry code segment")
     frame_size = len(vector.frame.push_bytes())
     sp = regs["sp"]

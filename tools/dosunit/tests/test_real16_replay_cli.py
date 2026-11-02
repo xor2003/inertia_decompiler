@@ -251,7 +251,7 @@ def test_malformed_selections_refuse(
     vectors_path.write_text(json.dumps({"vectors": vectors}))
     args = argparse.Namespace(
         oracle_exe=oracle, candidate_exe=candidate, vectors=vectors_path,
-        instruction_limit=1000, out=out,
+        instruction_limit=1000, max_patch_bytes=0x10000, out=out,
     )
     with pytest.raises(DosUnitError):
         cli.cmd_replay_real16(args)
@@ -286,7 +286,7 @@ def test_missing_vectors_file_wraps_oserror(cli: ModuleType, tmp_path: Path) -> 
         oracle_exe=tmp_path / "oracle.exe",
         candidate_exe=tmp_path / "candidate.exe",
         vectors=tmp_path / "absent.json",
-        instruction_limit=1000,
+        instruction_limit=1000, max_patch_bytes=0x10000,
         out=tmp_path / "report.json",
     )
     with pytest.raises(DosUnitError) as caught:
@@ -302,7 +302,7 @@ def test_missing_binary_wraps_oserror(cli: ModuleType, tmp_path: Path) -> None:
         oracle_exe=tmp_path / "absent.exe",
         candidate_exe=tmp_path / "candidate.exe",
         vectors=vectors_path,
-        instruction_limit=1000,
+        instruction_limit=1000, max_patch_bytes=0x10000,
         out=tmp_path / "report.json",
     )
     with pytest.raises(DosUnitError) as caught:
@@ -320,7 +320,7 @@ def test_non_mz_binary_refuses(cli: ModuleType, tmp_path: Path) -> None:
     vectors_path.write_text(json.dumps({"vectors": [_vector()]}))
     args = argparse.Namespace(
         oracle_exe=oracle, candidate_exe=candidate, vectors=vectors_path,
-        instruction_limit=1000, out=tmp_path / "report.json",
+        instruction_limit=1000, max_patch_bytes=0x10000, out=tmp_path / "report.json",
     )
     with pytest.raises(DosUnitError, match="cannot load"):
         cli.cmd_replay_real16(args)
@@ -334,7 +334,7 @@ def test_nonpositive_instruction_limit_refuses(cli: ModuleType, tmp_path: Path) 
         oracle_exe=tmp_path / "oracle.exe",
         candidate_exe=tmp_path / "candidate.exe",
         vectors=vectors_path,
-        instruction_limit=0,
+        instruction_limit=0, max_patch_bytes=0x10000,
         out=tmp_path / "report.json",
     )
     with pytest.raises(DosUnitError, match="instruction limit"):
@@ -386,7 +386,7 @@ def test_report_write_failure_carries_oserror(cli: ModuleType, tmp_path: Path) -
     image_path.write_bytes(_mz(bytes.fromhex("c3")))
     args = argparse.Namespace(
         oracle_exe=image_path, candidate_exe=image_path, vectors=vectors_path,
-        instruction_limit=1000, out=tmp_path,
+        instruction_limit=1000, max_patch_bytes=0x10000, out=tmp_path,
     )
     with pytest.raises(DosUnitError) as caught:
         cli.cmd_replay_real16(args)
