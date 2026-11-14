@@ -8,10 +8,9 @@ single-job dispatch without owning decompiler semantics.
 """
 
 from __future__ import annotations
-import typing
-import cython
 
 import contextlib
+import operator
 import os
 import pickle
 import select
@@ -19,7 +18,8 @@ import threading
 from collections import deque
 from collections.abc import Callable, Iterator
 from typing import TypedDict
-import operator
+
+import cython
 
 
 class _PreforkWorkerRecord(TypedDict):
@@ -73,6 +73,7 @@ class PreforkJobPool:
     _closed = cython.declare(cython.bint, visibility = "public")
     _condition = cython.declare(object, visibility = "public")
     _worker_func = cython.declare(object, visibility = "public")
+    _worker_setup = cython.declare(object, visibility = "public")
     _workers = cython.declare(list, visibility = "public")
 
     def __init__(
@@ -81,6 +82,7 @@ class PreforkJobPool:
         max_workers: cython.longlong,
         worker_func: Callable[[object], object],
         name_prefix: object = "prefork",
+        worker_setup: Callable[[], object] | None = None,
     ) -> None:
         """Start ``max_workers`` from a single-threaded POSIX parent."""
         if os.name != "posix" or not hasattr(os, "fork"):
@@ -90,6 +92,7 @@ class PreforkJobPool:
         if threading.active_count() != 1:
             raise RuntimeError("prefork requires a single-threaded parent")
         self._worker_func = worker_func
+        self._worker_setup = worker_setup
         self._workers: list[_PreforkWorkerRecord] = []
         self._closed = False
         self._condition = threading.Condition()
@@ -141,6 +144,8 @@ class PreforkJobPool:
     def _worker_loop(self, job_read: cython.longlong, result_write: cython.longlong) -> None:
         """Execute framed requests in one isolated prefork worker."""
         job: object
+        if self._worker_setup is not None:
+            self._worker_setup()
         while True:
             job = _read_framed_pickle(job_read)
             if job is None or job == ("shutdown",):

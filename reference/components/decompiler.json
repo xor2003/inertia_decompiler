@@ -229,6 +229,7 @@
     "tests/ir/test_segment_program_layout_reporting.py",
     "tests/integration/test_segment_register_membership.py",
     "tests/lowering/test_segmented_global_load_performance_contract.py",
+    "tests/cli/test_fork_clean_pool.py",
     "tests/cli/test_serial_clean_worker_cache.py",
     "tests/cli/test_serial_clean_worker_callsite_evidence.py",
     "tests/cli/test_serial_clean_worker_global_source_evidence.py",

@@ -7,13 +7,15 @@ Dynamic attributes in this CLI boundary are limited to third-party angr/codegen 
 """
 
 from __future__ import annotations
-import cython
 
+import builtins
 import contextlib
 import copy as copy
+import dataclasses
 import hashlib as hashlib
 import json as json
 import logging as logging
+import operator
 import os
 import re as re
 import subprocess as subprocess
@@ -31,9 +33,8 @@ from collections.abc import Sequence as Sequence
 from collections.abc import Sized as Sized
 from concurrent.futures import FIRST_COMPLETED as FIRST_COMPLETED
 from concurrent.futures import wait as wait
-import dataclasses
-import operator
-import builtins
+
+import cython
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -3101,6 +3102,70 @@ def _serial_clean_worker_debug_output_8616(stderr: object) -> str:
     return "".join(retained_lines)
 
 
+@cython.ccall
+def _dispatch_serial_clean_worker_8616(
+    command: object,
+    *,
+    environment: dict,
+    outer_timeout: cython.longlong,
+    job_dir: object,
+    job_id: object,
+) -> tuple[cython.bint, cython.longlong, object, object]:
+    """Run one clean worker via the prefork pool or a fresh subprocess.
+
+    Returns (timed_out, returncode, worker_debug_text, timeout_debug_output).
+    The prefork lane forks a disposable grandchild per job; when no pool
+    exists the per-function ``sys.executable`` subprocess lane runs instead —
+    both preserve one-fresh-process-per-function isolation.
+    """
+    worker_timed_out: cython.bint = False
+    worker_returncode: cython.longlong = -1
+    timeout_debug_output: object = ""
+    worker_debug_text: object = ""
+    from inertia.cli.fork_clean_pool import (
+        fork_clean_pool_8616 as _fork_clean_pool_8616,
+        run_fork_clean_job_8616 as _run_fork_clean_job_8616,
+    )
+    fork_clean_pool = _fork_clean_pool_8616()
+    if fork_clean_pool is not None:
+        worker_stderr_path = Path(job_dir) / "worker.stderr"
+        worker_stdout_path = Path(job_dir) / "worker.stdout"
+        fork_outcome = _run_fork_clean_job_8616(
+            fork_clean_pool,
+            job_id=job_id,
+            argv=list(command[3:]),
+            environment=environment,
+            stderr_path=worker_stderr_path,
+            stdout_path=worker_stdout_path,
+            outer_timeout=outer_timeout,
+        )
+        worker_timed_out = bool(fork_outcome["timed_out"])
+        if fork_outcome["returncode"] is not None:
+            worker_returncode = int(fork_outcome["returncode"])
+        if worker_stderr_path.exists():
+            worker_debug_text = worker_stderr_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+        if fork_outcome["detail"]:
+            worker_debug_text += f"[dbg] fork clean lane: {fork_outcome['detail']}\n"
+        timeout_debug_output = worker_debug_text
+    else:
+        try:
+            completed = run_captured_subprocess_tree(
+                command,
+                env=environment,
+                timeout=outer_timeout,
+            )
+        except subprocess.TimeoutExpired as ex:
+            worker_timed_out = True
+            timeout_debug_output = ex.stderr
+        else:
+            worker_returncode = completed.returncode
+            worker_debug_text = completed.stderr
+    return worker_timed_out, worker_returncode, worker_debug_text, timeout_debug_output
+
+
 @typing.overload
 def _run_serial_clean_process_work_item_8616(
     context: _BatchCliContext8616,
@@ -3185,18 +3250,24 @@ def _run_serial_clean_process_work_item_8616(
         environment["INERTIA_OTEL_PROFILE_IN_PROCESS"] = "1"
         environment["INERTIA_DIRECT_ADDR_PREFER_LST"] = "0"
         outer_timeout = _serial_clean_worker_outer_timeout_8616(timeout)
-        try:
-            completed = run_captured_subprocess_tree(
-                command,
-                env=environment,
-                timeout=outer_timeout,
-            )
-        except subprocess.TimeoutExpired as ex:
+        (
+            worker_timed_out,
+            worker_returncode,
+            worker_debug_text,
+            timeout_debug_output,
+        ) = _dispatch_serial_clean_worker_8616(
+            command,
+            environment=environment,
+            outer_timeout=outer_timeout,
+            job_dir=temporary_dir,
+            job_id=f"fn-{item.index}",
+        )
+        if worker_timed_out:
             return FunctionWorkResult(
                 index=item.index,
                 status=WorkItemStatus.TIMEOUT.value,
                 payload=f"Clean serial worker timed out after {outer_timeout}s.",
-                debug_output=_serial_clean_worker_debug_output_8616(ex.stderr),
+                debug_output=_serial_clean_worker_debug_output_8616(timeout_debug_output),
                 function=item.function,
                 function_cfg=item.function_cfg,
                 elapsed=time.perf_counter() - started_at,
@@ -3204,12 +3275,12 @@ def _run_serial_clean_process_work_item_8616(
                 failure_stage="clean_process_decompilation",
                 execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS,
             )
-        debug_output = _serial_clean_worker_debug_output_8616(completed.stderr)
-        if completed.returncode != 0 or not result_path.exists():
+        debug_output = _serial_clean_worker_debug_output_8616(worker_debug_text)
+        if worker_returncode != 0 or not result_path.exists():
             status, failure_stage, payload = _serial_clean_worker_failure_8616(
                 debug_output,
                 recovery_addr=recovery_addr,
-                returncode=completed.returncode,
+                returncode=worker_returncode,
                 result_present=result_path.exists(),
             )
             return FunctionWorkResult(
@@ -11336,6 +11407,13 @@ class _MainCliRun8616:
             )
             for item in iter(self.function_tasks)
         }
+        from inertia.cli.fork_clean_pool import (
+            ensure_fork_clean_pool_8616 as _ensure_fork_clean_pool_8616,
+        )
+        from inertia.cli.fork_clean_pool import (
+            shutdown_fork_clean_pool_8616 as _shutdown_fork_clean_pool_8616,
+        )
+        _ensure_fork_clean_pool_8616(self.workers)
         self.executor = DaemonThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="func-clean")
         try:
             self.item_by_future = {
@@ -11404,6 +11482,7 @@ class _MainCliRun8616:
                     self.pending.discard(_future_lp8616)
         finally:
             self.executor.shutdown(wait=True, cancel_futures=False)
+            _shutdown_fork_clean_pool_8616()
         return None
 
     @cython.ccall

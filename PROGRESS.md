@@ -20056,3 +20056,65 @@ migrate the pinned test's project construction to the declared route.
 No weakening of the census contract is correct: `int 21h` genuinely
 has environment-visible effects that cannot be derived from binary
 bytes alone.
+
+## Prefork clean-pool lane (post-migration perf work)
+
+Context: the x86-16 full-.exe sweep requires one isolated process per
+function; the CLEAN_PROCESS lane paid ~15.8s of interpreter import per
+function on top of analysis. New opt-in lane `inertia/cli/fork_clean_pool.py`
+(gated by `INERTIA_ENABLE_FORK_CLEAN_POOL=1`): N persistent workers are
+forked once from the fully-imported batch parent, each forks one disposable
+grandchild per function, so isolation semantics match
+`python -m inertia.cli.serial_clean_worker_cli` while imports are paid once.
+
+Wiring: pool created in `_phase_serial_fork_batch_8616` before the
+`DaemonThreadPoolExecutor` (PreforkJobPool requires a single-threaded main),
+shut down in the existing `finally`. `_run_serial_clean_process_work_item_8616`
+dispatches to `run_fork_clean_job_8616` when a pool exists, else keeps the
+`run_captured_subprocess_tree` lane unchanged.
+
+Grandchild contract (verified vs subprocess lane):
+- dup2's owned worker.stdout/worker.stderr, then rebinds fd-backed
+  sys.stdout/sys.stderr and repoints stale logging StreamHandlers so worker
+  diagnostics reach the capture files exactly like subprocess capture.
+- Applies the job env, sets `INERTIA_MEMORY_LIMIT_RELATIVE_8616`, mirrors
+  sys.argv (`argv[1:]` is what `_argument_was_explicit` reads).
+- Rewrites `INERTIA_ARCH_GUARD_VERIFIED_PARENT_PID` to its own ppid (the
+  pool worker), preserving the immediate-parent trust chain.
+- Runs under `run_with_timeout_in_fork` (process-group kill, guardian,
+  admit barrier) — same supervision as the in-process fork lane.
+
+Memory-limit change (`runtime_support.apply_memory_limit`): soft limit only,
+hard cap preserved; with the relative flag the cap bounds growth over the
+inherited fork snapshot instead of absolute VSZ (a grandchild already maps
+the parent's address space, so an absolute fresh-interpreter cap fires
+immediately). `prefork_job_pool` gained a `worker_setup` hook used to raise
+each worker's soft RLIMIT_AS to the inherited hard cap at fork time.
+
+Verified on SORTDEMO.EXE sweep (20 functions, `--timeout 25`,
+`INERTIA_DISABLE_SIGNATURES=1` to isolate the 544MB catalog pathology):
+- Identical per-function verdicts: 17 timeout + 3 validation_failed in both
+  lanes, same functions, same statuses; `0x10010` output block identical.
+- Function-phase wall time: fork 107s vs subprocess 135s (~21% faster on a
+  timeout-bound workload; on completing functions the ~10-16s saved per
+  function is a larger share).
+- Process tree shape parent -> 7 prefork workers -> grandchild+guardian per
+  job; zero leaked workers/guardians after sweep and after SIGKILL timeouts.
+- tests/cli/test_fork_clean_pool.py: 7 tests covering env gate, pool
+  creation, argv/env/stream fidelity, timeout kill + reuse, exception->job
+  failure mapping, shutdown reaping.
+
+Also fixed in-flight: cythonized `angr/.../clinic.so` mis-bound the stacked
+`@timethis`-over-`@staticmethod` `remove_empty_nodes` through `self.` calls
+(audit found it was the only stacked-decorator staticmethod in the compiled
+set); both call sites now use `Clinic.remove_empty_nodes`.
+
+Known pre-existing issue surfaced (affects both lanes, not a regression):
+the 544MB `repo_signature_catalog.pat` parse takes ~107s and ~4GB peak;
+under `--max-memory-mb 2048` workers in EITHER lane MemoryError (subprocess
+lane showed exit=1 on 6 of 20). The parent's own load can also die silently
+under `except Exception` in sidecar_metadata, leaving the lru_cache cold so
+every grandchild re-pays the parse. A 726MB `.patrx.pickle` now exists in
+`.inertia_decomp_cache/signature_catalog_specs/` which converts future loads
+to unpickle (~30s) — still heavy for a 2048 cap. When the parent load does
+succeed, the fork lane uniquely amortizes it across all grandchildren.

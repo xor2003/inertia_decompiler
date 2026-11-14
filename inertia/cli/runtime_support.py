@@ -9,12 +9,13 @@ angr/codegen compatibility hooks and diagnostic state attached to angr project o
 """
 
 from __future__ import annotations
-import cython
 
+import builtins
 import contextlib
 import faulthandler as faulthandler
 import io
 import logging
+import operator
 import os
 import re
 import resource as resource
@@ -27,9 +28,9 @@ import typing as _cli_compat_typing
 import weakref
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor as ThreadPoolExecutor
-import dataclasses
-import operator
-import builtins
+
+import cython
+
 StageParameters8616 = typing.TypeVar("StageParameters8616")
 StageResult8616 = typing.TypeVar("StageResult8616")
 TimeoutResultT = typing.TypeVar("TimeoutResultT")
@@ -44,7 +45,7 @@ else:
     from concurrent.futures import TimeoutError as _FuturesTimeoutError
 from concurrent.futures.thread import _threads_queues as _threads_queues
 from concurrent.futures.thread import _worker as _worker
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime as datetime
 
 from inertia.ir.condition_ir import ConditionEdgeEvidence as ConditionEdgeEvidence
@@ -3498,13 +3499,37 @@ def emit_timeout_and_exit(args_timeout: cython.longlong, recovery_detail: object
 
 
 @cython.ccall
+def _current_vsz_bytes_8616() -> int | None:
+    """Read this process's mapped address-space size in bytes."""
+    with contextlib.suppress(OSError, ValueError, IndexError), open("/proc/self/statm", encoding="ascii") as fp:
+        return int(fp.read().split()[0]) * os.sysconf("SC_PAGE_SIZE")
+    return None
+
+
+@cython.ccall
 def apply_memory_limit(max_memory_mb: object) -> None:
-    """Apply a best-effort process address-space limit in megabytes."""
+    """Apply a best-effort process address-space limit in megabytes.
+
+    Only the soft limit is lowered; the inherited hard limit is preserved so a
+    forked descendant may raise its own soft ceiling back up to the hard cap.
+    With INERTIA_MEMORY_LIMIT_RELATIVE_8616 set (prefork clean-pool
+    grandchildren), the cap bounds growth over the inherited snapshot instead
+    of absolute VSZ: a forked child already maps the parent's address space,
+    so an absolute cap equal to a fresh interpreter's budget would fire
+    immediately.
+    """
     if max_memory_mb is None or max_memory_mb <= 0:
         return
     limit = max_memory_mb * 1024 * 1024
+    if os.environ.get("INERTIA_MEMORY_LIMIT_RELATIVE_8616", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        vsz = _current_vsz_bytes_8616()
+        if vsz is not None:
+            limit = vsz + limit
     with contextlib.suppress(ValueError, OSError):
-        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
 
 
 @cython.ccall
