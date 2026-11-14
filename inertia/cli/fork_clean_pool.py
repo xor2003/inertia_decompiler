@@ -40,12 +40,17 @@ _FORK_CLEAN_POOL_FAILED_8616: cython.bint = False
 
 @cython.ccall
 def fork_clean_pool_enabled_8616() -> cython.bint:
-    """Return whether the opt-in prefork clean lane is available."""
+    """Return whether the prefork clean lane is available (default-on POSIX).
+
+    Enabled by default where fork exists; ``INERTIA_ENABLE_FORK_CLEAN_POOL``
+    set to a falsy token disables it and restores the per-function subprocess
+    lane (identical isolation, higher per-function import cost).
+    """
     return (
         os.name == "posix"
         and hasattr(os, "fork")
         and os.environ.get(FORK_CLEAN_POOL_ENV_8616, "").strip().lower()
-        in {"1", "true", "yes", "on"}
+        not in {"0", "false", "no", "off"}
     )
 
 

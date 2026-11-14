@@ -42,13 +42,17 @@ def _payload(tmp_path: Path, *, outer_timeout: int = 30, argv: list | None = Non
     }
 
 
-def test_enabled_requires_posix_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enabled_by_default_on_posix_and_env_off_disables(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = os.name == "posix" and hasattr(os, "fork")
+    assert fork_clean_pool_enabled_8616() is expected
+    monkeypatch.setenv(FORK_CLEAN_POOL_ENV_8616, "0")
     assert fork_clean_pool_enabled_8616() is False
-    monkeypatch.setenv(FORK_CLEAN_POOL_ENV_8616, "1")
-    assert fork_clean_pool_enabled_8616() is (os.name == "posix" and hasattr(os, "fork"))
+    monkeypatch.setenv(FORK_CLEAN_POOL_ENV_8616, "off")
+    assert fork_clean_pool_enabled_8616() is False
 
 
-def test_ensure_returns_none_when_disabled() -> None:
+def test_ensure_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(FORK_CLEAN_POOL_ENV_8616, "0")
     assert ensure_fork_clean_pool_8616(2) is None
     assert fork_clean_pool_8616() is None
 

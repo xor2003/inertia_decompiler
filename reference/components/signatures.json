@@ -44,7 +44,8 @@
     "tests/integration/test_signature_region_bounds.py",
     "tools/signatures/tests/test_x86_16_life_signature_matches.py",
     "tools/signatures/tests/test_configuration.py",
-    "tools/signatures/tests/test_pickle_cache.py"
+    "tools/signatures/tests/test_pickle_cache.py",
+    "tools/signatures/tests/test_slim_specs.py"
   ],
   "focus": [
     "tools/signatures/tests/test_configuration.py",
@@ -78,7 +79,8 @@
     "tools/signatures/tests/test_pat_literal_prefilter.py",
     "tools/signatures/tests/test_pat_catalog_cache_identity.py",
     "tools/signatures/tests/test_signature_match_ambiguity.py",
-    "tools/signatures/tests/test_pickle_cache.py"
+    "tools/signatures/tests/test_pickle_cache.py",
+    "tools/signatures/tests/test_slim_specs.py"
   ],
   "order": 2
 }

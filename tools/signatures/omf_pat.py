@@ -7,7 +7,9 @@ Responsibility: parse optional OMF/PAT signature evidence without controlling de
 from __future__ import annotations
 
 import contextlib
+import gc
 import hashlib
+import os
 import pickle
 import re
 import subprocess
@@ -234,6 +236,66 @@ class CachedPatRegexSpec:
     referenced_names: tuple[PatPublicName, ...]
     required_literal: bytes = b""
     linker_references: tuple[PatLinkerReference, ...] = ()
+
+    @property
+    def has_linker_references(self) -> bool:
+        """Whether typed linker provenance records accompany this spec."""
+        return bool(self.linker_references)
+
+
+@dataclass(frozen=True)
+class SlimPatMatchSpec:
+    """Scan-time subset of one cached spec; heavy records stay on disk.
+
+    ``linker_references`` and ``referenced_names`` stay empty here. Specs with
+    a positive ``linker_reference_count`` are materialized through
+    ``PatSpecMetaStore`` only when a scan hit requires provenance
+    authentication, so the full catalog never materializes inside a worker.
+    """
+
+    source_path: str
+    compiler_name: str
+    module_name: str
+    regex_source: bytes
+    scan_source: bytes
+    checked_match_length: int
+    module_length: int
+    public_names: tuple[PatPublicName, ...]
+    required_literal: bytes
+    linker_reference_count: int
+    meta_index: int
+
+    @property
+    def has_linker_references(self) -> bool:
+        """Whether on-disk linker provenance records exist for this spec."""
+        return self.linker_reference_count > 0
+
+    linker_references: tuple[PatLinkerReference, ...] = ()
+    referenced_names: tuple[PatPublicName, ...] = ()
+
+
+class PatSpecMetaStore:
+    """Random-access heavy spec records kept outside match memory.
+
+    Layer: Optional evidence/reporting.
+    Responsibility: lazily decode per-spec linker provenance records from an
+    indexed blob via positioned reads; safe to share across fork workers
+    because ``os.pread`` never moves a shared file cursor.
+    """
+
+    def __init__(self, blob_path: Path, offsets: tuple[int, ...]) -> None:
+        self._blob_path = blob_path
+        self._offsets = offsets
+        self._fd: int | None = None
+
+    def record(self, index: int) -> tuple[tuple[PatPublicName, ...], tuple[PatLinkerReference, ...]]:
+        """Decode the ``(referenced_names, linker_references)`` record at ``index``."""
+        if self._fd is None:
+            self._fd = os.open(self._blob_path, os.O_RDONLY)
+        start = self._offsets[index]
+        payload = os.pread(self._fd, self._offsets[index + 1] - start, start)
+        referenced_names, linker_references = pickle.loads(payload)
+        return referenced_names, linker_references
 
 
 _PAT_HEX_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}|\.\.)+$")
@@ -806,13 +868,69 @@ def _pat_module_provenance_valid(
     return False
 
 
+def _materialize_pat_match_module(
+    module: PatModule | CachedPatRegexSpec | SlimPatMatchSpec,
+    spec_meta_store: PatSpecMetaStore | None,
+) -> PatModule | CachedPatRegexSpec | SlimPatMatchSpec:
+    """Return the full cached spec when a slim record carries linker references."""
+    if not isinstance(module, SlimPatMatchSpec) or not module.linker_reference_count:
+        return module
+    if spec_meta_store is None:
+        raise ValueError("slim spec carries linker references without a meta store")
+    referenced_names, linker_references = spec_meta_store.record(module.meta_index)
+    return CachedPatRegexSpec(
+        source_path=module.source_path,
+        compiler_name=module.compiler_name,
+        module_name=module.module_name,
+        regex_source=module.regex_source,
+        scan_source=module.scan_source,
+        checked_match_length=module.checked_match_length,
+        module_length=module.module_length,
+        public_names=module.public_names,
+        referenced_names=referenced_names,
+        required_literal=module.required_literal,
+        linker_references=linker_references,
+    )
+
+
+def _collect_pat_hits_by_module(
+    image_bytes: bytes,
+    modules: (
+        tuple[PatModule | CachedPatRegexSpec | SlimPatMatchSpec, ...]
+        | list[PatModule | CachedPatRegexSpec | SlimPatMatchSpec]
+    ),
+    backend: str,
+    spec_meta_store: PatSpecMetaStore | None,
+    source_snapshots: dict[str, _PatSourceSnapshot | None],
+) -> list[tuple[PatModule | CachedPatRegexSpec | SlimPatMatchSpec, list[int]]]:
+    """Scan every spec, then authenticate provenance only for hit-bearing ones.
+
+    Zero-hit modules contribute nothing downstream, so deferring provenance
+    keeps linker-record materialization bounded to specs that can actually
+    supply evidence.
+    """
+    hits_by_module = []
+    for module in modules:
+        hits = _find_pat_matches(image_bytes, module, backend=backend)
+        if not hits:
+            continue
+        materialized = _materialize_pat_match_module(module, spec_meta_store)
+        if _pat_module_provenance_valid(materialized, source_snapshots):
+            hits_by_module.append((materialized, hits))
+    return hits_by_module
+
+
 def match_pat_modules(
     image_bytes: bytes,
     base_addr: int,
-    modules: tuple[PatModule | CachedPatRegexSpec, ...] | list[PatModule | CachedPatRegexSpec],
+    modules: (
+        tuple[PatModule | CachedPatRegexSpec | SlimPatMatchSpec, ...]
+        | list[PatModule | CachedPatRegexSpec | SlimPatMatchSpec]
+    ),
     *,
     backend: str | None = None,
     architecture: str | None = None,
+    spec_meta_store: PatSpecMetaStore | None = None,
 ) -> LocalPatMatchResult:
     """Return unique labels; publish ranges only for fully checked extents.
 
@@ -829,11 +947,9 @@ def match_pat_modules(
     matched_compiler_names: list[str] = []
     linker_evidence: list[PatLinkerIdentityEvidence] = []
     source_snapshots: dict[str, _PatSourceSnapshot | None] = {}
-    hits_by_module = [
-        (module, _find_pat_matches(image_bytes, module, backend=selected_backend))
-        for module in modules
-        if _pat_module_provenance_valid(module, source_snapshots)
-    ]
+    hits_by_module = _collect_pat_hits_by_module(
+        image_bytes, modules, selected_backend, spec_meta_store, source_snapshots
+    )
     anchors = _collect_pat_anchor_publics(hits_by_module, base_addr)
     for module, hits in hits_by_module:
         if len(hits) > 1:
@@ -2479,7 +2595,7 @@ def _find_pat_matches(
     if module_length <= 0 or module_length > len(image_bytes):
         return []
     literal = (
-        module.required_literal if isinstance(module, CachedPatRegexSpec)
+        module.required_literal if isinstance(module, (CachedPatRegexSpec, SlimPatMatchSpec))
         else required_pat_literal(module.pattern_bytes, module_length, module.tail_bytes)
     )
     if literal not in image_bytes:
@@ -2559,6 +2675,147 @@ def load_cached_pat_regex_specs(pat_path: Path, cache_dir: Path) -> tuple[Cached
     return specs
 
 
+@lru_cache(maxsize=16)
+def load_slim_pat_match_specs(
+    pat_path: Path,
+    cache_dir: Path,
+) -> tuple[tuple[SlimPatMatchSpec, ...], PatSpecMetaStore]:
+    """Load scan-time spec subset plus its lazy heavy-record store.
+
+    Building the slim artifacts requires one full materialization of the
+    cached specs; afterwards workers only hold the compact scan subset, so
+    the full ``lru_cache`` entry is evicted once the build returns.
+    """
+    # Both cache identity and embedded source provenance use the same path.
+    pat_path = pat_path.resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = _cache_key_for_file(pat_path)
+    stem = _sanitize_component(pat_path.stem)
+    slim_path = cache_dir / f"{stem}-{cache_key}-slim-v1.patrx.pickle"
+    meta_path = cache_dir / f"{stem}-{cache_key}-slim-v1.meta.bin"
+    idx_path = cache_dir / f"{stem}-{cache_key}-slim-v1.meta.idx.pickle"
+    prov_path = cache_dir / f"{stem}-{cache_key}-slim-v1.prov.pickle"
+    cached = read_signature_pickle(slim_path)
+    offsets = read_signature_pickle(idx_path)
+    if (
+        isinstance(cached, tuple)
+        and all(isinstance(item, SlimPatMatchSpec) for item in cached)
+        and isinstance(offsets, tuple)
+        and len(offsets) == len(cached) + 1
+        and meta_path.exists()
+    ):
+        return cached, PatSpecMetaStore(meta_path, offsets)
+    specs = load_cached_pat_regex_specs(pat_path, cache_dir)
+    try:
+        return _write_slim_spec_artifacts(specs, slim_path, meta_path, idx_path, prov_path)
+    finally:
+        # The full-spec tuple is a build-only artifact; retaining it inside
+        # the shared lru_cache is what pushes signature workers into OOM.
+        del specs
+        load_cached_pat_regex_specs.cache_clear()
+        gc.collect()
+
+
+@lru_cache(maxsize=16)
+def load_pat_provenance_index(
+    pat_path: Path,
+    cache_dir: Path,
+) -> tuple[tuple[str, str, int], ...]:
+    """Per-spec ``(source_path, compiler_name, linker_reference_count)`` index.
+
+    The index is all the match-cache key needs: workers can verify a cached
+    match result without materializing the spec set itself.
+    """
+    pat_path = pat_path.resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = _cache_key_for_file(pat_path)
+    stem = _sanitize_component(pat_path.stem)
+    prov_path = cache_dir / f"{stem}-{cache_key}-slim-v1.prov.pickle"
+    cached = read_signature_pickle(prov_path)
+    if isinstance(cached, tuple) and all(isinstance(item, tuple) and len(item) == 3 for item in cached):
+        return cached
+    specs, _store = load_slim_pat_match_specs(pat_path, cache_dir)
+    index = tuple(
+        (spec.source_path, spec.compiler_name, spec.linker_reference_count) for spec in specs
+    )
+    with contextlib.suppress(OSError):
+        prov_path.write_bytes(pickle.dumps(index, protocol=pickle.HIGHEST_PROTOCOL))
+    # The spec tuple was only needed to derive the index; evict it so callers
+    # that only authenticate cached matches never retain the spec set.
+    load_slim_pat_match_specs.cache_clear()
+    del specs
+    gc.collect()
+    return index
+
+
+def _write_slim_spec_artifacts(
+    specs: tuple[CachedPatRegexSpec, ...],
+    slim_path: Path,
+    meta_path: Path,
+    idx_path: Path,
+    prov_path: Path | None = None,
+) -> tuple[tuple[SlimPatMatchSpec, ...], PatSpecMetaStore]:
+    """Split full specs into a slim tuple and an indexed heavy-record blob."""
+    interned: dict[str, str] = {}
+
+    def _slim(index: int, spec: CachedPatRegexSpec) -> SlimPatMatchSpec:
+        return SlimPatMatchSpec(
+            source_path=interned.setdefault(spec.source_path, spec.source_path),
+            compiler_name=interned.setdefault(spec.compiler_name, spec.compiler_name),
+            module_name=interned.setdefault(spec.module_name, spec.module_name),
+            regex_source=spec.regex_source,
+            scan_source=spec.scan_source,
+            checked_match_length=spec.checked_match_length,
+            module_length=spec.module_length,
+            public_names=spec.public_names,
+            required_literal=spec.required_literal,
+            linker_reference_count=len(spec.linker_references),
+            meta_index=index,
+        )
+
+    slim_specs: list[SlimPatMatchSpec] = []
+    offsets = [0]
+    tmp_name: str | None = None
+    persisted = False
+    try:
+        with tempfile.NamedTemporaryFile(dir=meta_path.parent, suffix=".tmp", delete=False) as tmp:
+            tmp_name = tmp.name
+            for index, spec in enumerate(specs):
+                heavy = pickle.dumps(
+                    (spec.referenced_names, spec.linker_references), protocol=pickle.HIGHEST_PROTOCOL
+                )
+                tmp.write(heavy)
+                offsets.append(offsets[-1] + len(heavy))
+                slim_specs.append(_slim(index, spec))
+        offset_tuple = tuple(offsets)
+        slim_tuple = tuple(slim_specs)
+        # The slim pickle is written last: its presence marks all three
+        # artifacts as complete for future loads.
+        os.replace(tmp_name, meta_path)
+        tmp_name = None
+        idx_path.write_bytes(pickle.dumps(offset_tuple, protocol=pickle.HIGHEST_PROTOCOL))
+        if prov_path is not None:
+            prov_path.write_bytes(
+                pickle.dumps(
+                    tuple(
+                        (spec.source_path, spec.compiler_name, spec.linker_reference_count)
+                        for spec in slim_tuple
+                    ),
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            )
+        slim_path.write_bytes(pickle.dumps(slim_tuple, protocol=pickle.HIGHEST_PROTOCOL))
+        persisted = True
+    except OSError:
+        if tmp_name is not None:
+            with contextlib.suppress(OSError):
+                Path(tmp_name).unlink()
+    if not persisted:
+        offset_tuple = (0,) * (len(specs) + 1)
+        slim_tuple = tuple(_slim(index, spec) for index, spec in enumerate(specs))
+    return slim_tuple, PatSpecMetaStore(meta_path, offset_tuple)
+
+
 def _compile_pat_module_to_cached_regex(module: PatModule) -> CachedPatRegexSpec:
     """Compile identical backend patterns with their necessary literal witness."""
     regex_source, scan_source, checked_match_length = _build_pat_regex_source(module)
@@ -2577,8 +2834,8 @@ def _compile_pat_module_to_cached_regex(module: PatModule) -> CachedPatRegexSpec
     )
 
 
-def _get_pat_module_regex(module: PatModule | CachedPatRegexSpec) -> re.Pattern[bytes]:
-    if isinstance(module, CachedPatRegexSpec):
+def _get_pat_module_regex(module: PatModule | CachedPatRegexSpec | SlimPatMatchSpec) -> re.Pattern[bytes]:
+    if isinstance(module, (CachedPatRegexSpec, SlimPatMatchSpec)):
         return _compile_regex_bytes(module.regex_source)
     regex_source, _scan_source, _checked_match_length = _build_pat_regex_source(module)
     return _compile_regex_bytes(regex_source)
@@ -2625,18 +2882,18 @@ def _compile_regex_bytes(regex_source: bytes) -> re.Pattern[bytes]:
     return re.compile(regex_source, re.DOTALL)
 
 
-def _get_pat_checked_match_length(module: PatModule | CachedPatRegexSpec) -> int:
-    if isinstance(module, CachedPatRegexSpec):
+def _get_pat_checked_match_length(module: PatModule | CachedPatRegexSpec | SlimPatMatchSpec) -> int:
+    if isinstance(module, (CachedPatRegexSpec, SlimPatMatchSpec)):
         return module.checked_match_length
     _regex_source, _scan_source, checked_match_length = _build_pat_regex_source(module)
     return checked_match_length
 
 
 @lru_cache(maxsize=4096)
-def _get_pat_module_hyperscan_db(module: PatModule | CachedPatRegexSpec) -> Any:
+def _get_pat_module_hyperscan_db(module: PatModule | CachedPatRegexSpec | SlimPatMatchSpec) -> Any:
     if _hyperscan is None:
         raise RuntimeError("hyperscan unavailable")
-    if isinstance(module, CachedPatRegexSpec):
+    if isinstance(module, (CachedPatRegexSpec, SlimPatMatchSpec)):
         scan_source = module.scan_source
     else:
         _regex_source, scan_source, _checked_match_length = _build_pat_regex_source(module)

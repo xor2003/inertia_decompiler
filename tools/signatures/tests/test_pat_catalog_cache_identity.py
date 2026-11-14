@@ -44,9 +44,9 @@ def test_catalog_specs_reused_across_binary_artifact_directories(tmp_path, monke
     def load_specs(path, cache_dir):
         assert path == catalog
         seen.append(cache_dir)
-        return ()
+        return (), omf_pat.PatSpecMetaStore(tmp_path / "absent.bin", (0,))
 
-    monkeypatch.setattr(signature_catalog, "load_cached_pat_regex_specs", load_specs)
+    monkeypatch.setattr(signature_catalog, "load_slim_pat_match_specs", load_specs)
     monkeypatch.setattr(signature_catalog, "_load_cache_json", lambda *_args: None)
     project = SimpleNamespace(loader=SimpleNamespace(
         main_object=SimpleNamespace(min_addr=0, max_addr=3),

@@ -26,14 +26,20 @@ from tools.signatures.omf_pat import (
     PatLinkerReference,
     PatModule,
     PatPublicName,
+    PatSpecMetaStore,
+    SlimPatMatchSpec,
     ensure_pat_from_omf_input,
     format_pat_module_line,
-    load_cached_pat_regex_specs,
+    load_pat_provenance_index,
+    load_slim_pat_match_specs,
     match_pat_modules,
     normalized_pat_merge_name,
     parse_pat_file,
 )
-from tools.signatures.signature_matching_policy import signature_matching_disabled
+from tools.signatures.signature_matching_policy import (
+    signature_match_scan_read_only,
+    signature_matching_disabled,
+)
 
 _SIGNATURE_MATCH_CACHE_COMPONENTS = (
     Path(__file__).resolve(),
@@ -246,14 +252,15 @@ def match_signature_catalog(
         return LocalPatMatchResult({}, {}, ())
     image_bytes, min_addr = loaded_image
     architecture = registered_pat_architecture(project)
-    specs = _load_filtered_catalog_specs(catalog_path, cache_dir, compiler_names)
+    effective_cache_dir = cache_dir or (DECOMPILATION_CACHE_DIR / "signature_catalog_specs")
+    provenance_index = _filtered_provenance_index(catalog_path, effective_cache_dir, compiler_names)
     cache_key = _signature_catalog_match_cache_key(
         catalog_path=catalog_path,
         binary_path=binary_path,
         backend=backend,
         compiler_names=compiler_names,
         architecture=architecture,
-        provenance_sources=tuple(sorted({spec.source_path for spec in specs if spec.linker_references})),
+        provenance_sources=tuple(sorted({entry[0] for entry in provenance_index if entry[2] > 0})),
     )
     if cache_key is not None:
         cached = _load_cache_json("signature_catalog_match", cache_key)
@@ -261,6 +268,9 @@ def match_signature_catalog(
         if cached_result is not None:
             return cached_result
 
+    if signature_match_scan_read_only():
+        return LocalPatMatchResult({}, {}, ())
+    specs, spec_meta_store = _load_filtered_catalog_specs(catalog_path, effective_cache_dir, compiler_names)
     if not specs:
         return LocalPatMatchResult({}, {}, ())
     pat_match = match_pat_modules(
@@ -269,6 +279,7 @@ def match_signature_catalog(
         specs,
         backend=backend,
         architecture=architecture,
+        spec_meta_store=spec_meta_store,
     )
     source_formats = ("signature_catalog",) if pat_match.code_labels or pat_match.code_ranges else ()
     result = LocalPatMatchResult(
@@ -305,22 +316,55 @@ def _load_project_image(project: object) -> tuple[bytes, int] | None:
     return image_bytes, min_addr
 
 
+def _filtered_provenance_index(
+    catalog_path: Path,
+    cache_dir: Path,
+    compiler_names: tuple[str, ...],
+) -> tuple[tuple[str, str, int], ...]:
+    """Light per-spec provenance index narrowed by the compiler-name filter."""
+    index = load_pat_provenance_index(catalog_path, cache_dir)
+    normalized_filters = _normalized_compiler_filters(compiler_names)
+    if not normalized_filters:
+        return index
+    filtered = tuple(
+        entry for entry in index if _compiler_name_matches(entry[1], normalized_filters)
+    )
+    return filtered or index
+
+
+def _normalized_compiler_filters(compiler_names: tuple[str, ...]) -> tuple[str, ...]:
+    ignored_filters = {"ida flair", "flair", "unknown"}
+    return tuple(
+        name.strip().lower()
+        for name in compiler_names
+        if name and name.strip() and name.strip().lower() not in ignored_filters
+    )
+
+
+def _compiler_name_matches(compiler_name: str, normalized_filters: tuple[str, ...]) -> bool:
+    candidate = compiler_name.strip().lower()
+    return bool(candidate) and any(
+        compiler_filter in candidate or candidate in compiler_filter
+        for compiler_filter in normalized_filters
+    )
+
+
 def _load_filtered_catalog_specs(
     catalog_path: Path,
     cache_dir: Path | None,
     compiler_names: tuple[str, ...],
-) -> tuple[CachedPatRegexSpec, ...]:
-    """Load cached PAT regex specs, narrowed by compiler-name filters."""
+) -> tuple[tuple[CachedPatRegexSpec | SlimPatMatchSpec, ...], PatSpecMetaStore]:
+    """Load the slim scan-time spec subset, narrowed by compiler-name filters."""
     # Pattern specs depend on the catalog and builder, not the executable.
     # Fresh per-case artifact directories must not force repeated parsing.
     effective_cache_dir = cache_dir or (DECOMPILATION_CACHE_DIR / "signature_catalog_specs")
-    specs: tuple[CachedPatRegexSpec, ...] = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
+    specs, spec_meta_store = load_slim_pat_match_specs(catalog_path, effective_cache_dir)
     if not specs:
-        return ()
+        return specs, spec_meta_store
     filtered_specs = _filter_specs_by_compiler_names(specs, compiler_names)
     if filtered_specs:
         specs = filtered_specs
-    return specs
+    return specs, spec_meta_store
 
 
 def registered_pat_architecture(project: object) -> str | None:
@@ -499,27 +543,16 @@ def _decode_match_label_range_maps(
 
 
 def _filter_specs_by_compiler_names(
-    specs: tuple[CachedPatRegexSpec, ...],
+    specs: tuple[CachedPatRegexSpec | SlimPatMatchSpec, ...],
     compiler_names: tuple[str, ...],
-) -> tuple[CachedPatRegexSpec, ...]:
-    def _impl() -> tuple[CachedPatRegexSpec, ...]:
-        ignored_filters = {"ida flair", "flair", "unknown"}
-        normalized_filters = tuple(
-            name.strip().lower()
-            for name in compiler_names
-            if name and name.strip() and name.strip().lower() not in ignored_filters
-        )
+) -> tuple[CachedPatRegexSpec | SlimPatMatchSpec, ...]:
+    def _impl() -> tuple[CachedPatRegexSpec | SlimPatMatchSpec, ...]:
+        normalized_filters = _normalized_compiler_filters(compiler_names)
         if not normalized_filters:
             return ()
-        filtered: list[CachedPatRegexSpec] = []
+        filtered: list[CachedPatRegexSpec | SlimPatMatchSpec] = []
         for spec in specs:
-            compiler_name = spec.compiler_name.strip().lower()
-            if not compiler_name:
-                continue
-            if any(
-                compiler_filter in compiler_name or compiler_name in compiler_filter
-                for compiler_filter in normalized_filters
-            ):
+            if _compiler_name_matches(spec.compiler_name, normalized_filters):
                 filtered.append(spec)
         return tuple(filtered)
 

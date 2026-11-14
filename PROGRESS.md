@@ -20118,3 +20118,57 @@ every grandchild re-pays the parse. A 726MB `.patrx.pickle` now exists in
 `.inertia_decomp_cache/signature_catalog_specs/` which converts future loads
 to unpickle (~30s) — still heavy for a 2048 cap. When the parent load does
 succeed, the fork lane uniquely amortizes it across all grandchildren.
+
+
+## Signature catalog memory fix (slim specs + lazy meta + read-only workers)
+
+Resolved the catalog pathology noted above. The 383K-spec catalog no longer
+materializes in workers:
+
+- `tools/signatures/omf_pat.py`: `CachedPatRegexSpec` split into
+  `SlimPatMatchSpec` (scan fields only) + per-spec heavy records
+  (referenced_names, linker_references) in an indexed `*.meta.bin` blob read
+  lazily via `os.pread` (`PatSpecMetaStore`, fork-safe). New artifacts:
+  `-slim-v1.patrx.pickle` (329MB), `-slim-v1.meta.bin` (486MB),
+  `-slim-v1.meta.idx.pickle`, `-slim-v1.prov.pickle` (7.7MB per-spec
+  provenance index). `match_pat_modules` defers provenance auth to
+  hit-bearing specs only (identical output, strictly less work).
+- `tools/signatures/signature_catalog.py`: match-cache key is computed from
+  the prov index, so a cached match returns WITHOUT loading specs at all;
+  `INERTIA_SIGNATURE_MATCH_READ_ONLY_8616` (set in clean-worker env)
+  degrades cold-cache workers to honest no-evidence instead of every worker
+  launching a concurrent multi-GB scan.
+- `inertia/cli/cli_core.py`: parent RLIMIT_AS gets +4096MB catalog headroom
+  (`_parent_memory_limit_mb_8616`) — the batch parent performs the one-time
+  scan; prefork warm now heats only the prov index.
+
+Measured (SORTDEMO.EXE, signature-enabled, 20 functions):
+- Parent scan ~6min once -> 50MB `signature_catalog_match` JSON; every
+  grandchild hits it via prov index (~0.2s/70MB) instead of re-loading specs.
+- Slim load alone: 5.7s / 1.21GB RSS (was ~107s/4GB parse or ~30s/3-4GB
+  unpickle). Prov index: 0.2s / 70MB.
+- Sweep completed with ZERO OOM kills (previously the whole tree died; cgroup
+  session.slice oom_kill counter confirmed). 240 signature-matched labels
+  consumed by the decompiler output.
+- Verdicts: 9 error (FunctionGraphExtentRepairError semantic refusals) +
+  11 validation_failed; honest refusals, no resource failures.
+
+
+## Worker cProfile attribution + second angr compile batch
+
+Aggregated cProfile from live clean grandchildren (`INERTIA_OTEL_CPROFILE_PATH`;
+only completing functions dump — SIGKILL timeouts skip `finally`). Across
+3 completed functions the angr-side cumulative hot path is: typehoon cluster
+(~10s: simple_solver/typehoon/typevars/dfa), block_simplifier (5.4s),
+structured_codegen/c (4.7s), engine_ail (2.9s), forward_analysis (2.7s),
+s_propagator + ssa use-collectors. signature_catalog worker-side decode
+(linker evidence materialization for hit-bearing specs) ~8s cum/function —
+inherent to matched-label output.
+
+Second compiled batch (12 modules, build_perfile-style cython -3 + gcc -O2):
+typehoon/{simple_solver,typehoon,typevars,dfa}, block_simplifier,
+s_propagator, utils/ssa/{vvar,combined,tmp}_uses_collector,
+variable_recovery/engine_ail, ailgraph_walker, decompiler. Two candidates
+stay interpreted: forward_analysis (PEP-695 `class X[T]` generics) and
+structured_codegen/c (`type X = ...` alias) — unsupported by Cython.
+Import smoke passes for all 12.

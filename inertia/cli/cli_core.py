@@ -3103,6 +3103,67 @@ def _serial_clean_worker_debug_output_8616(stderr: object) -> str:
 
 
 @cython.ccall
+def _warm_signature_catalog_lru_8616(signature_catalog: object) -> cython.bint:
+    """Populate the process-wide PAT-spec LRU before preforking clean workers.
+
+    Pool grandchildren inherit this cache via copy-on-write, so one parent
+    load serves every function job. Best effort: on failure the lane still
+    works — each grandchild simply loads the catalog itself, matching the
+    subprocess lane's per-process cost.
+    """
+    if signature_catalog is None:
+        return False
+    from inertia.cli.cache import DECOMPILATION_CACHE_DIR
+    from tools.signatures.omf_pat import load_pat_provenance_index
+    from tools.signatures.signature_matching_policy import signature_matching_disabled
+
+    if signature_matching_disabled():
+        return False
+    cache_dir = DECOMPILATION_CACHE_DIR / "signature_catalog_specs"
+    try:
+        # The tiny provenance index (~40MB) is all grandchildren need to
+        # authenticate the on-disk match result; warming it keeps spec
+        # materialization out of every worker. A cache-miss grandchild
+        # loads the slim spec set itself under its own rlimit.
+        index = load_pat_provenance_index(Path(signature_catalog), cache_dir)
+    except Exception as ex:
+        print(
+            f"[dbg] fork clean pool: signature catalog warm failed ({type(ex).__name__});"
+            " workers will load it individually",
+            file=sys.stderr,
+        )
+        return False
+    print(
+        f"[dbg] fork clean pool: signature catalog warm ({len(index)} prov entries)",
+        file=sys.stderr,
+    )
+    return True
+
+
+# Extra address-space headroom granted to the batch parent when an optional
+# signature catalog is active: the parent performs the one-time catalog scan
+# and holds the slim spec set (~1.2GB RSS for the repo catalog) on a cache
+# miss. Per-function workers keep the plain --max-memory-mb budget and never
+# materialize specs for a cached match.
+_SIGNATURE_CATALOG_PARENT_HEADROOM_MB_8616: cython.longlong = 4096
+
+
+@cython.ccall
+def _parent_memory_limit_mb_8616(
+    max_memory_mb: cython.longlong,
+    signature_catalog: object,
+) -> cython.longlong:
+    """Return the batch supervisor's RLIMIT_AS budget with catalog headroom."""
+    if max_memory_mb is None or max_memory_mb <= 0 or signature_catalog is None:
+        return max_memory_mb
+    from tools.signatures.signature_matching_policy import signature_matching_disabled
+
+    if signature_matching_disabled():
+        return max_memory_mb
+    return max_memory_mb + _SIGNATURE_CATALOG_PARENT_HEADROOM_MB_8616
+
+
+@cython.ccall
 def _dispatch_serial_clean_worker_8616(
     command: object,
     *,
@@ -3124,6 +3185,8 @@ def _dispatch_serial_clean_worker_8616(
     worker_debug_text: object = ""
     from inertia.cli.fork_clean_pool import (
         fork_clean_pool_8616 as _fork_clean_pool_8616,
+    )
+    from inertia.cli.fork_clean_pool import (
         run_fork_clean_job_8616 as _run_fork_clean_job_8616,
     )
     fork_clean_pool = _fork_clean_pool_8616()
@@ -3249,6 +3312,7 @@ def _run_serial_clean_process_work_item_8616(
             environment[ARCHITECTURE_GUARD_VERIFIED_PARENT_PID_ENV] = str(os.getpid())
         environment["INERTIA_OTEL_PROFILE_IN_PROCESS"] = "1"
         environment["INERTIA_DIRECT_ADDR_PREFER_LST"] = "0"
+        environment["INERTIA_SIGNATURE_MATCH_READ_ONLY_8616"] = "1"
         outer_timeout = _serial_clean_worker_outer_timeout_8616(timeout)
         (
             worker_timed_out,
@@ -6227,11 +6291,11 @@ def _prepare_main_cli_args_8616(argv: object) -> tuple[CliArguments, cython.bint
         os.environ["INERTIA_IGNORE_LOCAL_SIDECAR_HINTS_8616"] = "1"
 
     _lower_process_priority()
-    _apply_memory_limit(args.max_memory_mb)
 
     effective_signature_catalog = args.signature_catalog
     if effective_signature_catalog is None:
         effective_signature_catalog = default_signature_catalog_path()
+    _apply_memory_limit(_parent_memory_limit_mb_8616(args.max_memory_mb, effective_signature_catalog))
     return args, timeout_was_explicit, effective_signature_catalog
 
 
@@ -11411,8 +11475,13 @@ class _MainCliRun8616:
             ensure_fork_clean_pool_8616 as _ensure_fork_clean_pool_8616,
         )
         from inertia.cli.fork_clean_pool import (
+            fork_clean_pool_enabled_8616 as _fork_clean_pool_enabled_8616,
+        )
+        from inertia.cli.fork_clean_pool import (
             shutdown_fork_clean_pool_8616 as _shutdown_fork_clean_pool_8616,
         )
+        if _fork_clean_pool_enabled_8616():
+            _warm_signature_catalog_lru_8616(self.effective_signature_catalog)
         _ensure_fork_clean_pool_8616(self.workers)
         self.executor = DaemonThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="func-clean")
         try:

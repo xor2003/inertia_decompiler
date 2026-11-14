@@ -207,6 +207,7 @@
     "tests/ir/test_segment_program_layout_reporting.py",
     "tests/integration/test_segment_register_membership.py",
     "tests/lowering/test_segmented_global_load_performance_contract.py",
+    "tests/cli/test_fork_clean_pool.py",
     "tests/cli/test_serial_clean_worker_cache.py",
     "tests/cli/test_serial_clean_worker_callsite_evidence.py",
     "tests/cli/test_serial_clean_worker_global_source_evidence.py",
@@ -1391,7 +1392,8 @@
     "tests/integration/test_signature_region_bounds.py",
     "tools/signatures/tests/test_x86_16_life_signature_matches.py",
     "tools/signatures/tests/test_configuration.py",
-    "tools/signatures/tests/test_pickle_cache.py"
+    "tools/signatures/tests/test_pickle_cache.py",
+    "tools/signatures/tests/test_slim_specs.py"
   ],
   "ssa_z3": [
     "tools/comparator/tests/test_global_source_aliases.py",
